@@ -31,6 +31,45 @@ function pngHeader(width: number, height: number): Uint8Array {
   return header;
 }
 
+function joinBytes(...parts: readonly Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  return bytes;
+}
+
+function isoBox(type: string, data: Uint8Array): Uint8Array {
+  const bytes = new Uint8Array(8 + data.byteLength);
+  writeUint32BE(bytes, 0, bytes.byteLength);
+  bytes.set(new TextEncoder().encode(type), 4);
+  bytes.set(data, 8);
+  return bytes;
+}
+
+function heicHeader(
+  width: number,
+  height: number,
+  majorBrand = "heic",
+  compatibleBrands: readonly string[] = ["mif1", "heic"],
+): ArrayBuffer {
+  const brandBytes = new Uint8Array(8 + compatibleBrands.length * 4);
+  brandBytes.set(new TextEncoder().encode(majorBrand), 0);
+  compatibleBrands.forEach((brand, index) => {
+    brandBytes.set(new TextEncoder().encode(brand), 8 + index * 4);
+  });
+
+  const ispe = new Uint8Array(12);
+  writeUint32BE(ispe, 4, width);
+  writeUint32BE(ispe, 8, height);
+  const properties = isoBox("ipco", isoBox("ispe", ispe));
+  const itemProperties = isoBox("iprp", properties);
+  const meta = isoBox("meta", joinBytes(new Uint8Array(4), itemProperties));
+  return joinBytes(isoBox("ftyp", brandBytes), meta).buffer as ArrayBuffer;
+}
+
 describe("inspectImageHeader", () => {
   it("reads JPEG dimensions from a start-of-frame segment", () => {
     const bytes = Uint8Array.from([
@@ -72,5 +111,40 @@ describe("inspectImageHeader", () => {
   it("rejects a file with a false extension and unknown signature", () => {
     const bytes = new TextEncoder().encode("not an image");
     expect(() => inspectImageHeader(bytes.buffer)).toThrow("지원하지 않거나 손상된 이미지");
+  });
+  it("reads HEIC dimensions from ISO BMFF properties", () => {
+    expect(inspectImageHeader(heicHeader(451, 461))).toEqual({
+      format: "heic",
+      mime: "image/heic",
+      width: 451,
+      height: 461,
+      animated: false,
+    });
+  });
+
+  it("does not mistake an AVIF brand for HEIC", () => {
+    expect(() => inspectImageHeader(heicHeader(100, 100, "avif", ["mif1", "avif"]))).toThrow();
+  });
+  it("marks the generic HEIF sequence brand as animated", () => {
+    const result = inspectImageHeader(heicHeader(100, 100, "heic", ["mif1", "heic", "msf1"]));
+    expect(result.animated).toBe(true);
+  });
+
+  it("still rejects AVIF sequences that use the generic sequence brand", () => {
+    expect(() =>
+      inspectImageHeader(heicHeader(100, 100, "avis", ["mif1", "avis", "msf1"])),
+    ).toThrow();
+  });
+
+  it("caps compatible brands before they can amplify memory", () => {
+    const brands = Array.from({ length: 65 }, () => "heic");
+    expect(() => inspectImageHeader(heicHeader(100, 100, "heic", brands))).toThrow();
+  });
+
+  it("caps ISO box traversal before it can amplify memory", () => {
+    const emptyBox = isoBox("free", new Uint8Array());
+    const boxes = Array.from({ length: 4097 }, () => emptyBox);
+    const bytes = joinBytes(new Uint8Array(heicHeader(100, 100)), ...boxes);
+    expect(() => inspectImageHeader(bytes.buffer as ArrayBuffer)).toThrow();
   });
 });

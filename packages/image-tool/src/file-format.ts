@@ -1,8 +1,8 @@
-export type SupportedImageFormat = "jpeg" | "png" | "webp";
+export type SupportedImageFormat = "jpeg" | "png" | "webp" | "heic";
 
 export interface InspectedImageFile {
   format: SupportedImageFormat;
-  mime: "image/jpeg" | "image/png" | "image/webp";
+  mime: "image/jpeg" | "image/png" | "image/webp" | "image/heic";
   width: number;
   height: number;
   animated: boolean;
@@ -156,6 +156,133 @@ function inspectWebp(bytes: Uint8Array): InspectedImageFile {
   return { format: "webp", mime: "image/webp", width, height, animated };
 }
 
+interface IsoBox {
+  type: string;
+  payloadStart: number;
+  end: number;
+}
+
+interface IsoBoxBudget {
+  remaining: number;
+}
+
+const MAX_ISO_BOXES = 4096;
+const MAX_HEIC_BRANDS = 64;
+const HEIC_STILL_BRANDS = new Set(["heic", "heix", "heim", "heis"]);
+const HEIC_SEQUENCE_BRANDS = new Set(["hevc", "hevx", "hevm", "hevs"]);
+const HEIF_SEQUENCE_BRANDS = new Set(["msf1"]);
+
+function visitIsoBoxes(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  budget: IsoBoxBudget,
+  visit: (box: IsoBox) => void,
+): void {
+  let offset = start;
+
+  while (offset < end) {
+    if (budget.remaining <= 0 || offset + 8 > end) invalidImage();
+    budget.remaining -= 1;
+    let size = readUint32BE(bytes, offset);
+    const type = ascii(bytes, offset + 4, 4);
+    let headerSize = 8;
+
+    if (size === 1) {
+      if (offset + 16 > end) invalidImage();
+      const high = readUint32BE(bytes, offset + 8);
+      const low = readUint32BE(bytes, offset + 12);
+      if (high > 0x1fffff) invalidImage();
+      size = high * 0x100000000 + low;
+      headerSize = 16;
+    } else if (size === 0) {
+      size = end - offset;
+    }
+
+    const boxEnd = offset + size;
+    if (size < headerSize || !Number.isSafeInteger(boxEnd) || boxEnd > end) invalidImage();
+    visit({ type, payloadStart: offset + headerSize, end: boxEnd });
+    offset = boxEnd;
+  }
+}
+
+function inspectHeic(bytes: Uint8Array): InspectedImageFile {
+  const budget: IsoBoxBudget = { remaining: MAX_ISO_BOXES };
+  let foundFileType = false;
+  let hasHeicCodecBrand = false;
+  let hasSequenceBrand = false;
+  let bestWidth = 0;
+  let bestHeight = 0;
+  let bestArea = 0;
+
+  const inspectFileType = (box: IsoBox): void => {
+    if (foundFileType) invalidImage();
+    foundFileType = true;
+    const brandBytes = box.end - box.payloadStart;
+    if (brandBytes < 8 || (brandBytes - 8) % 4 !== 0) invalidImage();
+    const brandCount = 1 + (brandBytes - 8) / 4;
+    if (brandCount > MAX_HEIC_BRANDS) invalidImage();
+
+    const inspectBrand = (brand: string): void => {
+      hasHeicCodecBrand ||= HEIC_STILL_BRANDS.has(brand) || HEIC_SEQUENCE_BRANDS.has(brand);
+      hasSequenceBrand ||= HEIC_SEQUENCE_BRANDS.has(brand) || HEIF_SEQUENCE_BRANDS.has(brand);
+    };
+
+    inspectBrand(ascii(bytes, box.payloadStart, 4));
+    for (let offset = box.payloadStart + 8; offset + 4 <= box.end; offset += 4) {
+      inspectBrand(ascii(bytes, offset, 4));
+    }
+  };
+
+  const inspectProperty = (box: IsoBox, depth: number): void => {
+    if (depth > 6) invalidImage();
+    if (box.type === "ispe") {
+      if (box.end - box.payloadStart < 12) invalidImage();
+      const width = readUint32BE(bytes, box.payloadStart + 4);
+      const height = readUint32BE(bytes, box.payloadStart + 8);
+      if (!validDimensions(width, height)) invalidImage();
+      const area = width * height;
+      if (area > bestArea) {
+        bestWidth = width;
+        bestHeight = height;
+        bestArea = area;
+      }
+      return;
+    }
+
+    let childStart: number | undefined;
+    if (box.type === "meta") {
+      if (box.payloadStart + 4 > box.end) invalidImage();
+      childStart = box.payloadStart + 4;
+    } else if (box.type === "iprp" || box.type === "ipco") {
+      childStart = box.payloadStart;
+    }
+
+    if (childStart !== undefined) {
+      visitIsoBoxes(bytes, childStart, box.end, budget, (child) =>
+        inspectProperty(child, depth + 1),
+      );
+    }
+  };
+
+  visitIsoBoxes(bytes, 0, bytes.length, budget, (box) => {
+    if (box.type === "ftyp") inspectFileType(box);
+    inspectProperty(box, 0);
+  });
+
+  if (!foundFileType || !hasHeicCodecBrand || !validDimensions(bestWidth, bestHeight)) {
+    invalidImage();
+  }
+
+  return {
+    format: "heic",
+    mime: "image/heic",
+    width: bestWidth,
+    height: bestHeight,
+    animated: hasSequenceBrand,
+  };
+}
+
 export function inspectImageHeader(buffer: ArrayBuffer): InspectedImageFile {
   const bytes = new Uint8Array(buffer);
 
@@ -179,5 +306,8 @@ export function inspectImageHeader(buffer: ArrayBuffer): InspectedImageFile {
     return inspectWebp(bytes);
   }
 
+  if (bytes.length >= 24 && ascii(bytes, 4, 4) === "ftyp") {
+    return inspectHeic(bytes);
+  }
   return invalidImage();
 }

@@ -18,10 +18,23 @@ import {
   useRef,
   useState,
 } from "react";
-import { createZipArchive, downloadUrl, formatBytes } from "../lib/files";
+import {
+  createZipArchive,
+  downloadUrl,
+  formatBytes,
+  formatDuration,
+  formatSavings,
+  isAbortError,
+} from "../lib/files";
 import styles from "./image-workbench.module.css";
 
-const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ACCEPTED_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+]);
 const MAX_FILES = 100;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
@@ -126,7 +139,8 @@ function resetWorkItem(item: WorkItem, status: ItemStatus = "ready", error?: str
 
 function isAcceptedFile(file: File): boolean {
   return (
-    ACCEPTED_TYPES.has(file.type) || (file.type === "" && /\.(?:jpe?g|png|webp)$/i.test(file.name))
+    ACCEPTED_TYPES.has(file.type) ||
+    (file.type === "" && /\.(?:jpe?g|png|webp|heic|heif)$/i.test(file.name))
   );
 }
 
@@ -271,6 +285,10 @@ export function ImageWorkbench() {
   const completedItems = useMemo(
     () => items.filter((item) => item.status === "completed" && item.result !== undefined),
     [items],
+  );
+  const completedInputBytes = useMemo(
+    () => completedItems.reduce((total, item) => total + item.file.size, 0),
+    [completedItems],
   );
   const totalOutputBytes = useMemo(
     () => completedItems.reduce((total, item) => total + (item.result?.byteLength ?? 0), 0),
@@ -445,8 +463,14 @@ export function ImageWorkbench() {
     const sourceItems = itemsRef.current;
     const runId = activeRunRef.current + 1;
     activeRunRef.current = runId;
-    for (const item of sourceItems) revokeOwnedUrl(item.resultUrl);
-    const queuedItems = sourceItems.map((item) => resetWorkItem(item, "queued"));
+    for (const item of sourceItems) {
+      revokeOwnedUrl(item.previewUrl);
+      revokeOwnedUrl(item.resultUrl);
+    }
+    const queuedItems = sourceItems.map((item) => ({
+      ...resetWorkItem(item, "queued"),
+      previewUrl: createOwnedUrl(item.file),
+    }));
     itemsRef.current = queuedItems;
     setItems(queuedItems);
     setProcessing(true);
@@ -535,9 +559,35 @@ export function ImageWorkbench() {
     );
   };
 
-  const downloadItem = (item: WorkItem) => {
+  const saveItem = async (item: WorkItem) => {
     if (item.resultUrl === undefined || item.result === undefined) return;
+    let shareData: ShareData | undefined;
+    let canShare = false;
+    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
+      shareData = {
+        files: [
+          new File([item.result.bytes], item.result.suggestedName, { type: item.result.mime }),
+        ],
+      };
+      try {
+        canShare = navigator.canShare(shareData);
+      } catch {
+        canShare = false;
+      }
+    }
+
+    if (canShare && shareData !== undefined) {
+      try {
+        await navigator.share(shareData);
+        setMessage("결과를 공유 메뉴로 보냈어요.");
+        return;
+      } catch (error) {
+        if (isAbortError(error)) return;
+      }
+    }
+
     downloadUrl(item.resultUrl, item.result.suggestedName);
+    setMessage("결과 파일을 저장했어요.");
   };
 
   const downloadAll = async () => {
@@ -575,7 +625,7 @@ export function ImageWorkbench() {
         ref={inputRef}
         className={styles.hiddenInput}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
         multiple
         tabIndex={-1}
         disabled={!hydrated || busy || !runtimeSupported}
@@ -605,7 +655,7 @@ export function ImageWorkbench() {
           <div>
             <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
             <h2 id="workbench-title">이미지를 놓거나 선택하세요</h2>
-            <p>JPG, PNG, WebP · 파일당 50MB · 총 250MB · 최대 100개</p>
+            <p>JPG, PNG, WebP, HEIC · 파일당 50MB · 총 250MB · 최대 100개</p>
           </div>
           <div className={styles.dropActions}>
             <button
@@ -622,7 +672,7 @@ export function ImageWorkbench() {
                 ? "도구를 준비하고 있어요…"
                 : runtimeSupported
                   ? message
-                  : "최신 Chrome 또는 Edge에서 사용할 수 있어요."}
+                  : "최신 Safari, Chrome, Firefox 또는 Edge에서 사용할 수 있어요."}
             </p>
           </div>
           <div className={styles.localBadge}>
@@ -648,8 +698,8 @@ export function ImageWorkbench() {
 
           {hydrated && !runtimeSupported && (
             <div className={styles.runtimeWarning} role="alert">
-              현재 브라우저는 로컬 이미지 Worker를 완전히 지원하지 않습니다. 최신 Chrome 또는 Edge를
-              사용해 주세요.
+              현재 브라우저는 로컬 이미지 Worker를 완전히 지원하지 않습니다. 최신 Safari, Chrome,
+              Firefox 또는 Edge를 사용해 주세요.
             </div>
           )}
 
@@ -671,15 +721,21 @@ export function ImageWorkbench() {
                       aria-pressed={item.id === selected?.id}
                       onClick={() => setSelectedId(item.id)}
                     >
-                      {/* biome-ignore lint/performance/noImgElement: object URLs are local and unknown to next/image */}
-                      <img src={item.previewUrl} alt="" />
+                      {processing ? (
+                        <span className={styles.filePlaceholder} aria-hidden="true">
+                          IMG
+                        </span>
+                      ) : (
+                        /* biome-ignore lint/performance/noImgElement: local object URLs are local previews */
+                        <img src={item.previewUrl} alt="" loading="lazy" decoding="async" />
+                      )}
                       <span className={styles.fileCopy}>
                         <strong>{item.file.name}</strong>
                         <small>
                           {item.status === "processing"
                             ? `${phaseLabel(item.phase)} ${Math.round(item.progress * 100)}%`
                             : item.status === "completed" && item.result !== undefined
-                              ? `${formatBytes(item.file.size)} → ${formatBytes(item.result.byteLength)}`
+                              ? `${formatBytes(item.file.size)} → ${formatBytes(item.result.byteLength)} · ${formatSavings(item.file.size, item.result.byteLength)} · ${formatDuration(item.result.timing.totalMs)}`
                               : item.status === "unchanged"
                                 ? "이미 최적화됨"
                                 : item.status === "failed"
@@ -719,7 +775,11 @@ export function ImageWorkbench() {
                 <>
                   <div className={styles.previewTopline}>
                     <span>
-                      {selected.resultUrl === undefined ? "원본 미리보기" : "변환 전 · 후"}
+                      {processing
+                        ? "메모리 절약 모드"
+                        : selected.resultUrl === undefined
+                          ? "원본 미리보기"
+                          : "변환 전 · 후"}
                     </span>
                     {selected.result !== undefined && (
                       <span>
@@ -728,19 +788,40 @@ export function ImageWorkbench() {
                     )}
                   </div>
                   <div
-                    className={`${styles.previewStage} ${selected.resultUrl ? styles.withResult : ""}`}
+                    className={`${styles.previewStage} ${!processing && selected.resultUrl ? styles.withResult : ""}`}
                   >
-                    <figure>
-                      {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                      <img src={selected.previewUrl} alt={`${selected.file.name} 원본`} />
-                      <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
-                    </figure>
-                    {selected.resultUrl !== undefined && selected.result !== undefined && (
-                      <figure>
-                        {/* biome-ignore lint/performance/noImgElement: local generated result */}
-                        <img src={selected.resultUrl} alt={`${selected.file.name} 변환 결과`} />
-                        <figcaption>결과 · {formatBytes(selected.result.byteLength)}</figcaption>
-                      </figure>
+                    {processing ? (
+                      <div className={styles.previewMemoryNotice} role="status">
+                        <strong>메모리를 아끼고 있어요</strong>
+                        <span>변환 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
+                      </div>
+                    ) : (
+                      <>
+                        <figure>
+                          {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                          <img
+                            src={selected.previewUrl}
+                            alt={`${selected.file.name} 원본`}
+                            decoding="async"
+                          />
+                          <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
+                        </figure>
+                        {selected.resultUrl !== undefined && selected.result !== undefined && (
+                          <figure>
+                            {/* biome-ignore lint/performance/noImgElement: local generated result */}
+                            <img
+                              src={selected.resultUrl}
+                              alt={`${selected.file.name} 변환 결과`}
+                              decoding="async"
+                            />
+                            <figcaption>
+                              결과 · {formatBytes(selected.result.byteLength)} ·{` `}
+                              {formatSavings(selected.file.size, selected.result.byteLength)} ·{` `}
+                              {formatDuration(selected.result.timing.totalMs)}
+                            </figcaption>
+                          </figure>
+                        )}
+                      </>
                     )}
                   </div>
                   {selected.error !== undefined && (
@@ -752,9 +833,9 @@ export function ImageWorkbench() {
                     <button
                       className={styles.inlineDownload}
                       type="button"
-                      onClick={() => downloadItem(selected)}
+                      onClick={() => void saveItem(selected)}
                     >
-                      이 이미지 받기 ↓
+                      이 이미지 저장·공유 ↓
                     </button>
                   )}
                 </>
@@ -889,7 +970,7 @@ export function ImageWorkbench() {
               <strong>{message}</strong>
               <span>
                 {completedItems.length > 0
-                  ? `${formatBytes(totalInputBytes)} → ${formatBytes(totalOutputBytes)}`
+                  ? `${formatBytes(completedInputBytes)} → ${formatBytes(totalOutputBytes)} · ${formatSavings(completedInputBytes, totalOutputBytes)}`
                   : `총 ${items.length}개 · ${formatBytes(totalInputBytes)}`}
               </span>
             </div>
@@ -912,11 +993,20 @@ export function ImageWorkbench() {
                     className={styles.runButton}
                     type="button"
                     disabled={archiving}
-                    onClick={downloadAll}
+                    onClick={() => {
+                      const onlyItem = completedItems[0];
+                      if (completedItems.length === 1 && onlyItem !== undefined) {
+                        void saveItem(onlyItem);
+                      } else {
+                        void downloadAll();
+                      }
+                    }}
                   >
                     {archiving
                       ? "ZIP 만드는 중…"
-                      : `결과 ${completedItems.length}개 ZIP으로 받기 ↓`}
+                      : completedItems.length === 1
+                        ? "결과 저장·공유 ↓"
+                        : `결과 ${completedItems.length}개 ZIP으로 받기 ↓`}
                   </button>
                 </>
               ) : (

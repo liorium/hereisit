@@ -62,11 +62,14 @@ class CompletingWorker {
   terminate(): void {}
 }
 
-function installRuntime(worker: typeof CompletingWorker): void {
+function installRuntime(
+  worker: typeof CompletingWorker,
+  navigatorProperties: { deviceMemory?: number } = { deviceMemory: 8 },
+): void {
   vi.stubGlobal("Worker", worker);
   vi.stubGlobal("OffscreenCanvas", class {});
   vi.stubGlobal("createImageBitmap", () => undefined);
-  vi.stubGlobal("navigator", { hardwareConcurrency: 8, deviceMemory: 8 });
+  vi.stubGlobal("navigator", { hardwareConcurrency: 8, ...navigatorProperties });
 }
 
 afterEach(() => {
@@ -75,6 +78,20 @@ afterEach(() => {
 });
 
 describe("runImageBatch", () => {
+  it("uses one worker when device memory is not reported", async () => {
+    installRuntime(CompletingWorker, {});
+    const handle = runImageBatch([
+      { itemId: "first", file: fakeFile("first.png"), spec },
+      { itemId: "second", file: fakeFile("second.png"), spec },
+    ]);
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "first", status: "fulfilled" },
+      { itemId: "second", status: "fulfilled" },
+    ]);
+    expect(CompletingWorker.instances).toBe(1);
+  });
+
   it("falls back from NaN concurrency and survives observer exceptions", async () => {
     installRuntime(CompletingWorker);
     const handle = runImageBatch(

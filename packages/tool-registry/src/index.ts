@@ -23,11 +23,11 @@ export const imagePresets: readonly ToolPreset[] = [
   {
     id: "balanced",
     name: "용량만 줄이기",
-    description: "크기는 유지하고 원본보다 작아질 때만 결과를 만들어요.",
+    description: "원본보다 작게 만들고 초고해상도만 5000px로 줄여요.",
     badge: "절약",
     spec: {
       ...base,
-      resize: { kind: "none" },
+      resize: { kind: "inside", maxWidth: 5000, maxHeight: 5000 },
       output: { format: "webp", compression: { mode: "quality", quality: 82 } },
       sizeGoal: {
         mode: "smaller-only",

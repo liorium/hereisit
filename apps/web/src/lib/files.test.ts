@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { createZipArchive } from "./files";
+import { createZipArchive, formatDuration, formatSavings, isAbortError } from "./files";
 
 describe("createZipArchive", () => {
   it("keeps every duplicate name and strips archive paths", async () => {
@@ -23,5 +23,17 @@ describe("createZipArchive", () => {
         .map((bytes) => bytes[0])
         .sort(),
     ).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("result metrics", () => {
+  it("formats savings, growth, and processing time", () => {
+    expect(formatSavings(1000, 400)).toBe("60% 절약");
+    expect(formatSavings(1000, 1100)).toBe("10% 증가");
+    expect(formatDuration(850)).toBe("850ms");
+    expect(formatDuration(1250)).toBe("1.3초");
+    expect(isAbortError({ name: "AbortError" })).toBe(true);
+    expect(isAbortError(new Error("other"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
   });
 });

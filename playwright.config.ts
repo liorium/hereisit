@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const isCI = Boolean(process.env.CI);
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: This local-only flag does not affect Turbo task outputs.
+const includeWebKit = isCI || process.env.PLAYWRIGHT_WEBKIT === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -18,7 +20,27 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /mobile\.spec\.ts/,
     },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      testIgnore: /mobile\.spec\.ts/,
+    },
+    ...(includeWebKit
+      ? [
+          {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"] },
+            testIgnore: /mobile\.spec\.ts/,
+          },
+          {
+            name: "mobile-webkit",
+            use: { ...devices["iPhone 15"] },
+            testMatch: /mobile\.spec\.ts/,
+          },
+        ]
+      : []),
   ],
   webServer: {
     command: "pnpm --filter @hereisit/web preview:test",

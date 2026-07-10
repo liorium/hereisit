@@ -7,6 +7,25 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
 }
 
+export function formatSavings(inputBytes: number, outputBytes: number): string {
+  if (inputBytes <= 0) return "절감률 계산 불가";
+  const difference = inputBytes - outputBytes;
+  if (difference === 0) return "용량 동일";
+  const percentage = (Math.abs(difference) / inputBytes) * 100;
+  const formatted = percentage >= 10 ? String(Math.round(percentage)) : percentage.toFixed(1);
+  return difference > 0 ? `${formatted}% 절약` : `${formatted}% 증가`;
+}
+
+export function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) return `${Math.max(1, Math.round(milliseconds))}ms`;
+  if (milliseconds < 10_000) return `${(milliseconds / 1000).toFixed(1)}초`;
+  return `${Math.round(milliseconds / 1000)}초`;
+}
+
+export function isAbortError(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === "AbortError";
+}
+
 export function downloadUrl(url: string, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -63,7 +82,5 @@ export async function createZipArchive(
     });
   });
 
-  const archiveBytes = new Uint8Array(bytes.byteLength);
-  archiveBytes.set(bytes);
-  return new Blob([archiveBytes.buffer], { type: "application/zip" });
+  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/zip" });
 }

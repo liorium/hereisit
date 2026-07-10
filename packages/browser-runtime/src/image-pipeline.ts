@@ -148,7 +148,10 @@ export async function processImagePipeline(
   try {
     inspected = inspectImageHeader(input.bytes);
   } catch {
-    throw new ImagePipelineError("UNSUPPORTED_INPUT", "JPG, PNG 또는 WebP 이미지만 지원합니다.");
+    throw new ImagePipelineError(
+      "UNSUPPORTED_INPUT",
+      "JPG, PNG, WebP 또는 HEIC 이미지만 지원합니다.",
+    );
   }
 
   if (inspected.animated) {
@@ -170,6 +173,12 @@ export async function processImagePipeline(
     const sourceBlob = new Blob([input.bytes], { type: inspected.mime });
     bitmap = await createImageBitmap(sourceBlob, { imageOrientation: "from-image" });
   } catch {
+    if (inspected.format === "heic") {
+      throw new ImagePipelineError(
+        "DECODE_FAILED",
+        "이 브라우저는 HEIC 디코딩을 지원하지 않아요. Safari 17 이상에서 다시 시도해 주세요.",
+      );
+    }
     throw new ImagePipelineError("DECODE_FAILED", "이미지를 읽지 못했습니다.");
   }
   const decodeMs = performance.now() - decodeStarted;

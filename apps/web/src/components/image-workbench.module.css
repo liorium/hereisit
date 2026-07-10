@@ -321,6 +321,20 @@
   background: #eee;
 }
 
+.filePlaceholder {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: #e8e9e4;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
 .fileCopy {
   min-width: 0;
   display: block;
@@ -438,6 +452,29 @@
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
+}
+
+.previewMemoryNotice {
+  max-width: 340px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  text-align: center;
+}
+
+.previewMemoryNotice strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.previewMemoryNotice span {
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .itemError {

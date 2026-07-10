@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
-import { unzipSync } from "fflate";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -89,20 +88,17 @@ test("processes and downloads an image without external uploads", async ({ page 
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("1×1", { exact: true })).toBeVisible();
 
-  const zipButton = page.getByRole("button", { name: "결과 1개 ZIP으로 받기 ↓" });
-  const [download] = await Promise.all([page.waitForEvent("download"), zipButton.click()]);
-  expect(download.suggestedFilename()).toBe("hereisit-images.zip");
+  const saveButton = page.getByRole("button", { name: "결과 저장·공유 ↓" });
+  const [download] = await Promise.all([page.waitForEvent("download"), saveButton.click()]);
+  expect(download.suggestedFilename()).toBe("sample-hereisit.webp");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
-  const archive = unzipSync(new Uint8Array(await readFile(downloadPath as string)));
-  expect(Object.keys(archive)).toEqual(["sample-hereisit.webp"]);
-  const output = archive["sample-hereisit.webp"];
-  expect(output).toBeDefined();
-  expect(new TextDecoder().decode(output?.subarray(0, 4))).toBe("RIFF");
-  expect(new TextDecoder().decode(output?.subarray(8, 12))).toBe("WEBP");
+  const output = new Uint8Array(await readFile(downloadPath as string));
+  expect(new TextDecoder().decode(output.subarray(0, 4))).toBe("RIFF");
+  expect(new TextDecoder().decode(output.subarray(8, 12))).toBe("WEBP");
 
   await page.getByLabel("출력 형식").selectOption("png");
-  await expect(zipButton).toBeHidden();
+  await expect(saveButton).toBeHidden();
   await expect(page.getByRole("button", { name: "1개 이미지 변환 →" })).toBeVisible();
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
@@ -144,13 +140,11 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 1개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
   ]);
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
-  const archive = unzipSync(new Uint8Array(await readFile(downloadPath as string)));
-  const output = archive["photo-hereisit.webp"];
-  if (output === undefined) throw new Error("Expected WebP output");
+  const output = new Uint8Array(await readFile(downloadPath as string));
   expect(output.byteLength).toBeLessThan(input.byteLength);
   expect(new TextDecoder().decode(output.subarray(0, 4))).toBe("RIFF");
   expect(new TextDecoder().decode(output.subarray(8, 12))).toBe("WEBP");
@@ -181,4 +175,89 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   ).toBeVisible();
   await expect(page.getByText("이미 최적화됨", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
+});
+
+test("uses the device share sheet for one result when files are supported", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: (data: ShareData) => data.files?.length === 1,
+    });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: async (data: ShareData) => {
+        const file = data.files?.[0];
+        if (file === undefined) throw new Error("Expected one shared file");
+        (
+          window as Window & { sharedResult?: { name: string; type: string; size: number } }
+        ).sharedResult = {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+        };
+      },
+    });
+  });
+  await page.goto("/");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "share.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByRole("button", { name: "결과 저장·공유 ↓" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "결과를 공유 메뉴로 보냈어요." }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { sharedResult?: { name: string; type: string; size: number } })
+            .sharedResult,
+      ),
+    )
+    .toMatchObject({ name: "share-hereisit.webp", type: "image/webp" });
+});
+
+test("accepts a real HEIC file without uploading it", async ({ page, browserName }) => {
+  await page.goto("/");
+  const origin = new URL(page.url()).origin;
+  const unexpectedRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin !== origin ||
+      !["GET", "HEAD"].includes(request.method()) ||
+      request.postData() !== null
+    ) {
+      unexpectedRequests.push(request.url());
+    }
+  });
+
+  const heic = await readFile("tests/fixtures/rainbow-451x461.heic");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "rainbow-451x461.HEIC",
+    mimeType: "",
+    buffer: heic,
+  });
+  await expect(page.getByText("rainbow-451x461.HEIC")).toBeVisible();
+  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+
+  const completed = page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." });
+  const unsupported = page.getByRole("alert").filter({ hasText: "HEIC 디코딩을 지원하지 않아요" });
+  if (browserName === "webkit") {
+    await expect(completed.or(unsupported)).toBeVisible({ timeout: 20_000 });
+    if (await completed.isVisible()) {
+      await expect(page.getByText("451×461", { exact: true })).toBeVisible();
+    }
+  } else {
+    await expect(unsupported).toBeVisible({ timeout: 20_000 });
+  }
+  expect(unexpectedRequests).toEqual([]);
 });

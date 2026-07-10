@@ -37,7 +37,7 @@ function autoConcurrency(): number {
   const cores = globalThis.navigator?.hardwareConcurrency ?? 2;
   const memory = (globalThis.navigator as (Navigator & { deviceMemory?: number }) | undefined)
     ?.deviceMemory;
-  if (memory !== undefined && memory <= 4) return 1;
+  if (memory === undefined || memory <= 4) return 1;
   return Math.max(1, Math.min(MAX_WORKERS, cores - 1));
 }
 
