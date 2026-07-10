@@ -23,17 +23,31 @@ pnpm verify
 ~~~
 
 The browser suite additionally verifies local conversion, a downloaded WebP inside ZIP, keyboard
-navigation, and that conversion makes no external or write requests:
+navigation, Worker loading, and that conversion makes no external or write requests:
 
 ~~~bash
 pnpm exec playwright install chromium
+pnpm build
 pnpm test:e2e
-# or run both core and browser checks
+# or run core and browser checks together
 pnpm verify:all
 ~~~
 
-Run the production build locally with pnpm build followed by pnpm --filter @hereisit/web start. CI runs
-the browser suite against that production server.
+Build and preview the exact Cloudflare Pages output locally:
+
+~~~bash
+pnpm build
+pnpm cloudflare:preview
+~~~
+
+The static site is written to apps/web/out.
+
+## Deployment
+
+Production deployment uses Cloudflare Pages Git integration with the GitHub main branch. Every push to
+main produces a production deployment, while pull requests and other branches receive preview URLs.
+See [docs/deployment.md](docs/deployment.md) for the dashboard fields, CLI helpers, and first-deploy
+checklist.
 
 ## Current limits
 

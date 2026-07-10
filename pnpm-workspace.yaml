@@ -3,7 +3,13 @@ packages:
   - packages/*
 
 allowBuilds:
+  esbuild: true
   sharp: true
+  workerd: true
+
+minimumReleaseAgeExclude:
+  - miniflare@4.20260708.1
+  - wrangler@4.110.0
 
 onlyBuiltDependencies:
   - sharp

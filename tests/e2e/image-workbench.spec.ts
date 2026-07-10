@@ -17,9 +17,15 @@ test("processes and downloads an image without external uploads", async ({ page 
   await expect(fileInput).toBeEnabled();
 
   const unexpectedRequests: string[] = [];
+  const failedRequests: string[] = [];
+  const pageErrors: string[] = [];
+  const requestedPaths: string[] = [];
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
     const pageUrl = new URL(page.url());
+    if (requestUrl.origin === pageUrl.origin) {
+      requestedPaths.push(requestUrl.pathname);
+    }
     if (
       requestUrl.origin !== pageUrl.origin ||
       !["GET", "HEAD"].includes(request.method()) ||
@@ -27,6 +33,14 @@ test("processes and downloads an image without external uploads", async ({ page 
     ) {
       unexpectedRequests.push(request.url());
     }
+  });
+  page.on("requestfailed", (request) => {
+    failedRequests.push(
+      [request.url(), request.failure()?.errorText ?? "unknown request failure"].join(": "),
+    );
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
   });
 
   await fileInput.setInputFiles({
@@ -59,6 +73,14 @@ test("processes and downloads an image without external uploads", async ({ page 
   await expect(zipButton).toBeHidden();
   await expect(page.getByRole("button", { name: "1개 이미지 변환 →" })).toBeVisible();
   expect(unexpectedRequests).toEqual([]);
+  expect(failedRequests).toEqual([]);
+  expect(pageErrors).toEqual([]);
+  expect(
+    requestedPaths.some(
+      (path) => path.startsWith("/_next/static/chunks/turbopack-worker-") && path.endsWith(".js"),
+    ),
+  ).toBe(true);
+  expect(requestedPaths.some((path) => path.endsWith(".ts"))).toBe(false);
 });
 
 test("reaches the upload action through the real tab order", async ({ page }) => {

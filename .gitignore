@@ -1,6 +1,9 @@
 node_modules/
 .next/
 dist/
+out/
+.wrangler/
+.dev.vars*
 coverage/
 .turbo/
 playwright-report/

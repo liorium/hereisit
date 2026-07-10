@@ -10,7 +10,7 @@ export default defineConfig({
   workers: isCI ? 1 : undefined,
   reporter: isCI ? "github" : "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://127.0.0.1:4173",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -21,9 +21,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: isCI ? "pnpm --filter @hereisit/web start" : "pnpm --filter @hereisit/web dev",
-    url: "http://localhost:3000",
-    reuseExistingServer: !isCI,
+    command: "pnpm --filter @hereisit/web preview:test",
+    url: "http://127.0.0.1:4173",
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
