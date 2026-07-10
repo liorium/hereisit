@@ -1,0 +1,852 @@
+"use client";
+
+import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime";
+import type {
+  BatchHandle,
+  BatchRuntimeEvent,
+  ImagePhase,
+  ImagePipelineResult,
+  ImagePipelineSpecV1,
+} from "@hereisit/tool-contracts";
+import { findImagePreset, imagePresets } from "@hereisit/tool-registry";
+import {
+  type ChangeEvent,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createZipArchive, downloadUrl, formatBytes } from "../lib/files";
+import styles from "./image-workbench.module.css";
+
+const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_FILES = 100;
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
+
+type ItemStatus = "ready" | "queued" | "processing" | "completed" | "failed" | "cancelled";
+
+interface WorkItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+  resultUrl?: string;
+  result?: ImagePipelineResult;
+  status: ItemStatus;
+  progress: number;
+  phase?: ImagePhase;
+  error?: string | undefined;
+}
+
+function cloneSpec(spec: ImagePipelineSpecV1): ImagePipelineSpecV1 {
+  return structuredClone(spec);
+}
+
+function makeId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function phaseLabel(phase?: ImagePhase): string {
+  if (phase === "validating") return "확인 중";
+  if (phase === "decoding") return "읽는 중";
+  if (phase === "transforming") return "크기 조절 중";
+  if (phase === "encoding") return "압축 중";
+  if (phase === "finalizing") return "마무리 중";
+  return "대기 중";
+}
+
+function currentQuality(spec: ImagePipelineSpecV1): number {
+  if (spec.output.format === "png" || spec.output.compression.mode !== "quality") return 100;
+  return spec.output.compression.quality;
+}
+
+function withOutputFormat(
+  spec: ImagePipelineSpecV1,
+  format: "jpeg" | "png" | "webp",
+): ImagePipelineSpecV1 {
+  const quality = Math.min(95, currentQuality(spec));
+  if (format === "png") {
+    return { ...spec, output: { format: "png", compression: { mode: "lossless" } } };
+  }
+  if (format === "jpeg") {
+    return {
+      ...spec,
+      output: {
+        format: "jpeg",
+        compression: { mode: "quality", quality },
+        matte: "#ffffff",
+      },
+    };
+  }
+  return {
+    ...spec,
+    output: { format: "webp", compression: { mode: "quality", quality } },
+  };
+}
+
+function resultBlob(result: ImagePipelineResult): Blob {
+  return new Blob([result.bytes], { type: result.mime });
+}
+
+function resetWorkItem(item: WorkItem, status: ItemStatus = "ready", error?: string): WorkItem {
+  const reset: WorkItem = {
+    id: item.id,
+    file: item.file,
+    previewUrl: item.previewUrl,
+    status,
+    progress: 0,
+  };
+  if (error !== undefined) reset.error = error;
+  return reset;
+}
+
+function isAcceptedFile(file: File): boolean {
+  return (
+    ACCEPTED_TYPES.has(file.type) || (file.type === "" && /\.(?:jpe?g|png|webp)$/i.test(file.name))
+  );
+}
+
+export function ImageWorkbench() {
+  const [items, setItems] = useState<WorkItem[]>([]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [presetId, setPresetId] = useState("web-1920");
+  const [spec, setSpec] = useState<ImagePipelineSpecV1>(() =>
+    cloneSpec(findImagePreset("web-1920").spec),
+  );
+  const [dragging, setDragging] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [message, setMessage] = useState("이미지를 선택하면 바로 준비할게요.");
+  const [runtimeSupported, setRuntimeSupported] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const batchRef = useRef<BatchHandle | undefined>(undefined);
+  const activeRunRef = useRef(0);
+  const itemsRef = useRef(items);
+  const objectUrlsRef = useRef(new Set<string>());
+  const busy = processing || archiving;
+
+  const commitItems = useCallback((update: (current: WorkItem[]) => WorkItem[]) => {
+    const next = update(itemsRef.current);
+    itemsRef.current = next;
+    setItems(next);
+  }, []);
+
+  const createOwnedUrl = useCallback((blob: Blob): string => {
+    const url = URL.createObjectURL(blob);
+    objectUrlsRef.current.add(url);
+    return url;
+  }, []);
+
+  const revokeOwnedUrl = useCallback((url: string | undefined) => {
+    if (url === undefined || !objectUrlsRef.current.delete(url)) return;
+    URL.revokeObjectURL(url);
+  }, []);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    setHydrated(true);
+    setRuntimeSupported(supportsBrowserImageRuntime());
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (itemsRef.current.length === 0) return;
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, []);
+
+  useEffect(
+    () => () => {
+      activeRunRef.current += 1;
+      batchRef.current?.cancel();
+      for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
+      objectUrlsRef.current.clear();
+    },
+    [],
+  );
+
+  const addFiles = useCallback(
+    (fileList: FileList | readonly File[]) => {
+      const candidates = Array.from(fileList);
+      const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
+      let remainingBytes = Math.max(0, MAX_TOTAL_INPUT_BYTES - currentBytes);
+      const available = Math.max(0, MAX_FILES - itemsRef.current.length);
+      const accepted: File[] = [];
+
+      for (const file of candidates) {
+        if (
+          accepted.length >= available ||
+          !isAcceptedFile(file) ||
+          file.size < 1 ||
+          file.size > MAX_FILE_BYTES ||
+          file.size > remainingBytes
+        ) {
+          continue;
+        }
+        accepted.push(file);
+        remainingBytes -= file.size;
+      }
+
+      const additions = accepted.map<WorkItem>((file) => ({
+        id: makeId(),
+        file,
+        previewUrl: createOwnedUrl(file),
+        status: "ready",
+        progress: 0,
+      }));
+
+      if (additions.length > 0) {
+        commitItems((current) => [...current, ...additions]);
+        setSelectedId((current) => current ?? additions[0]?.id);
+        setMessage(`${additions.length}개 이미지를 준비했어요.`);
+      }
+
+      const rejected = candidates.length - additions.length;
+      if (rejected > 0) {
+        setMessage(
+          `${additions.length}개를 추가했어요. ${rejected}개는 형식·파일당 50MB·총 250MB·개수 제한으로 제외했어요.`,
+        );
+      }
+    },
+    [commitItems, createOwnedUrl],
+  );
+
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (
+        busy ||
+        event.clipboardData?.files.length === 0 ||
+        (target instanceof HTMLElement &&
+          (target.matches("input, textarea, [contenteditable=true]") ||
+            target.closest("[contenteditable=true]") !== null))
+      ) {
+        return;
+      }
+      const imageFiles = Array.from(event.clipboardData?.files ?? []).filter(isAcceptedFile);
+      if (imageFiles.length > 0) addFiles(imageFiles);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [addFiles, busy]);
+
+  const selected = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? items[0],
+    [items, selectedId],
+  );
+  const totalInputBytes = useMemo(
+    () => items.reduce((total, item) => total + item.file.size, 0),
+    [items],
+  );
+  const completedItems = useMemo(
+    () => items.filter((item) => item.status === "completed" && item.result !== undefined),
+    [items],
+  );
+  const totalOutputBytes = useMemo(
+    () => completedItems.reduce((total, item) => total + (item.result?.byteLength ?? 0), 0),
+    [completedItems],
+  );
+
+  const invalidateResults = () => {
+    const hasResultOrError = itemsRef.current.some(
+      (item) => item.resultUrl !== undefined || item.status !== "ready",
+    );
+    if (!hasResultOrError) return;
+    for (const item of itemsRef.current) revokeOwnedUrl(item.resultUrl);
+    commitItems((current) => current.map((item) => resetWorkItem(item)));
+    setMessage("설정이 바뀌었어요. 새 설정으로 다시 변환해 주세요.");
+  };
+
+  const choosePreset = (id: string) => {
+    invalidateResults();
+    setPresetId(id);
+    setSpec(cloneSpec(findImagePreset(id).spec));
+  };
+
+  const changeFormat = (event: ChangeEvent<HTMLSelectElement>) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => withOutputFormat(current, event.target.value as "jpeg" | "png" | "webp"));
+  };
+
+  const changeQuality = (event: ChangeEvent<HTMLInputElement>) => {
+    const quality = Number(event.target.value);
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.output.format === "png") return current;
+      return {
+        ...current,
+        output: { ...current.output, compression: { mode: "quality", quality } },
+      };
+    });
+  };
+
+  const changeResizeMode = (mode: "none" | "inside" | "cover") => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({
+      ...current,
+      resize:
+        mode === "none"
+          ? { kind: "none" }
+          : mode === "inside"
+            ? { kind: "inside", maxWidth: 1920, maxHeight: 1920 }
+            : { kind: "cover", width: 1000, height: 1000 },
+    }));
+  };
+
+  const changeSize = (value: number) => {
+    const size = Math.max(64, Math.min(16_384, Math.round(value || 64)));
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind === "inside") {
+        return { ...current, resize: { kind: "inside", maxWidth: size, maxHeight: size } };
+      }
+      if (current.resize.kind === "cover") {
+        return { ...current, resize: { ...current.resize, width: size, height: size } };
+      }
+      return current;
+    });
+  };
+
+  const removeItem = (id: string) => {
+    if (busy) return;
+    const target = itemsRef.current.find((item) => item.id === id);
+    if (target === undefined) return;
+    revokeOwnedUrl(target.previewUrl);
+    revokeOwnedUrl(target.resultUrl);
+    const next = itemsRef.current.filter((item) => item.id !== id);
+    itemsRef.current = next;
+    setItems(next);
+    setSelectedId((selectedItem) => (selectedItem === id ? next[0]?.id : selectedItem));
+  };
+
+  const reset = () => {
+    activeRunRef.current += 1;
+    batchRef.current?.cancel();
+    batchRef.current = undefined;
+    for (const item of itemsRef.current) {
+      revokeOwnedUrl(item.previewUrl);
+      revokeOwnedUrl(item.resultUrl);
+    }
+    itemsRef.current = [];
+    setItems([]);
+    setSelectedId(undefined);
+    setProcessing(false);
+    setArchiving(false);
+    setMessage("이미지를 선택하면 바로 준비할게요.");
+  };
+
+  const applyRuntimeEvent = (event: BatchRuntimeEvent) => {
+    if (event.type === "item-progress") {
+      commitItems((current) =>
+        current.map((item) =>
+          item.id === event.itemId
+            ? {
+                ...item,
+                status: "processing",
+                progress: event.fraction,
+                phase: event.phase,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    if (event.type !== "item-complete") return;
+    const previous = itemsRef.current.find((item) => item.id === event.itemId);
+    revokeOwnedUrl(previous?.resultUrl);
+
+    if (event.result.status === "fulfilled") {
+      const result = event.result.value;
+      const resultUrl = createOwnedUrl(resultBlob(result));
+      commitItems((current) =>
+        current.map((item) =>
+          item.id === event.itemId
+            ? {
+                ...resetWorkItem(item, "completed"),
+                progress: 1,
+                result,
+                resultUrl,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    const error =
+      event.result.status === "cancelled" ? "작업을 중단했어요." : event.result.error.message;
+    const status: ItemStatus = event.result.status === "cancelled" ? "cancelled" : "failed";
+    commitItems((current) =>
+      current.map((item) => (item.id === event.itemId ? resetWorkItem(item, status, error) : item)),
+    );
+  };
+
+  const startProcessing = async () => {
+    if (itemsRef.current.length === 0 || busy || !runtimeSupported) return;
+    const sourceItems = itemsRef.current;
+    const runId = activeRunRef.current + 1;
+    activeRunRef.current = runId;
+    for (const item of sourceItems) revokeOwnedUrl(item.resultUrl);
+    const queuedItems = sourceItems.map((item) => resetWorkItem(item, "queued"));
+    itemsRef.current = queuedItems;
+    setItems(queuedItems);
+    setProcessing(true);
+    setMessage(`${sourceItems.length}개 이미지를 변환하고 있어요.`);
+
+    let handle: BatchHandle | undefined;
+    try {
+      handle = runImageBatch(
+        sourceItems.map((item) => ({ itemId: item.id, file: item.file, spec: cloneSpec(spec) })),
+        {
+          concurrency: "auto",
+          onEvent: (event) => {
+            if (activeRunRef.current === runId) applyRuntimeEvent(event);
+          },
+        },
+      );
+      batchRef.current = handle;
+      const results = await handle.result;
+      if (activeRunRef.current !== runId) return;
+
+      const successes = results.filter((result) => result.status === "fulfilled").length;
+      const failures = results.filter((result) => result.status === "rejected").length;
+      if (successes === results.length) {
+        setMessage(`${successes}개 이미지 변환을 완료했어요.`);
+      } else if (successes > 0) {
+        setMessage(`${successes}개 완료, ${failures}개는 처리하지 못했어요.`);
+      } else if (results.some((result) => result.status === "cancelled")) {
+        setMessage("작업을 중단했어요.");
+      } else {
+        setMessage("이미지를 처리하지 못했어요. 파일을 확인해 주세요.");
+      }
+    } catch {
+      if (activeRunRef.current !== runId) return;
+      commitItems((current) =>
+        current.map((item) =>
+          item.status === "completed"
+            ? item
+            : resetWorkItem(item, "failed", "브라우저 작업기를 시작하지 못했습니다."),
+        ),
+      );
+      setMessage("이미지 작업을 시작하지 못했습니다. 브라우저 설정을 확인해 주세요.");
+    } finally {
+      if (activeRunRef.current === runId) {
+        if (batchRef.current === handle) batchRef.current = undefined;
+        setProcessing(false);
+      }
+    }
+  };
+
+  const cancelProcessing = () => {
+    activeRunRef.current += 1;
+    batchRef.current?.cancel();
+    batchRef.current = undefined;
+    setProcessing(false);
+    commitItems((current) =>
+      current.map((item) =>
+        item.status === "completed" ? item : resetWorkItem(item, "cancelled", "작업을 중단했어요."),
+      ),
+    );
+    const preserved = itemsRef.current.filter((item) => item.status === "completed").length;
+    setMessage(
+      preserved > 0
+        ? `작업을 중단했어요. 완료된 결과 ${preserved}개는 받을 수 있어요.`
+        : "작업을 중단했어요.",
+    );
+  };
+
+  const downloadItem = (item: WorkItem) => {
+    if (item.resultUrl === undefined || item.result === undefined) return;
+    downloadUrl(item.resultUrl, item.result.suggestedName);
+  };
+
+  const downloadAll = async () => {
+    if (completedItems.length === 0 || archiving) return;
+    setArchiving(true);
+    setMessage("ZIP 파일을 만들고 있어요.");
+    try {
+      const archive = await createZipArchive(
+        completedItems.flatMap((item) =>
+          item.result === undefined
+            ? []
+            : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
+        ),
+      );
+      const url = createOwnedUrl(archive);
+      downloadUrl(url, "hereisit-images.zip");
+      setTimeout(() => revokeOwnedUrl(url), 10_000);
+      setMessage(`${completedItems.length}개 결과를 ZIP으로 만들었어요.`);
+    } catch {
+      setMessage("ZIP 파일을 만들지 못했어요. 개별 파일을 받아 주세요.");
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const onDrop = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    if (!busy) addFiles(event.dataTransfer.files);
+  };
+
+  return (
+    <section className={styles.shell} aria-labelledby="workbench-title">
+      <input
+        ref={inputRef}
+        className={styles.hiddenInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        tabIndex={-1}
+        disabled={!hydrated || busy || !runtimeSupported}
+        onChange={(event) => {
+          if (event.target.files !== null) addFiles(event.target.files);
+          event.target.value = "";
+        }}
+      />
+
+      {items.length === 0 ? (
+        <section
+          className={`${styles.emptyDropzone} ${dragging ? styles.dragging : ""}`}
+          aria-labelledby="workbench-title"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
+          }}
+          onDrop={onDrop}
+        >
+          <div className={styles.dropIcon} aria-hidden="true">
+            <span>＋</span>
+          </div>
+          <div>
+            <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
+            <h2 id="workbench-title">이미지를 놓거나 선택하세요</h2>
+            <p>JPG, PNG, WebP · 파일당 50MB · 총 250MB · 최대 100개</p>
+          </div>
+          <div className={styles.dropActions}>
+            <button
+              className={styles.primaryButton}
+              type="button"
+              disabled={!hydrated || !runtimeSupported}
+              onClick={() => inputRef.current?.click()}
+            >
+              이미지 선택
+            </button>
+            <span className={styles.pasteHint}>⌘V 또는 Ctrl+V로 붙여넣기</span>
+            <p className={styles.emptyStatus} role="status" aria-live="polite" aria-atomic="true">
+              {!hydrated
+                ? "도구를 준비하고 있어요…"
+                : runtimeSupported
+                  ? message
+                  : "최신 Chrome 또는 Edge에서 사용할 수 있어요."}
+            </p>
+          </div>
+          <div className={styles.localBadge}>
+            <span aria-hidden="true">✓</span> 업로드 없음 · 내 기기에서 처리
+          </div>
+        </section>
+      ) : (
+        <div className={styles.workbench}>
+          <div className={styles.workbenchHeader}>
+            <div>
+              <p className={styles.dropEyebrow}>LOCAL IMAGE WORKBENCH</p>
+              <h2 id="workbench-title">이미지 작업대</h2>
+            </div>
+            <div className={styles.headerActions}>
+              <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
+                ＋ 추가
+              </button>
+              <button type="button" onClick={reset} disabled={busy}>
+                처음부터
+              </button>
+            </div>
+          </div>
+
+          {hydrated && !runtimeSupported && (
+            <div className={styles.runtimeWarning} role="alert">
+              현재 브라우저는 로컬 이미지 Worker를 완전히 지원하지 않습니다. 최신 Chrome 또는 Edge를
+              사용해 주세요.
+            </div>
+          )}
+
+          <div className={styles.workspaceGrid}>
+            <aside className={styles.filePanel} aria-label="선택한 이미지">
+              <div className={styles.panelTitle}>
+                <strong>파일</strong>
+                <span>{items.length}</span>
+              </div>
+              <div className={styles.fileList}>
+                {items.map((item) => (
+                  <div
+                    className={`${styles.fileRow} ${item.id === selected?.id ? styles.selectedFile : ""}`}
+                    key={item.id}
+                  >
+                    <button
+                      className={styles.fileSelect}
+                      type="button"
+                      aria-pressed={item.id === selected?.id}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      {/* biome-ignore lint/performance/noImgElement: object URLs are local and unknown to next/image */}
+                      <img src={item.previewUrl} alt="" />
+                      <span className={styles.fileCopy}>
+                        <strong>{item.file.name}</strong>
+                        <small>
+                          {item.status === "processing"
+                            ? `${phaseLabel(item.phase)} ${Math.round(item.progress * 100)}%`
+                            : item.status === "completed" && item.result !== undefined
+                              ? `${formatBytes(item.file.size)} → ${formatBytes(item.result.byteLength)}`
+                              : item.status === "failed"
+                                ? "처리 실패"
+                                : formatBytes(item.file.size)}
+                        </small>
+                      </span>
+                    </button>
+                    {!busy && (
+                      <button
+                        className={styles.removeButton}
+                        type="button"
+                        aria-label={`${item.file.name} 제거`}
+                        onClick={() => removeItem(item.id)}
+                      >
+                        ×
+                      </button>
+                    )}
+                    {item.status === "processing" && (
+                      <span
+                        className={styles.rowProgress}
+                        role="progressbar"
+                        aria-label={`${item.file.name} 변환 진행률`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(item.progress * 100)}
+                        style={{ width: `${item.progress * 100}%` }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </aside>
+
+            <section className={styles.previewPanel} aria-label="이미지 미리보기">
+              {selected !== undefined && (
+                <>
+                  <div className={styles.previewTopline}>
+                    <span>
+                      {selected.resultUrl === undefined ? "원본 미리보기" : "변환 전 · 후"}
+                    </span>
+                    {selected.result !== undefined && (
+                      <span>
+                        {selected.result.width}×{selected.result.height}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`${styles.previewStage} ${selected.resultUrl ? styles.withResult : ""}`}
+                  >
+                    <figure>
+                      {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                      <img src={selected.previewUrl} alt={`${selected.file.name} 원본`} />
+                      <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
+                    </figure>
+                    {selected.resultUrl !== undefined && selected.result !== undefined && (
+                      <figure>
+                        {/* biome-ignore lint/performance/noImgElement: local generated result */}
+                        <img src={selected.resultUrl} alt={`${selected.file.name} 변환 결과`} />
+                        <figcaption>결과 · {formatBytes(selected.result.byteLength)}</figcaption>
+                      </figure>
+                    )}
+                  </div>
+                  {selected.error !== undefined && (
+                    <p className={styles.itemError} role="alert">
+                      {selected.error}
+                    </p>
+                  )}
+                  {selected.resultUrl !== undefined && (
+                    <button
+                      className={styles.inlineDownload}
+                      type="button"
+                      onClick={() => downloadItem(selected)}
+                    >
+                      이 이미지 받기 ↓
+                    </button>
+                  )}
+                </>
+              )}
+            </section>
+
+            <aside className={styles.settingsPanel} aria-label="변환 설정">
+              <div className={styles.panelTitle}>
+                <strong>설정</strong>
+                <span>모두 적용</span>
+              </div>
+
+              <fieldset className={styles.settingsGroup} disabled={busy}>
+                <legend>빠른 프리셋</legend>
+                <div className={styles.presetList}>
+                  {imagePresets.map((preset) => (
+                    <button
+                      className={presetId === preset.id ? styles.activePreset : ""}
+                      type="button"
+                      key={preset.id}
+                      aria-pressed={presetId === preset.id}
+                      onClick={() => choosePreset(preset.id)}
+                    >
+                      <span>
+                        <strong>{preset.name}</strong>
+                        <small>{preset.description}</small>
+                      </span>
+                      <em>{preset.badge}</em>
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset className={styles.settingsGroup} disabled={busy}>
+                <legend>크기</legend>
+                <div className={styles.segmented}>
+                  {[
+                    ["none", "유지"],
+                    ["inside", "최대 크기"],
+                    ["cover", "정사각 자르기"],
+                  ].map(([value, label]) => (
+                    <button
+                      className={spec.resize.kind === value ? styles.activeSegment : ""}
+                      type="button"
+                      key={value}
+                      aria-pressed={spec.resize.kind === value}
+                      onClick={() => changeResizeMode(value as "none" | "inside" | "cover")}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {spec.resize.kind !== "none" && spec.resize.kind !== "stretch" && (
+                  <label className={styles.numberField}>
+                    <span>{spec.resize.kind === "cover" ? "정사각형 한 변" : "긴 변 최대"}</span>
+                    <span>
+                      <input
+                        type="number"
+                        min="64"
+                        max="16384"
+                        step="10"
+                        value={
+                          spec.resize.kind === "cover"
+                            ? spec.resize.width
+                            : (spec.resize.maxWidth ?? spec.resize.maxHeight ?? 1920)
+                        }
+                        onChange={(event) => changeSize(Number(event.target.value))}
+                      />
+                      px
+                    </span>
+                  </label>
+                )}
+              </fieldset>
+
+              <fieldset className={styles.settingsGroup} disabled={busy}>
+                <legend>형식과 품질</legend>
+                <label className={styles.selectField}>
+                  <span>출력 형식</span>
+                  <select value={spec.output.format} onChange={changeFormat}>
+                    <option value="webp">WebP · 작은 용량</option>
+                    <option value="jpeg">JPG · 넓은 호환성</option>
+                    <option value="png">PNG · 무손실</option>
+                  </select>
+                </label>
+                {spec.output.format !== "png" && (
+                  <label className={styles.qualityField}>
+                    <span>
+                      <span>품질</span>
+                      <strong>{currentQuality(spec)}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min="35"
+                      max="95"
+                      step="1"
+                      value={currentQuality(spec)}
+                      onChange={changeQuality}
+                    />
+                  </label>
+                )}
+              </fieldset>
+
+              <div className={styles.privacyNotice}>
+                <span aria-hidden="true">✓</span>
+                <p className={styles.privacyCopy}>
+                  <strong>메타데이터 자동 제거</strong>
+                  위치와 촬영 정보는 결과에 포함하지 않아요.
+                </p>
+              </div>
+            </aside>
+          </div>
+
+          <div className={styles.actionBar} role="status" aria-live="polite" aria-atomic="true">
+            <div>
+              <strong>{message}</strong>
+              <span>
+                {completedItems.length > 0
+                  ? `${formatBytes(totalInputBytes)} → ${formatBytes(totalOutputBytes)}`
+                  : `총 ${items.length}개 · ${formatBytes(totalInputBytes)}`}
+              </span>
+            </div>
+            <div className={styles.actionButtons}>
+              {processing ? (
+                <button className={styles.cancelButton} type="button" onClick={cancelProcessing}>
+                  작업 중단
+                </button>
+              ) : completedItems.length > 0 ? (
+                <>
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    disabled={archiving}
+                    onClick={startProcessing}
+                  >
+                    다시 변환
+                  </button>
+                  <button
+                    className={styles.runButton}
+                    type="button"
+                    disabled={archiving}
+                    onClick={downloadAll}
+                  >
+                    {archiving
+                      ? "ZIP 만드는 중…"
+                      : `결과 ${completedItems.length}개 ZIP으로 받기 ↓`}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className={styles.runButton}
+                  type="button"
+                  disabled={!runtimeSupported || busy}
+                  onClick={startProcessing}
+                >
+                  {items.length}개 이미지 변환 →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

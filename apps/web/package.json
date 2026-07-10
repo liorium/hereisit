@@ -1,0 +1,29 @@
+{
+  "name": "@hereisit/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hereisit/browser-runtime": "workspace:*",
+    "@hereisit/tool-contracts": "workspace:*",
+    "@hereisit/tool-registry": "workspace:*",
+    "fflate": "0.8.3",
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.2",
+    "@types/node": "24.10.10",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "postcss": "8.5.16",
+    "tailwindcss": "4.3.2",
+    "typescript": "6.0.3"
+  }
+}

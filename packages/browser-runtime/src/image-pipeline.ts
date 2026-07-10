@@ -1,0 +1,268 @@
+import { computeDrawGeometry, inspectImageHeader, suggestOutputName } from "@hereisit/image-tool";
+import {
+  type ImagePhase,
+  type ImagePipelineResult,
+  type ImageWarning,
+  imagePipelineSpecSchema,
+  type ParsedImagePipelineSpecV1,
+  type ToolErrorCode,
+} from "@hereisit/tool-contracts";
+
+const MAX_INPUT_BYTES = 50 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 50_000_000;
+const MAX_OUTPUT_PIXELS = 25_000_000;
+const MAX_OUTPUT_BYTES = 100 * 1024 * 1024;
+const MAX_DIMENSION = 16_384;
+
+export class ImagePipelineError extends Error {
+  constructor(
+    readonly code: ToolErrorCode,
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = "ImagePipelineError";
+  }
+}
+
+interface PipelineInput {
+  name: string;
+  mimeHint: string;
+  byteLength: number;
+  bytes: ArrayBuffer;
+}
+
+type ProgressReporter = (phase: ImagePhase, fraction: number) => void;
+
+function outputMime(
+  format: ParsedImagePipelineSpecV1["output"]["format"],
+): ImagePipelineResult["mime"] {
+  if (format === "jpeg") return "image/jpeg";
+  if (format === "webp") return "image/webp";
+  return "image/png";
+}
+
+function decodeHexColor(value: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#ffffff";
+}
+
+async function encodeCanvas(
+  canvas: OffscreenCanvas,
+  mime: ImagePipelineResult["mime"],
+  quality?: number,
+): Promise<Blob> {
+  const blob = await canvas.convertToBlob({
+    type: mime,
+    ...(quality === undefined ? {} : { quality: quality / 100 }),
+  });
+
+  if (blob.type !== mime) {
+    throw new ImagePipelineError(
+      "ENCODE_FAILED",
+      `${mime} 형식 인코딩을 이 브라우저가 지원하지 않습니다.`,
+    );
+  }
+
+  return blob;
+}
+
+async function encodeWithTarget(
+  canvas: OffscreenCanvas,
+  mime: "image/jpeg" | "image/webp",
+  compression: Extract<
+    ParsedImagePipelineSpecV1["output"],
+    { format: "jpeg" | "webp" }
+  >["compression"],
+): Promise<{ blob: Blob; attempts: number; targetReached: boolean }> {
+  if (compression.mode === "quality") {
+    return {
+      blob: await encodeCanvas(canvas, mime, compression.quality),
+      attempts: 1,
+      targetReached: true,
+    };
+  }
+
+  let low = compression.minQuality;
+  let high = compression.maxQuality;
+  let attempts = 0;
+  let bestUnderTarget: Blob | undefined;
+  let smallest: Blob | undefined;
+
+  while (low <= high && attempts < compression.maxAttempts) {
+    const current = Math.round((low + high) / 2);
+    const candidate = await encodeCanvas(canvas, mime, current);
+    attempts += 1;
+
+    if (smallest === undefined || candidate.size < smallest.size) smallest = candidate;
+
+    if (candidate.size <= compression.maxBytes) {
+      bestUnderTarget = candidate;
+      low = current + 1;
+    } else {
+      high = current - 1;
+    }
+  }
+
+  const blob = bestUnderTarget ?? smallest;
+  if (blob === undefined) {
+    throw new ImagePipelineError("ENCODE_FAILED", "이미지 인코딩 결과를 만들지 못했습니다.");
+  }
+
+  return { blob, attempts, targetReached: bestUnderTarget !== undefined };
+}
+
+export async function processImagePipeline(
+  input: PipelineInput,
+  rawSpec: unknown,
+  report: ProgressReporter,
+): Promise<ImagePipelineResult> {
+  const totalStarted = performance.now();
+  report("validating", 0.02);
+
+  const parsed = imagePipelineSpecSchema.safeParse(rawSpec);
+  if (!parsed.success) {
+    throw new ImagePipelineError("INVALID_SPEC", "이미지 변환 설정이 올바르지 않습니다.");
+  }
+  const spec = parsed.data;
+
+  const actualByteLength = input.bytes.byteLength;
+  if (actualByteLength < 1 || actualByteLength > MAX_INPUT_BYTES) {
+    throw new ImagePipelineError("MEMORY_LIMIT", "파일은 50MB 이하만 처리할 수 있습니다.");
+  }
+  if (input.byteLength !== actualByteLength) {
+    throw new ImagePipelineError("CORRUPT_INPUT", "파일 크기 정보가 실제 데이터와 다릅니다.");
+  }
+
+  const inspectStarted = performance.now();
+  let inspected: ReturnType<typeof inspectImageHeader>;
+  try {
+    inspected = inspectImageHeader(input.bytes);
+  } catch {
+    throw new ImagePipelineError("UNSUPPORTED_INPUT", "JPG, PNG 또는 WebP 이미지만 지원합니다.");
+  }
+
+  if (inspected.animated) {
+    throw new ImagePipelineError("ANIMATED_INPUT", "움직이는 이미지는 아직 지원하지 않습니다.");
+  }
+  if (
+    inspected.width > MAX_DIMENSION ||
+    inspected.height > MAX_DIMENSION ||
+    inspected.width * inspected.height > MAX_INPUT_PIXELS
+  ) {
+    throw new ImagePipelineError("DIMENSION_LIMIT", "이미지 해상도가 너무 큽니다.");
+  }
+  const inspectMs = performance.now() - inspectStarted;
+
+  report("decoding", 0.2);
+  const decodeStarted = performance.now();
+  let bitmap: ImageBitmap;
+  try {
+    const sourceBlob = new Blob([input.bytes], { type: inspected.mime });
+    bitmap = await createImageBitmap(sourceBlob, { imageOrientation: "from-image" });
+  } catch {
+    throw new ImagePipelineError("DECODE_FAILED", "이미지를 읽지 못했습니다.");
+  }
+  const decodeMs = performance.now() - decodeStarted;
+
+  try {
+    if (
+      bitmap.width > MAX_DIMENSION ||
+      bitmap.height > MAX_DIMENSION ||
+      bitmap.width * bitmap.height > MAX_INPUT_PIXELS
+    ) {
+      throw new ImagePipelineError("DIMENSION_LIMIT", "이미지 해상도가 너무 큽니다.");
+    }
+
+    report("transforming", 0.55);
+    const transformStarted = performance.now();
+    const geometry = computeDrawGeometry(bitmap.width, bitmap.height, spec.resize);
+
+    if (
+      geometry.canvasWidth > MAX_DIMENSION ||
+      geometry.canvasHeight > MAX_DIMENSION ||
+      geometry.canvasWidth * geometry.canvasHeight > MAX_OUTPUT_PIXELS
+    ) {
+      throw new ImagePipelineError("DIMENSION_LIMIT", "출력 이미지 해상도가 너무 큽니다.");
+    }
+
+    const canvas = new OffscreenCanvas(geometry.canvasWidth, geometry.canvasHeight);
+    const context = canvas.getContext("2d", {
+      alpha: spec.output.format !== "jpeg",
+      desynchronized: true,
+    });
+    if (context === null) {
+      throw new ImagePipelineError("MEMORY_LIMIT", "이미지 작업 공간을 만들지 못했습니다.");
+    }
+
+    if (spec.output.format === "jpeg") {
+      context.fillStyle = decodeHexColor(spec.output.matte);
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      bitmap,
+      geometry.sourceX,
+      geometry.sourceY,
+      geometry.sourceWidth,
+      geometry.sourceHeight,
+      geometry.destinationX,
+      geometry.destinationY,
+      geometry.destinationWidth,
+      geometry.destinationHeight,
+    );
+    const transformMs = performance.now() - transformStarted;
+
+    report("encoding", 0.9);
+    const encodeStarted = performance.now();
+    const mime = outputMime(spec.output.format);
+    let blob: Blob;
+    let encodeAttempts = 1;
+    let targetReached = true;
+
+    if (spec.output.format === "png") {
+      blob = await encodeCanvas(canvas, mime);
+    } else {
+      const lossyMime = spec.output.format === "jpeg" ? "image/jpeg" : "image/webp";
+      const encoded = await encodeWithTarget(canvas, lossyMime, spec.output.compression);
+      blob = encoded.blob;
+      encodeAttempts = encoded.attempts;
+      targetReached = encoded.targetReached;
+    }
+    const encodeMs = performance.now() - encodeStarted;
+    if (blob.size > MAX_OUTPUT_BYTES) {
+      throw new ImagePipelineError("MEMORY_LIMIT", "결과 파일이 100MB 제한을 넘었습니다.");
+    }
+
+    report("finalizing", 0.98);
+    const warnings: ImageWarning[] = [];
+    if (geometry.upscalingSkipped) warnings.push("UPSCALING_SKIPPED");
+    if (!targetReached) warnings.push("TARGET_SIZE_NOT_REACHED");
+
+    const bytes = await blob.arrayBuffer();
+    report("finalizing", 1);
+
+    return {
+      bytes,
+      suggestedName: suggestOutputName(input.name, spec.output.format),
+      mime,
+      width: geometry.canvasWidth,
+      height: geometry.canvasHeight,
+      byteLength: bytes.byteLength,
+      warnings,
+      timing: {
+        inspectMs,
+        decodeMs,
+        transformMs,
+        encodeMs,
+        totalMs: performance.now() - totalStarted,
+        encodeAttempts,
+      },
+    };
+  } finally {
+    bitmap.close();
+  }
+}
