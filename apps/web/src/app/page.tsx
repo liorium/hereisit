@@ -1,4 +1,7 @@
 import { ImageWorkbench } from "../components/image-workbench";
+import { SiteFooter } from "../components/site-footer";
+import { SiteHeader } from "../components/site-header";
+import { imageToolList } from "../lib/site";
 
 const features = [
   {
@@ -21,17 +24,7 @@ const features = [
 export default function HomePage() {
   return (
     <main>
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label="HereItIs 홈">
-          <span className="brand-mark" aria-hidden="true">
-            H
-          </span>
-          <span>HereItIs</span>
-        </a>
-        <div className="privacy-pill">
-          <span className="privacy-dot" aria-hidden="true" />내 기기에서만 처리
-        </div>
-      </header>
+      <SiteHeader />
 
       <section id="top" className="hero-section">
         <div className="hero-copy">
@@ -55,6 +48,25 @@ export default function HomePage() {
 
       <ImageWorkbench />
 
+      <section className="home-tools-section" aria-labelledby="home-tools-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">IMAGE TOOLS</p>
+            <h2 id="home-tools-title">필요한 작업으로 바로 가세요.</h2>
+          </div>
+        </div>
+        <div className="home-tools-grid">
+          {imageToolList.map((tool, index) => (
+            <a className="home-tool-card" href={tool.path} key={tool.path}>
+              <span className="feature-number">{String(index + 1).padStart(2, "0")}</span>
+              <strong>{tool.title}</strong>
+              <p>{tool.description}</p>
+              <em aria-hidden="true">바로 시작 →</em>
+            </a>
+          ))}
+        </div>
+      </section>
+
       <section className="principles-section" aria-labelledby="principles-title">
         <div className="section-heading">
           <p className="eyebrow">HOW IT WORKS</p>
@@ -71,13 +83,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="site-footer">
-        <div>
-          <strong>HereItIs</strong>
-          <p>필요한 작업, 여기 있어요.</p>
-        </div>
-        <p>브라우저를 닫으면 작업 파일도 함께 사라집니다.</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

@@ -1,0 +1,11 @@
+import { ImageToolPage } from "../../../components/image-tool-page";
+import { createImageToolMetadata } from "../../../lib/metadata";
+import { imageTools } from "../../../lib/site";
+
+const tool = imageTools.compress;
+
+export const metadata = createImageToolMetadata(tool);
+
+export default function CompressImagePage() {
+  return <ImageToolPage tool={tool} />;
+}

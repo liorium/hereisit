@@ -39,6 +39,48 @@ const MAX_FILES = 100;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
 
+export type ImageWorkbenchIntent = "general" | "compress" | "resize" | "convert";
+
+const INTENT_CONFIG: Record<
+  ImageWorkbenchIntent,
+  {
+    defaultPresetId: string;
+    emptyTitle: string;
+    selectLabel: string;
+    runLabel: string;
+    workbenchTitle: string;
+  }
+> = {
+  general: {
+    defaultPresetId: "web-1920",
+    emptyTitle: "이미지를 놓거나 선택하세요",
+    selectLabel: "이미지 선택",
+    runLabel: "이미지 변환",
+    workbenchTitle: "이미지 작업대",
+  },
+  compress: {
+    defaultPresetId: "balanced",
+    emptyTitle: "압축할 이미지를 놓거나 선택하세요",
+    selectLabel: "압축할 이미지 선택",
+    runLabel: "이미지 용량 줄이기",
+    workbenchTitle: "이미지 압축 작업대",
+  },
+  resize: {
+    defaultPresetId: "web-1920",
+    emptyTitle: "크기를 바꿀 이미지를 놓거나 선택하세요",
+    selectLabel: "크기를 바꿀 이미지 선택",
+    runLabel: "이미지 크기 조절",
+    workbenchTitle: "크기 조절 작업대",
+  },
+  convert: {
+    defaultPresetId: "convert-webp",
+    emptyTitle: "변환할 이미지를 놓거나 선택하세요",
+    selectLabel: "변환할 이미지 선택",
+    runLabel: "이미지 형식 변환",
+    workbenchTitle: "형식 변환 작업대",
+  },
+};
+
 type ItemStatus =
   | "ready"
   | "queued"
@@ -62,6 +104,14 @@ interface WorkItem {
 
 function cloneSpec(spec: ImagePipelineSpecV1): ImagePipelineSpecV1 {
   return structuredClone(spec);
+}
+
+function resolveInitialPreset(intent: ImageWorkbenchIntent): {
+  presetId: string;
+  spec: ImagePipelineSpecV1;
+} {
+  const preset = findImagePreset(INTENT_CONFIG[intent].defaultPresetId);
+  return { presetId: preset.id, spec: cloneSpec(preset.spec) };
 }
 
 function makeId(): string {
@@ -144,13 +194,13 @@ function isAcceptedFile(file: File): boolean {
   );
 }
 
-export function ImageWorkbench() {
+export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbenchIntent }) {
+  const intentCopy = INTENT_CONFIG[intent];
+  const [initialPreset] = useState(() => resolveInitialPreset(intent));
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
-  const [presetId, setPresetId] = useState("web-1920");
-  const [spec, setSpec] = useState<ImagePipelineSpecV1>(() =>
-    cloneSpec(findImagePreset("web-1920").spec),
-  );
+  const [presetId, setPresetId] = useState(initialPreset.presetId);
+  const [spec, setSpec] = useState<ImagePipelineSpecV1>(initialPreset.spec);
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -654,8 +704,8 @@ export function ImageWorkbench() {
           </div>
           <div>
             <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
-            <h2 id="workbench-title">이미지를 놓거나 선택하세요</h2>
-            <p>JPG, PNG, WebP, HEIC · 파일당 50MB · 총 250MB · 최대 100개</p>
+            <h2 id="workbench-title">{intentCopy.emptyTitle}</h2>
+            <p>JPG, PNG, WebP · HEIC(Safari 17+) · 파일당 50MB · 총 250MB · 최대 100개</p>
           </div>
           <div className={styles.dropActions}>
             <button
@@ -664,7 +714,7 @@ export function ImageWorkbench() {
               disabled={!hydrated || !runtimeSupported}
               onClick={() => inputRef.current?.click()}
             >
-              이미지 선택
+              {intentCopy.selectLabel}
             </button>
             <span className={styles.pasteHint}>⌘V 또는 Ctrl+V로 붙여넣기</span>
             <p className={styles.emptyStatus} role="status" aria-live="polite" aria-atomic="true">
@@ -684,7 +734,7 @@ export function ImageWorkbench() {
           <div className={styles.workbenchHeader}>
             <div>
               <p className={styles.dropEyebrow}>LOCAL IMAGE WORKBENCH</p>
-              <h2 id="workbench-title">이미지 작업대</h2>
+              <h2 id="workbench-title">{intentCopy.workbenchTitle}</h2>
             </div>
             <div className={styles.headerActions}>
               <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
@@ -769,78 +819,6 @@ export function ImageWorkbench() {
                 ))}
               </div>
             </aside>
-
-            <section className={styles.previewPanel} aria-label="이미지 미리보기">
-              {selected !== undefined && (
-                <>
-                  <div className={styles.previewTopline}>
-                    <span>
-                      {processing
-                        ? "메모리 절약 모드"
-                        : selected.resultUrl === undefined
-                          ? "원본 미리보기"
-                          : "변환 전 · 후"}
-                    </span>
-                    {selected.result !== undefined && (
-                      <span>
-                        {selected.result.width}×{selected.result.height}
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    className={`${styles.previewStage} ${!processing && selected.resultUrl ? styles.withResult : ""}`}
-                  >
-                    {processing ? (
-                      <div className={styles.previewMemoryNotice} role="status">
-                        <strong>메모리를 아끼고 있어요</strong>
-                        <span>변환 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
-                      </div>
-                    ) : (
-                      <>
-                        <figure>
-                          {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                          <img
-                            src={selected.previewUrl}
-                            alt={`${selected.file.name} 원본`}
-                            decoding="async"
-                          />
-                          <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
-                        </figure>
-                        {selected.resultUrl !== undefined && selected.result !== undefined && (
-                          <figure>
-                            {/* biome-ignore lint/performance/noImgElement: local generated result */}
-                            <img
-                              src={selected.resultUrl}
-                              alt={`${selected.file.name} 변환 결과`}
-                              decoding="async"
-                            />
-                            <figcaption>
-                              결과 · {formatBytes(selected.result.byteLength)} ·{` `}
-                              {formatSavings(selected.file.size, selected.result.byteLength)} ·{` `}
-                              {formatDuration(selected.result.timing.totalMs)}
-                            </figcaption>
-                          </figure>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  {selected.error !== undefined && (
-                    <p className={styles.itemError} role="alert">
-                      {selected.error}
-                    </p>
-                  )}
-                  {selected.resultUrl !== undefined && (
-                    <button
-                      className={styles.inlineDownload}
-                      type="button"
-                      onClick={() => void saveItem(selected)}
-                    >
-                      이 이미지 저장·공유 ↓
-                    </button>
-                  )}
-                </>
-              )}
-            </section>
 
             <aside className={styles.settingsPanel} aria-label="변환 설정">
               <div className={styles.panelTitle}>
@@ -963,10 +941,81 @@ export function ImageWorkbench() {
                 </p>
               </div>
             </aside>
+            <section className={styles.previewPanel} aria-label="이미지 미리보기">
+              {selected !== undefined && (
+                <>
+                  <div className={styles.previewTopline}>
+                    <span>
+                      {processing
+                        ? "메모리 절약 모드"
+                        : selected.resultUrl === undefined
+                          ? "원본 미리보기"
+                          : "변환 전 · 후"}
+                    </span>
+                    {selected.result !== undefined && (
+                      <span>
+                        {selected.result.width}×{selected.result.height}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`${styles.previewStage} ${!processing && selected.resultUrl ? styles.withResult : ""}`}
+                  >
+                    {processing ? (
+                      <div className={styles.previewMemoryNotice} role="status">
+                        <strong>메모리를 아끼고 있어요</strong>
+                        <span>변환 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
+                      </div>
+                    ) : (
+                      <>
+                        <figure>
+                          {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                          <img
+                            src={selected.previewUrl}
+                            alt={`${selected.file.name} 원본`}
+                            decoding="async"
+                          />
+                          <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
+                        </figure>
+                        {selected.resultUrl !== undefined && selected.result !== undefined && (
+                          <figure>
+                            {/* biome-ignore lint/performance/noImgElement: local generated result */}
+                            <img
+                              src={selected.resultUrl}
+                              alt={`${selected.file.name} 변환 결과`}
+                              decoding="async"
+                            />
+                            <figcaption>
+                              결과 · {formatBytes(selected.result.byteLength)} ·{` `}
+                              {formatSavings(selected.file.size, selected.result.byteLength)} ·{` `}
+                              {formatDuration(selected.result.timing.totalMs)}
+                            </figcaption>
+                          </figure>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {selected.error !== undefined && (
+                    <p className={styles.itemError} role="alert">
+                      {selected.error}
+                    </p>
+                  )}
+                  {selected.resultUrl !== undefined && (
+                    <button
+                      className={styles.inlineDownload}
+                      type="button"
+                      onClick={() => void saveItem(selected)}
+                    >
+                      이 이미지 저장·공유 ↓
+                    </button>
+                  )}
+                </>
+              )}
+            </section>
           </div>
 
-          <div className={styles.actionBar} role="status" aria-live="polite" aria-atomic="true">
-            <div>
+          <div className={styles.actionBar}>
+            <div className={styles.statusCopy} role="status" aria-live="polite" aria-atomic="true">
               <strong>{message}</strong>
               <span>
                 {completedItems.length > 0
@@ -1016,7 +1065,7 @@ export function ImageWorkbench() {
                   disabled={!runtimeSupported || busy}
                   onClick={startProcessing}
                 >
-                  {items.length}개 이미지 변환 →
+                  {items.length}개 {intentCopy.runLabel} →
                 </button>
               )}
             </div>

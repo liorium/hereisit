@@ -119,6 +119,10 @@ test("reaches the upload action through the real tab order", async ({ page }) =>
 
   await page.keyboard.press("Tab");
   await expect(homeLink).toBeFocused();
+  for (const name of ["이미지 용량 줄이기", "이미지 크기 조절", "이미지 형식 변환"]) {
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("link", { name, exact: true })).toBeFocused();
+  }
   await page.keyboard.press("Tab");
   await expect(uploadButton).toBeFocused();
 });

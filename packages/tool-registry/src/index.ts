@@ -39,6 +39,17 @@ export const imagePresets: readonly ToolPreset[] = [
   },
   defaultImagePreset,
   {
+    id: "convert-webp",
+    name: "형식만 바꾸기",
+    description: "크기는 그대로 두고 WebP 형식으로 바꿔요.",
+    badge: "변환",
+    spec: {
+      ...base,
+      resize: { kind: "none" },
+      output: { format: "webp", compression: { mode: "quality", quality: 84 } },
+    },
+  },
+  {
     id: "product-square",
     name: "상품 정사각형",
     description: "가운데를 기준으로 1000×1000px 정사각형을 만들어요.",

@@ -6,6 +6,27 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(repositoryRoot, "apps/web/out");
 
+const toolPages = [
+  {
+    file: "image/compress.html",
+    path: "/image/compress",
+    title: "이미지 용량 줄이기",
+    description: "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요.",
+  },
+  {
+    file: "image/resize.html",
+    path: "/image/resize",
+    title: "이미지 크기 조절",
+    description: "사진의 가로·세로 크기를 빠르게 바꾸세요.",
+  },
+  {
+    file: "image/convert.html",
+    path: "/image/convert",
+    title: "이미지 형식 변환",
+    description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
+  },
+];
+
 async function collectJavaScript(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
@@ -21,21 +42,44 @@ await Promise.all([
   access(path.join(outputRoot, "index.html")),
   access(path.join(outputRoot, "404.html")),
   access(path.join(outputRoot, "_headers")),
+  access(path.join(outputRoot, "sitemap.xml")),
+  access(path.join(outputRoot, "robots.txt")),
+  ...toolPages.map((tool) => access(path.join(outputRoot, tool.file))),
 ]);
 
-const [html, headers] = await Promise.all([
+const [html, headers, sitemap, robots, ...toolHtmlPages] = await Promise.all([
   readFile(path.join(outputRoot, "index.html"), "utf8"),
   readFile(path.join(outputRoot, "_headers"), "utf8"),
+  readFile(path.join(outputRoot, "sitemap.xml"), "utf8"),
+  readFile(path.join(outputRoot, "robots.txt"), "utf8"),
+  ...toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 ]);
 assert.match(html, /이미지 작업/);
+assert.match(html, /href="\/image\/compress"/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /connect-src \x27self\x27/);
 
+for (const [index, tool] of toolPages.entries()) {
+  const toolHtml = toolHtmlPages[index];
+  assert.ok(toolHtml, `Missing exported HTML for ${tool.path}`);
+  assert.ok(toolHtml.includes(`<title>${tool.title} | HereItIs</title>`));
+  assert.ok(toolHtml.includes(tool.description));
+  assert.ok(toolHtml.includes(`rel="canonical" href="https://hereisit.pages.dev${tool.path}"`));
+  assert.ok(sitemap.includes(`<loc>https://hereisit.pages.dev${tool.path}</loc>`));
+}
+
+assert.match(robots, /Sitemap: https:\/\/hereisit\.pages\.dev\/sitemap\.xml/);
+
+const exportedHtml = [html, ...toolHtmlPages].join("\n");
 const assetPaths = Array.from(
-  html.matchAll(/(?:src|href)="(\/_next\/[^"?#]+)["?#]/g),
-  (match) => match[1],
+  new Set(
+    Array.from(
+      exportedHtml.matchAll(/(?:src|href)="(\/_next\/[^"?#]+)["?#]/g),
+      (match) => match[1],
+    ),
+  ),
 );
-assert.ok(assetPaths.length > 0, "The exported page must reference Next.js assets.");
+assert.ok(assetPaths.length > 0, "The exported pages must reference Next.js assets.");
 await Promise.all(assetPaths.map((assetPath) => access(path.join(outputRoot, assetPath.slice(1)))));
 
 const scripts = await collectJavaScript(path.join(outputRoot, "_next"));

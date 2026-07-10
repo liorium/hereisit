@@ -15,4 +15,11 @@ describe("image presets", () => {
         .every((preset) => preset.spec.sizeGoal?.mode === "allow-growth"),
     ).toBe(true);
   });
+  it("keeps the format-conversion preset at the original dimensions", () => {
+    const preset = findImagePreset("convert-webp");
+    expect(preset.id).toBe("convert-webp");
+    expect(preset.spec.resize).toEqual({ kind: "none" });
+    expect(preset.spec.output.format).toBe("webp");
+    expect(preset.spec.sizeGoal?.mode).toBe("allow-growth");
+  });
 });

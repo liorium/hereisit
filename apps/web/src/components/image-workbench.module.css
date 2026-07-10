@@ -249,10 +249,19 @@
 }
 
 .filePanel {
+  grid-column: 1;
+  grid-row: 1;
   border-right: 1px solid var(--line);
 }
 
+.previewPanel {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .settingsPanel {
+  grid-column: 3;
+  grid-row: 1;
   border-left: 1px solid var(--line);
 }
 
@@ -780,7 +789,7 @@
   background: white;
 }
 
-.actionBar > div:first-child {
+.statusCopy {
   min-width: 0;
 }
 
@@ -832,6 +841,7 @@
 
   .settingsPanel {
     grid-column: 1 / -1;
+    grid-row: 2;
     display: grid;
     grid-template-columns: 1.2fr 1fr 1fr;
     border-top: 1px solid var(--line);
@@ -897,6 +907,7 @@
   }
 
   .workbench {
+    overflow: visible;
     box-shadow: 7px 7px 0 var(--yellow);
   }
 
@@ -910,7 +921,7 @@
   }
 
   .headerActions button {
-    min-height: 38px;
+    min-height: 44px;
     padding: 0 10px;
     font-size: 11px;
   }
@@ -921,6 +932,7 @@
   }
 
   .filePanel {
+    order: 1;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -939,6 +951,7 @@
 
   .previewPanel {
     min-height: 390px;
+    order: 3;
   }
 
   .previewStage {
@@ -954,14 +967,65 @@
   }
 
   .settingsPanel {
+    order: 2;
     display: block;
+  }
+
+  .removeButton {
+    width: 44px;
+    height: 44px;
+    right: 0;
+  }
+
+  .fileSelect {
+    padding-right: 48px;
+  }
+
+  .inlineDownload,
+  .segmented button,
+  .numberField > span:last-child,
+  .selectField select {
+    min-height: 44px;
+  }
+
+  .numberField > span:last-child {
+    height: 44px;
+  }
+
+  .numberField input {
+    height: 42px;
+    font-size: 16px;
+  }
+
+  .selectField select {
+    height: 44px;
+    font-size: 16px;
+  }
+
+  .qualityField input {
+    height: 44px;
+    margin-top: 2px;
+  }
+
+  .sizeGoalField {
+    min-height: 44px;
+  }
+
+  .sizeGoalField input {
+    width: 20px;
+    height: 20px;
   }
 
   .actionBar {
     min-height: 132px;
-    padding: 14px;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
     align-items: stretch;
     flex-direction: column;
+    border-radius: 0 0 17px 17px;
+    box-shadow: 0 -10px 24px rgba(23, 25, 31, 0.1);
   }
 
   .actionButtons,
@@ -971,6 +1035,10 @@
 
   .actionButtons {
     align-items: stretch;
+  }
+
+  .actionButtons > button {
+    min-height: 48px;
   }
 }
 
