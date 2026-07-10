@@ -640,6 +640,63 @@
   accent-color: var(--blue);
 }
 
+.formatWarning {
+  margin: 12px 0 0;
+  padding: 10px;
+  border: 1px solid #e8c64a;
+  border-radius: 8px;
+  background: #fff9dc;
+  color: #715b00;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.formatWarning strong,
+.formatWarning span {
+  display: block;
+}
+
+.formatWarning span {
+  margin-top: 2px;
+}
+
+.sizeGoalField {
+  margin-top: 12px;
+  padding: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sizeGoalField input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--blue);
+}
+
+.sizeGoalField span,
+.sizeGoalField strong,
+.sizeGoalField small {
+  display: block;
+}
+
+.sizeGoalField strong {
+  font-size: 10px;
+}
+
+.sizeGoalField small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .privacyNotice {
   margin: 18px;
   padding: 12px;

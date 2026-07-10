@@ -33,6 +33,10 @@ interface PipelineInput {
 }
 
 type ProgressReporter = (phase: ImagePhase, fraction: number) => void;
+type LossyCompression = Extract<
+  ParsedImagePipelineSpecV1["output"],
+  { format: "jpeg" | "webp" }
+>["compression"];
 
 function outputMime(
   format: ParsedImagePipelineSpecV1["output"]["format"],
@@ -69,10 +73,7 @@ async function encodeCanvas(
 async function encodeWithTarget(
   canvas: OffscreenCanvas,
   mime: "image/jpeg" | "image/webp",
-  compression: Extract<
-    ParsedImagePipelineSpecV1["output"],
-    { format: "jpeg" | "webp" }
-  >["compression"],
+  compression: LossyCompression,
 ): Promise<{ blob: Blob; attempts: number; targetReached: boolean }> {
   if (compression.mode === "quality") {
     return {
@@ -109,6 +110,15 @@ async function encodeWithTarget(
   }
 
   return { blob, attempts, targetReached: bestUnderTarget !== undefined };
+}
+
+function smallerOnlyTargetBytes(
+  inputByteLength: number,
+  sizeGoal: ParsedImagePipelineSpecV1["sizeGoal"],
+): number | undefined {
+  if (sizeGoal.mode !== "smaller-only") return undefined;
+  const ratioSavings = Math.ceil((inputByteLength * sizeGoal.minSavingsPercent) / 100);
+  return Math.max(0, inputByteLength - Math.max(1, ratioSavings));
 }
 
 export async function processImagePipeline(
@@ -219,20 +229,74 @@ export async function processImagePipeline(
     report("encoding", 0.9);
     const encodeStarted = performance.now();
     const mime = outputMime(spec.output.format);
+    const sizeTarget = smallerOnlyTargetBytes(actualByteLength, spec.sizeGoal);
     let blob: Blob;
     let encodeAttempts = 1;
     let targetReached = true;
 
     if (spec.output.format === "png") {
       blob = await encodeCanvas(canvas, mime);
+      if (sizeTarget !== undefined) targetReached = blob.size <= sizeTarget;
     } else {
       const lossyMime = spec.output.format === "jpeg" ? "image/jpeg" : "image/webp";
-      const encoded = await encodeWithTarget(canvas, lossyMime, spec.output.compression);
+      const compression: LossyCompression = spec.output.compression;
+      let encoded: { blob: Blob; attempts: number; targetReached: boolean };
+
+      if (
+        sizeTarget !== undefined &&
+        spec.sizeGoal.mode === "smaller-only" &&
+        compression.mode === "quality"
+      ) {
+        const preferred = await encodeCanvas(canvas, lossyMime, compression.quality);
+        const minQuality = Math.min(spec.sizeGoal.minQuality, compression.quality);
+        if (preferred.size <= sizeTarget || compression.quality <= minQuality) {
+          encoded = {
+            blob: preferred,
+            attempts: 1,
+            targetReached: preferred.size <= sizeTarget,
+          };
+        } else {
+          const adaptive = await encodeWithTarget(canvas, lossyMime, {
+            mode: "maxBytes",
+            maxBytes: sizeTarget,
+            minQuality,
+            maxQuality: compression.quality - 1,
+            maxAttempts: spec.sizeGoal.maxAttempts,
+          });
+          encoded = {
+            blob: adaptive.blob.size < preferred.size ? adaptive.blob : preferred,
+            attempts: adaptive.attempts + 1,
+            targetReached: adaptive.targetReached,
+          };
+        }
+      } else {
+        let targetCompression = compression;
+        if (
+          sizeTarget !== undefined &&
+          spec.sizeGoal.mode === "smaller-only" &&
+          compression.mode === "maxBytes"
+        ) {
+          targetCompression = {
+            ...compression,
+            maxBytes: Math.min(sizeTarget, compression.maxBytes),
+            minQuality: Math.min(
+              compression.maxQuality,
+              Math.max(compression.minQuality, spec.sizeGoal.minQuality),
+            ),
+            maxAttempts: Math.min(compression.maxAttempts, spec.sizeGoal.maxAttempts),
+          };
+        }
+        encoded = await encodeWithTarget(canvas, lossyMime, targetCompression);
+      }
+
       blob = encoded.blob;
       encodeAttempts = encoded.attempts;
       targetReached = encoded.targetReached;
     }
     const encodeMs = performance.now() - encodeStarted;
+    if (sizeTarget !== undefined && blob.size > sizeTarget) {
+      throw new ImagePipelineError("NO_SIZE_REDUCTION", "이미 충분히 작아 더 줄이지 못했어요.");
+    }
     if (blob.size > MAX_OUTPUT_BYTES) {
       throw new ImagePipelineError("MEMORY_LIMIT", "결과 파일이 100MB 제한을 넘었습니다.");
     }

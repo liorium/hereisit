@@ -1,9 +1,10 @@
 import type { ImagePipelineSpecV1, ToolPreset } from "@hereisit/tool-contracts";
 
-const base: Pick<ImagePipelineSpecV1, "version" | "autoOrient" | "metadata"> = {
+const base: Pick<ImagePipelineSpecV1, "version" | "autoOrient" | "metadata" | "sizeGoal"> = {
   version: 1,
   autoOrient: true,
   metadata: "strip",
+  sizeGoal: { mode: "allow-growth" },
 };
 
 const defaultImagePreset: ToolPreset = {
@@ -22,12 +23,18 @@ export const imagePresets: readonly ToolPreset[] = [
   {
     id: "balanced",
     name: "용량만 줄이기",
-    description: "크기는 유지하고 선명도와 용량의 균형을 맞춰요.",
-    badge: "빠름",
+    description: "크기는 유지하고 원본보다 작아질 때만 결과를 만들어요.",
+    badge: "절약",
     spec: {
       ...base,
       resize: { kind: "none" },
       output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+      sizeGoal: {
+        mode: "smaller-only",
+        minSavingsPercent: 1,
+        minQuality: 35,
+        maxAttempts: 6,
+      },
     },
   },
   defaultImagePreset,

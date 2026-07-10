@@ -26,7 +26,14 @@ const MAX_FILES = 100;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
 
-type ItemStatus = "ready" | "queued" | "processing" | "completed" | "failed" | "cancelled";
+type ItemStatus =
+  | "ready"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "unchanged"
+  | "failed"
+  | "cancelled";
 
 interface WorkItem {
   id: string;
@@ -57,8 +64,23 @@ function phaseLabel(phase?: ImagePhase): string {
   return "대기 중";
 }
 
+const DEFAULT_LOSSY_QUALITY = 82;
+const SMALLER_ONLY_GOAL = {
+  mode: "smaller-only",
+  minSavingsPercent: 1,
+  minQuality: 35,
+  maxAttempts: 6,
+} as const;
+
+function isSmallerOnly(spec: ImagePipelineSpecV1): boolean {
+  return spec.sizeGoal?.mode === "smaller-only";
+}
+
 function currentQuality(spec: ImagePipelineSpecV1): number {
-  if (spec.output.format === "png" || spec.output.compression.mode !== "quality") return 100;
+  if (spec.output.format === "png") return DEFAULT_LOSSY_QUALITY;
+  if (spec.output.compression.mode === "maxBytes") {
+    return spec.output.compression.maxQuality ?? 92;
+  }
   return spec.output.compression.quality;
 }
 
@@ -272,9 +294,15 @@ export function ImageWorkbench() {
   };
 
   const changeFormat = (event: ChangeEvent<HTMLSelectElement>) => {
+    const format = event.target.value as "jpeg" | "png" | "webp";
     invalidateResults();
     setPresetId("custom");
-    setSpec((current) => withOutputFormat(current, event.target.value as "jpeg" | "png" | "webp"));
+    setSpec((current) => withOutputFormat(current, format));
+    setMessage(
+      format === "png"
+        ? "PNG 무손실은 사진에서 용량이 커질 수 있어요."
+        : "출력 형식을 바꿨어요. 새 설정으로 변환해 주세요.",
+    );
   };
 
   const changeQuality = (event: ChangeEvent<HTMLInputElement>) => {
@@ -288,6 +316,21 @@ export function ImageWorkbench() {
         output: { ...current.output, compression: { mode: "quality", quality } },
       };
     });
+  };
+
+  const changeSizeGoal = (event: ChangeEvent<HTMLInputElement>) => {
+    const enabled = event.target.checked;
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({
+      ...current,
+      sizeGoal: enabled ? { ...SMALLER_ONLY_GOAL } : { mode: "allow-growth" },
+    }));
+    setMessage(
+      enabled
+        ? "원본보다 작아질 때만 결과를 만들어요."
+        : "용량 증가를 허용했어요. 선택한 변환을 그대로 적용합니다.",
+    );
   };
 
   const changeResizeMode = (mode: "none" | "inside" | "cover") => {
@@ -386,9 +429,12 @@ export function ImageWorkbench() {
       return;
     }
 
+    const noSizeReduction =
+      event.result.status === "rejected" && event.result.error.code === "NO_SIZE_REDUCTION";
     const error =
       event.result.status === "cancelled" ? "작업을 중단했어요." : event.result.error.message;
-    const status: ItemStatus = event.result.status === "cancelled" ? "cancelled" : "failed";
+    const status: ItemStatus =
+      event.result.status === "cancelled" ? "cancelled" : noSizeReduction ? "unchanged" : "failed";
     commitItems((current) =>
       current.map((item) => (item.id === event.itemId ? resetWorkItem(item, status, error) : item)),
     );
@@ -422,13 +468,34 @@ export function ImageWorkbench() {
       if (activeRunRef.current !== runId) return;
 
       const successes = results.filter((result) => result.status === "fulfilled").length;
-      const failures = results.filter((result) => result.status === "rejected").length;
+      const unchanged = results.filter(
+        (result) => result.status === "rejected" && result.error.code === "NO_SIZE_REDUCTION",
+      ).length;
+      const failures = results.filter(
+        (result) => result.status === "rejected" && result.error.code !== "NO_SIZE_REDUCTION",
+      ).length;
       if (successes === results.length) {
-        setMessage(`${successes}개 이미지 변환을 완료했어요.`);
+        setMessage(String(successes).concat("개 이미지 변환을 완료했어요."));
+      } else if (unchanged === results.length) {
+        setMessage("이미 충분히 작아 더 줄이지 못했어요.");
       } else if (successes > 0) {
-        setMessage(`${successes}개 완료, ${failures}개는 처리하지 못했어요.`);
+        const summary = [
+          String(successes).concat("개 완료"),
+          unchanged > 0 ? String(unchanged).concat("개는 이미 최적화") : undefined,
+          failures > 0 ? String(failures).concat("개 처리 실패") : undefined,
+        ]
+          .filter((part): part is string => part !== undefined)
+          .join(", ");
+        setMessage(summary.concat("."));
       } else if (results.some((result) => result.status === "cancelled")) {
         setMessage("작업을 중단했어요.");
+      } else if (unchanged > 0) {
+        setMessage(
+          [
+            String(unchanged).concat("개는 이미 최적화"),
+            String(failures).concat("개는 처리하지 못했어요."),
+          ].join(", "),
+        );
       } else {
         setMessage("이미지를 처리하지 못했어요. 파일을 확인해 주세요.");
       }
@@ -613,9 +680,11 @@ export function ImageWorkbench() {
                             ? `${phaseLabel(item.phase)} ${Math.round(item.progress * 100)}%`
                             : item.status === "completed" && item.result !== undefined
                               ? `${formatBytes(item.file.size)} → ${formatBytes(item.result.byteLength)}`
-                              : item.status === "failed"
-                                ? "처리 실패"
-                                : formatBytes(item.file.size)}
+                              : item.status === "unchanged"
+                                ? "이미 최적화됨"
+                                : item.status === "failed"
+                                  ? "처리 실패"
+                                  : formatBytes(item.file.size)}
                         </small>
                       </span>
                     </button>
@@ -695,7 +764,7 @@ export function ImageWorkbench() {
             <aside className={styles.settingsPanel} aria-label="변환 설정">
               <div className={styles.panelTitle}>
                 <strong>설정</strong>
-                <span>모두 적용</span>
+                <span>{presetId === "custom" ? "직접 설정" : "모두 적용"}</span>
               </div>
 
               <fieldset className={styles.settingsGroup} disabled={busy}>
@@ -786,6 +855,23 @@ export function ImageWorkbench() {
                     />
                   </label>
                 )}
+                {spec.output.format === "png" && (
+                  <p className={styles.formatWarning}>
+                    <strong>PNG 무손실은 용량이 커질 수 있어요.</strong>
+                    <span>
+                      {isSmallerOnly(spec)
+                        ? "더 작아지지 않으면 결과를 만들지 않아요."
+                        : "용량이 목적이면 WebP를 선택하세요."}
+                    </span>
+                  </p>
+                )}
+                <label className={styles.sizeGoalField}>
+                  <input type="checkbox" checked={isSmallerOnly(spec)} onChange={changeSizeGoal} />
+                  <span>
+                    <strong>원본보다 작을 때만 완료</strong>
+                    <small>더 커지는 결과는 만들지 않아요.</small>
+                  </span>
+                </label>
               </fieldset>
 
               <div className={styles.privacyNotice}>

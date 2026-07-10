@@ -51,6 +51,8 @@ checklist.
 
 ## Current limits
 
+- The size-only preset returns files only when they are at least 1% smaller than the source. Files that
+  cannot meet the target are marked as already optimized and are not added to downloads.
 - Tested release browser: current Chromium (Chrome and Edge).
 - Up to 100 files, 50MB per file, and 250MB total input per batch.
 - Up to 50 megapixels per input and 25 megapixels per output.

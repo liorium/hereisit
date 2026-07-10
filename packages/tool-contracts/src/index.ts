@@ -7,6 +7,16 @@ export const IMAGE_TOOL_VERSION = 1 as const;
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
 
+export const imageSizeGoalSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("allow-growth") }),
+  z.object({
+    mode: z.literal("smaller-only"),
+    minSavingsPercent: z.number().min(0).max(50).default(1),
+    minQuality: quality.default(35),
+    maxAttempts: z.number().int().min(1).max(10).default(6),
+  }),
+]);
+
 export const resizeSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
   z
@@ -80,6 +90,7 @@ export const imagePipelineSpecSchema = z.object({
   version: z.literal(1),
   resize: resizeSpecSchema,
   output: imageOutputSchema,
+  sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
   autoOrient: z.literal(true),
   metadata: z.literal("strip"),
 });
@@ -123,6 +134,7 @@ export type ToolErrorCode =
   | "MEMORY_LIMIT"
   | "DECODE_FAILED"
   | "ENCODE_FAILED"
+  | "NO_SIZE_REDUCTION"
   | "CANCELLED"
   | "WORKER_CRASH";
 

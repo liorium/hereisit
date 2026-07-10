@@ -21,6 +21,10 @@ or network boundary.
 The initial `image.pipeline@1` tool guarantees one decode and one raster draw per item. Quality-based
 output performs one encode; target-byte mode may encode repeatedly against the already-rendered canvas.
 
+The source-relative `smaller-only` goal is a hard postcondition. The runtime adaptively encodes against
+the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
+the target is reported as already optimized; a larger generated file is never offered for download.
+
 ## Resource policy
 
 Image dimensions are parsed from PNG, JPEG, and WebP structure before decode. The runtime then keeps a

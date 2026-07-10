@@ -1,11 +1,43 @@
 import { readFile } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
+  const bytes = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 240;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("Canvas is unavailable");
+    const image = context.createImageData(canvas.width, canvas.height);
+    let seed = 123_456_789;
+    for (let index = 0; index < image.data.length; index += 4) {
+      seed = (1_664_525 * seed + 1_013_904_223) >>> 0;
+      image.data[index] = seed & 255;
+      image.data[index + 1] = (seed >>> 8) & 255;
+      image.data[index + 2] = (seed >>> 16) & 255;
+      image.data[index + 3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (value) => {
+          if (value === null) reject(new Error("JPEG encoding failed"));
+          else resolve(value);
+        },
+        "image/jpeg",
+        0.78,
+      );
+    });
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  return Buffer.from(bytes);
+}
 
 test("processes and downloads an image without external uploads", async ({ page }) => {
   const response = await page.goto("/");
@@ -93,4 +125,60 @@ test("reaches the upload action through the real tab order", async ({ page }) =>
   await expect(homeLink).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(uploadButton).toBeFocused();
+});
+
+test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) => {
+  await page.goto("/");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles({
+    name: "photo.jpg",
+    mimeType: "image/jpeg",
+    buffer: input,
+  });
+
+  await page.getByRole("button", { name: /용량만 줄이기/ }).click();
+  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 1개 ZIP으로 받기 ↓" }).click(),
+  ]);
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(downloadPath as string)));
+  const output = archive["photo-hereisit.webp"];
+  if (output === undefined) throw new Error("Expected WebP output");
+  expect(output.byteLength).toBeLessThan(input.byteLength);
+  expect(new TextDecoder().decode(output.subarray(0, 4))).toBe("RIFF");
+  expect(new TextDecoder().decode(output.subarray(8, 12))).toBe("WEBP");
+});
+
+test("does not produce a larger result in the size-only flow", async ({ page }) => {
+  await page.goto("/");
+  const fileInput = page.locator("input[type=file]");
+  await fileInput.setInputFiles({
+    name: "tiny.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: /용량만 줄이기/ }).click();
+  await page.getByLabel("출력 형식").selectOption("png");
+  await expect(page.getByLabel("원본보다 작을 때만 완료")).toBeChecked();
+  await expect(page.getByText("PNG 무손실은 용량이 커질 수 있어요.")).toBeVisible();
+  await page.getByLabel("출력 형식").selectOption("webp");
+  await expect(page.locator("input[type=range]")).toHaveValue("82");
+  await page.getByLabel("출력 형식").selectOption("png");
+
+  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await expect(
+    page.getByRole("status").getByText("이미 충분히 작아 더 줄이지 못했어요.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("이미 최적화됨", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
 });
