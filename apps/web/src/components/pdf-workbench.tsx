@@ -90,7 +90,7 @@ const INTENT_CONFIG: Record<
     selectLabel: "워터마크를 넣을 PDF 선택",
     workbenchTitle: "PDF 워터마크 작업대",
     accept: "application/pdf,.pdf",
-    fileDescription: "PDF 한 개 · 최대 50MB · 모든 페이지에 적용",
+    fileDescription: "PDF 한 개 · 최대 50MB · 모든 페이지 또는 지정 페이지",
     maximumFiles: 1,
     multiple: false,
   },
@@ -158,6 +158,10 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
   const [watermarkOpacity, setWatermarkOpacity] = useState(18);
   const [watermarkRotation, setWatermarkRotation] = useState<-45 | 0 | 45>(-45);
   const [watermarkColor, setWatermarkColor] = useState("#334155");
+  const [watermarkScope, setWatermarkScope] = useState<"every-page" | "selected-pages">(
+    "every-page",
+  );
+  const [watermarkPageRange, setWatermarkPageRange] = useState("1");
   const [inputLimit, setInputLimit] = useState(LOW_MEMORY_TOTAL_BYTES);
   const inputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef(items);
@@ -173,6 +177,10 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     [items],
   );
   const parsedPageRange = useMemo(() => parsePageSelection(pageRange), [pageRange]);
+  const parsedWatermarkPageRange = useMemo(
+    () => parsePageSelection(watermarkPageRange),
+    [watermarkPageRange],
+  );
   const validWatermarkText =
     watermarkText.trim().length > 0 &&
     watermarkText.trim().length <= 80 &&
@@ -417,6 +425,16 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
         setMessage("워터마크 문구를 1자 이상 80자 이하로 입력해 주세요.");
         return undefined;
       }
+      let selection: Extract<PdfPipelineSpecV1, { operation: "watermark" }>["selection"] = {
+        mode: "every-page",
+      };
+      if (watermarkScope === "selected-pages") {
+        if (!parsedWatermarkPageRange.ok) {
+          setMessage(parsedWatermarkPageRange.message);
+          return undefined;
+        }
+        selection = { mode: "extract", pages: [...parsedWatermarkPageRange.pages] };
+      }
       return {
         version: 1,
         operation: "watermark",
@@ -428,7 +446,7 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
           rotation: watermarkRotation,
           color: watermarkColor,
         },
-        selection: { mode: "every-page" },
+        selection,
       };
     }
     if (splitMode === "every-page") {
@@ -593,7 +611,8 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     (intent !== "merge" || items.length >= 2) &&
     (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok) &&
     (intent !== "organize" || pagePlan.length > 0) &&
-    (intent !== "watermark" || validWatermarkText);
+    (intent !== "watermark" ||
+      (validWatermarkText && (watermarkScope === "every-page" || parsedWatermarkPageRange.ok)));
 
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -1029,10 +1048,65 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                     </div>
                   </fieldset>
 
-                  <div className={styles.settingCard}>
-                    <strong>모든 페이지에 적용</strong>
-                    <p>현재 버전은 선택한 PDF의 모든 페이지에 같은 워터마크를 넣어요.</p>
-                  </div>
+                  <fieldset className={styles.optionGroup}>
+                    <legend>적용 페이지</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="watermark-scope"
+                        checked={watermarkScope === "every-page"}
+                        disabled={busy}
+                        onChange={() => {
+                          setWatermarkScope("every-page");
+                          clearResult();
+                          setMessage("모든 페이지에 같은 워터마크를 넣어요.");
+                        }}
+                      />
+                      <span>
+                        <strong>모든 페이지</strong>
+                        <small>PDF 전체에 같은 워터마크 적용</small>
+                      </span>
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="watermark-scope"
+                        checked={watermarkScope === "selected-pages"}
+                        disabled={busy}
+                        onChange={() => {
+                          setWatermarkScope("selected-pages");
+                          clearResult();
+                          setMessage("입력한 페이지에만 워터마크를 넣어요.");
+                        }}
+                      />
+                      <span>
+                        <strong>지정 페이지</strong>
+                        <small>예: 1-3, 5 형식으로 필요한 페이지만 선택</small>
+                      </span>
+                    </label>
+                    {watermarkScope === "selected-pages" ? (
+                      <div className={styles.rangeField}>
+                        <label htmlFor="pdf-watermark-page-range">페이지 범위</label>
+                        <input
+                          id="pdf-watermark-page-range"
+                          type="text"
+                          value={watermarkPageRange}
+                          disabled={busy}
+                          aria-invalid={!parsedWatermarkPageRange.ok}
+                          aria-describedby="pdf-watermark-page-range-help"
+                          onChange={(event) => {
+                            setWatermarkPageRange(event.target.value);
+                            clearResult();
+                          }}
+                        />
+                        <small id="pdf-watermark-page-range-help">
+                          {parsedWatermarkPageRange.ok
+                            ? `${parsedWatermarkPageRange.pages.length}페이지를 선택했어요.`
+                            : parsedWatermarkPageRange.message}
+                        </small>
+                      </div>
+                    ) : null}
+                  </fieldset>
                   <p className={styles.rasterNotice}>
                     워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요.
                   </p>
@@ -1126,6 +1200,15 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                   <button className={styles.secondaryButton} type="button" onClick={reset}>
                     새 작업
                   </button>
+                  {intent === "watermark" ? (
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      onClick={() => void startProcessing()}
+                    >
+                      같은 설정으로 다시 실행
+                    </button>
+                  ) : null}
                   <button
                     className={styles.runButton}
                     type="button"

@@ -219,6 +219,141 @@ test("adds a rasterized text watermark without external or write requests", asyn
   expect(pageErrors).toEqual([]);
 });
 
+test("watermarks only selected pages and revokes the previous result", async ({ page }) => {
+  await page.addInitScript(() => {
+    const createdKey = "__hereisitCreatedCount";
+    const revokedKey = "__hereisitRevokedCount";
+    if (sessionStorage.getItem(createdKey) === null) sessionStorage.setItem(createdKey, "0");
+    if (sessionStorage.getItem(revokedKey) === null) sessionStorage.setItem(revokedKey, "0");
+    const originalCreate = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (object: Blob | MediaSource) => {
+      const count = Number(sessionStorage.getItem(createdKey) ?? "0");
+      sessionStorage.setItem(createdKey, String(count + 1));
+      return originalCreate(object);
+    };
+    const originalRevoke = URL.revokeObjectURL.bind(URL);
+    URL.revokeObjectURL = (url: string) => {
+      const count = Number(sessionStorage.getItem(revokedKey) ?? "0");
+      sessionStorage.setItem(revokedKey, String(count + 1));
+      originalRevoke(url);
+    };
+  });
+  await page.goto("/pdf/watermark");
+
+  const unexpectedRequests: string[] = [];
+  page.on("request", (request) => {
+    const requestUrl = new URL(request.url());
+    const pageUrl = new URL(page.url());
+    if (
+      requestUrl.origin !== pageUrl.origin ||
+      !["GET", "HEAD"].includes(request.method()) ||
+      request.postData() !== null
+    ) {
+      unexpectedRequests.push(request.url());
+    }
+  });
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "selected.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200]),
+  });
+
+  await page.getByRole("button", { name: "PDF에 워터마크 넣기 →" }).click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
+    .toBe(1);
+
+  await page
+    .getByRole("group", { name: "적용 페이지" })
+    .getByRole("radio", {
+      name: /지정 페이지/,
+    })
+    .check();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
+    .toBe(1);
+
+  const range = page.getByLabel("페이지 범위", { exact: true });
+  const runButton = page.getByRole("button", { name: "PDF에 워터마크 넣기 →" });
+  await range.fill("3-");
+  await expect(runButton).toBeDisabled();
+  await expect(page.getByText("예: 1-3, 5, 8-10 형식으로 입력해 주세요.")).toBeVisible();
+
+  await range.fill("3");
+  await runButton.click();
+  await expect(page.getByText("이 PDF는 2페이지까지 있어요.")).toBeVisible({ timeout: 20_000 });
+
+  await range.fill("2");
+  await runButton.click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
+    .toBe(2);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+  ]);
+  const output = await downloadedBytes(await download.path());
+  const document = await PDFDocument.load(output);
+  expect(document.getPage(0).node.Contents()).toBeUndefined();
+  expect(document.getPage(1).node.Contents()).toBeDefined();
+
+  await range.fill("1");
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
+    .toBe(2);
+  await runButton.click();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))), {
+      timeout: 20_000,
+    })
+    .toBe(3);
+
+  await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))), {
+      timeout: 20_000,
+    })
+    .toBe(4);
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
+    .toBe(3);
+
+  await page.getByRole("button", { name: "새 작업" }).click();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
+    .toBe(4);
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "selected-again.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200]),
+  });
+  await page.getByRole("button", { name: "PDF에 워터마크 넣기 →" }).click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
+    .toBe(5);
+  await page.evaluate(() => {
+    const nextWindow = window as Window & {
+      next?: { router?: { push: (path: string) => void } };
+    };
+    const router = nextWindow.next?.router;
+    if (router === undefined) throw new Error("Next router unavailable");
+    router.push("/pdf/merge");
+  });
+  await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
+    .toBe(5);
+
+  expect(unexpectedRequests).toEqual([]);
+});
+
 test("publishes every PDF route with unique metadata", async ({ page, request }) => {
   const tools = [
     ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],

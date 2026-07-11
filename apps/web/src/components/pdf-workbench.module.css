@@ -505,6 +505,10 @@
   gap: 16px;
 }
 
+.watermarkSettings .optionGroup {
+  margin: 0;
+}
+
 .controlField {
   min-width: 0;
 }
