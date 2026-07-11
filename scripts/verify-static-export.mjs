@@ -53,7 +53,7 @@ const toolPages = [
     file: "pdf/watermark.html",
     path: "/pdf/watermark",
     title: "PDF 워터마크 넣기",
-    description: "PDF 모든 페이지에 원하는 문구의 워터마크를 넣으세요.",
+    description: "PDF 모든 페이지 또는 지정한 페이지에 원하는 문구의 워터마크를 넣으세요.",
   },
 ];
 
