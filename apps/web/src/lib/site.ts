@@ -3,7 +3,7 @@ export const SITE_URL = "https://hereisit.pages.dev";
 
 export const HOME_TITLE = "HereItIs — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
   "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
 
@@ -98,7 +98,7 @@ export function relatedImageTools(intent: ImageToolIntent): readonly ImageToolCo
   return imageToolList.filter((tool) => tool.intent !== intent);
 }
 
-export type PdfToolIntent = "merge" | "split" | "image-to-pdf";
+export type PdfToolIntent = "merge" | "split" | "organize" | "watermark" | "image-to-pdf";
 
 export interface PdfToolConfig {
   intent: PdfToolIntent;
@@ -145,6 +145,51 @@ export const pdfTools = {
       { title: "PDF 선택", description: "나눌 PDF 한 개를 선택하세요." },
       { title: "방식 선택", description: "페이지별 분리 또는 필요한 페이지 추출을 골라요." },
       { title: "결과 저장", description: "분할 ZIP이나 추출된 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  organize: {
+    intent: "organize",
+    path: "/pdf/organize",
+    navLabel: "페이지 정리",
+    eyebrow: "PDF ORGANIZER",
+    title: "PDF 페이지 정리",
+    description:
+      "PDF 페이지 순서를 바꾸고 90도씩 회전하거나 필요 없는 페이지를 빼세요. 파일은 기기 안에서만 처리됩니다.",
+    defaultSummary:
+      "페이지 번호 목록을 기기 안에서 확인한 뒤 순서·회전·삭제 계획대로 새 PDF를 만들어요.",
+    warning:
+      "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+    steps: [
+      { title: "PDF 선택", description: "정리할 PDF 한 개를 선택하세요." },
+      {
+        title: "페이지 정리",
+        description: "페이지를 위아래로 옮기고 90도씩 회전하거나 결과에서 빼세요.",
+      },
+      { title: "새 PDF 저장", description: "정리 계획을 적용한 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  watermark: {
+    intent: "watermark",
+    path: "/pdf/watermark",
+    navLabel: "워터마크",
+    eyebrow: "PDF WATERMARK",
+    title: "PDF 워터마크 넣기",
+    description:
+      "PDF 모든 페이지에 원하는 문구의 워터마크를 넣으세요. 업로드 없이 브라우저에서 처리합니다.",
+    defaultSummary:
+      "기본값은 ‘대외비’를 18% 불투명도로 가운데에 넣고, 문구·배치·크기·각도·색상을 바꿀 수 있어요.",
+    warning:
+      "워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요. 기존 전자서명도 새 PDF에서 무효화됩니다.",
+    steps: [
+      { title: "PDF 선택", description: "워터마크를 넣을 PDF 한 개를 선택하세요." },
+      {
+        title: "문구와 모양 설정",
+        description: "문구·배치·글자 크기·불투명도·각도·색상을 정하세요.",
+      },
+      {
+        title: "새 PDF 저장",
+        description: "모든 페이지에 워터마크를 넣은 새 PDF를 기기에 저장해요.",
+      },
     ],
   },
   "image-to-pdf": {

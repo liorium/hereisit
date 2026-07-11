@@ -107,6 +107,52 @@ test("extracts a validated page range into one PDF", async ({ page }) => {
   expect(extracted.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([200, 300]);
 });
 
+test("reorders, rotates, and deletes PDF pages without external uploads", async ({ page }) => {
+  await page.goto("/pdf/organize");
+  const unexpectedRequests: string[] = [];
+  const failedRequests: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("request", (request) => {
+    const requestUrl = new URL(request.url());
+    const pageUrl = new URL(page.url());
+    if (
+      requestUrl.origin !== pageUrl.origin ||
+      !["GET", "HEAD"].includes(request.method()) ||
+      request.postData() !== null
+    ) {
+      unexpectedRequests.push(request.url());
+    }
+  });
+  page.on("requestfailed", (request) => failedRequests.push(request.url()));
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "handout.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200, 300]),
+  });
+  await expect(page.getByText("3페이지를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "3페이지 위로 이동" }).click();
+  await page.getByRole("button", { name: "3페이지 위로 이동" }).click();
+  await page.getByRole("button", { name: "3페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "2페이지 정리하기 →" }).click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("handout-organized-hereisit.pdf");
+  const output = await downloadedBytes(await download.path());
+  const organized = await PDFDocument.load(output);
+  expect(organized.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([300, 100]);
+  expect(organized.getPages().map((pdfPage) => pdfPage.getRotation().angle)).toEqual([90, 0]);
+  expect(unexpectedRequests).toEqual([]);
+  expect(failedRequests).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("creates one PDF page per image", async ({ page }) => {
   await page.goto("/pdf/image-to-pdf");
   await page.locator("input[type=file]").setInputFiles([
@@ -127,11 +173,59 @@ test("creates one PDF page per image", async ({ page }) => {
   expect(document.getPageCount()).toBe(2);
 });
 
+test("adds a rasterized text watermark without external or write requests", async ({ page }) => {
+  await page.goto("/pdf/watermark");
+  const unexpectedRequests: string[] = [];
+  const failedRequests: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("request", (request) => {
+    const requestUrl = new URL(request.url());
+    const pageUrl = new URL(page.url());
+    if (
+      requestUrl.origin !== pageUrl.origin ||
+      !["GET", "HEAD"].includes(request.method()) ||
+      request.postData() !== null
+    ) {
+      unexpectedRequests.push(request.url());
+    }
+  });
+  page.on("requestfailed", (request) => failedRequests.push(request.url()));
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "proposal.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200]),
+  });
+  await page.getByLabel("워터마크 텍스트").fill("검토용");
+  await page.getByRole("group", { name: "배치" }).getByLabel("반복 타일").check();
+  await page.getByRole("button", { name: "워터마크 넣기 →" }).click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("proposal-watermarked-hereisit.pdf");
+  const output = await downloadedBytes(await download.path());
+  expect(new TextDecoder().decode(output.subarray(0, 5))).toBe("%PDF-");
+  const watermarked = await PDFDocument.load(output);
+  expect(watermarked.getPageCount()).toBe(2);
+  expect(watermarked.getPages().every((pdfPage) => pdfPage.node.Contents() !== undefined)).toBe(
+    true,
+  );
+  expect(unexpectedRequests).toEqual([]);
+  expect(failedRequests).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("publishes every PDF route with unique metadata", async ({ page, request }) => {
   const tools = [
     ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
     ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
     ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
+    ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
+    ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],
   ] as const;
 
   await page.goto("/");

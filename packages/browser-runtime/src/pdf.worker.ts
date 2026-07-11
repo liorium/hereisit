@@ -3,25 +3,35 @@
 import {
   PDF_IMAGES_TO_PDF_TOOL_ID,
   PDF_MERGE_TOOL_ID,
+  PDF_ORGANIZE_TOOL_ID,
   PDF_SPLIT_TOOL_ID,
   PDF_TOOL_VERSION,
+  PDF_WATERMARK_TOOL_ID,
   type PdfPipelineSpecV1,
   type PdfToolId,
   type PdfWorkerEvent,
   type PdfWorkerRequest,
   WORKER_PROTOCOL_VERSION,
 } from "@hereisit/tool-contracts";
-import { runPdfPipeline, toPdfErrorPayload } from "./pdf-pipeline";
+import { inspectPdfInput, runPdfPipeline, toPdfErrorPayload } from "./pdf-pipeline";
 
 const scope = self as DedicatedWorkerGlobalScope;
 const cancelledJobs = new Set<string>();
-const supportedTools = [PDF_MERGE_TOOL_ID, PDF_SPLIT_TOOL_ID, PDF_IMAGES_TO_PDF_TOOL_ID] as const;
+const supportedTools = [
+  PDF_MERGE_TOOL_ID,
+  PDF_SPLIT_TOOL_ID,
+  PDF_IMAGES_TO_PDF_TOOL_ID,
+  PDF_ORGANIZE_TOOL_ID,
+  PDF_WATERMARK_TOOL_ID,
+] as const;
 
 function toolMatchesSpec(tool: PdfToolId, spec: PdfPipelineSpecV1): boolean {
   return (
     (tool === PDF_MERGE_TOOL_ID && spec.operation === "merge") ||
     (tool === PDF_SPLIT_TOOL_ID && spec.operation === "split") ||
-    (tool === PDF_IMAGES_TO_PDF_TOOL_ID && spec.operation === "images-to-pdf")
+    (tool === PDF_IMAGES_TO_PDF_TOOL_ID && spec.operation === "images-to-pdf") ||
+    (tool === PDF_ORGANIZE_TOOL_ID && spec.operation === "organize") ||
+    (tool === PDF_WATERMARK_TOOL_ID && spec.operation === "watermark")
   );
 }
 
@@ -41,6 +51,17 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
   let sequence = 0;
   void (async () => {
     try {
+      if (request.type === "inspect") {
+        const result = await inspectPdfInput(request.input);
+        if (cancelledJobs.has(jobId)) return;
+        post({
+          protocol: WORKER_PROTOCOL_VERSION,
+          type: "inspected",
+          jobId,
+          result,
+        });
+        return;
+      }
       if (
         request.toolVersion !== PDF_TOOL_VERSION ||
         !toolMatchesSpec(request.tool, request.spec)

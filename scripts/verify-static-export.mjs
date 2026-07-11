@@ -43,6 +43,18 @@ const toolPages = [
     title: "이미지를 PDF로 변환",
     description: "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요.",
   },
+  {
+    file: "pdf/organize.html",
+    path: "/pdf/organize",
+    title: "PDF 페이지 정리",
+    description: "PDF 페이지 순서를 바꾸고 90도씩 회전하거나 필요 없는 페이지를 빼세요.",
+  },
+  {
+    file: "pdf/watermark.html",
+    path: "/pdf/watermark",
+    title: "PDF 워터마크 넣기",
+    description: "PDF 모든 페이지에 원하는 문구의 워터마크를 넣으세요.",
+  },
 ];
 
 async function collectJavaScript(directory) {

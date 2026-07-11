@@ -31,6 +31,8 @@ test("keeps every dedicated tool inside an iPhone viewport", async ({ page }) =>
     ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
     ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
     ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
+    ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
+    ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],
   ] as const;
 
   for (const [path, title, selectLabel] of tools) {
@@ -80,6 +82,77 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
   const removeBox = await remove.boundingBox();
   expect(removeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(removeBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});
+
+test("keeps PDF organizer controls touch-safe without horizontal overflow", async ({ page }) => {
+  const document = await PDFDocument.create();
+  document.addPage([100, 200]);
+  document.addPage([200, 100]);
+  document.addPage([300, 100]);
+
+  await page.goto("/pdf/organize");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "organize.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await document.save()),
+  });
+  await expect(page.getByText("3페이지를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+
+  const controls = [
+    page.getByRole("button", { name: "2페이지 위로 이동" }),
+    page.getByRole("button", { name: "2페이지 아래로 이동" }),
+    page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }),
+    page.getByRole("button", { name: "2페이지 삭제" }),
+    page.getByRole("button", { name: "3페이지 정리하기 →" }),
+  ];
+  for (const control of controls) {
+    const box = await control.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});
+
+test("runs the watermark Worker with touch-safe controls on an iPhone", async ({ page }) => {
+  const document = await PDFDocument.create();
+  document.addPage([300, 400]);
+
+  await page.goto("/pdf/watermark");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "mobile.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await document.save()),
+  });
+  const text = page.getByLabel("워터마크 텍스트");
+  await text.fill("대외비");
+  const placement = page.getByRole("group", { name: "배치" }).getByLabel("반복 타일");
+  await placement.check();
+  const opacity = page.getByLabel(/불투명도/);
+  const run = page.getByRole("button", { name: "워터마크 넣기 →" });
+
+  for (const control of [text, placement.locator(".."), opacity, run]) {
+    const box = await control.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+
+  await run.click();
+  await expect(page.getByText("1페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  const save = page.getByRole("button", { name: "PDF 저장·공유 ↓" });
+  const saveBox = await save.boundingBox();
+  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,

@@ -1,8 +1,8 @@
 # HereItIs
 
 HereItIs is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
-resize, crop, conversion, and compression plus PDF merge, split, page extraction, and JPG/PNG-to-PDF
-tools. File processing runs in Web Workers without uploads.
+resize, crop, conversion, and compression plus PDF merge, split, page extraction, page organization,
+text watermarking, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
 
 ## Development
 
@@ -22,8 +22,9 @@ Core verification runs formatting/lint checks, TypeScript, unit tests, and a pro
 pnpm verify
 ~~~
 
-The browser suite additionally verifies image and PDF conversion, downloaded artifacts, keyboard and
-mobile layouts, Worker loading, and that conversion makes no external or write requests:
+The browser suite additionally verifies image and PDF conversion, page organization, text watermarking,
+downloaded artifacts, keyboard and mobile layouts, Worker loading, and that conversion makes no external
+or write requests:
 
 ~~~bash
 pnpm exec playwright install chromium
@@ -59,6 +60,13 @@ checklist.
 - Up to 100MB per result and 500MB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
 - PDF jobs accept up to 100MB total input and 500 pages; page-by-page split creates at most 200 files.
+- Page organization works on one PDF at a time and can reorder, quarter-turn, or omit pages locally.
+- Watermark text is rasterized locally into a bounded PNG before it is placed on every page. It
+  is not searchable or selectable text, and its exact glyph appearance can vary with the device font.
+- Organizing pages and adding a watermark create a new PDF. Existing electronic signatures become
+  invalid, and advanced document features such as bookmarks or forms may change.
+- General PDF compression and image downsampling are not provided. PDF editing can make an output larger
+  than its source.
 - JPG/PNG-to-PDF uses a format-aware 128MB estimated decode-memory ceiling for each PNG.
 - Files and filenames stay in the current tab or its Worker. Closing the tab releases in-memory results.
 
@@ -67,7 +75,7 @@ checklist.
 - apps/web — Next.js application and local image/PDF workbenches.
 - packages/tool-contracts — versioned tool and Worker protocol.
 - packages/image-tool — structural image validation, geometry, and naming.
-- packages/pdf-tool — PDF page-range, layout, signature, and naming helpers.
+- packages/pdf-tool — PDF page-range, page-plan, watermark-layout, signature, and naming helpers.
 - packages/browser-runtime — bounded image/PDF Worker execution runtime.
 - packages/tool-registry — user-facing tool and preset metadata.
 

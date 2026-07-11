@@ -1,16 +1,18 @@
 import {
   decodePDFRawStream,
+  degrees,
   PDFContext,
   PDFDocument,
   PDFObjectParser,
   PDFObjectStreamParser,
+  PDFPage,
   PDFRawStream,
   PDFXRefStreamParser,
 } from "@cantoo/pdf-lib";
 import { hasPdfSignature } from "@hereisit/pdf-tool";
 import { unzipSync, zlibSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
-import { runPdfPipeline } from "./pdf-pipeline";
+import { inspectPdfInput, runPdfPipeline } from "./pdf-pipeline";
 
 const onePixelPng = Uint8Array.from(
   atob(
@@ -222,6 +224,170 @@ describe("runPdfPipeline", () => {
     const document = await PDFDocument.load(result.bytes);
     expect(document.getPages().map((page) => page.getWidth())).toEqual([100, 300]);
     expect(result.suggestedName).toBe("report-selected-hereisit.pdf");
+  });
+
+  it("inspects page geometry without returning file data", async () => {
+    const source = await samplePdf([100, 200, 300]);
+    const inspected = await inspectPdfInput(input("private-name.pdf", source));
+
+    expect(inspected).toEqual({
+      pageCount: 3,
+      pages: [
+        { sourcePage: 1, width: 100, height: 100, rotation: 0 },
+        { sourcePage: 2, width: 200, height: 100, rotation: 0 },
+        { sourcePage: 3, width: 300, height: 100, rotation: 0 },
+      ],
+    });
+    expect(JSON.stringify(inspected)).not.toContain("private-name");
+  });
+
+  it("reorders, rotates, and removes pages from one PDF", async () => {
+    const sourceDocument = await PDFDocument.create();
+    sourceDocument.addPage([100, 100]);
+    sourceDocument.addPage([200, 100]);
+    sourceDocument.addPage([300, 100]).setRotation(degrees(90));
+    const source = Uint8Array.from(await sourceDocument.save()).buffer;
+
+    const result = await runPdfPipeline([input("report.pdf", source)], {
+      version: 1,
+      operation: "organize",
+      pages: [
+        { sourcePage: 3, rotateBy: 90 },
+        { sourcePage: 1, rotateBy: 270 },
+      ],
+    });
+
+    const organized = await PDFDocument.load(result.bytes);
+    expect(organized.getPages().map((page) => page.getWidth())).toEqual([300, 100]);
+    expect(organized.getPages().map((page) => page.getRotation().angle)).toEqual([180, 270]);
+    expect(result.outputPageCount).toBe(2);
+    expect(result.suggestedName).toBe("report-organized-hereisit.pdf");
+  });
+
+  it("rejects an organizer page beyond the source document", async () => {
+    const source = await samplePdf([100]);
+    await expect(
+      runPdfPipeline([input("report.pdf", source)], {
+        version: 1,
+        operation: "organize",
+        pages: [{ sourcePage: 2, rotateBy: 0 }],
+      }),
+    ).rejects.toMatchObject({ payload: { code: "PAGE_RANGE_INVALID" } });
+  });
+
+  it("adds a rasterized watermark only to selected pages", async () => {
+    const source = await samplePdf([100, 200]);
+    const result = await runPdfPipeline(
+      [input("report.pdf", source)],
+      {
+        version: 1,
+        operation: "watermark",
+        watermark: {
+          text: "대외비",
+          placement: "center",
+          fontSize: 48,
+          opacity: 0.18,
+          rotation: -45,
+          color: "#334155",
+        },
+        selection: { mode: "extract", pages: [2] },
+      },
+      {
+        renderWatermark: async () => ({
+          bytes: Uint8Array.from(onePixelPng).buffer,
+          width: 1,
+          height: 1,
+        }),
+      },
+    );
+
+    const watermarked = await PDFDocument.load(result.bytes);
+    expect(watermarked.getPage(0).node.Contents()).toBeUndefined();
+    expect(watermarked.getPage(1).node.Contents()).toBeDefined();
+    expect(result.outputPageCount).toBe(2);
+    expect(result.suggestedName).toBe("report-watermarked-hereisit.pdf");
+    expect(result.warnings).toContain("WATERMARK_TEXT_RASTERIZED");
+  });
+
+  it("positions a watermark inside a non-zero crop box", async () => {
+    const sourceDocument = await PDFDocument.create();
+    const sourcePage = sourceDocument.addPage([400, 500]);
+    sourcePage.setCropBox(50, 100, 200, 300);
+    const source = Uint8Array.from(await sourceDocument.save()).buffer;
+    const drawImage = vi.spyOn(PDFPage.prototype, "drawImage");
+
+    try {
+      await runPdfPipeline(
+        [input("print.pdf", source)],
+        {
+          version: 1,
+          operation: "watermark",
+          watermark: {
+            text: "PRINT",
+            placement: "center",
+            fontSize: 48,
+            opacity: 0.18,
+            rotation: 0,
+            color: "#334155",
+          },
+          selection: { mode: "every-page" },
+        },
+        {
+          renderWatermark: async () => ({
+            bytes: Uint8Array.from(onePixelPng).buffer,
+            width: 1,
+            height: 1,
+          }),
+        },
+      );
+
+      expect(drawImage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ x: 126, y: 226, width: 48, height: 48 }),
+      );
+    } finally {
+      drawImage.mockRestore();
+    }
+  });
+
+  it("keeps the requested visual watermark angle on a rotated page", async () => {
+    const sourceDocument = await PDFDocument.create();
+    sourceDocument.addPage([400, 500]).setRotation(degrees(90));
+    const source = Uint8Array.from(await sourceDocument.save()).buffer;
+    const drawImage = vi.spyOn(PDFPage.prototype, "drawImage");
+
+    try {
+      await runPdfPipeline(
+        [input("rotated.pdf", source)],
+        {
+          version: 1,
+          operation: "watermark",
+          watermark: {
+            text: "ROTATED",
+            placement: "center",
+            fontSize: 48,
+            opacity: 0.18,
+            rotation: -45,
+            color: "#334155",
+          },
+          selection: { mode: "every-page" },
+        },
+        {
+          renderWatermark: async () => ({
+            bytes: Uint8Array.from(onePixelPng).buffer,
+            width: 1,
+            height: 1,
+          }),
+        },
+      );
+
+      expect(drawImage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ rotate: expect.objectContaining({ angle: -135 }) }),
+      );
+    } finally {
+      drawImage.mockRestore();
+    }
   });
 
   it("puts each PNG on its own PDF page", async () => {

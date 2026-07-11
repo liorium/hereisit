@@ -3,8 +3,10 @@ import {
   extractedPdfName,
   imagesPdfName,
   mergedPdfName,
+  organizedPdfName,
   splitPdfArchiveName,
   splitPdfPageName,
+  watermarkedPdfName,
 } from "./naming";
 
 describe("PDF output naming", () => {
@@ -14,5 +16,7 @@ describe("PDF output naming", () => {
     expect(splitPdfArchiveName("../report.pdf")).toBe("report-pages-hereisit.zip");
     expect(splitPdfPageName("folder/report.pdf", 2, 12)).toBe("report-page-002.pdf");
     expect(extractedPdfName("report.pdf")).toBe("report-selected-hereisit.pdf");
+    expect(organizedPdfName("../report.pdf")).toBe("report-organized-hereisit.pdf");
+    expect(watermarkedPdfName("../report.pdf")).toBe("report-watermarked-hereisit.pdf");
   });
 });

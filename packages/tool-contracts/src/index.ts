@@ -6,10 +6,24 @@ export const IMAGE_TOOL_VERSION = 1 as const;
 export const PDF_MERGE_TOOL_ID = "pdf.merge" as const;
 export const PDF_SPLIT_TOOL_ID = "pdf.split" as const;
 export const PDF_IMAGES_TO_PDF_TOOL_ID = "pdf.images-to-pdf" as const;
+export const PDF_ORGANIZE_TOOL_ID = "pdf.organize" as const;
+export const PDF_WATERMARK_TOOL_ID = "pdf.watermark" as const;
 export const PDF_TOOL_VERSION = 1 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
+
+function isSafeWatermarkText(value: string): boolean {
+  return Array.from(value).every((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return (
+      code > 31 &&
+      code !== 127 &&
+      (code < 0x202a || code > 0x202e) &&
+      (code < 0x2066 || code > 0x2069)
+    );
+  });
+}
 
 export const imageSizeGoalSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("allow-growth") }),
@@ -236,17 +250,19 @@ export interface ToolPreset {
   spec: ImagePipelineSpecV1;
 }
 
+const pdfPageNumbersSchema = z
+  .array(z.number().int().min(1).max(500))
+  .min(1)
+  .max(500)
+  .refine((pages) => new Set(pages).size === pages.length, {
+    message: "페이지 번호는 중복될 수 없습니다.",
+  });
+
 export const pdfPageSelectionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("every-page") }),
   z.object({
     mode: z.literal("extract"),
-    pages: z
-      .array(z.number().int().min(1).max(500))
-      .min(1)
-      .max(500)
-      .refine((pages) => new Set(pages).size === pages.length, {
-        message: "페이지 번호는 중복될 수 없습니다.",
-      }),
+    pages: pdfPageNumbersSchema,
   }),
 ]);
 
@@ -257,6 +273,28 @@ export const pdfImagePageSchema = z.discriminatedUnion("size", [
   }),
   z.object({ size: z.literal("image"), margin: z.literal(0).default(0) }),
 ]);
+
+export const pdfOrganizePageSchema = z.object({
+  sourcePage: z.number().int().min(1).max(500),
+  rotateBy: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+});
+
+export const pdfWatermarkSchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .refine(isSafeWatermarkText, {
+      message: "워터마크에는 제어 문자를 사용할 수 없습니다.",
+    })
+    .transform((value) => value.normalize("NFC")),
+  placement: z.enum(["center", "tile"]),
+  fontSize: z.number().int().min(12).max(96),
+  opacity: z.number().min(0.05).max(0.8),
+  rotation: z.union([z.literal(-45), z.literal(0), z.literal(45)]),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+});
 
 export const pdfPipelineSpecSchema = z.discriminatedUnion("operation", [
   z.object({ version: z.literal(1), operation: z.literal("merge") }),
@@ -270,6 +308,23 @@ export const pdfPipelineSpecSchema = z.discriminatedUnion("operation", [
     operation: z.literal("images-to-pdf"),
     page: pdfImagePageSchema,
   }),
+  z.object({
+    version: z.literal(1),
+    operation: z.literal("organize"),
+    pages: z
+      .array(pdfOrganizePageSchema)
+      .min(1)
+      .max(500)
+      .refine((pages) => new Set(pages.map((page) => page.sourcePage)).size === pages.length, {
+        message: "같은 원본 페이지를 두 번 넣을 수 없습니다.",
+      }),
+  }),
+  z.object({
+    version: z.literal(1),
+    operation: z.literal("watermark"),
+    watermark: pdfWatermarkSchema,
+    selection: pdfPageSelectionSchema,
+  }),
 ]);
 
 export type PdfPipelineSpecV1 = z.input<typeof pdfPipelineSpecSchema>;
@@ -277,13 +332,16 @@ export type ParsedPdfPipelineSpecV1 = z.output<typeof pdfPipelineSpecSchema>;
 export type PdfToolId =
   | typeof PDF_MERGE_TOOL_ID
   | typeof PDF_SPLIT_TOOL_ID
-  | typeof PDF_IMAGES_TO_PDF_TOOL_ID;
+  | typeof PDF_IMAGES_TO_PDF_TOOL_ID
+  | typeof PDF_ORGANIZE_TOOL_ID
+  | typeof PDF_WATERMARK_TOOL_ID;
 export type PdfPhase = "validating" | "loading" | "processing" | "serializing" | "finalizing";
 
 export type PdfWarning =
   | "DOCUMENT_FEATURES_MAY_CHANGE"
   | "SIGNATURES_INVALIDATED"
-  | "IMAGE_COLOR_MAY_CHANGE";
+  | "IMAGE_COLOR_MAY_CHANGE"
+  | "WATERMARK_TEXT_RASTERIZED";
 
 export interface PdfPipelineResult {
   bytes: ArrayBuffer;
@@ -335,13 +393,37 @@ export interface PdfRunRequest {
   spec: PdfPipelineSpecV1;
 }
 
+export interface PdfInspectRequest {
+  protocol: 1;
+  type: "inspect";
+  jobId: string;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    bytes: ArrayBuffer;
+  };
+}
+
+export interface PdfInspectionPage {
+  sourcePage: number;
+  width: number;
+  height: number;
+  rotation: number;
+}
+
+export interface PdfInspectionResult {
+  pageCount: number;
+  pages: readonly PdfInspectionPage[];
+}
+
 export interface PdfCancelRequest {
   protocol: 1;
   type: "cancel";
   jobId: string;
 }
 
-export type PdfWorkerRequest = PdfRunRequest | PdfCancelRequest;
+export type PdfWorkerRequest = PdfRunRequest | PdfInspectRequest | PdfCancelRequest;
 
 export type PdfWorkerEvent =
   | {
@@ -357,6 +439,7 @@ export type PdfWorkerEvent =
       phase: PdfPhase;
       fraction: number;
     }
+  | { protocol: 1; type: "inspected"; jobId: string; result: PdfInspectionResult }
   | { protocol: 1; type: "complete"; jobId: string; result: PdfPipelineResult }
   | { protocol: 1; type: "failed"; jobId: string; error: PdfToolErrorPayload };
 
@@ -367,5 +450,15 @@ export type PdfJobOutcome =
 
 export interface PdfJobHandle {
   result: Promise<PdfJobOutcome>;
+  cancel(): void;
+}
+
+export type PdfInspectionOutcome =
+  | { status: "fulfilled"; value: PdfInspectionResult }
+  | { status: "rejected"; error: PdfToolErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfInspectionHandle {
+  result: Promise<PdfInspectionOutcome>;
   cancel(): void;
 }

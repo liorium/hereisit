@@ -1,4 +1,4 @@
-import { PDFDocument, type PDFImage } from "@cantoo/pdf-lib";
+import { degrees, PDFDocument, type PDFImage } from "@cantoo/pdf-lib";
 import {
   inspectImageHeader,
   readJpegExifOrientation,
@@ -7,16 +7,20 @@ import {
 } from "@hereisit/image-tool";
 import {
   calculateOrientedPdfImageLayout,
+  calculateWatermarkPlacements,
   extractedPdfName,
   hasPdfSignature,
   imagesPdfName,
   mergedPdfName,
+  organizedPdfName,
   type PdfImageOrientation,
   splitPdfArchiveName,
   splitPdfPageName,
+  watermarkedPdfName,
 } from "@hereisit/pdf-tool";
 import {
   type ParsedPdfPipelineSpecV1,
+  type PdfInspectionResult,
   type PdfPhase,
   type PdfPipelineResult,
   type PdfRunRequest,
@@ -36,11 +40,23 @@ const MAX_JPEG_PIXELS = 50_000_000;
 const MAX_PNG_PIXELS = 16_000_000;
 const MAX_TOTAL_PNG_PIXELS = 64_000_000;
 const MAX_PNG_ESTIMATED_PEAK_BYTES = 128 * 1024 * 1024;
+const MAX_WATERMARK_PNG_BYTES = 2 * 1024 * 1024;
+const MAX_WATERMARK_CANVAS_WIDTH = 2_048;
+const MAX_WATERMARK_CANVAS_HEIGHT = 512;
+const MAX_WATERMARK_CANVAS_PIXELS = 1_048_576;
+const MAX_PDF_PAGE_DIMENSION = 14_400;
 
 export type PdfPipelineInput = PdfRunRequest["inputs"][number];
 
 export interface PdfPipelineOptions {
   onProgress?: (phase: PdfPhase, fraction: number) => void;
+  renderWatermark?: (input: { text: string; color: string }) => Promise<PdfWatermarkBitmap>;
+}
+
+export interface PdfWatermarkBitmap {
+  bytes: ArrayBuffer;
+  width: number;
+  height: number;
 }
 
 interface Timing {
@@ -79,19 +95,85 @@ function emit(options: PdfPipelineOptions, phase: PdfPhase, fraction: number): v
   options.onProgress?.(phase, Math.max(0, Math.min(1, fraction)));
 }
 
+async function renderWatermarkBitmap(input: {
+  text: string;
+  color: string;
+}): Promise<PdfWatermarkBitmap> {
+  if (typeof OffscreenCanvas === "undefined") {
+    fail(
+      "UNSUPPORTED_INPUT",
+      "이 브라우저에서는 한글 워터마크를 안전하게 만들 수 없어요. 최신 브라우저로 다시 시도해 주세요.",
+    );
+  }
+
+  const measuringCanvas = new OffscreenCanvas(1, 1);
+  const measuringContext = measuringCanvas.getContext("2d");
+  if (measuringContext === null) {
+    fail("WRITE_FAILED", "워터마크 글자를 준비하지 못했어요.");
+  }
+
+  const baseFontSize = 192;
+  measuringContext.font = `800 ${baseFontSize}px sans-serif`;
+  const measuredWidth = Math.max(1, measuringContext.measureText(input.text).width);
+  const widthScale = Math.min(1, (MAX_WATERMARK_CANVAS_WIDTH - 64) / measuredWidth);
+  const rasterFontSize = Math.max(24, Math.floor(baseFontSize * widthScale));
+  measuringContext.font = `800 ${rasterFontSize}px sans-serif`;
+  const canvasWidth = Math.min(
+    MAX_WATERMARK_CANVAS_WIDTH,
+    Math.max(32, Math.ceil(measuringContext.measureText(input.text).width) + 48),
+  );
+  const canvasHeight = Math.min(
+    MAX_WATERMARK_CANVAS_HEIGHT,
+    Math.max(32, Math.ceil(rasterFontSize * 1.5)),
+  );
+  if (canvasWidth * canvasHeight > MAX_WATERMARK_CANVAS_PIXELS) {
+    fail("MEMORY_LIMIT", "워터마크 글자가 안전 처리 한도를 넘었어요.");
+  }
+
+  const canvas = new OffscreenCanvas(canvasWidth, canvasHeight);
+  const context = canvas.getContext("2d");
+  if (context === null) {
+    fail("WRITE_FAILED", "워터마크 글자를 준비하지 못했어요.");
+  }
+  context.clearRect(0, 0, canvasWidth, canvasHeight);
+  context.fillStyle = input.color;
+  context.font = `800 ${rasterFontSize}px sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(input.text, canvasWidth / 2, canvasHeight / 2, canvasWidth - 24);
+
+  let blob: Blob;
+  try {
+    blob = await canvas.convertToBlob({ type: "image/png" });
+  } catch {
+    fail("WRITE_FAILED", "워터마크 글자를 이미지로 만들지 못했어요.");
+  }
+  if (blob.size < 1 || blob.size > MAX_WATERMARK_PNG_BYTES) {
+    fail("MEMORY_LIMIT", "워터마크 이미지가 안전 처리 한도를 넘었어요.");
+  }
+  return {
+    bytes: await blob.arrayBuffer(),
+    width: canvasWidth,
+    height: canvasHeight,
+  };
+}
+
 function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipelineSpecV1): void {
   const expected =
-    spec.operation === "merge" ? { minimum: 2, maximum: 20 } : { minimum: 1, maximum: 100 };
+    spec.operation === "merge"
+      ? { minimum: 2, maximum: 20 }
+      : spec.operation === "images-to-pdf"
+        ? { minimum: 1, maximum: 100 }
+        : { minimum: 1, maximum: 1 };
   if (inputs.length < expected.minimum || inputs.length > expected.maximum) {
     fail(
       "UNSUPPORTED_INPUT",
       spec.operation === "merge"
         ? "PDF 합치기는 2개부터 20개 파일까지 처리할 수 있어요."
-        : "선택한 파일 개수가 처리 범위를 벗어났어요.",
+        : spec.operation === "images-to-pdf"
+          ? "선택한 이미지 개수가 처리 범위를 벗어났어요."
+          : "이 PDF 작업은 파일 한 개씩 처리할 수 있어요.",
     );
-  }
-  if (spec.operation === "split" && inputs.length !== 1) {
-    fail("UNSUPPORTED_INPUT", "페이지 분할은 PDF 한 개씩 처리할 수 있어요.");
   }
 
   let totalBytes = 0;
@@ -107,6 +189,16 @@ function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipe
   }
   if (totalBytes > MAX_INPUT_BYTES) {
     fail("MEMORY_LIMIT", "한 작업의 파일 합계는 최대 100MB까지 처리할 수 있어요.");
+  }
+}
+
+function validateInspectionInput(input: PdfPipelineInput): void {
+  if (
+    input.bytes.byteLength < 1 ||
+    input.bytes.byteLength !== input.byteLength ||
+    input.bytes.byteLength > MAX_FILE_BYTES
+  ) {
+    fail("MEMORY_LIMIT", "파일당 최대 50MB까지 처리할 수 있어요.");
   }
 }
 
@@ -166,6 +258,30 @@ function ensurePageLimit(pageCount: number): void {
   if (pageCount > MAX_PAGES) {
     fail("PAGE_LIMIT", "한 작업에서 최대 500페이지까지 처리할 수 있어요.");
   }
+}
+
+export async function inspectPdfInput(input: PdfPipelineInput): Promise<PdfInspectionResult> {
+  validateInspectionInput(input);
+  const document = await loadPdf(input);
+  const pageCount = document.getPageCount();
+  ensurePageLimit(pageCount);
+  return {
+    pageCount,
+    pages: document.getPages().map((page, index) => {
+      const { width, height } = page.getSize();
+      const rotation = page.getRotation().angle;
+      if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        !Number.isFinite(rotation) ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        fail("CORRUPT_PDF", "페이지 크기나 회전값이 올바르지 않은 PDF예요.");
+      }
+      return { sourcePage: index + 1, width, height, rotation };
+    }),
+  };
 }
 
 function ensureOutputLimit(byteLength: number): void {
@@ -373,6 +489,63 @@ async function splitPdf(
   };
 }
 
+async function organizePdf(
+  input: PdfPipelineInput,
+  spec: Extract<ParsedPdfPipelineSpecV1, { operation: "organize" }>,
+  timing: Timing,
+  options: PdfPipelineOptions,
+): Promise<Omit<PdfPipelineResult, "timing">> {
+  const loadStarted = now();
+  const source = await loadPdf(input);
+  timing.loadMs += now() - loadStarted;
+  const sourcePageCount = source.getPageCount();
+  ensurePageLimit(sourcePageCount);
+  if (spec.pages.some((page) => page.sourcePage > sourcePageCount)) {
+    fail("PAGE_RANGE_INVALID", `이 PDF는 ${sourcePageCount}페이지까지 있어요.`);
+  }
+
+  const output = await createOutputDocument();
+  const processStarted = now();
+  const copiedPages = await output.copyPages(
+    source,
+    spec.pages.map((page) => page.sourcePage - 1),
+  );
+  for (const [index, page] of copiedPages.entries()) {
+    const plan = spec.pages[index];
+    if (plan === undefined) {
+      fail("CORRUPT_PDF", "PDF 페이지 계획을 적용하지 못했어요.");
+    }
+    if (plan.rotateBy !== 0) {
+      const existingRotation = page.getRotation().angle;
+      if (!Number.isFinite(existingRotation) || existingRotation % 90 !== 0) {
+        fail("CORRUPT_PDF", "페이지 회전값이 올바르지 않은 PDF예요.");
+      }
+      const rotation = (((existingRotation + plan.rotateBy) % 360) + 360) % 360;
+      page.setRotation(degrees(rotation));
+    }
+    output.addPage(page);
+    emit(options, "processing", 0.15 + ((index + 1) / copiedPages.length) * 0.65);
+  }
+  timing.processMs += now() - processStarted;
+
+  emit(options, "serializing", 0.86);
+  const saveStarted = now();
+  const outputBytes = await savePdf(output);
+  timing.saveMs += now() - saveStarted;
+  ensureOutputLimit(outputBytes.byteLength);
+  const bytes = ownedArrayBuffer(outputBytes);
+  return {
+    bytes,
+    suggestedName: organizedPdfName(input.name),
+    mime: "application/pdf",
+    byteLength: bytes.byteLength,
+    sourcePageCount,
+    outputPageCount: spec.pages.length,
+    outputDocumentCount: 1,
+    warnings: ["DOCUMENT_FEATURES_MAY_CHANGE", "SIGNATURES_INVALIDATED"],
+  };
+}
+
 async function imagesToPdf(
   inputs: readonly PdfPipelineInput[],
   spec: Extract<ParsedPdfPipelineSpecV1, { operation: "images-to-pdf" }>,
@@ -501,6 +674,137 @@ async function imagesToPdf(
   };
 }
 
+async function watermarkPdf(
+  input: PdfPipelineInput,
+  spec: Extract<ParsedPdfPipelineSpecV1, { operation: "watermark" }>,
+  timing: Timing,
+  options: PdfPipelineOptions,
+): Promise<Omit<PdfPipelineResult, "timing">> {
+  const loadStarted = now();
+  const source = await loadPdf(input);
+  timing.loadMs += now() - loadStarted;
+  const sourcePageCount = source.getPageCount();
+  ensurePageLimit(sourcePageCount);
+  if (
+    spec.selection.mode === "extract" &&
+    spec.selection.pages.some((page) => page > sourcePageCount)
+  ) {
+    fail("PAGE_RANGE_INVALID", `이 PDF는 ${sourcePageCount}페이지까지 있어요.`);
+  }
+  const selectedPages =
+    spec.selection.mode === "every-page" ? undefined : new Set(spec.selection.pages);
+
+  const processStarted = now();
+  const output = await createOutputDocument();
+  const copiedPages = await output.copyPages(source, source.getPageIndices());
+  const renderer = options.renderWatermark ?? renderWatermarkBitmap;
+  const bitmap = await renderer({
+    text: spec.watermark.text,
+    color: spec.watermark.color,
+  });
+  if (
+    bitmap.bytes.byteLength < 1 ||
+    bitmap.bytes.byteLength > MAX_WATERMARK_PNG_BYTES ||
+    !Number.isSafeInteger(bitmap.width) ||
+    !Number.isSafeInteger(bitmap.height) ||
+    bitmap.width < 1 ||
+    bitmap.height < 1 ||
+    bitmap.width > MAX_WATERMARK_CANVAS_WIDTH ||
+    bitmap.height > MAX_WATERMARK_CANVAS_HEIGHT ||
+    bitmap.width * bitmap.height > MAX_WATERMARK_CANVAS_PIXELS
+  ) {
+    fail("MEMORY_LIMIT", "워터마크 이미지가 안전 처리 한도를 넘었어요.");
+  }
+
+  let watermarkImage: PDFImage;
+  try {
+    watermarkImage = await output.embedPng(bitmap.bytes);
+  } catch {
+    fail("WRITE_FAILED", "워터마크 이미지를 PDF에 넣지 못했어요.");
+  }
+  const imageAspectRatio = bitmap.width / bitmap.height;
+
+  for (const [index, page] of copiedPages.entries()) {
+    output.addPage(page);
+    if (selectedPages === undefined || selectedPages.has(index + 1)) {
+      const cropBox = page.getCropBox();
+      const { width: pageWidth, height: pageHeight } = cropBox;
+      if (
+        !Number.isFinite(cropBox.x) ||
+        !Number.isFinite(cropBox.y) ||
+        !Number.isFinite(pageWidth) ||
+        !Number.isFinite(pageHeight) ||
+        Math.abs(cropBox.x) > MAX_PDF_PAGE_DIMENSION ||
+        Math.abs(cropBox.y) > MAX_PDF_PAGE_DIMENSION ||
+        pageWidth < 1 ||
+        pageHeight < 1 ||
+        pageWidth > MAX_PDF_PAGE_DIMENSION ||
+        pageHeight > MAX_PDF_PAGE_DIMENSION
+      ) {
+        fail("UNSUPPORTED_INPUT", "워터마크를 넣기에는 페이지 크기가 너무 큰 PDF예요.");
+      }
+      const pageRotation = page.getRotation().angle;
+      if (!Number.isFinite(pageRotation) || pageRotation % 90 !== 0) {
+        fail("CORRUPT_PDF", "페이지 회전값이 올바르지 않은 PDF예요.");
+      }
+      const effectiveRotation =
+        ((((spec.watermark.rotation - pageRotation + 180) % 360) + 360) % 360) - 180;
+
+      let placements: ReturnType<typeof calculateWatermarkPlacements>;
+      try {
+        placements = calculateWatermarkPlacements({
+          pageWidth,
+          pageHeight,
+          imageAspectRatio,
+          fontSize: spec.watermark.fontSize,
+          rotation: effectiveRotation,
+          placement: spec.watermark.placement,
+        });
+      } catch {
+        fail("CORRUPT_PDF", "PDF 페이지 크기를 안전하게 계산하지 못했어요.");
+      }
+      for (const placement of placements) {
+        page.drawImage(watermarkImage, {
+          x: cropBox.x + placement.x,
+          y: cropBox.y + placement.y,
+          width: placement.width,
+          height: placement.height,
+          rotate: degrees(placement.rotation),
+          opacity: spec.watermark.opacity,
+        });
+      }
+    }
+    emit(options, "processing", 0.15 + ((index + 1) / copiedPages.length) * 0.65);
+  }
+  try {
+    await watermarkImage.embed();
+  } catch {
+    fail("WRITE_FAILED", "워터마크 이미지를 PDF에 넣지 못했어요.");
+  }
+  timing.processMs += now() - processStarted;
+
+  emit(options, "serializing", 0.86);
+  const saveStarted = now();
+  const outputBytes = await savePdf(output);
+  timing.saveMs += now() - saveStarted;
+  ensureOutputLimit(outputBytes.byteLength);
+  const bytes = ownedArrayBuffer(outputBytes);
+  return {
+    bytes,
+    suggestedName: watermarkedPdfName(input.name),
+    mime: "application/pdf",
+    byteLength: bytes.byteLength,
+    sourcePageCount,
+    outputPageCount: sourcePageCount,
+    outputDocumentCount: 1,
+    warnings: [
+      "DOCUMENT_FEATURES_MAY_CHANGE",
+      "SIGNATURES_INVALIDATED",
+      "WATERMARK_TEXT_RASTERIZED",
+    ],
+  };
+}
+
 export async function runPdfPipeline(
   inputs: readonly PdfPipelineInput[],
   rawSpec: unknown,
@@ -515,12 +819,18 @@ export async function runPdfPipeline(
 
   const timing: Timing = { loadMs: 0, processMs: 0, saveMs: 0 };
   emit(options, "loading", 0.05);
-  const result =
-    spec.operation === "merge"
-      ? await mergePdfs(inputs, timing, options)
-      : spec.operation === "split"
-        ? await splitPdf(inputs[0] as PdfPipelineInput, spec, timing, options)
-        : await imagesToPdf(inputs, spec, timing, options);
+  let result: Omit<PdfPipelineResult, "timing">;
+  if (spec.operation === "merge") {
+    result = await mergePdfs(inputs, timing, options);
+  } else if (spec.operation === "split") {
+    result = await splitPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
+  } else if (spec.operation === "images-to-pdf") {
+    result = await imagesToPdf(inputs, spec, timing, options);
+  } else if (spec.operation === "organize") {
+    result = await organizePdf(inputs[0] as PdfPipelineInput, spec, timing, options);
+  } else {
+    result = await watermarkPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
+  }
   emit(options, "finalizing", 1);
   return { ...result, timing: { ...timing, totalMs: now() - started } };
 }

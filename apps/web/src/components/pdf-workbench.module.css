@@ -239,6 +239,81 @@
   overflow-y: auto;
 }
 
+.pageList {
+  max-height: 440px;
+  overflow-y: auto;
+}
+
+.pageRow {
+  min-height: 112px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.pagePosition {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.pageCopy {
+  min-width: 0;
+}
+
+.pageCopy strong,
+.pageCopy span {
+  display: block;
+}
+
+.pageCopy strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pageCopy span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pageActions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(40px, 1fr));
+  gap: 5px;
+}
+
+.pageActions button {
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pageActions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pageLoading {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .fileRow {
   min-height: 82px;
   padding: 12px;
@@ -326,6 +401,24 @@
   line-height: 1.6;
 }
 
+.resetPlanButton {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.resetPlanButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .optionGroup {
   display: grid;
   gap: 10px;
@@ -404,6 +497,128 @@
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.watermarkSettings {
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.controlField {
+  min-width: 0;
+}
+
+.controlField > label,
+.segmentGroup legend {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.controlField input[type="text"],
+.controlField select {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.controlField input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.watermarkSettings .controlField > small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+
+.controlField input[type="color"] {
+  width: 100%;
+  height: 44px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.controlField input[type="range"] {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.controlGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.55fr);
+  gap: 10px;
+}
+
+.segmentGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.segmentGroup > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.segmentGroup:first-of-type > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmentGroup label {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  font-size: 10px;
+  font-weight: 750;
+  text-align: center;
+  cursor: pointer;
+}
+
+.segmentGroup input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.watermarkSettings .settingCard {
+  margin: 0;
+}
+
+.rasterNotice {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--yellow) 28%, white);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .privacyNotice {
@@ -648,6 +863,10 @@
     max-height: 330px;
   }
 
+  .pageList {
+    max-height: 360px;
+  }
+
   .fileRow {
     min-height: 92px;
   }
@@ -655,6 +874,10 @@
   .fileActions button {
     width: 44px;
     height: 44px;
+  }
+
+  .pageActions button {
+    min-height: 44px;
   }
 
   .optionGroup > label {
@@ -669,6 +892,16 @@
   .rangeField input {
     height: 46px;
     font-size: 16px;
+  }
+
+  .controlField input[type="text"],
+  .controlField select {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .controlGrid {
+    grid-template-columns: 1fr;
   }
 
   .resultPanel {

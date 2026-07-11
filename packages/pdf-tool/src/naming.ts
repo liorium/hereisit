@@ -34,3 +34,11 @@ export function extractedPdfName(filename: string): string {
 export function imagesPdfName(): string {
   return "images-hereisit.pdf";
 }
+
+export function organizedPdfName(filename: string): string {
+  return `${safeStem(filename, "document")}-organized-hereisit.pdf`;
+}
+
+export function watermarkedPdfName(filename: string): string {
+  return `${safeStem(filename, "document")}-watermarked-hereisit.pdf`;
+}

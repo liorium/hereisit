@@ -1,8 +1,20 @@
 "use client";
 
-import { runPdfJob, supportsBrowserPdfRuntime } from "@hereisit/browser-runtime/pdf";
-import { parsePageSelection } from "@hereisit/pdf-tool";
+import {
+  inspectPdfFile,
+  runPdfJob,
+  supportsBrowserPdfRuntime,
+} from "@hereisit/browser-runtime/pdf";
+import {
+  createPdfPagePlan,
+  movePdfPage,
+  type PdfPagePlan,
+  parsePageSelection,
+  removePdfPage,
+  rotatePdfPage,
+} from "@hereisit/pdf-tool";
 import type {
+  PdfInspectionHandle,
   PdfJobHandle,
   PdfPhase,
   PdfPipelineResult,
@@ -16,6 +28,18 @@ import styles from "./pdf-workbench.module.css";
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const LOW_MEMORY_TOTAL_BYTES = 60 * 1024 * 1024;
 const STANDARD_TOTAL_BYTES = 100 * 1024 * 1024;
+
+function isSafeWatermarkText(value: string): boolean {
+  return Array.from(value).every((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return (
+      code > 31 &&
+      code !== 127 &&
+      (code < 0x202a || code > 0x202e) &&
+      (code < 0x2066 || code > 0x2069)
+    );
+  });
+}
 
 interface PdfWorkItem {
   id: string;
@@ -49,6 +73,24 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 페이지 분할 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 페이지별 분리 최대 200페이지",
+    maximumFiles: 1,
+    multiple: false,
+  },
+  organize: {
+    emptyTitle: "정리할 PDF를 놓거나 선택하세요",
+    selectLabel: "정리할 PDF 선택",
+    workbenchTitle: "PDF 페이지 정리 작업대",
+    accept: "application/pdf,.pdf",
+    fileDescription: "PDF 한 개 · 최대 50MB · 최대 500페이지",
+    maximumFiles: 1,
+    multiple: false,
+  },
+  watermark: {
+    emptyTitle: "워터마크를 넣을 PDF를 놓거나 선택하세요",
+    selectLabel: "워터마크를 넣을 PDF 선택",
+    workbenchTitle: "PDF 워터마크 작업대",
+    accept: "application/pdf,.pdf",
+    fileDescription: "PDF 한 개 · 최대 50MB · 모든 페이지에 적용",
     maximumFiles: 1,
     multiple: false,
   },
@@ -99,6 +141,7 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
   const [message, setMessage] = useState("파일을 선택하면 바로 준비할게요.");
   const [phase, setPhase] = useState<PdfPhase>();
   const [progress, setProgress] = useState(0);
@@ -107,20 +150,33 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
   const [splitMode, setSplitMode] = useState<"every-page" | "extract">("every-page");
   const [pageRange, setPageRange] = useState("1-3, 5");
   const [imagePageSize, setImagePageSize] = useState<"a4" | "image">("a4");
+  const [pagePlan, setPagePlan] = useState<PdfPagePlan>([]);
+  const [organizerPageCount, setOrganizerPageCount] = useState(0);
+  const [watermarkText, setWatermarkText] = useState("대외비");
+  const [watermarkPlacement, setWatermarkPlacement] = useState<"center" | "tile">("center");
+  const [watermarkFontSize, setWatermarkFontSize] = useState<32 | 48 | 72>(48);
+  const [watermarkOpacity, setWatermarkOpacity] = useState(18);
+  const [watermarkRotation, setWatermarkRotation] = useState<-45 | 0 | 45>(-45);
+  const [watermarkColor, setWatermarkColor] = useState("#334155");
   const [inputLimit, setInputLimit] = useState(LOW_MEMORY_TOTAL_BYTES);
   const inputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef(items);
   const handleRef = useRef<PdfJobHandle | undefined>(undefined);
+  const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const resultBlobRef = useRef<Blob | undefined>(undefined);
   const runRef = useRef(0);
-  const busy = processing;
+  const busy = processing || inspecting;
 
   const totalBytes = useMemo(
     () => items.reduce((total, item) => total + item.file.size, 0),
     [items],
   );
   const parsedPageRange = useMemo(() => parsePageSelection(pageRange), [pageRange]);
+  const validWatermarkText =
+    watermarkText.trim().length > 0 &&
+    watermarkText.trim().length <= 80 &&
+    isSafeWatermarkText(watermarkText);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -163,15 +219,52 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     () => () => {
       runRef.current += 1;
       handleRef.current?.cancel();
+      inspectionHandleRef.current?.cancel();
       if (resultUrlRef.current !== undefined) URL.revokeObjectURL(resultUrlRef.current);
     },
     [],
   );
 
+  const inspectOrganizerPdf = useCallback(async (file: File) => {
+    const runId = runRef.current + 1;
+    runRef.current = runId;
+    inspectionHandleRef.current?.cancel();
+    setInspecting(true);
+    setPagePlan([]);
+    setOrganizerPageCount(0);
+    setMessage("PDF 페이지를 기기 안에서 확인하고 있어요.");
+
+    let handle: PdfInspectionHandle | undefined;
+    try {
+      handle = inspectPdfFile(file);
+      inspectionHandleRef.current = handle;
+      const outcome = await handle.result;
+      if (runRef.current !== runId) return;
+      if (outcome.status === "fulfilled") {
+        setOrganizerPageCount(outcome.value.pageCount);
+        setPagePlan(createPdfPagePlan(outcome.value.pageCount));
+        setMessage(`${outcome.value.pageCount}페이지를 불러왔어요.`);
+      } else if (outcome.status === "cancelled") {
+        setMessage("페이지 확인을 중단했어요.");
+      } else {
+        setMessage(outcome.error.message);
+      }
+    } catch {
+      if (runRef.current === runId) {
+        setMessage("PDF 페이지를 확인하지 못했어요. 다른 파일로 다시 시도해 주세요.");
+      }
+    } finally {
+      if (runRef.current === runId) {
+        if (inspectionHandleRef.current === handle) inspectionHandleRef.current = undefined;
+        setInspecting(false);
+      }
+    }
+  }, []);
+
   const addFiles = useCallback(
     (fileList: FileList | readonly File[]) => {
       const candidates = Array.from(fileList);
-      const existing = intent === "split" ? [] : itemsRef.current;
+      const existing = config.multiple ? itemsRef.current : [];
       const accepted: PdfWorkItem[] = [];
       let remainingBytes = Math.max(
         0,
@@ -199,7 +292,12 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
         itemsRef.current = next;
         setItems(next);
         clearResult();
-        setMessage(`${accepted.length}개 파일을 준비했어요.`);
+        if (intent === "organize") {
+          const organizerFile = accepted[0]?.file;
+          if (organizerFile !== undefined) void inspectOrganizerPdf(organizerFile);
+        } else {
+          setMessage(`${accepted.length}개 파일을 준비했어요.`);
+        }
       }
       const rejected = candidates.length - accepted.length;
       if (rejected > 0) {
@@ -208,7 +306,7 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
         );
       }
     },
-    [clearResult, config.maximumFiles, inputLimit, intent],
+    [clearResult, config.maximumFiles, config.multiple, inputLimit, inspectOrganizerPdf, intent],
   );
 
   const removeItem = (id: string) => {
@@ -217,6 +315,12 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     itemsRef.current = next;
     setItems(next);
     clearResult();
+    if (intent === "organize") {
+      inspectionHandleRef.current?.cancel();
+      inspectionHandleRef.current = undefined;
+      setPagePlan([]);
+      setOrganizerPageCount(0);
+    }
     setMessage(next.length === 0 ? "파일을 선택하면 바로 준비할게요." : "파일을 제거했어요.");
   };
 
@@ -235,13 +339,55 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     setMessage(`${item.file.name}을 ${target + 1}번째로 이동했어요.`);
   };
 
+  const moveOrganizerPage = (index: number, direction: -1 | 1) => {
+    if (busy) return;
+    const item = pagePlan[index];
+    if (item === undefined) return;
+    const target = index + direction;
+    const next = movePdfPage(pagePlan, index, direction);
+    if (next === pagePlan) return;
+    setPagePlan(next);
+    clearResult();
+    setMessage(`${item.sourcePage}페이지를 ${target + 1}번째로 이동했어요.`);
+  };
+
+  const rotateOrganizerPage = (index: number) => {
+    if (busy) return;
+    const item = pagePlan[index];
+    if (item === undefined) return;
+    setPagePlan(rotatePdfPage(pagePlan, index, 1));
+    clearResult();
+    setMessage(`${item.sourcePage}페이지를 시계 방향으로 90도 회전했어요.`);
+  };
+
+  const deleteOrganizerPage = (index: number) => {
+    if (busy || pagePlan.length === 1) return;
+    const item = pagePlan[index];
+    if (item === undefined) return;
+    setPagePlan(removePdfPage(pagePlan, index));
+    clearResult();
+    setMessage(`${item.sourcePage}페이지를 결과에서 뺐어요.`);
+  };
+
+  const resetPagePlan = () => {
+    if (busy || organizerPageCount < 1) return;
+    setPagePlan(createPdfPagePlan(organizerPageCount));
+    clearResult();
+    setMessage("페이지 순서·회전·삭제 계획을 초기화했어요.");
+  };
+
   const reset = () => {
     runRef.current += 1;
     handleRef.current?.cancel();
     handleRef.current = undefined;
+    inspectionHandleRef.current?.cancel();
+    inspectionHandleRef.current = undefined;
     itemsRef.current = [];
     setItems([]);
     setProcessing(false);
+    setInspecting(false);
+    setPagePlan([]);
+    setOrganizerPageCount(0);
     clearResult();
     setMessage("파일을 선택하면 바로 준비할게요.");
   };
@@ -253,6 +399,36 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
         version: 1,
         operation: "images-to-pdf",
         page: imagePageSize === "a4" ? { size: "a4", margin: 24 } : { size: "image", margin: 0 },
+      };
+    }
+    if (intent === "organize") {
+      if (pagePlan.length === 0) {
+        setMessage("PDF 페이지 확인이 끝난 뒤 다시 시도해 주세요.");
+        return undefined;
+      }
+      return {
+        version: 1,
+        operation: "organize",
+        pages: pagePlan.map((page) => ({ ...page })),
+      };
+    }
+    if (intent === "watermark") {
+      if (!validWatermarkText) {
+        setMessage("워터마크 문구를 1자 이상 80자 이하로 입력해 주세요.");
+        return undefined;
+      }
+      return {
+        version: 1,
+        operation: "watermark",
+        watermark: {
+          text: watermarkText.trim(),
+          placement: watermarkPlacement,
+          fontSize: watermarkFontSize,
+          opacity: watermarkOpacity / 100,
+          rotation: watermarkRotation,
+          color: watermarkColor,
+        },
+        selection: { mode: "every-page" },
       };
     }
     if (splitMode === "every-page") {
@@ -342,6 +518,14 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
     setMessage("PDF 작업을 중단했어요.");
   };
 
+  const cancelInspection = () => {
+    runRef.current += 1;
+    inspectionHandleRef.current?.cancel();
+    inspectionHandleRef.current = undefined;
+    setInspecting(false);
+    setMessage("페이지 확인을 중단했어요.");
+  };
+
   const saveResult = async () => {
     const blob = resultBlobRef.current;
     if (result === undefined || resultUrl === undefined || blob === undefined) return;
@@ -396,14 +580,20 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
         ? splitMode === "every-page"
           ? "PDF 페이지별로 나누기 →"
           : "선택 페이지 추출하기 →"
-        : `${items.length}개 이미지로 PDF 만들기 →`;
+        : intent === "organize"
+          ? `${pagePlan.length}페이지 정리하기 →`
+          : intent === "watermark"
+            ? "PDF에 워터마크 넣기 →"
+            : `${items.length}개 이미지로 PDF 만들기 →`;
 
   const canRun =
     runtimeSupported &&
     !busy &&
     items.length > 0 &&
     (intent !== "merge" || items.length >= 2) &&
-    (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok);
+    (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok) &&
+    (intent !== "organize" || pagePlan.length > 0) &&
+    (intent !== "watermark" || validWatermarkText);
 
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -480,67 +670,128 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
               <h2 id="pdf-workbench-title">{config.workbenchTitle}</h2>
             </div>
             <div className={styles.headerActions}>
-              {intent !== "split" ? (
-                <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
-                  ＋ 추가
-                </button>
-              ) : null}
-              <button type="button" onClick={reset} disabled={busy}>
+              <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
+                {config.multiple ? "＋ 추가" : "PDF 교체"}
+              </button>
+              <button type="button" onClick={reset} disabled={processing}>
                 처음부터
               </button>
             </div>
           </div>
 
           <div className={styles.workspace}>
-            <section className={styles.filePanel} aria-label="선택한 파일">
+            <section
+              className={styles.filePanel}
+              aria-label={intent === "organize" ? "PDF 페이지 순서" : "선택한 파일"}
+            >
               <div className={styles.panelTitle}>
-                <strong>파일 순서</strong>
-                <span>{items.length}</span>
+                <strong>{intent === "organize" ? "페이지 순서" : "파일 순서"}</strong>
+                <span>{intent === "organize" ? pagePlan.length : items.length}</span>
               </div>
-              <div className={styles.fileList}>
-                {items.map((item, index) => (
-                  <article className={styles.fileRow} key={item.id}>
-                    <span className={styles.fileIndex}>{String(index + 1).padStart(2, "0")}</span>
-                    <div className={styles.fileCopy}>
-                      <strong>{item.file.name}</strong>
-                      <span>{formatBytes(item.file.size)}</span>
-                    </div>
-                    <div className={styles.fileActions}>
-                      {intent !== "split" ? (
-                        <>
+              {intent === "organize" ? (
+                <>
+                  <div className={styles.pageList}>
+                    {pagePlan.map((page, index) => (
+                      <article className={styles.pageRow} key={page.sourcePage}>
+                        <span className={styles.pagePosition}>
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className={styles.pageCopy}>
+                          <strong>{`원본 ${page.sourcePage}페이지`}</strong>
+                          <span>회전 {page.rotateBy}°</span>
+                        </div>
+                        <div className={styles.pageActions}>
                           <button
                             type="button"
-                            aria-label={`${item.file.name} 위로 이동`}
+                            aria-label={`${page.sourcePage}페이지 위로 이동`}
                             disabled={busy || index === 0}
-                            onClick={() => moveItem(index, -1)}
+                            onClick={() => moveOrganizerPage(index, -1)}
                           >
                             ↑
                           </button>
                           <button
                             type="button"
-                            aria-label={`${item.file.name} 아래로 이동`}
-                            disabled={busy || index === items.length - 1}
-                            onClick={() => moveItem(index, 1)}
+                            aria-label={`${page.sourcePage}페이지 아래로 이동`}
+                            disabled={busy || index === pagePlan.length - 1}
+                            onClick={() => moveOrganizerPage(index, 1)}
                           >
                             ↓
                           </button>
-                        </>
-                      ) : null}
-                      <button
-                        type="button"
-                        aria-label={`${item.file.name} 제거`}
-                        disabled={busy}
-                        onClick={() => removeItem(item.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <p className={styles.fileTotal}>
-                총 {formatBytes(totalBytes)} · 기기별 한도 {formatBytes(inputLimit)}
-              </p>
+                          <button
+                            type="button"
+                            aria-label={`${page.sourcePage}페이지 시계 방향으로 회전`}
+                            disabled={busy}
+                            onClick={() => rotateOrganizerPage(index)}
+                          >
+                            ↻
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`${page.sourcePage}페이지 삭제`}
+                            disabled={busy || pagePlan.length === 1}
+                            onClick={() => deleteOrganizerPage(index)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                    {inspecting ? <p className={styles.pageLoading}>페이지 확인 중…</p> : null}
+                  </div>
+                  <p className={styles.fileTotal}>
+                    결과 {pagePlan.length}페이지 · {formatBytes(totalBytes)}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className={styles.fileList}>
+                    {items.map((item, index) => (
+                      <article className={styles.fileRow} key={item.id}>
+                        <span className={styles.fileIndex}>
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className={styles.fileCopy}>
+                          <strong>{item.file.name}</strong>
+                          <span>{formatBytes(item.file.size)}</span>
+                        </div>
+                        <div className={styles.fileActions}>
+                          {config.multiple ? (
+                            <>
+                              <button
+                                type="button"
+                                aria-label={`${item.file.name} 위로 이동`}
+                                disabled={busy || index === 0}
+                                onClick={() => moveItem(index, -1)}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`${item.file.name} 아래로 이동`}
+                                disabled={busy || index === items.length - 1}
+                                onClick={() => moveItem(index, 1)}
+                              >
+                                ↓
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            type="button"
+                            aria-label={`${item.file.name} 제거`}
+                            disabled={busy}
+                            onClick={() => removeItem(item.id)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <p className={styles.fileTotal}>
+                    총 {formatBytes(totalBytes)} · 기기별 한도 {formatBytes(inputLimit)}
+                  </p>
+                </>
+              )}
             </section>
 
             <aside className={styles.settingsPanel} aria-label="PDF 설정">
@@ -553,6 +804,21 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                 <div className={styles.settingCard}>
                   <strong>선택한 순서대로 합치기</strong>
                   <p>왼쪽 목록의 01번부터 모든 페이지를 차례로 복사해요.</p>
+                </div>
+              ) : null}
+
+              {intent === "organize" ? (
+                <div className={styles.settingCard}>
+                  <strong>페이지 순서·회전·삭제</strong>
+                  <p>왼쪽 목록을 위아래로 옮기고, 90도씩 돌리거나 결과에서 빼세요.</p>
+                  <button
+                    className={styles.resetPlanButton}
+                    type="button"
+                    disabled={busy || organizerPageCount < 1}
+                    onClick={resetPagePlan}
+                  >
+                    페이지 순서 초기화
+                  </button>
                 </div>
               ) : null}
 
@@ -642,6 +908,137 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                 </fieldset>
               ) : null}
 
+              {intent === "watermark" ? (
+                <div className={styles.watermarkSettings}>
+                  <div className={styles.controlField}>
+                    <label htmlFor="pdf-watermark-text">워터마크 텍스트</label>
+                    <input
+                      id="pdf-watermark-text"
+                      type="text"
+                      value={watermarkText}
+                      maxLength={80}
+                      disabled={busy}
+                      aria-invalid={!validWatermarkText}
+                      onChange={(event) => {
+                        setWatermarkText(event.target.value);
+                        clearResult();
+                      }}
+                    />
+                    <small>{watermarkText.length}/80자</small>
+                  </div>
+
+                  <fieldset className={styles.segmentGroup}>
+                    <legend>배치</legend>
+                    <div>
+                      <label>
+                        <input
+                          type="radio"
+                          name="watermark-placement"
+                          checked={watermarkPlacement === "center"}
+                          disabled={busy}
+                          onChange={() => {
+                            setWatermarkPlacement("center");
+                            clearResult();
+                          }}
+                        />
+                        가운데 한 번
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="watermark-placement"
+                          checked={watermarkPlacement === "tile"}
+                          disabled={busy}
+                          onChange={() => {
+                            setWatermarkPlacement("tile");
+                            clearResult();
+                          }}
+                        />
+                        반복 타일
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <div className={styles.controlGrid}>
+                    <div className={styles.controlField}>
+                      <label htmlFor="pdf-watermark-size">글자 크기</label>
+                      <select
+                        id="pdf-watermark-size"
+                        value={watermarkFontSize}
+                        disabled={busy}
+                        onChange={(event) => {
+                          setWatermarkFontSize(Number(event.target.value) as 32 | 48 | 72);
+                          clearResult();
+                        }}
+                      >
+                        <option value={32}>32</option>
+                        <option value={48}>48</option>
+                        <option value={72}>72</option>
+                      </select>
+                    </div>
+                    <div className={styles.controlField}>
+                      <label htmlFor="pdf-watermark-color">색상</label>
+                      <input
+                        id="pdf-watermark-color"
+                        type="color"
+                        value={watermarkColor}
+                        disabled={busy}
+                        onChange={(event) => {
+                          setWatermarkColor(event.target.value);
+                          clearResult();
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={styles.controlField}>
+                    <label htmlFor="pdf-watermark-opacity">불투명도 {watermarkOpacity}%</label>
+                    <input
+                      id="pdf-watermark-opacity"
+                      type="range"
+                      min={5}
+                      max={80}
+                      step={1}
+                      value={watermarkOpacity}
+                      disabled={busy}
+                      onChange={(event) => {
+                        setWatermarkOpacity(Number(event.target.value));
+                        clearResult();
+                      }}
+                    />
+                  </div>
+
+                  <fieldset className={styles.segmentGroup}>
+                    <legend>각도</legend>
+                    <div>
+                      {([-45, 0, 45] as const).map((rotation) => (
+                        <label key={rotation}>
+                          <input
+                            type="radio"
+                            name="watermark-rotation"
+                            checked={watermarkRotation === rotation}
+                            disabled={busy}
+                            onChange={() => {
+                              setWatermarkRotation(rotation);
+                              clearResult();
+                            }}
+                          />
+                          {rotation}°
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+
+                  <div className={styles.settingCard}>
+                    <strong>모든 페이지에 적용</strong>
+                    <p>현재 버전은 선택한 PDF의 모든 페이지에 같은 워터마크를 넣어요.</p>
+                  </div>
+                  <p className={styles.rasterNotice}>
+                    워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요.
+                  </p>
+                </div>
+              ) : null}
+
               <div className={styles.privacyNotice}>
                 <span aria-hidden="true">✓</span>
                 <p>
@@ -663,7 +1060,9 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                       : `${result.outputPageCount}페이지 PDF 준비 완료`
                     : processing
                       ? phaseLabel(phase)
-                      : "결과가 여기에 준비돼요"}
+                      : inspecting
+                        ? "페이지 목록 읽는 중"
+                        : "결과가 여기에 준비돼요"}
                 </strong>
                 <p>
                   {result !== undefined
@@ -692,6 +1091,11 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
                   광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.
                 </p>
               ) : null}
+              {result?.warnings.includes("WATERMARK_TEXT_RASTERIZED") ? (
+                <p className={styles.resultWarning}>
+                  워터마크 문구는 이미지로 그려져 결과 PDF에서 검색하거나 선택할 수 없어요.
+                </p>
+              ) : null}
             </section>
           </div>
 
@@ -701,13 +1105,21 @@ export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
               <span>
                 {processing
                   ? `${phaseLabel(phase)} · ${Math.round(progress * 100)}%`
-                  : `선택 ${items.length}개 · ${formatBytes(totalBytes)}`}
+                  : inspecting
+                    ? "페이지 목록 확인 중"
+                    : intent === "organize" && pagePlan.length > 0
+                      ? `결과 ${pagePlan.length}페이지 · ${formatBytes(totalBytes)}`
+                      : `선택 ${items.length}개 · ${formatBytes(totalBytes)}`}
               </span>
             </div>
             <div className={styles.actionButtons}>
               {processing ? (
                 <button className={styles.secondaryButton} type="button" onClick={cancelProcessing}>
                   중단
+                </button>
+              ) : inspecting ? (
+                <button className={styles.secondaryButton} type="button" onClick={cancelInspection}>
+                  페이지 확인 중단
                 </button>
               ) : result !== undefined ? (
                 <>
