@@ -291,7 +291,7 @@ select:focus-visible,
 }
 
 .site-nav-link:hover,
-.site-nav-link[aria-current="page"] {
+.site-nav-link[data-active="true"] {
   background: white;
   color: var(--ink);
 }
@@ -304,6 +304,10 @@ select:focus-visible,
 
 .home-tools-section {
   padding: 110px 0 10px;
+}
+
+.home-tools-section-secondary {
+  padding-top: 70px;
 }
 
 .home-tools-grid,
@@ -392,7 +396,8 @@ select:focus-visible,
 }
 
 .tool-summary,
-.tool-note {
+.tool-note,
+.tool-warning {
   max-width: 760px;
   margin: 18px 0 0;
   padding: 12px 14px;
@@ -406,6 +411,12 @@ select:focus-visible,
   border-left-color: var(--green);
   color: var(--green);
   font-weight: 750;
+}
+
+.tool-warning {
+  border-left-color: var(--red);
+  color: var(--red);
+  font-weight: 700;
 }
 
 .tool-steps {
@@ -546,7 +557,8 @@ select:focus-visible,
   }
 
   .tool-summary,
-  .tool-note {
+  .tool-note,
+  .tool-warning {
     font-size: 12px;
   }
 

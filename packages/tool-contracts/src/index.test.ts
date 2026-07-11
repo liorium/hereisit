@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imagePipelineSpecSchema } from "./index";
+import { imagePipelineSpecSchema, pdfPipelineSpecSchema } from "./index";
 
 describe("imagePipelineSpecSchema", () => {
   it("rejects an inverted target-size quality range", () => {
@@ -50,5 +50,37 @@ describe("imagePipelineSpecSchema", () => {
       minQuality: 35,
       maxAttempts: 6,
     });
+  });
+});
+
+describe("pdfPipelineSpecSchema", () => {
+  it("parses every supported PDF operation", () => {
+    expect(pdfPipelineSpecSchema.parse({ version: 1, operation: "merge" })).toEqual({
+      version: 1,
+      operation: "merge",
+    });
+    expect(
+      pdfPipelineSpecSchema.parse({
+        version: 1,
+        operation: "split",
+        selection: { mode: "every-page" },
+      }),
+    ).toMatchObject({ operation: "split" });
+    expect(
+      pdfPipelineSpecSchema.parse({
+        version: 1,
+        operation: "images-to-pdf",
+        page: { size: "a4" },
+      }),
+    ).toMatchObject({ page: { size: "a4", margin: 24 } });
+  });
+
+  it("rejects duplicate extracted pages", () => {
+    const result = pdfPipelineSpecSchema.safeParse({
+      version: 1,
+      operation: "split",
+      selection: { mode: "extract", pages: [1, 1] },
+    });
+    expect(result.success).toBe(false);
   });
 });

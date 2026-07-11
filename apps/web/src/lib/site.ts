@@ -1,15 +1,15 @@
 export const SITE_NAME = "HereItIs";
 export const SITE_URL = "https://hereisit.pages.dev";
 
-export const HOME_TITLE = "HereItIs — 이미지 작업, 여기서 끝";
+export const HOME_TITLE = "HereItIs — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축, 크기 조절, 형식 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
-  "파일은 기기 밖으로 나가지 않아요. 여러 이미지를 한 번에 빠르게 처리하세요.";
+  "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
 
 export type ImageToolIntent = "compress" | "resize" | "convert";
 
-export interface ImageToolStep {
+export interface ToolStep {
   title: string;
   description: string;
 }
@@ -22,7 +22,7 @@ export interface ImageToolConfig {
   title: string;
   description: string;
   defaultSummary: string;
-  steps: readonly [ImageToolStep, ImageToolStep, ImageToolStep];
+  steps: readonly [ToolStep, ToolStep, ToolStep];
   heicNote?: string;
 }
 
@@ -97,3 +97,83 @@ export const imageToolList: readonly ImageToolConfig[] = Object.values(imageTool
 export function relatedImageTools(intent: ImageToolIntent): readonly ImageToolConfig[] {
   return imageToolList.filter((tool) => tool.intent !== intent);
 }
+
+export type PdfToolIntent = "merge" | "split" | "image-to-pdf";
+
+export interface PdfToolConfig {
+  intent: PdfToolIntent;
+  path: `/pdf/${PdfToolIntent}`;
+  navLabel: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  defaultSummary: string;
+  warning?: string;
+  steps: readonly [ToolStep, ToolStep, ToolStep];
+}
+
+export const pdfTools = {
+  merge: {
+    intent: "merge",
+    path: "/pdf/merge",
+    navLabel: "PDF 합치기",
+    eyebrow: "PDF MERGER",
+    title: "PDF 합치기",
+    description:
+      "여러 PDF 파일을 원하는 순서대로 하나로 합치세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
+    defaultSummary: "선택한 순서대로 페이지를 이미지로 바꾸지 않고 하나의 PDF로 합쳐요.",
+    warning:
+      "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+    steps: [
+      { title: "PDF 선택", description: "합칠 PDF를 2개 이상 선택하세요." },
+      { title: "순서 정리", description: "위·아래 버튼으로 합쳐질 파일 순서를 정하세요." },
+      { title: "하나로 저장", description: "모든 페이지를 담은 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  split: {
+    intent: "split",
+    path: "/pdf/split",
+    navLabel: "페이지 분할",
+    eyebrow: "PDF SPLITTER",
+    title: "PDF 페이지 분할",
+    description:
+      "PDF를 페이지별로 나누거나 필요한 페이지만 추출하세요. 파일은 기기 안에서만 처리됩니다.",
+    defaultSummary: "기본값은 각 페이지를 별도 PDF로 나누고 하나의 ZIP으로 저장해요.",
+    warning:
+      "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+    steps: [
+      { title: "PDF 선택", description: "나눌 PDF 한 개를 선택하세요." },
+      { title: "방식 선택", description: "페이지별 분리 또는 필요한 페이지 추출을 골라요." },
+      { title: "결과 저장", description: "분할 ZIP이나 추출된 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  "image-to-pdf": {
+    intent: "image-to-pdf",
+    path: "/pdf/image-to-pdf",
+    navLabel: "이미지→PDF",
+    eyebrow: "IMAGE TO PDF",
+    title: "이미지를 PDF로 변환",
+    description:
+      "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요. 업로드 없이 내 기기에서 처리합니다.",
+    defaultSummary:
+      "이미지 한 장을 PDF 한 페이지로 넣고 원본 비율과 순서를 유지하며 촬영 위치 정보는 제외해요.",
+    warning: "광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.",
+    steps: [
+      { title: "이미지 선택", description: "JPG 또는 PNG 이미지를 최대 100장 선택하세요." },
+      { title: "순서·페이지 설정", description: "페이지 순서와 A4 또는 이미지 맞춤을 골라요." },
+      { title: "PDF 저장", description: "모든 이미지를 담은 PDF 한 개를 기기에 저장해요." },
+    ],
+  },
+} as const satisfies Record<PdfToolIntent, PdfToolConfig>;
+
+export const pdfToolList: readonly PdfToolConfig[] = Object.values(pdfTools);
+export const toolList = [...imageToolList, ...pdfToolList] as const;
+
+export function relatedPdfTools(intent: PdfToolIntent): readonly PdfToolConfig[] {
+  return pdfToolList.filter((tool) => tool.intent !== intent);
+}
+
+export const categoryNavigation = [
+  { path: imageTools.compress.path, label: "이미지", prefix: "/image/" },
+  { path: pdfTools.merge.path, label: "PDF", prefix: "/pdf/" },
+] as const;

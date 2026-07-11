@@ -1,23 +1,23 @@
 import { ImageWorkbench } from "../components/image-workbench";
 import { SiteFooter } from "../components/site-footer";
 import { SiteHeader } from "../components/site-header";
-import { imageToolList } from "../lib/site";
+import { imageToolList, pdfToolList } from "../lib/site";
 
 const features = [
   {
     number: "01",
     title: "업로드를 기다리지 않아요",
-    body: "이미지는 브라우저 안에서 처리됩니다. 작은 작업은 서버 왕복 없이 바로 시작해요.",
+    body: "이미지와 PDF는 브라우저 안에서 처리됩니다. 서버 왕복 없이 바로 시작해요.",
   },
   {
     number: "02",
     title: "한 번만 열고 끝내요",
-    body: "크기 조절, 자르기, 형식 변환, 압축을 하나의 작업으로 묶어 다시 인코딩하지 않아요.",
+    body: "작업별 전용 화면에서 필요한 설정만 고르고 결과를 바로 확인해요.",
   },
   {
     number: "03",
     title: "원본은 그대로 남아요",
-    body: "작업 결과는 새 파일로 만들어지고, 위치·촬영 정보 같은 메타데이터는 포함하지 않아요.",
+    body: "작업 결과는 새 파일로 만들어지고, 선택한 원본 파일은 바뀌지 않아요.",
   },
 ];
 
@@ -30,12 +30,12 @@ export default function HomePage() {
         <div className="hero-copy">
           <p className="eyebrow">FAST · PRIVATE · LOCAL</p>
           <h1>
-            이미지 작업,
+            파일 작업,
             <br />
             <span>여기서 끝.</span>
           </h1>
           <p className="hero-description">
-            압축·크기 조절·형식 변환을 한 번에.
+            이미지와 PDF, 필요한 작업을 빠르게.
             <br className="desktop-break" /> 파일은 기기 밖으로 나가지 않아요.
           </p>
         </div>
@@ -57,6 +57,29 @@ export default function HomePage() {
         </div>
         <div className="home-tools-grid">
           {imageToolList.map((tool, index) => (
+            <a className="home-tool-card" href={tool.path} key={tool.path}>
+              <span className="feature-number">{String(index + 1).padStart(2, "0")}</span>
+              <strong>{tool.title}</strong>
+              <p>{tool.description}</p>
+              <em aria-hidden="true">바로 시작 →</em>
+            </a>
+          ))}
+        </div>
+      </section>
+
+      <section
+        id="pdf-tools"
+        className="home-tools-section home-tools-section-secondary"
+        aria-labelledby="pdf-tools-title"
+      >
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">PDF TOOLS</p>
+            <h2 id="pdf-tools-title">PDF 작업도 기기 안에서.</h2>
+          </div>
+        </div>
+        <div className="home-tools-grid">
+          {pdfToolList.map((tool, index) => (
             <a className="home-tool-card" href={tool.path} key={tool.path}>
               <span className="feature-number">{String(index + 1).padStart(2, "0")}</span>
               <strong>{tool.title}</strong>

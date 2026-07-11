@@ -4,14 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./image": "./src/run-image-batch.ts",
+    "./pdf": "./src/run-pdf-job.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cantoo/pdf-lib": "2.7.1",
     "@hereisit/image-tool": "workspace:*",
-    "@hereisit/tool-contracts": "workspace:*"
+    "@hereisit/pdf-tool": "workspace:*",
+    "@hereisit/tool-contracts": "workspace:*",
+    "fflate": "0.8.3"
   },
   "devDependencies": {
     "typescript": "6.0.3",

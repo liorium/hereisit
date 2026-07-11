@@ -1,6 +1,6 @@
 "use client";
 
-import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime";
+import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
 import type {
   BatchHandle,
   BatchRuntimeEvent,

@@ -1,0 +1,1901 @@
+diff --git a/cjs/api/PDFDocument.js b/cjs/api/PDFDocument.js
+index 5b8108cfb329463be61086c233ff7b31cb5bb6d4..03a8dcdf4fdfe5d5231765c28846c64915677ea4 100644
+--- a/cjs/api/PDFDocument.js
++++ b/cjs/api/PDFDocument.js
+@@ -20,6 +20,8 @@ const crypto_1 = require("../core/crypto");
+ const PDFSvg_1 = tslib_1.__importDefault(require("./PDFSvg"));
+ const PDFSecurity_1 = tslib_1.__importDefault(require("../core/security/PDFSecurity"));
+ const snapshot_1 = require("./snapshot");
++const MAX_DOCUMENT_PAGES = 500;
++const PDF_PAGE_LIMIT = 'PDF_PAGE_LIMIT';
+ /**
+  * Represents a PDF document.
+  */
+@@ -129,6 +131,8 @@ class PDFDocument {
+             const pages = [];
+             this.catalog.Pages().traverse((node, ref) => {
+                 if (node instanceof core_1.PDFPageLeaf) {
++                    if (pages.length >= MAX_DOCUMENT_PAGES)
++                        throw new Error(PDF_PAGE_LIMIT);
+                     let page = this.pageMap.get(node);
+                     if (!page) {
+                         page = PDFPage_1.default.of(node, ref, this);
+diff --git a/cjs/core/parser/BaseParser.js b/cjs/core/parser/BaseParser.js
+index 6077a0fad9925a258eb1301b0c67bb8791a70d16..375fabd54389cfa9ff78518518e938490c8ba910 100644
+--- a/cjs/core/parser/BaseParser.js
++++ b/cjs/core/parser/BaseParser.js
+@@ -7,6 +7,8 @@ const Numeric_1 = require("../syntax/Numeric");
+ const Whitespace_1 = require("../syntax/Whitespace");
+ const utils_1 = require("../../utils");
+ const { Newline, CarriageReturn } = CharCodes_1.default;
++const MAX_NUMBER_TOKEN_BYTES = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class BaseParser {
+     constructor(bytes, capNumbers = false) {
+@@ -19,6 +21,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!Numeric_1.IsDigit[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += (0, utils_1.charFromCode)(this.bytes.next());
+         }
+         const numberValue = Number(value);
+@@ -36,6 +40,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!Numeric_1.IsNumeric[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += (0, utils_1.charFromCode)(this.bytes.next());
+             if (byte === CharCodes_1.default.Period)
+                 break;
+@@ -45,6 +51,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!Numeric_1.IsDigit[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += (0, utils_1.charFromCode)(this.bytes.next());
+         }
+         const numberValue = Number(value);
+@@ -53,14 +61,8 @@ class BaseParser {
+         }
+         if (numberValue > Number.MAX_SAFE_INTEGER) {
+             if (this.capNumbers) {
+-                const msg = `Parsed number that is too large for some PDF readers: ${value}, using Number.MAX_SAFE_INTEGER instead.`;
+-                console.warn(msg);
+                 return Number.MAX_SAFE_INTEGER;
+             }
+-            else {
+-                const msg = `Parsed number that is too large for some PDF readers: ${value}, not capping.`;
+-                console.warn(msg);
+-            }
+         }
+         return numberValue;
+     }
+diff --git a/cjs/core/parser/ByteStream.js b/cjs/core/parser/ByteStream.js
+index 3ed56f668632d23d44c35e7989b951a7ef88b927..b9c36d95c3d3fad3f729ebce02e6d586a9b4d21d 100644
+--- a/cjs/core/parser/ByteStream.js
++++ b/cjs/core/parser/ByteStream.js
+@@ -4,6 +4,10 @@ const tslib_1 = require("tslib");
+ const errors_1 = require("../errors");
+ const decode_1 = require("../streams/decode");
+ const CharCodes_1 = tslib_1.__importDefault(require("../syntax/CharCodes"));
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_STREAM_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedStreamBytes = 0;
+ // TODO: See how line/col tracking affects performance
+ class ByteStream {
+     constructor(bytes) {
+@@ -56,6 +60,14 @@ class ByteStream {
+     }
+ }
+ ByteStream.of = (bytes) => new ByteStream(bytes);
+-ByteStream.fromPDFRawStream = (rawStream) => ByteStream.of((0, decode_1.decodePDFRawStream)(rawStream).decode());
++ByteStream.fromPDFRawStream = (rawStream) => {
++    const bytes = (0, decode_1.decodePDFRawStream)(rawStream).decode();
++    if (bytes.byteLength > MAX_DECODED_STREAM_BYTES ||
++        totalDecodedStreamBytes > MAX_TOTAL_DECODED_STREAM_BYTES - bytes.byteLength) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
++    totalDecodedStreamBytes += bytes.byteLength;
++    return ByteStream.of(bytes);
++};
+ exports.default = ByteStream;
+ //# sourceMappingURL=ByteStream.js.map
+\ No newline at end of file
+diff --git a/cjs/core/parser/PDFObjectParser.js b/cjs/core/parser/PDFObjectParser.js
+index 66a87d8f3f6acf418d3c953009cfeaa2548d89ff..d0acd209a4bfea0de6591809b7ecb969cb957651 100644
+--- a/cjs/core/parser/PDFObjectParser.js
++++ b/cjs/core/parser/PDFObjectParser.js
+@@ -23,38 +23,63 @@ const Keywords_1 = require("../syntax/Keywords");
+ const Numeric_1 = require("../syntax/Numeric");
+ const Whitespace_1 = require("../syntax/Whitespace");
+ const utils_1 = require("../../utils");
++const MAX_PARSED_OBJECT_NODES = 250000;
++const MAX_TOTAL_PARSED_OBJECT_NODES = 500000;
++const MAX_ARRAY_ELEMENTS = 100000;
++const MAX_DICT_ENTRIES = 50000;
++const MAX_OBJECT_DEPTH = 128;
++const MAX_OBJECT_TOKEN_BYTES = 16 * 1024 * 1024;
++const MAX_NAME_BYTES = 4096;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++const parsedNodesByContext = new WeakMap();
++let totalParsedObjectNodes = 0;
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class PDFObjectParser extends BaseParser_1.default {
+     constructor(byteStream, context, capNumbers = false, cryptoFactory) {
+         super(byteStream, capNumbers);
++        this.objectDepth = 0;
+         this.context = context;
+         this.cryptoFactory = cryptoFactory;
+     }
+     // TODO: Is it possible to reduce duplicate parsing for ref lookaheads?
+     parseObject(ref) {
+         this.skipWhitespaceAndComments();
+-        if (this.matchKeyword(Keywords_1.Keywords.true))
+-            return PDFBool_1.default.True;
+-        if (this.matchKeyword(Keywords_1.Keywords.false))
+-            return PDFBool_1.default.False;
+-        if (this.matchKeyword(Keywords_1.Keywords.null))
+-            return PDFNull_1.default;
+-        const byte = this.bytes.peek();
+-        if (byte === CharCodes_1.default.LessThan &&
+-            this.bytes.peekAhead(1) === CharCodes_1.default.LessThan) {
+-            return this.parseDictOrStream(ref);
+-        }
+-        if (byte === CharCodes_1.default.LessThan)
+-            return this.parseHexString(ref);
+-        if (byte === CharCodes_1.default.LeftParen)
+-            return this.parseString(ref);
+-        if (byte === CharCodes_1.default.ForwardSlash)
+-            return this.parseName();
+-        if (byte === CharCodes_1.default.LeftSquareBracket)
+-            return this.parseArray(ref);
+-        if (Numeric_1.IsNumeric[byte])
+-            return this.parseNumberOrRef();
+-        throw new errors_1.PDFObjectParsingError(this.bytes.position(), byte);
++        const parsedNodes = (parsedNodesByContext.get(this.context) || 0) + 1;
++        totalParsedObjectNodes += 1;
++        if (parsedNodes > MAX_PARSED_OBJECT_NODES ||
++            totalParsedObjectNodes > MAX_TOTAL_PARSED_OBJECT_NODES ||
++            this.objectDepth >= MAX_OBJECT_DEPTH) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
++        parsedNodesByContext.set(this.context, parsedNodes);
++        this.objectDepth += 1;
++        try {
++            if (this.matchKeyword(Keywords_1.Keywords.true))
++                return PDFBool_1.default.True;
++            if (this.matchKeyword(Keywords_1.Keywords.false))
++                return PDFBool_1.default.False;
++            if (this.matchKeyword(Keywords_1.Keywords.null))
++                return PDFNull_1.default;
++            const byte = this.bytes.peek();
++            if (byte === CharCodes_1.default.LessThan &&
++                this.bytes.peekAhead(1) === CharCodes_1.default.LessThan) {
++                return this.parseDictOrStream(ref);
++            }
++            if (byte === CharCodes_1.default.LessThan)
++                return this.parseHexString(ref);
++            if (byte === CharCodes_1.default.LeftParen)
++                return this.parseString(ref);
++            if (byte === CharCodes_1.default.ForwardSlash)
++                return this.parseName();
++            if (byte === CharCodes_1.default.LeftSquareBracket)
++                return this.parseArray(ref);
++            if (Numeric_1.IsNumeric[byte])
++                return this.parseNumberOrRef();
++            throw new errors_1.PDFObjectParsingError(this.bytes.position(), byte);
++        }
++        finally {
++            this.objectDepth -= 1;
++        }
+     }
+     parseNumberOrRef() {
+         const firstNum = this.parseRawNumber();
+@@ -76,6 +101,8 @@ class PDFObjectParser extends BaseParser_1.default {
+         let value = '';
+         this.bytes.assertNext(CharCodes_1.default.LessThan);
+         while (!this.bytes.done() && this.bytes.peek() !== CharCodes_1.default.GreaterThan) {
++            if (value.length >= MAX_OBJECT_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += (0, utils_1.charFromCode)(this.bytes.next());
+         }
+         this.bytes.assertNext(CharCodes_1.default.GreaterThan);
+@@ -92,6 +119,8 @@ class PDFObjectParser extends BaseParser_1.default {
+         let value = '';
+         while (!this.bytes.done()) {
+             const byte = this.bytes.next();
++            if (value.length >= MAX_OBJECT_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += (0, utils_1.charFromCode)(byte);
+             // Check for unescaped parenthesis
+             if (!isEscaped) {
+@@ -130,6 +159,8 @@ class PDFObjectParser extends BaseParser_1.default {
+             const byte = this.bytes.peek();
+             if (Whitespace_1.IsWhitespace[byte] || Delimiters_1.IsDelimiter[byte])
+                 break;
++            if (name.length >= MAX_NAME_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             name += (0, utils_1.charFromCode)(byte);
+             this.bytes.next();
+         }
+@@ -139,7 +170,11 @@ class PDFObjectParser extends BaseParser_1.default {
+         this.bytes.assertNext(CharCodes_1.default.LeftSquareBracket);
+         this.skipWhitespaceAndComments();
+         const pdfArray = PDFArray_1.default.withContext(this.context);
++        let elements = 0;
+         while (this.bytes.peek() !== CharCodes_1.default.RightSquareBracket) {
++            elements += 1;
++            if (elements > MAX_ARRAY_ELEMENTS)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             const element = this.parseObject(ref);
+             pdfArray.push(element);
+             this.skipWhitespaceAndComments();
+@@ -152,9 +187,13 @@ class PDFObjectParser extends BaseParser_1.default {
+         this.bytes.assertNext(CharCodes_1.default.LessThan);
+         this.skipWhitespaceAndComments();
+         const dict = new Map();
++        let entries = 0;
+         while (!this.bytes.done() &&
+             this.bytes.peek() !== CharCodes_1.default.GreaterThan &&
+             this.bytes.peekAhead(1) !== CharCodes_1.default.GreaterThan) {
++            entries += 1;
++            if (entries > MAX_DICT_ENTRIES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             const key = this.parseName();
+             const value = this.parseObject(ref);
+             dict.set(key, value);
+diff --git a/cjs/core/parser/PDFObjectStreamParser.d.ts b/cjs/core/parser/PDFObjectStreamParser.d.ts
+index 47c9e340280423759bfc5da26b9c61541f18bcda..18ee029dd0fe0b9c9b46694c489cf4f939cb92ad 100644
+--- a/cjs/core/parser/PDFObjectStreamParser.d.ts
++++ b/cjs/core/parser/PDFObjectStreamParser.d.ts
+@@ -1,12 +1,13 @@
+ import PDFRawStream from '../objects/PDFRawStream';
++import PDFRef from '../objects/PDFRef';
+ import PDFObjectParser from './PDFObjectParser';
+ declare class PDFObjectStreamParser extends PDFObjectParser {
+-    static forStream: (rawStream: PDFRawStream, shouldWaitForTick?: () => boolean) => PDFObjectStreamParser;
++    static forStream: (rawStream: PDFRawStream, shouldWaitForTick?: (ref: PDFRef) => boolean) => PDFObjectStreamParser;
+     private alreadyParsed;
+     private readonly shouldWaitForTick;
+     private readonly firstOffset;
+     private readonly objectCount;
+-    constructor(rawStream: PDFRawStream, shouldWaitForTick?: () => boolean);
++    constructor(rawStream: PDFRawStream, shouldWaitForTick?: (ref: PDFRef) => boolean);
+     parseIntoContext(): Promise<void>;
+     private parseOffsetsAndObjectNumbers;
+ }
+diff --git a/cjs/core/parser/PDFObjectStreamParser.js b/cjs/core/parser/PDFObjectStreamParser.js
+index 91da40dc5804cf57e4c44e9097eeab315543a917..5b77b09f089591b3601844e1d3b9b0414822ed1f 100644
+--- a/cjs/core/parser/PDFObjectStreamParser.js
++++ b/cjs/core/parser/PDFObjectStreamParser.js
+@@ -8,6 +8,9 @@ const PDFRef_1 = tslib_1.__importDefault(require("../objects/PDFRef"));
+ const ByteStream_1 = tslib_1.__importDefault(require("./ByteStream"));
+ const PDFObjectParser_1 = tslib_1.__importDefault(require("./PDFObjectParser"));
+ const utils_1 = require("../../utils");
++const MAX_OBJECT_STREAM_OBJECTS = 50000;
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFObjectStreamParser extends PDFObjectParser_1.default {
+     constructor(rawStream, shouldWaitForTick) {
+         super(ByteStream_1.default.fromPDFRawStream(rawStream), rawStream.dict.context);
+@@ -16,6 +19,14 @@ class PDFObjectStreamParser extends PDFObjectParser_1.default {
+         this.shouldWaitForTick = shouldWaitForTick || (() => false);
+         this.firstOffset = dict.lookup(PDFName_1.default.of('First'), PDFNumber_1.default).asNumber();
+         this.objectCount = dict.lookup(PDFName_1.default.of('N'), PDFNumber_1.default).asNumber();
++        if (!Number.isSafeInteger(this.firstOffset) ||
++            this.firstOffset < 0 ||
++            this.firstOffset > MAX_DECODED_STREAM_BYTES ||
++            !Number.isSafeInteger(this.objectCount) ||
++            this.objectCount < 0 ||
++            this.objectCount > MAX_OBJECT_STREAM_OBJECTS) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+     }
+     parseIntoContext() {
+         return tslib_1.__awaiter(this, void 0, void 0, function* () {
+@@ -30,7 +41,7 @@ class PDFObjectStreamParser extends PDFObjectParser_1.default {
+                 const ref = PDFRef_1.default.of(objectNumber, 0);
+                 const object = this.parseObject(ref);
+                 this.context.assign(ref, object);
+-                if (this.shouldWaitForTick())
++                if (this.shouldWaitForTick(ref))
+                     yield (0, utils_1.waitForTick)();
+             }
+         });
+diff --git a/cjs/core/parser/PDFParser.js b/cjs/core/parser/PDFParser.js
+index 5f88b2e09a5a3ec06e463a16e1f8dd540f9be053..ea6b1421a08a61f71c914d3a9071ddca0c469202 100644
+--- a/cjs/core/parser/PDFParser.js
++++ b/cjs/core/parser/PDFParser.js
+@@ -20,15 +20,28 @@ const Keywords_1 = require("../syntax/Keywords");
+ const Numeric_1 = require("../syntax/Numeric");
+ const utils_1 = require("../../utils");
+ const PDFNumber_1 = tslib_1.__importDefault(require("../objects/PDFNumber"));
++const MAX_PARSED_OBJECTS = 100000;
++const MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION = 100000;
++const MAX_TRADITIONAL_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFParser extends PDFObjectParser_1.default {
+     constructor(pdfBytes, objectsPerTick = Infinity, throwOnInvalidObject = false, warnOnInvalidObjects = false, capNumbers = false, cryptoFactory, forIncrementalUpdate = false) {
+         super(ByteStream_1.default.of(pdfBytes), PDFContext_1.default.create(), capNumbers, cryptoFactory);
+         this.alreadyParsed = false;
+         this.parsedObjects = 0;
++        this.parsedCompressedObjectRefs = new Set();
++        this.parsedObjectRefs = new Set();
+         this.shouldWaitForTick = () => {
+             this.parsedObjects += 1;
+             return this.parsedObjects % this.objectsPerTick === 0;
+         };
++        this.shouldWaitForObjectStreamTick = (ref) => {
++            this.parsedCompressedObjectRefs.add(ref.tag);
++            if (this.parsedCompressedObjectRefs.size > MAX_PARSED_OBJECTS) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            return this.shouldWaitForTick();
++        };
+         this.objectsPerTick = objectsPerTick;
+         this.throwOnInvalidObject = throwOnInvalidObject;
+         this.warnOnInvalidObjects = warnOnInvalidObjects;
+@@ -125,11 +138,11 @@ class PDFParser extends PDFObjectParser_1.default {
+             this.matchKeyword(Keywords_1.Keywords.endobj);
+             if (object instanceof PDFRawStream_1.default &&
+                 object.dict.lookup(PDFName_1.default.of('Type')) === PDFName_1.default.of('ObjStm')) {
+-                yield PDFObjectStreamParser_1.default.forStream(object, this.shouldWaitForTick).parseIntoContext();
++                yield PDFObjectStreamParser_1.default.forStream(object, this.shouldWaitForObjectStreamTick).parseIntoContext();
+             }
+             else if (object instanceof PDFRawStream_1.default &&
+                 object.dict.lookup(PDFName_1.default.of('Type')) === PDFName_1.default.of('XRef')) {
+-                PDFXRefStreamParser_1.default.forStream(object).parseIntoContext();
++                PDFXRefStreamParser_1.default.forStream(object).parseIntoContext(false);
+             }
+             // always register the object and the ref, to properly handle object numeration
+             this.context.assign(ref, object);
+@@ -170,13 +183,20 @@ class PDFParser extends PDFObjectParser_1.default {
+             this.skipWhitespaceAndComments();
+             while (!this.bytes.done() && Numeric_1.IsDigit[this.bytes.peek()]) {
+                 const initialOffset = this.bytes.offset();
++                let ref;
+                 try {
+-                    yield this.parseIndirectObject();
++                    ref = yield this.parseIndirectObject();
+                 }
+                 catch (e) {
++                    if (e instanceof Error && e.message === 'PDF_STREAM_SAFETY_LIMIT')
++                        throw e;
+                     // TODO: Add tracing/logging mechanism to track when this happens!
+                     this.bytes.moveTo(initialOffset);
+-                    this.tryToParseInvalidIndirectObject();
++                    ref = this.tryToParseInvalidIndirectObject();
++                }
++                this.parsedObjectRefs.add(ref.tag);
++                if (this.parsedObjectRefs.size > MAX_PARSED_OBJECTS) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
+                 }
+                 this.skipWhitespaceAndComments();
+                 // TODO: Can this be done only when needed, to avoid harming performance?
+@@ -193,6 +213,8 @@ class PDFParser extends PDFObjectParser_1.default {
+         this.skipWhitespaceAndComments();
+         let objectNumber = -1;
+         const xref = PDFCrossRefSection_1.default.createEmpty();
++        let parsedEntries = 0;
++        let parsedSubsections = 0;
+         while (!this.bytes.done() && Numeric_1.IsDigit[this.bytes.peek()]) {
+             const firstInt = this.parseRawInt();
+             this.skipWhitespaceAndComments();
+@@ -204,17 +226,18 @@ class PDFParser extends PDFObjectParser_1.default {
+             this.skipWhitespaceAndComments();
+             const byte = this.bytes.peek();
+             if (byte === CharCodes_1.default.n || byte === CharCodes_1.default.f) {
+-                const ref = PDFRef_1.default.of(objectNumber, secondInt);
+-                if (this.bytes.next() === CharCodes_1.default.n) {
+-                    xref.addEntry(ref, firstInt);
+-                }
+-                else {
+-                    // this.context.delete(ref);
+-                    xref.addDeletedEntry(ref, firstInt);
++                parsedEntries += 1;
++                if (parsedEntries > MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
+                 }
++                this.bytes.next();
+                 objectNumber += 1;
+             }
+             else {
++                parsedSubsections += 1;
++                if (parsedSubsections > MAX_TRADITIONAL_XREF_SUBSECTIONS) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
++                }
+                 objectNumber = firstInt;
+             }
+             this.skipWhitespaceAndComments();
+diff --git a/cjs/core/parser/PDFXRefStreamParser.d.ts b/cjs/core/parser/PDFXRefStreamParser.d.ts
+index 836035b939ca7f4fee38d61cc504e3e6bbc68562..a4f23218430cd469183ff3b52fa9aae72cace286 100644
+--- a/cjs/core/parser/PDFXRefStreamParser.d.ts
++++ b/cjs/core/parser/PDFXRefStreamParser.d.ts
+@@ -15,7 +15,7 @@ declare class PDFXRefStreamParser {
+     private readonly subsections;
+     private readonly byteWidths;
+     constructor(rawStream: PDFRawStream);
+-    parseIntoContext(): Entry[];
++    parseIntoContext(collectEntries?: boolean): Entry[];
+     private parseEntries;
+ }
+ export default PDFXRefStreamParser;
+diff --git a/cjs/core/parser/PDFXRefStreamParser.js b/cjs/core/parser/PDFXRefStreamParser.js
+index fc5d389920df5ebf8b355e987d68644cc4e99b23..906f19b1457b6368088e44be3fa43d7c6ab93ea1 100644
+--- a/cjs/core/parser/PDFXRefStreamParser.js
++++ b/cjs/core/parser/PDFXRefStreamParser.js
+@@ -7,6 +7,10 @@ const PDFName_1 = tslib_1.__importDefault(require("../objects/PDFName"));
+ const PDFNumber_1 = tslib_1.__importDefault(require("../objects/PDFNumber"));
+ const PDFRef_1 = tslib_1.__importDefault(require("../objects/PDFRef"));
+ const ByteStream_1 = tslib_1.__importDefault(require("./ByteStream"));
++const MAX_PDF_OBJECT_NUMBER = 10000000;
++const MAX_XREF_ENTRIES = 100000;
++const MAX_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFXRefStreamParser {
+     constructor(rawStream) {
+         this.alreadyParsed = false;
+@@ -15,25 +19,57 @@ class PDFXRefStreamParser {
+         this.context = this.dict.context;
+         this.context.pdfFileDetails.useObjectStreams = true;
+         const Size = this.dict.lookup(PDFName_1.default.of('Size'), PDFNumber_1.default);
++        const size = Size.asNumber();
++        if (!Number.isSafeInteger(size) || size < 1 || size > MAX_PDF_OBJECT_NUMBER) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         const Index = this.dict.lookup(PDFName_1.default.of('Index'));
++        let totalEntries = 0;
+         if (Index instanceof PDFArray_1.default) {
++            if (Index.size() % 2 !== 0 || Index.size() / 2 > MAX_XREF_SUBSECTIONS) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
+             this.subsections = [];
+             for (let idx = 0, len = Index.size(); idx < len; idx += 2) {
+                 const firstObjectNumber = Index.lookup(idx + 0, PDFNumber_1.default).asNumber();
+                 const length = Index.lookup(idx + 1, PDFNumber_1.default).asNumber();
++                totalEntries += length;
++                if (!Number.isSafeInteger(firstObjectNumber) ||
++                    !Number.isSafeInteger(length) ||
++                    firstObjectNumber < 0 ||
++                    length < 0 ||
++                    firstObjectNumber + length > size ||
++                    totalEntries > MAX_XREF_ENTRIES) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
++                }
+                 this.subsections.push({ firstObjectNumber, length });
+             }
+         }
+         else {
+-            this.subsections = [{ firstObjectNumber: 0, length: Size.asNumber() }];
++            if (size > MAX_XREF_ENTRIES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            totalEntries = size;
++            this.subsections = [{ firstObjectNumber: 0, length: size }];
+         }
+         const W = this.dict.lookup(PDFName_1.default.of('W'), PDFArray_1.default);
++        if (W.size() !== 3)
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
+         this.byteWidths = [-1, -1, -1];
+         for (let idx = 0, len = W.size(); idx < len; idx++) {
+-            this.byteWidths[idx] = W.lookup(idx, PDFNumber_1.default).asNumber();
++            const width = W.lookup(idx, PDFNumber_1.default).asNumber();
++            if (!Number.isSafeInteger(width) || width < 0 || width > 8) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            this.byteWidths[idx] = width;
++        }
++        const bytesPerEntry = this.byteWidths.reduce((total, width) => total + width, 0);
++        const requiredBytes = totalEntries * bytesPerEntry;
++        if (!Number.isSafeInteger(requiredBytes) ||
++            (requiredBytes > 0 && this.bytes.peekAt(requiredBytes - 1) === undefined)) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
+         }
+     }
+-    parseIntoContext() {
++    parseIntoContext(collectEntries = true) {
+         if (this.alreadyParsed) {
+             throw new errors_1.ReparseError('PDFXRefStreamParser', 'parseIntoContext');
+         }
+@@ -51,7 +87,7 @@ class PDFXRefStreamParser {
+             this.context.largestObjectNumber =
+                 this.context.trailerInfo.Size.asNumber() - 1;
+         }
+-        const entries = this.parseEntries();
++        const entries = collectEntries ? this.parseEntries() : [];
+         // for (let idx = 0, len = entries.length; idx < len; idx++) {
+         // const entry = entries[idx];
+         // if (entry.deleted) this.context.delete(entry.ref);
+diff --git a/cjs/core/streams/DecodeStream.js b/cjs/core/streams/DecodeStream.js
+index 86022bf3743eba7ae18bf1b89edad4dc996bc963..1ebdff93d804501e3fcc13433d0ac49d1a899f81 100644
+--- a/cjs/core/streams/DecodeStream.js
++++ b/cjs/core/streams/DecodeStream.js
+@@ -15,6 +15,10 @@ const Stream_1 = tslib_1.__importDefault(require("./Stream"));
+ // having special cases that would be required if we used |null| for an empty
+ // buffer.
+ const emptyBuffer = new Uint8Array(0);
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_BUFFER_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedBufferBytes = 0;
+ /**
+  * Super class for the decoding streams
+  */
+@@ -26,6 +30,10 @@ class DecodeStream {
+         this.buffer = emptyBuffer;
+         this.minBufferLength = 512;
+         if (maybeMinBufferLength) {
++            if (!Number.isSafeInteger(maybeMinBufferLength) ||
++                maybeMinBufferLength > MAX_DECODED_STREAM_BYTES) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
+             // Compute the first power of two that is as big as maybeMinBufferLength.
+             while (this.minBufferLength < maybeMinBufferLength) {
+                 this.minBufferLength *= 2;
+@@ -125,6 +133,11 @@ class DecodeStream {
+         throw new errors_1.MethodNotImplementedError(this.constructor.name, 'readBlock');
+     }
+     ensureBuffer(requested) {
++        if (!Number.isSafeInteger(requested) ||
++            requested < 0 ||
++            requested > MAX_DECODED_STREAM_BYTES) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         const buffer = this.buffer;
+         if (requested <= buffer.byteLength) {
+             return buffer;
+@@ -133,6 +146,11 @@ class DecodeStream {
+         while (size < requested) {
+             size *= 2;
+         }
++        const growth = size - buffer.byteLength;
++        if (totalDecodedBufferBytes > MAX_TOTAL_DECODED_BUFFER_BYTES - growth) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
++        totalDecodedBufferBytes += growth;
+         const buffer2 = new Uint8Array(size);
+         buffer2.set(buffer);
+         return (this.buffer = buffer2);
+diff --git a/cjs/core/streams/decode.js b/cjs/core/streams/decode.js
+index 637c3265919bafdfc59936bfa5108c450ace1270..469acca66bb48bdf8b0dc5200acd2b41544c1baa 100644
+--- a/cjs/core/streams/decode.js
++++ b/cjs/core/streams/decode.js
+@@ -13,6 +13,8 @@ const FlateStream_1 = tslib_1.__importDefault(require("./FlateStream"));
+ const LZWStream_1 = tslib_1.__importDefault(require("./LZWStream"));
+ const RunLengthStream_1 = tslib_1.__importDefault(require("./RunLengthStream"));
+ const Stream_1 = tslib_1.__importDefault(require("./Stream"));
++const MAX_STREAM_FILTERS = 8;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ const decodeStream = (stream, encoding, params) => {
+     if (encoding === PDFName_1.default.of('FlateDecode')) {
+         return new FlateStream_1.default(stream);
+@@ -49,6 +51,9 @@ const decodePDFRawStream = ({ dict, contents, transform, }) => {
+         stream = decodeStream(stream, Filter, DecodeParms);
+     }
+     else if (Filter instanceof PDFArray_1.default) {
++        if (Filter.size() > MAX_STREAM_FILTERS) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         for (let idx = 0, len = Filter.size(); idx < len; idx++) {
+             stream = decodeStream(stream, Filter.lookup(idx, PDFName_1.default), DecodeParms && DecodeParms.lookupMaybe(idx, PDFDict_1.default));
+         }
+diff --git a/cjs/core/structures/PDFPageTree.js b/cjs/core/structures/PDFPageTree.js
+index dd7cad7e7321531c5be4027d13bd2cd825cad4e7..55b5ad2cc91cd13e8cd32545a91c846bec08ac80 100644
+--- a/cjs/core/structures/PDFPageTree.js
++++ b/cjs/core/structures/PDFPageTree.js
+@@ -7,6 +7,9 @@ const PDFName_1 = tslib_1.__importDefault(require("../objects/PDFName"));
+ const PDFNumber_1 = tslib_1.__importDefault(require("../objects/PDFNumber"));
+ const PDFPageLeaf_1 = tslib_1.__importDefault(require("./PDFPageLeaf"));
+ const errors_1 = require("../errors");
++const MAX_PAGE_TREE_VISITS = 10000;
++const MAX_PAGE_TREE_DEPTH = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFPageTree extends PDFDict_1.default {
+     Parent() {
+         return this.lookup(PDFName_1.default.of('Parent'));
+@@ -125,13 +128,27 @@ class PDFPageTree extends PDFDict_1.default {
+             Parent.ascend(visitor);
+     }
+     /** Performs a Post-Order traversal of this page tree */
+-    traverse(visitor) {
++    traverse(visitor, state = { visited: new Set(), visits: 0, depth: 0 }) {
+         const Kids = this.Kids();
+         for (let idx = 0, len = Kids.size(); idx < len; idx++) {
+             const kidRef = Kids.get(idx);
++            state.visits += 1;
++            if (state.visits > MAX_PAGE_TREE_VISITS ||
++                state.depth >= MAX_PAGE_TREE_DEPTH ||
++                state.visited.has(kidRef.tag)) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            state.visited.add(kidRef.tag);
+             const kid = this.context.lookup(kidRef);
+-            if (kid instanceof PDFPageTree)
+-                kid.traverse(visitor);
++            if (kid instanceof PDFPageTree) {
++                state.depth += 1;
++                try {
++                    kid.traverse(visitor, state);
++                }
++                finally {
++                    state.depth -= 1;
++                }
++            }
+             visitor(kid, kidRef);
+         }
+     }
+diff --git a/es/api/PDFDocument.js b/es/api/PDFDocument.js
+index 4d1a63a90a52b18d530422e315f5a458c0bdf278..7a7b20ccbe58c8a03a80aab2467c7e4eccf42377 100644
+--- a/es/api/PDFDocument.js
++++ b/es/api/PDFDocument.js
+@@ -18,6 +18,8 @@ import { CipherTransformFactory } from '../core/crypto.js';
+ import PDFSvg from './PDFSvg.js';
+ import PDFSecurity from '../core/security/PDFSecurity.js';
+ import { IncrementalDocumentSnapshot } from './snapshot/index.js';
++const MAX_DOCUMENT_PAGES = 500;
++const PDF_PAGE_LIMIT = 'PDF_PAGE_LIMIT';
+ /**
+  * Represents a PDF document.
+  */
+@@ -127,6 +129,8 @@ export default class PDFDocument {
+             const pages = [];
+             this.catalog.Pages().traverse((node, ref) => {
+                 if (node instanceof PDFPageLeaf) {
++                    if (pages.length >= MAX_DOCUMENT_PAGES)
++                        throw new Error(PDF_PAGE_LIMIT);
+                     let page = this.pageMap.get(node);
+                     if (!page) {
+                         page = PDFPage.of(node, ref, this);
+diff --git a/es/core/parser/BaseParser.js b/es/core/parser/BaseParser.js
+index 7d50f338f8896b666a01863d79cf777a36d2bd57..c9b0595eb8bc94315ea6c141379ff4e8fe255770 100644
+--- a/es/core/parser/BaseParser.js
++++ b/es/core/parser/BaseParser.js
+@@ -4,6 +4,8 @@ import { IsDigit, IsNumeric } from '../syntax/Numeric.js';
+ import { IsWhitespace } from '../syntax/Whitespace.js';
+ import { charFromCode } from '../../utils/index.js';
+ const { Newline, CarriageReturn } = CharCodes;
++const MAX_NUMBER_TOKEN_BYTES = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class BaseParser {
+     constructor(bytes, capNumbers = false) {
+@@ -16,6 +18,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!IsDigit[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += charFromCode(this.bytes.next());
+         }
+         const numberValue = Number(value);
+@@ -33,6 +37,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!IsNumeric[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += charFromCode(this.bytes.next());
+             if (byte === CharCodes.Period)
+                 break;
+@@ -42,6 +48,8 @@ class BaseParser {
+             const byte = this.bytes.peek();
+             if (!IsDigit[byte])
+                 break;
++            if (value.length >= MAX_NUMBER_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += charFromCode(this.bytes.next());
+         }
+         const numberValue = Number(value);
+@@ -50,14 +58,8 @@ class BaseParser {
+         }
+         if (numberValue > Number.MAX_SAFE_INTEGER) {
+             if (this.capNumbers) {
+-                const msg = `Parsed number that is too large for some PDF readers: ${value}, using Number.MAX_SAFE_INTEGER instead.`;
+-                console.warn(msg);
+                 return Number.MAX_SAFE_INTEGER;
+             }
+-            else {
+-                const msg = `Parsed number that is too large for some PDF readers: ${value}, not capping.`;
+-                console.warn(msg);
+-            }
+         }
+         return numberValue;
+     }
+diff --git a/es/core/parser/ByteStream.js b/es/core/parser/ByteStream.js
+index 3a5797f23acb2427cfc434ec9f7045e0cd7a64fc..82218c250b50633c89c1aec095230dfd2ab10763 100644
+--- a/es/core/parser/ByteStream.js
++++ b/es/core/parser/ByteStream.js
+@@ -1,6 +1,10 @@
+ import { NextByteAssertionError } from '../errors.js';
+ import { decodePDFRawStream } from '../streams/decode.js';
+ import CharCodes from '../syntax/CharCodes.js';
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_STREAM_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedStreamBytes = 0;
+ // TODO: See how line/col tracking affects performance
+ class ByteStream {
+     constructor(bytes) {
+@@ -53,6 +57,14 @@ class ByteStream {
+     }
+ }
+ ByteStream.of = (bytes) => new ByteStream(bytes);
+-ByteStream.fromPDFRawStream = (rawStream) => ByteStream.of(decodePDFRawStream(rawStream).decode());
++ByteStream.fromPDFRawStream = (rawStream) => {
++    const bytes = decodePDFRawStream(rawStream).decode();
++    if (bytes.byteLength > MAX_DECODED_STREAM_BYTES ||
++        totalDecodedStreamBytes > MAX_TOTAL_DECODED_STREAM_BYTES - bytes.byteLength) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
++    totalDecodedStreamBytes += bytes.byteLength;
++    return ByteStream.of(bytes);
++};
+ export default ByteStream;
+ //# sourceMappingURL=ByteStream.js.map
+\ No newline at end of file
+diff --git a/es/core/parser/PDFObjectParser.js b/es/core/parser/PDFObjectParser.js
+index e0ffb6745b8881204809d664c40babcc25e78ae3..6f3421f47a89c2704d978cc6b095f79345f0166a 100644
+--- a/es/core/parser/PDFObjectParser.js
++++ b/es/core/parser/PDFObjectParser.js
+@@ -20,38 +20,63 @@ import { Keywords } from '../syntax/Keywords.js';
+ import { IsDigit, IsNumeric } from '../syntax/Numeric.js';
+ import { IsWhitespace } from '../syntax/Whitespace.js';
+ import { arrayAsString, charFromCode } from '../../utils/index.js';
++const MAX_PARSED_OBJECT_NODES = 250000;
++const MAX_TOTAL_PARSED_OBJECT_NODES = 500000;
++const MAX_ARRAY_ELEMENTS = 100000;
++const MAX_DICT_ENTRIES = 50000;
++const MAX_OBJECT_DEPTH = 128;
++const MAX_OBJECT_TOKEN_BYTES = 16 * 1024 * 1024;
++const MAX_NAME_BYTES = 4096;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++const parsedNodesByContext = new WeakMap();
++let totalParsedObjectNodes = 0;
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class PDFObjectParser extends BaseParser {
+     constructor(byteStream, context, capNumbers = false, cryptoFactory) {
+         super(byteStream, capNumbers);
++        this.objectDepth = 0;
+         this.context = context;
+         this.cryptoFactory = cryptoFactory;
+     }
+     // TODO: Is it possible to reduce duplicate parsing for ref lookaheads?
+     parseObject(ref) {
+         this.skipWhitespaceAndComments();
+-        if (this.matchKeyword(Keywords.true))
+-            return PDFBool.True;
+-        if (this.matchKeyword(Keywords.false))
+-            return PDFBool.False;
+-        if (this.matchKeyword(Keywords.null))
+-            return PDFNull;
+-        const byte = this.bytes.peek();
+-        if (byte === CharCodes.LessThan &&
+-            this.bytes.peekAhead(1) === CharCodes.LessThan) {
+-            return this.parseDictOrStream(ref);
+-        }
+-        if (byte === CharCodes.LessThan)
+-            return this.parseHexString(ref);
+-        if (byte === CharCodes.LeftParen)
+-            return this.parseString(ref);
+-        if (byte === CharCodes.ForwardSlash)
+-            return this.parseName();
+-        if (byte === CharCodes.LeftSquareBracket)
+-            return this.parseArray(ref);
+-        if (IsNumeric[byte])
+-            return this.parseNumberOrRef();
+-        throw new PDFObjectParsingError(this.bytes.position(), byte);
++        const parsedNodes = (parsedNodesByContext.get(this.context) || 0) + 1;
++        totalParsedObjectNodes += 1;
++        if (parsedNodes > MAX_PARSED_OBJECT_NODES ||
++            totalParsedObjectNodes > MAX_TOTAL_PARSED_OBJECT_NODES ||
++            this.objectDepth >= MAX_OBJECT_DEPTH) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
++        parsedNodesByContext.set(this.context, parsedNodes);
++        this.objectDepth += 1;
++        try {
++            if (this.matchKeyword(Keywords.true))
++                return PDFBool.True;
++            if (this.matchKeyword(Keywords.false))
++                return PDFBool.False;
++            if (this.matchKeyword(Keywords.null))
++                return PDFNull;
++            const byte = this.bytes.peek();
++            if (byte === CharCodes.LessThan &&
++                this.bytes.peekAhead(1) === CharCodes.LessThan) {
++                return this.parseDictOrStream(ref);
++            }
++            if (byte === CharCodes.LessThan)
++                return this.parseHexString(ref);
++            if (byte === CharCodes.LeftParen)
++                return this.parseString(ref);
++            if (byte === CharCodes.ForwardSlash)
++                return this.parseName();
++            if (byte === CharCodes.LeftSquareBracket)
++                return this.parseArray(ref);
++            if (IsNumeric[byte])
++                return this.parseNumberOrRef();
++            throw new PDFObjectParsingError(this.bytes.position(), byte);
++        }
++        finally {
++            this.objectDepth -= 1;
++        }
+     }
+     parseNumberOrRef() {
+         const firstNum = this.parseRawNumber();
+@@ -73,6 +98,8 @@ class PDFObjectParser extends BaseParser {
+         let value = '';
+         this.bytes.assertNext(CharCodes.LessThan);
+         while (!this.bytes.done() && this.bytes.peek() !== CharCodes.GreaterThan) {
++            if (value.length >= MAX_OBJECT_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += charFromCode(this.bytes.next());
+         }
+         this.bytes.assertNext(CharCodes.GreaterThan);
+@@ -89,6 +116,8 @@ class PDFObjectParser extends BaseParser {
+         let value = '';
+         while (!this.bytes.done()) {
+             const byte = this.bytes.next();
++            if (value.length >= MAX_OBJECT_TOKEN_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             value += charFromCode(byte);
+             // Check for unescaped parenthesis
+             if (!isEscaped) {
+@@ -127,6 +156,8 @@ class PDFObjectParser extends BaseParser {
+             const byte = this.bytes.peek();
+             if (IsWhitespace[byte] || IsDelimiter[byte])
+                 break;
++            if (name.length >= MAX_NAME_BYTES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             name += charFromCode(byte);
+             this.bytes.next();
+         }
+@@ -136,7 +167,11 @@ class PDFObjectParser extends BaseParser {
+         this.bytes.assertNext(CharCodes.LeftSquareBracket);
+         this.skipWhitespaceAndComments();
+         const pdfArray = PDFArray.withContext(this.context);
++        let elements = 0;
+         while (this.bytes.peek() !== CharCodes.RightSquareBracket) {
++            elements += 1;
++            if (elements > MAX_ARRAY_ELEMENTS)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             const element = this.parseObject(ref);
+             pdfArray.push(element);
+             this.skipWhitespaceAndComments();
+@@ -149,9 +184,13 @@ class PDFObjectParser extends BaseParser {
+         this.bytes.assertNext(CharCodes.LessThan);
+         this.skipWhitespaceAndComments();
+         const dict = new Map();
++        let entries = 0;
+         while (!this.bytes.done() &&
+             this.bytes.peek() !== CharCodes.GreaterThan &&
+             this.bytes.peekAhead(1) !== CharCodes.GreaterThan) {
++            entries += 1;
++            if (entries > MAX_DICT_ENTRIES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
+             const key = this.parseName();
+             const value = this.parseObject(ref);
+             dict.set(key, value);
+diff --git a/es/core/parser/PDFObjectStreamParser.d.ts b/es/core/parser/PDFObjectStreamParser.d.ts
+index 47c9e340280423759bfc5da26b9c61541f18bcda..18ee029dd0fe0b9c9b46694c489cf4f939cb92ad 100644
+--- a/es/core/parser/PDFObjectStreamParser.d.ts
++++ b/es/core/parser/PDFObjectStreamParser.d.ts
+@@ -1,12 +1,13 @@
+ import PDFRawStream from '../objects/PDFRawStream';
++import PDFRef from '../objects/PDFRef';
+ import PDFObjectParser from './PDFObjectParser';
+ declare class PDFObjectStreamParser extends PDFObjectParser {
+-    static forStream: (rawStream: PDFRawStream, shouldWaitForTick?: () => boolean) => PDFObjectStreamParser;
++    static forStream: (rawStream: PDFRawStream, shouldWaitForTick?: (ref: PDFRef) => boolean) => PDFObjectStreamParser;
+     private alreadyParsed;
+     private readonly shouldWaitForTick;
+     private readonly firstOffset;
+     private readonly objectCount;
+-    constructor(rawStream: PDFRawStream, shouldWaitForTick?: () => boolean);
++    constructor(rawStream: PDFRawStream, shouldWaitForTick?: (ref: PDFRef) => boolean);
+     parseIntoContext(): Promise<void>;
+     private parseOffsetsAndObjectNumbers;
+ }
+diff --git a/es/core/parser/PDFObjectStreamParser.js b/es/core/parser/PDFObjectStreamParser.js
+index a7c8598e0cb15072ae47308441381b2bdf9bb08b..a5320de3ec2f64719ef95a497f8eb7471174ece5 100644
+--- a/es/core/parser/PDFObjectStreamParser.js
++++ b/es/core/parser/PDFObjectStreamParser.js
+@@ -6,6 +6,9 @@ import PDFRef from '../objects/PDFRef.js';
+ import ByteStream from './ByteStream.js';
+ import PDFObjectParser from './PDFObjectParser.js';
+ import { waitForTick } from '../../utils/index.js';
++const MAX_OBJECT_STREAM_OBJECTS = 50000;
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFObjectStreamParser extends PDFObjectParser {
+     constructor(rawStream, shouldWaitForTick) {
+         super(ByteStream.fromPDFRawStream(rawStream), rawStream.dict.context);
+@@ -14,6 +17,14 @@ class PDFObjectStreamParser extends PDFObjectParser {
+         this.shouldWaitForTick = shouldWaitForTick || (() => false);
+         this.firstOffset = dict.lookup(PDFName.of('First'), PDFNumber).asNumber();
+         this.objectCount = dict.lookup(PDFName.of('N'), PDFNumber).asNumber();
++        if (!Number.isSafeInteger(this.firstOffset) ||
++            this.firstOffset < 0 ||
++            this.firstOffset > MAX_DECODED_STREAM_BYTES ||
++            !Number.isSafeInteger(this.objectCount) ||
++            this.objectCount < 0 ||
++            this.objectCount > MAX_OBJECT_STREAM_OBJECTS) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+     }
+     parseIntoContext() {
+         return __awaiter(this, void 0, void 0, function* () {
+@@ -28,7 +39,7 @@ class PDFObjectStreamParser extends PDFObjectParser {
+                 const ref = PDFRef.of(objectNumber, 0);
+                 const object = this.parseObject(ref);
+                 this.context.assign(ref, object);
+-                if (this.shouldWaitForTick())
++                if (this.shouldWaitForTick(ref))
+                     yield waitForTick();
+             }
+         });
+diff --git a/es/core/parser/PDFParser.js b/es/core/parser/PDFParser.js
+index ca9516bd89d60b2c3f81a14160f9115fc38d0b40..cccf8ea2f6d08cfd60fdcba843dbe7cb08f67eec 100644
+--- a/es/core/parser/PDFParser.js
++++ b/es/core/parser/PDFParser.js
+@@ -18,15 +18,28 @@ import { Keywords } from '../syntax/Keywords.js';
+ import { IsDigit } from '../syntax/Numeric.js';
+ import { waitForTick } from '../../utils/index.js';
+ import PDFNumber from '../objects/PDFNumber.js';
++const MAX_PARSED_OBJECTS = 100000;
++const MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION = 100000;
++const MAX_TRADITIONAL_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFParser extends PDFObjectParser {
+     constructor(pdfBytes, objectsPerTick = Infinity, throwOnInvalidObject = false, warnOnInvalidObjects = false, capNumbers = false, cryptoFactory, forIncrementalUpdate = false) {
+         super(ByteStream.of(pdfBytes), PDFContext.create(), capNumbers, cryptoFactory);
+         this.alreadyParsed = false;
+         this.parsedObjects = 0;
++        this.parsedCompressedObjectRefs = new Set();
++        this.parsedObjectRefs = new Set();
+         this.shouldWaitForTick = () => {
+             this.parsedObjects += 1;
+             return this.parsedObjects % this.objectsPerTick === 0;
+         };
++        this.shouldWaitForObjectStreamTick = (ref) => {
++            this.parsedCompressedObjectRefs.add(ref.tag);
++            if (this.parsedCompressedObjectRefs.size > MAX_PARSED_OBJECTS) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            return this.shouldWaitForTick();
++        };
+         this.objectsPerTick = objectsPerTick;
+         this.throwOnInvalidObject = throwOnInvalidObject;
+         this.warnOnInvalidObjects = warnOnInvalidObjects;
+@@ -123,11 +136,11 @@ class PDFParser extends PDFObjectParser {
+             this.matchKeyword(Keywords.endobj);
+             if (object instanceof PDFRawStream &&
+                 object.dict.lookup(PDFName.of('Type')) === PDFName.of('ObjStm')) {
+-                yield PDFObjectStreamParser.forStream(object, this.shouldWaitForTick).parseIntoContext();
++                yield PDFObjectStreamParser.forStream(object, this.shouldWaitForObjectStreamTick).parseIntoContext();
+             }
+             else if (object instanceof PDFRawStream &&
+                 object.dict.lookup(PDFName.of('Type')) === PDFName.of('XRef')) {
+-                PDFXRefStreamParser.forStream(object).parseIntoContext();
++                PDFXRefStreamParser.forStream(object).parseIntoContext(false);
+             }
+             // always register the object and the ref, to properly handle object numeration
+             this.context.assign(ref, object);
+@@ -168,13 +181,20 @@ class PDFParser extends PDFObjectParser {
+             this.skipWhitespaceAndComments();
+             while (!this.bytes.done() && IsDigit[this.bytes.peek()]) {
+                 const initialOffset = this.bytes.offset();
++                let ref;
+                 try {
+-                    yield this.parseIndirectObject();
++                    ref = yield this.parseIndirectObject();
+                 }
+                 catch (e) {
++                    if (e instanceof Error && e.message === 'PDF_STREAM_SAFETY_LIMIT')
++                        throw e;
+                     // TODO: Add tracing/logging mechanism to track when this happens!
+                     this.bytes.moveTo(initialOffset);
+-                    this.tryToParseInvalidIndirectObject();
++                    ref = this.tryToParseInvalidIndirectObject();
++                }
++                this.parsedObjectRefs.add(ref.tag);
++                if (this.parsedObjectRefs.size > MAX_PARSED_OBJECTS) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
+                 }
+                 this.skipWhitespaceAndComments();
+                 // TODO: Can this be done only when needed, to avoid harming performance?
+@@ -191,6 +211,8 @@ class PDFParser extends PDFObjectParser {
+         this.skipWhitespaceAndComments();
+         let objectNumber = -1;
+         const xref = PDFCrossRefSection.createEmpty();
++        let parsedEntries = 0;
++        let parsedSubsections = 0;
+         while (!this.bytes.done() && IsDigit[this.bytes.peek()]) {
+             const firstInt = this.parseRawInt();
+             this.skipWhitespaceAndComments();
+@@ -202,17 +224,18 @@ class PDFParser extends PDFObjectParser {
+             this.skipWhitespaceAndComments();
+             const byte = this.bytes.peek();
+             if (byte === CharCodes.n || byte === CharCodes.f) {
+-                const ref = PDFRef.of(objectNumber, secondInt);
+-                if (this.bytes.next() === CharCodes.n) {
+-                    xref.addEntry(ref, firstInt);
+-                }
+-                else {
+-                    // this.context.delete(ref);
+-                    xref.addDeletedEntry(ref, firstInt);
++                parsedEntries += 1;
++                if (parsedEntries > MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
+                 }
++                this.bytes.next();
+                 objectNumber += 1;
+             }
+             else {
++                parsedSubsections += 1;
++                if (parsedSubsections > MAX_TRADITIONAL_XREF_SUBSECTIONS) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
++                }
+                 objectNumber = firstInt;
+             }
+             this.skipWhitespaceAndComments();
+diff --git a/es/core/parser/PDFXRefStreamParser.d.ts b/es/core/parser/PDFXRefStreamParser.d.ts
+index 836035b939ca7f4fee38d61cc504e3e6bbc68562..a4f23218430cd469183ff3b52fa9aae72cace286 100644
+--- a/es/core/parser/PDFXRefStreamParser.d.ts
++++ b/es/core/parser/PDFXRefStreamParser.d.ts
+@@ -15,7 +15,7 @@ declare class PDFXRefStreamParser {
+     private readonly subsections;
+     private readonly byteWidths;
+     constructor(rawStream: PDFRawStream);
+-    parseIntoContext(): Entry[];
++    parseIntoContext(collectEntries?: boolean): Entry[];
+     private parseEntries;
+ }
+ export default PDFXRefStreamParser;
+diff --git a/es/core/parser/PDFXRefStreamParser.js b/es/core/parser/PDFXRefStreamParser.js
+index 55b33400f43542ba738455006d6720ef8e1725dc..25c69b6733a534929c86b968d0813fb2e9853a3a 100644
+--- a/es/core/parser/PDFXRefStreamParser.js
++++ b/es/core/parser/PDFXRefStreamParser.js
+@@ -4,6 +4,10 @@ import PDFName from '../objects/PDFName.js';
+ import PDFNumber from '../objects/PDFNumber.js';
+ import PDFRef from '../objects/PDFRef.js';
+ import ByteStream from './ByteStream.js';
++const MAX_PDF_OBJECT_NUMBER = 10000000;
++const MAX_XREF_ENTRIES = 100000;
++const MAX_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFXRefStreamParser {
+     constructor(rawStream) {
+         this.alreadyParsed = false;
+@@ -12,25 +16,57 @@ class PDFXRefStreamParser {
+         this.context = this.dict.context;
+         this.context.pdfFileDetails.useObjectStreams = true;
+         const Size = this.dict.lookup(PDFName.of('Size'), PDFNumber);
++        const size = Size.asNumber();
++        if (!Number.isSafeInteger(size) || size < 1 || size > MAX_PDF_OBJECT_NUMBER) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         const Index = this.dict.lookup(PDFName.of('Index'));
++        let totalEntries = 0;
+         if (Index instanceof PDFArray) {
++            if (Index.size() % 2 !== 0 || Index.size() / 2 > MAX_XREF_SUBSECTIONS) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
+             this.subsections = [];
+             for (let idx = 0, len = Index.size(); idx < len; idx += 2) {
+                 const firstObjectNumber = Index.lookup(idx + 0, PDFNumber).asNumber();
+                 const length = Index.lookup(idx + 1, PDFNumber).asNumber();
++                totalEntries += length;
++                if (!Number.isSafeInteger(firstObjectNumber) ||
++                    !Number.isSafeInteger(length) ||
++                    firstObjectNumber < 0 ||
++                    length < 0 ||
++                    firstObjectNumber + length > size ||
++                    totalEntries > MAX_XREF_ENTRIES) {
++                    throw new Error(PDF_STREAM_SAFETY_LIMIT);
++                }
+                 this.subsections.push({ firstObjectNumber, length });
+             }
+         }
+         else {
+-            this.subsections = [{ firstObjectNumber: 0, length: Size.asNumber() }];
++            if (size > MAX_XREF_ENTRIES)
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            totalEntries = size;
++            this.subsections = [{ firstObjectNumber: 0, length: size }];
+         }
+         const W = this.dict.lookup(PDFName.of('W'), PDFArray);
++        if (W.size() !== 3)
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
+         this.byteWidths = [-1, -1, -1];
+         for (let idx = 0, len = W.size(); idx < len; idx++) {
+-            this.byteWidths[idx] = W.lookup(idx, PDFNumber).asNumber();
++            const width = W.lookup(idx, PDFNumber).asNumber();
++            if (!Number.isSafeInteger(width) || width < 0 || width > 8) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            this.byteWidths[idx] = width;
++        }
++        const bytesPerEntry = this.byteWidths.reduce((total, width) => total + width, 0);
++        const requiredBytes = totalEntries * bytesPerEntry;
++        if (!Number.isSafeInteger(requiredBytes) ||
++            (requiredBytes > 0 && this.bytes.peekAt(requiredBytes - 1) === undefined)) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
+         }
+     }
+-    parseIntoContext() {
++    parseIntoContext(collectEntries = true) {
+         if (this.alreadyParsed) {
+             throw new ReparseError('PDFXRefStreamParser', 'parseIntoContext');
+         }
+@@ -48,7 +84,7 @@ class PDFXRefStreamParser {
+             this.context.largestObjectNumber =
+                 this.context.trailerInfo.Size.asNumber() - 1;
+         }
+-        const entries = this.parseEntries();
++        const entries = collectEntries ? this.parseEntries() : [];
+         // for (let idx = 0, len = entries.length; idx < len; idx++) {
+         // const entry = entries[idx];
+         // if (entry.deleted) this.context.delete(entry.ref);
+diff --git a/es/core/streams/DecodeStream.js b/es/core/streams/DecodeStream.js
+index a95f1e8fb83d1c16c5628886d138aaa22d49b4b8..4002e178a2acccc0c34734315d98cc274c1d1706 100644
+--- a/es/core/streams/DecodeStream.js
++++ b/es/core/streams/DecodeStream.js
+@@ -12,6 +12,10 @@ import Stream from './Stream.js';
+ // having special cases that would be required if we used |null| for an empty
+ // buffer.
+ const emptyBuffer = new Uint8Array(0);
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_BUFFER_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedBufferBytes = 0;
+ /**
+  * Super class for the decoding streams
+  */
+@@ -23,6 +27,10 @@ class DecodeStream {
+         this.buffer = emptyBuffer;
+         this.minBufferLength = 512;
+         if (maybeMinBufferLength) {
++            if (!Number.isSafeInteger(maybeMinBufferLength) ||
++                maybeMinBufferLength > MAX_DECODED_STREAM_BYTES) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
+             // Compute the first power of two that is as big as maybeMinBufferLength.
+             while (this.minBufferLength < maybeMinBufferLength) {
+                 this.minBufferLength *= 2;
+@@ -122,6 +130,11 @@ class DecodeStream {
+         throw new MethodNotImplementedError(this.constructor.name, 'readBlock');
+     }
+     ensureBuffer(requested) {
++        if (!Number.isSafeInteger(requested) ||
++            requested < 0 ||
++            requested > MAX_DECODED_STREAM_BYTES) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         const buffer = this.buffer;
+         if (requested <= buffer.byteLength) {
+             return buffer;
+@@ -130,6 +143,11 @@ class DecodeStream {
+         while (size < requested) {
+             size *= 2;
+         }
++        const growth = size - buffer.byteLength;
++        if (totalDecodedBufferBytes > MAX_TOTAL_DECODED_BUFFER_BYTES - growth) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
++        totalDecodedBufferBytes += growth;
+         const buffer2 = new Uint8Array(size);
+         buffer2.set(buffer);
+         return (this.buffer = buffer2);
+diff --git a/es/core/streams/decode.js b/es/core/streams/decode.js
+index 6ea11a431fad1ac7ea35c8b59d0ddfcac7db90bc..158ca82b0917e1b4edcebd6988587a779a564b79 100644
+--- a/es/core/streams/decode.js
++++ b/es/core/streams/decode.js
+@@ -9,6 +9,8 @@ import FlateStream from './FlateStream.js';
+ import LZWStream from './LZWStream.js';
+ import RunLengthStream from './RunLengthStream.js';
+ import Stream from './Stream.js';
++const MAX_STREAM_FILTERS = 8;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ const decodeStream = (stream, encoding, params) => {
+     if (encoding === PDFName.of('FlateDecode')) {
+         return new FlateStream(stream);
+@@ -45,6 +47,9 @@ export const decodePDFRawStream = ({ dict, contents, transform, }) => {
+         stream = decodeStream(stream, Filter, DecodeParms);
+     }
+     else if (Filter instanceof PDFArray) {
++        if (Filter.size() > MAX_STREAM_FILTERS) {
++            throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         for (let idx = 0, len = Filter.size(); idx < len; idx++) {
+             stream = decodeStream(stream, Filter.lookup(idx, PDFName), DecodeParms && DecodeParms.lookupMaybe(idx, PDFDict));
+         }
+diff --git a/es/core/structures/PDFPageTree.js b/es/core/structures/PDFPageTree.js
+index 673c95b79dfafb9bb795c1ca7495ebf4c974f2b5..bd3adfd3885be588e0537c795d20f2bbccbc4356 100644
+--- a/es/core/structures/PDFPageTree.js
++++ b/es/core/structures/PDFPageTree.js
+@@ -4,6 +4,9 @@ import PDFName from '../objects/PDFName.js';
+ import PDFNumber from '../objects/PDFNumber.js';
+ import PDFPageLeaf from './PDFPageLeaf.js';
+ import { InvalidTargetIndexError, CorruptPageTreeError } from '../errors.js';
++const MAX_PAGE_TREE_VISITS = 10000;
++const MAX_PAGE_TREE_DEPTH = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ class PDFPageTree extends PDFDict {
+     Parent() {
+         return this.lookup(PDFName.of('Parent'));
+@@ -122,13 +125,27 @@ class PDFPageTree extends PDFDict {
+             Parent.ascend(visitor);
+     }
+     /** Performs a Post-Order traversal of this page tree */
+-    traverse(visitor) {
++    traverse(visitor, state = { visited: new Set(), visits: 0, depth: 0 }) {
+         const Kids = this.Kids();
+         for (let idx = 0, len = Kids.size(); idx < len; idx++) {
+             const kidRef = Kids.get(idx);
++            state.visits += 1;
++            if (state.visits > MAX_PAGE_TREE_VISITS ||
++                state.depth >= MAX_PAGE_TREE_DEPTH ||
++                state.visited.has(kidRef.tag)) {
++                throw new Error(PDF_STREAM_SAFETY_LIMIT);
++            }
++            state.visited.add(kidRef.tag);
+             const kid = this.context.lookup(kidRef);
+-            if (kid instanceof PDFPageTree)
+-                kid.traverse(visitor);
++            if (kid instanceof PDFPageTree) {
++                state.depth += 1;
++                try {
++                    kid.traverse(visitor, state);
++                }
++                finally {
++                    state.depth -= 1;
++                }
++            }
+             visitor(kid, kidRef);
+         }
+     }
+diff --git a/src/api/PDFDocument.ts b/src/api/PDFDocument.ts
+index 11cb6aff09fd7b9b4f041de645b3f37dd070323e..dc619679add510506a983c555c5e5d581e0155c4 100644
+--- a/src/api/PDFDocument.ts
++++ b/src/api/PDFDocument.ts
+@@ -82,6 +82,9 @@ import PDFSecurity, { SecurityOptions } from '../core/security/PDFSecurity';
+ import { IncrementalDocumentSnapshot } from './snapshot';
+ import type { DocumentSnapshot } from './snapshot';
+ 
++const MAX_DOCUMENT_PAGES = 500;
++const PDF_PAGE_LIMIT = 'PDF_PAGE_LIMIT';
++
+ export type BasePDFAttachment = {
+   name: string;
+   data: Uint8Array;
+@@ -1818,6 +1821,7 @@ export default class PDFDocument {
+     const pages: PDFPage[] = [];
+     this.catalog.Pages().traverse((node, ref) => {
+       if (node instanceof PDFPageLeaf) {
++        if (pages.length >= MAX_DOCUMENT_PAGES) throw new Error(PDF_PAGE_LIMIT);
+         let page = this.pageMap.get(node);
+         if (!page) {
+           page = PDFPage.of(node, ref, this);
+diff --git a/src/core/parser/BaseParser.ts b/src/core/parser/BaseParser.ts
+index 137d8d7ecf5574d559676d9009b4211bef787687..874acb676189db68016d578926aefef13f3e57a9 100644
+--- a/src/core/parser/BaseParser.ts
++++ b/src/core/parser/BaseParser.ts
+@@ -6,6 +6,8 @@ import { IsWhitespace } from '../syntax/Whitespace';
+ import { charFromCode } from '../../utils';
+ 
+ const { Newline, CarriageReturn } = CharCodes;
++const MAX_NUMBER_TOKEN_BYTES = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
+ 
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class BaseParser {
+@@ -23,6 +25,9 @@ class BaseParser {
+     while (!this.bytes.done()) {
+       const byte = this.bytes.peek();
+       if (!IsDigit[byte]) break;
++      if (value.length >= MAX_NUMBER_TOKEN_BYTES) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
+       value += charFromCode(this.bytes.next());
+     }
+ 
+@@ -44,6 +49,9 @@ class BaseParser {
+     while (!this.bytes.done()) {
+       const byte = this.bytes.peek();
+       if (!IsNumeric[byte]) break;
++      if (value.length >= MAX_NUMBER_TOKEN_BYTES) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
+       value += charFromCode(this.bytes.next());
+       if (byte === CharCodes.Period) break;
+     }
+@@ -52,6 +60,9 @@ class BaseParser {
+     while (!this.bytes.done()) {
+       const byte = this.bytes.peek();
+       if (!IsDigit[byte]) break;
++      if (value.length >= MAX_NUMBER_TOKEN_BYTES) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
+       value += charFromCode(this.bytes.next());
+     }
+ 
+@@ -63,12 +74,7 @@ class BaseParser {
+ 
+     if (numberValue > Number.MAX_SAFE_INTEGER) {
+       if (this.capNumbers) {
+-        const msg = `Parsed number that is too large for some PDF readers: ${value}, using Number.MAX_SAFE_INTEGER instead.`;
+-        console.warn(msg);
+         return Number.MAX_SAFE_INTEGER;
+-      } else {
+-        const msg = `Parsed number that is too large for some PDF readers: ${value}, not capping.`;
+-        console.warn(msg);
+       }
+     }
+ 
+diff --git a/src/core/parser/ByteStream.ts b/src/core/parser/ByteStream.ts
+index d1260a5e8418961d7247e048d2e1d348fe23460c..b23794d079d5617b2db37ea72b9a959d2412979f 100644
+--- a/src/core/parser/ByteStream.ts
++++ b/src/core/parser/ByteStream.ts
+@@ -3,12 +3,26 @@ import PDFRawStream from '../objects/PDFRawStream';
+ import { decodePDFRawStream } from '../streams/decode';
+ import CharCodes from '../syntax/CharCodes';
+ 
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_STREAM_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedStreamBytes = 0;
++
+ // TODO: See how line/col tracking affects performance
+ class ByteStream {
+   static of = (bytes: Uint8Array) => new ByteStream(bytes);
+ 
+-  static fromPDFRawStream = (rawStream: PDFRawStream) =>
+-    ByteStream.of(decodePDFRawStream(rawStream).decode());
++  static fromPDFRawStream = (rawStream: PDFRawStream) => {
++    const bytes = decodePDFRawStream(rawStream).decode();
++    if (
++      bytes.byteLength > MAX_DECODED_STREAM_BYTES ||
++      totalDecodedStreamBytes > MAX_TOTAL_DECODED_STREAM_BYTES - bytes.byteLength
++    ) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
++    totalDecodedStreamBytes += bytes.byteLength;
++    return ByteStream.of(bytes);
++  };
+ 
+   private readonly bytes: Uint8Array;
+   private readonly length: number;
+diff --git a/src/core/parser/PDFObjectParser.ts b/src/core/parser/PDFObjectParser.ts
+index 27fd6d8486263f9022f541904b45a5ad685ae3d1..3a168c05cf86a70de44eb747e8fadd9e53c08ef2 100644
+--- a/src/core/parser/PDFObjectParser.ts
++++ b/src/core/parser/PDFObjectParser.ts
+@@ -30,6 +30,17 @@ import { IsWhitespace } from '../syntax/Whitespace';
+ import { arrayAsString, charFromCode } from '../../utils';
+ import { CipherTransformFactory } from '../crypto';
+ 
++const MAX_PARSED_OBJECT_NODES = 250_000;
++const MAX_TOTAL_PARSED_OBJECT_NODES = 500_000;
++const MAX_ARRAY_ELEMENTS = 100_000;
++const MAX_DICT_ENTRIES = 50_000;
++const MAX_OBJECT_DEPTH = 128;
++const MAX_OBJECT_TOKEN_BYTES = 16 * 1024 * 1024;
++const MAX_NAME_BYTES = 4096;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++const parsedNodesByContext = new WeakMap<PDFContext, number>();
++let totalParsedObjectNodes = 0;
++
+ // TODO: Throw error if eof is reached before finishing object parse...
+ class PDFObjectParser extends BaseParser {
+   static forBytes = (
+@@ -46,6 +57,7 @@ class PDFObjectParser extends BaseParser {
+ 
+   protected readonly context: PDFContext;
+   private readonly cryptoFactory?: CipherTransformFactory;
++  private objectDepth = 0;
+ 
+   constructor(
+     byteStream: ByteStream,
+@@ -61,26 +73,40 @@ class PDFObjectParser extends BaseParser {
+   // TODO: Is it possible to reduce duplicate parsing for ref lookaheads?
+   parseObject(ref?: PDFRef): PDFObject {
+     this.skipWhitespaceAndComments();
+-
+-    if (this.matchKeyword(Keywords.true)) return PDFBool.True;
+-    if (this.matchKeyword(Keywords.false)) return PDFBool.False;
+-    if (this.matchKeyword(Keywords.null)) return PDFNull;
+-
+-    const byte = this.bytes.peek();
+-
++    const parsedNodes = (parsedNodesByContext.get(this.context) ?? 0) + 1;
++    totalParsedObjectNodes += 1;
+     if (
+-      byte === CharCodes.LessThan &&
+-      this.bytes.peekAhead(1) === CharCodes.LessThan
++      parsedNodes > MAX_PARSED_OBJECT_NODES ||
++      totalParsedObjectNodes > MAX_TOTAL_PARSED_OBJECT_NODES ||
++      this.objectDepth >= MAX_OBJECT_DEPTH
+     ) {
+-      return this.parseDictOrStream(ref);
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
+     }
+-    if (byte === CharCodes.LessThan) return this.parseHexString(ref);
+-    if (byte === CharCodes.LeftParen) return this.parseString(ref);
+-    if (byte === CharCodes.ForwardSlash) return this.parseName();
+-    if (byte === CharCodes.LeftSquareBracket) return this.parseArray(ref);
+-    if (IsNumeric[byte]) return this.parseNumberOrRef();
++    parsedNodesByContext.set(this.context, parsedNodes);
++    this.objectDepth += 1;
++    try {
++      if (this.matchKeyword(Keywords.true)) return PDFBool.True;
++      if (this.matchKeyword(Keywords.false)) return PDFBool.False;
++      if (this.matchKeyword(Keywords.null)) return PDFNull;
+ 
+-    throw new PDFObjectParsingError(this.bytes.position(), byte);
++      const byte = this.bytes.peek();
++
++      if (
++        byte === CharCodes.LessThan &&
++        this.bytes.peekAhead(1) === CharCodes.LessThan
++      ) {
++        return this.parseDictOrStream(ref);
++      }
++      if (byte === CharCodes.LessThan) return this.parseHexString(ref);
++      if (byte === CharCodes.LeftParen) return this.parseString(ref);
++      if (byte === CharCodes.ForwardSlash) return this.parseName();
++      if (byte === CharCodes.LeftSquareBracket) return this.parseArray(ref);
++      if (IsNumeric[byte]) return this.parseNumberOrRef();
++
++      throw new PDFObjectParsingError(this.bytes.position(), byte);
++    } finally {
++      this.objectDepth -= 1;
++    }
+   }
+ 
+   protected parseNumberOrRef(): PDFNumber | PDFRef {
+@@ -107,6 +133,7 @@ class PDFObjectParser extends BaseParser {
+ 
+     this.bytes.assertNext(CharCodes.LessThan);
+     while (!this.bytes.done() && this.bytes.peek() !== CharCodes.GreaterThan) {
++      if (value.length >= MAX_OBJECT_TOKEN_BYTES) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       value += charFromCode(this.bytes.next());
+     }
+     this.bytes.assertNext(CharCodes.GreaterThan);
+@@ -133,6 +160,7 @@ class PDFObjectParser extends BaseParser {
+ 
+     while (!this.bytes.done()) {
+       const byte = this.bytes.next();
++      if (value.length >= MAX_OBJECT_TOKEN_BYTES) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       value += charFromCode(byte);
+ 
+       // Check for unescaped parenthesis
+@@ -179,6 +207,7 @@ class PDFObjectParser extends BaseParser {
+     while (!this.bytes.done()) {
+       const byte = this.bytes.peek();
+       if (IsWhitespace[byte] || IsDelimiter[byte]) break;
++      if (name.length >= MAX_NAME_BYTES) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       name += charFromCode(byte);
+       this.bytes.next();
+     }
+@@ -191,7 +220,10 @@ class PDFObjectParser extends BaseParser {
+     this.skipWhitespaceAndComments();
+ 
+     const pdfArray = PDFArray.withContext(this.context);
++    let elements = 0;
+     while (this.bytes.peek() !== CharCodes.RightSquareBracket) {
++      elements += 1;
++      if (elements > MAX_ARRAY_ELEMENTS) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       const element = this.parseObject(ref);
+       pdfArray.push(element);
+       this.skipWhitespaceAndComments();
+@@ -206,12 +238,15 @@ class PDFObjectParser extends BaseParser {
+     this.skipWhitespaceAndComments();
+ 
+     const dict: DictMap = new Map();
++    let entries = 0;
+ 
+     while (
+       !this.bytes.done() &&
+       this.bytes.peek() !== CharCodes.GreaterThan &&
+       this.bytes.peekAhead(1) !== CharCodes.GreaterThan
+     ) {
++      entries += 1;
++      if (entries > MAX_DICT_ENTRIES) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       const key = this.parseName();
+       const value = this.parseObject(ref);
+       dict.set(key, value);
+diff --git a/src/core/parser/PDFObjectStreamParser.ts b/src/core/parser/PDFObjectStreamParser.ts
+index 3f81e045641ec34adeadf70233123e39dec5f1e9..a683226710d6798503a95389789fd63353bdd2e7 100644
+--- a/src/core/parser/PDFObjectStreamParser.ts
++++ b/src/core/parser/PDFObjectStreamParser.ts
+@@ -7,18 +7,22 @@ import ByteStream from './ByteStream';
+ import PDFObjectParser from './PDFObjectParser';
+ import { waitForTick } from '../../utils';
+ 
++const MAX_OBJECT_STREAM_OBJECTS = 50_000;
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++
+ class PDFObjectStreamParser extends PDFObjectParser {
+   static forStream = (
+     rawStream: PDFRawStream,
+-    shouldWaitForTick?: () => boolean,
++    shouldWaitForTick?: (ref: PDFRef) => boolean,
+   ) => new PDFObjectStreamParser(rawStream, shouldWaitForTick);
+ 
+   private alreadyParsed: boolean;
+-  private readonly shouldWaitForTick: () => boolean;
++  private readonly shouldWaitForTick: (ref: PDFRef) => boolean;
+   private readonly firstOffset: number;
+   private readonly objectCount: number;
+ 
+-  constructor(rawStream: PDFRawStream, shouldWaitForTick?: () => boolean) {
++  constructor(rawStream: PDFRawStream, shouldWaitForTick?: (ref: PDFRef) => boolean) {
+     super(ByteStream.fromPDFRawStream(rawStream), rawStream.dict.context);
+ 
+     const { dict } = rawStream;
+@@ -27,6 +31,16 @@ class PDFObjectStreamParser extends PDFObjectParser {
+     this.shouldWaitForTick = shouldWaitForTick || (() => false);
+     this.firstOffset = dict.lookup(PDFName.of('First'), PDFNumber).asNumber();
+     this.objectCount = dict.lookup(PDFName.of('N'), PDFNumber).asNumber();
++    if (
++      !Number.isSafeInteger(this.firstOffset) ||
++      this.firstOffset < 0 ||
++      this.firstOffset > MAX_DECODED_STREAM_BYTES ||
++      !Number.isSafeInteger(this.objectCount) ||
++      this.objectCount < 0 ||
++      this.objectCount > MAX_OBJECT_STREAM_OBJECTS
++    ) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
+   }
+ 
+   async parseIntoContext(): Promise<void> {
+@@ -42,7 +56,7 @@ class PDFObjectStreamParser extends PDFObjectParser {
+       const ref = PDFRef.of(objectNumber, 0);
+       const object = this.parseObject(ref);
+       this.context.assign(ref, object);
+-      if (this.shouldWaitForTick()) await waitForTick();
++      if (this.shouldWaitForTick(ref)) await waitForTick();
+     }
+   }
+ 
+diff --git a/src/core/parser/PDFParser.ts b/src/core/parser/PDFParser.ts
+index e7f20c637603de53c0bf93758ddcacac2819aa75..b6c2cf41be4de2c0d35b0b5372d1be947b127cf1 100644
+--- a/src/core/parser/PDFParser.ts
++++ b/src/core/parser/PDFParser.ts
+@@ -26,6 +26,11 @@ import { waitForTick } from '../../utils';
+ import { CipherTransformFactory } from '../crypto';
+ import PDFNumber from '../objects/PDFNumber';
+ 
++const MAX_PARSED_OBJECTS = 100_000;
++const MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION = 100_000;
++const MAX_TRADITIONAL_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++
+ class PDFParser extends PDFObjectParser {
+   static forBytesWithOptions = (
+     pdfBytes: Uint8Array,
+@@ -51,6 +56,8 @@ class PDFParser extends PDFObjectParser {
+   private readonly warnOnInvalidObjects: boolean;
+   private alreadyParsed = false;
+   private parsedObjects = 0;
++  private parsedCompressedObjectRefs = new Set<string>();
++  private parsedObjectRefs = new Set<string>();
+ 
+   constructor(
+     pdfBytes: Uint8Array,
+@@ -170,6 +177,14 @@ class PDFParser extends PDFObjectParser {
+     return this.parsedObjects % this.objectsPerTick === 0;
+   };
+ 
++  private shouldWaitForObjectStreamTick = (ref: PDFRef) => {
++    this.parsedCompressedObjectRefs.add(ref.tag);
++    if (this.parsedCompressedObjectRefs.size > MAX_PARSED_OBJECTS) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
++    return this.shouldWaitForTick();
++  };
++
+   private async parseIndirectObject(): Promise<PDFRef> {
+     const ref = this.parseIndirectObjectHeader();
+ 
+@@ -190,13 +205,13 @@ class PDFParser extends PDFObjectParser {
+     ) {
+       await PDFObjectStreamParser.forStream(
+         object,
+-        this.shouldWaitForTick,
++        this.shouldWaitForObjectStreamTick,
+       ).parseIntoContext();
+     } else if (
+       object instanceof PDFRawStream &&
+       object.dict.lookup(PDFName.of('Type')) === PDFName.of('XRef')
+     ) {
+-      PDFXRefStreamParser.forStream(object).parseIntoContext();
++      PDFXRefStreamParser.forStream(object).parseIntoContext(false);
+     }
+     // always register the object and the ref, to properly handle object numeration
+     this.context.assign(ref, object);
+@@ -243,13 +258,19 @@ class PDFParser extends PDFObjectParser {
+ 
+     while (!this.bytes.done() && IsDigit[this.bytes.peek()]) {
+       const initialOffset = this.bytes.offset();
++      let ref: PDFRef;
+ 
+       try {
+-        await this.parseIndirectObject();
++        ref = await this.parseIndirectObject();
+       } catch (e) {
++        if (e instanceof Error && e.message === 'PDF_STREAM_SAFETY_LIMIT') throw e;
+         // TODO: Add tracing/logging mechanism to track when this happens!
+         this.bytes.moveTo(initialOffset);
+-        this.tryToParseInvalidIndirectObject();
++        ref = this.tryToParseInvalidIndirectObject();
++      }
++      this.parsedObjectRefs.add(ref.tag);
++      if (this.parsedObjectRefs.size > MAX_PARSED_OBJECTS) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
+       }
+       this.skipWhitespaceAndComments();
+ 
+@@ -267,6 +288,8 @@ class PDFParser extends PDFObjectParser {
+ 
+     let objectNumber = -1;
+     const xref = PDFCrossRefSection.createEmpty();
++    let parsedEntries = 0;
++    let parsedSubsections = 0;
+ 
+     while (!this.bytes.done() && IsDigit[this.bytes.peek()]) {
+       const firstInt = this.parseRawInt();
+@@ -282,15 +305,17 @@ class PDFParser extends PDFObjectParser {
+ 
+       const byte = this.bytes.peek();
+       if (byte === CharCodes.n || byte === CharCodes.f) {
+-        const ref = PDFRef.of(objectNumber, secondInt);
+-        if (this.bytes.next() === CharCodes.n) {
+-          xref.addEntry(ref, firstInt);
+-        } else {
+-          // this.context.delete(ref);
+-          xref.addDeletedEntry(ref, firstInt);
++        parsedEntries += 1;
++        if (parsedEntries > MAX_TRADITIONAL_XREF_ENTRIES_PER_SECTION) {
++          throw new Error(PDF_STREAM_SAFETY_LIMIT);
+         }
++        this.bytes.next();
+         objectNumber += 1;
+       } else {
++        parsedSubsections += 1;
++        if (parsedSubsections > MAX_TRADITIONAL_XREF_SUBSECTIONS) {
++          throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         objectNumber = firstInt;
+       }
+       this.skipWhitespaceAndComments();
+diff --git a/src/core/parser/PDFXRefStreamParser.ts b/src/core/parser/PDFXRefStreamParser.ts
+index 9c0f90e71735847aec14fc5e500d6185eb12015f..f51fec30bf0b3c43d510d8f6e4277b9cdb1ddfbb 100644
+--- a/src/core/parser/PDFXRefStreamParser.ts
++++ b/src/core/parser/PDFXRefStreamParser.ts
+@@ -8,6 +8,11 @@ import PDFRef from '../objects/PDFRef';
+ import ByteStream from './ByteStream';
+ import PDFContext from '../PDFContext';
+ 
++const MAX_PDF_OBJECT_NUMBER = 10_000_000;
++const MAX_XREF_ENTRIES = 100_000;
++const MAX_XREF_SUBSECTIONS = 2048;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++
+ export interface Entry {
+   ref: PDFRef;
+   offset: number;
+@@ -39,27 +44,61 @@ class PDFXRefStreamParser {
+     this.context.pdfFileDetails.useObjectStreams = true;
+ 
+     const Size = this.dict.lookup(PDFName.of('Size'), PDFNumber);
++    const size = Size.asNumber();
++    if (!Number.isSafeInteger(size) || size < 1 || size > MAX_PDF_OBJECT_NUMBER) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
+ 
+     const Index = this.dict.lookup(PDFName.of('Index'));
++    let totalEntries = 0;
+     if (Index instanceof PDFArray) {
++      if (Index.size() % 2 !== 0 || Index.size() / 2 > MAX_XREF_SUBSECTIONS) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
+       this.subsections = [];
+       for (let idx = 0, len = Index.size(); idx < len; idx += 2) {
+         const firstObjectNumber = Index.lookup(idx + 0, PDFNumber).asNumber();
+         const length = Index.lookup(idx + 1, PDFNumber).asNumber();
++        totalEntries += length;
++        if (
++          !Number.isSafeInteger(firstObjectNumber) ||
++          !Number.isSafeInteger(length) ||
++          firstObjectNumber < 0 ||
++          length < 0 ||
++          firstObjectNumber + length > size ||
++          totalEntries > MAX_XREF_ENTRIES
++        ) {
++          throw new Error(PDF_STREAM_SAFETY_LIMIT);
++        }
+         this.subsections.push({ firstObjectNumber, length });
+       }
+     } else {
+-      this.subsections = [{ firstObjectNumber: 0, length: Size.asNumber() }];
++      if (size > MAX_XREF_ENTRIES) throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      totalEntries = size;
++      this.subsections = [{ firstObjectNumber: 0, length: size }];
+     }
+ 
+     const W = this.dict.lookup(PDFName.of('W'), PDFArray);
++    if (W.size() !== 3) throw new Error(PDF_STREAM_SAFETY_LIMIT);
+     this.byteWidths = [-1, -1, -1];
+     for (let idx = 0, len = W.size(); idx < len; idx++) {
+-      this.byteWidths[idx] = W.lookup(idx, PDFNumber).asNumber();
++      const width = W.lookup(idx, PDFNumber).asNumber();
++      if (!Number.isSafeInteger(width) || width < 0 || width > 8) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
++      this.byteWidths[idx] = width;
++    }
++    const bytesPerEntry = this.byteWidths.reduce((total, width) => total + width, 0);
++    const requiredBytes = totalEntries * bytesPerEntry;
++    if (
++      !Number.isSafeInteger(requiredBytes) ||
++      (requiredBytes > 0 && this.bytes.peekAt(requiredBytes - 1) === undefined)
++    ) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
+     }
+   }
+ 
+-  parseIntoContext(): Entry[] {
++  parseIntoContext(collectEntries = true): Entry[] {
+     if (this.alreadyParsed) {
+       throw new ReparseError('PDFXRefStreamParser', 'parseIntoContext');
+     }
+@@ -81,7 +120,7 @@ class PDFXRefStreamParser {
+         this.context.trailerInfo.Size.asNumber() - 1;
+     }
+ 
+-    const entries = this.parseEntries();
++    const entries = collectEntries ? this.parseEntries() : [];
+ 
+     // for (let idx = 0, len = entries.length; idx < len; idx++) {
+     // const entry = entries[idx];
+diff --git a/src/core/streams/DecodeStream.ts b/src/core/streams/DecodeStream.ts
+index 7143ab4c5317ef1446911165c732ffd189c34268..d0463acb609eed3b30e57d2f60f3557dac63e24f 100644
+--- a/src/core/streams/DecodeStream.ts
++++ b/src/core/streams/DecodeStream.ts
+@@ -14,6 +14,10 @@ import Stream, { StreamType } from './Stream';
+ // having special cases that would be required if we used |null| for an empty
+ // buffer.
+ const emptyBuffer = new Uint8Array(0);
++const MAX_DECODED_STREAM_BYTES = 32 * 1024 * 1024;
++const MAX_TOTAL_DECODED_BUFFER_BYTES = 64 * 1024 * 1024;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++let totalDecodedBufferBytes = 0;
+ 
+ /**
+  * Super class for the decoding streams
+@@ -33,6 +37,12 @@ class DecodeStream implements StreamType {
+     this.buffer = emptyBuffer;
+     this.minBufferLength = 512;
+     if (maybeMinBufferLength) {
++      if (
++        !Number.isSafeInteger(maybeMinBufferLength) ||
++        maybeMinBufferLength > MAX_DECODED_STREAM_BYTES
++      ) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
+       // Compute the first power of two that is as big as maybeMinBufferLength.
+       while (this.minBufferLength < maybeMinBufferLength) {
+         this.minBufferLength *= 2;
+@@ -146,6 +156,13 @@ class DecodeStream implements StreamType {
+   }
+ 
+   protected ensureBuffer(requested: number) {
++    if (
++      !Number.isSafeInteger(requested) ||
++      requested < 0 ||
++      requested > MAX_DECODED_STREAM_BYTES
++    ) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
+     const buffer = this.buffer;
+     if (requested <= buffer.byteLength) {
+       return buffer;
+@@ -154,6 +171,11 @@ class DecodeStream implements StreamType {
+     while (size < requested) {
+       size *= 2;
+     }
++    const growth = size - buffer.byteLength;
++    if (totalDecodedBufferBytes > MAX_TOTAL_DECODED_BUFFER_BYTES - growth) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
++    totalDecodedBufferBytes += growth;
+     const buffer2 = new Uint8Array(size);
+     buffer2.set(buffer);
+     return (this.buffer = buffer2);
+diff --git a/src/core/streams/decode.ts b/src/core/streams/decode.ts
+index 82020725719ffe789e6ec5484a4acfe26112453a..b77299f3acbd936748d8d1fb269d0c7fe6c09e9e 100644
+--- a/src/core/streams/decode.ts
++++ b/src/core/streams/decode.ts
+@@ -12,6 +12,9 @@ import LZWStream from './LZWStream';
+ import RunLengthStream from './RunLengthStream';
+ import Stream, { StreamType } from './Stream';
+ 
++const MAX_STREAM_FILTERS = 8;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++
+ const decodeStream = (
+   stream: StreamType,
+   encoding: PDFName,
+@@ -63,6 +66,9 @@ export const decodePDFRawStream = ({
+       DecodeParms as PDFDict | typeof PDFNull | undefined,
+     );
+   } else if (Filter instanceof PDFArray) {
++    if (Filter.size() > MAX_STREAM_FILTERS) {
++      throw new Error(PDF_STREAM_SAFETY_LIMIT);
++    }
+     for (let idx = 0, len = Filter.size(); idx < len; idx++) {
+       stream = decodeStream(
+         stream,
+diff --git a/src/core/structures/PDFPageTree.ts b/src/core/structures/PDFPageTree.ts
+index 51763619740f22aa8d356ccf538edb2f852243ec..7d2f2301e62e60008d11a0c5edb16e2bb641c8f8 100644
+--- a/src/core/structures/PDFPageTree.ts
++++ b/src/core/structures/PDFPageTree.ts
+@@ -9,6 +9,16 @@ import { InvalidTargetIndexError, CorruptPageTreeError } from '../errors';
+ 
+ export type TreeNode = PDFPageTree | PDFPageLeaf;
+ 
++const MAX_PAGE_TREE_VISITS = 10_000;
++const MAX_PAGE_TREE_DEPTH = 128;
++const PDF_STREAM_SAFETY_LIMIT = 'PDF_STREAM_SAFETY_LIMIT';
++
++interface TraversalState {
++  visited: Set<string>;
++  visits: number;
++  depth: number;
++}
++
+ class PDFPageTree extends PDFDict {
+   static withContext = (context: PDFContext, parent?: PDFRef) => {
+     const dict = new Map();
+@@ -156,12 +166,31 @@ class PDFPageTree extends PDFDict {
+   }
+ 
+   /** Performs a Post-Order traversal of this page tree */
+-  traverse(visitor: (node: TreeNode, ref: PDFRef) => any): void {
++  traverse(
++    visitor: (node: TreeNode, ref: PDFRef) => any,
++    state: TraversalState = { visited: new Set(), visits: 0, depth: 0 },
++  ): void {
+     const Kids = this.Kids();
+     for (let idx = 0, len = Kids.size(); idx < len; idx++) {
+       const kidRef = Kids.get(idx) as PDFRef;
++      state.visits += 1;
++      if (
++        state.visits > MAX_PAGE_TREE_VISITS ||
++        state.depth >= MAX_PAGE_TREE_DEPTH ||
++        state.visited.has(kidRef.tag)
++      ) {
++        throw new Error(PDF_STREAM_SAFETY_LIMIT);
++      }
++      state.visited.add(kidRef.tag);
+       const kid = this.context.lookup(kidRef) as TreeNode;
+-      if (kid instanceof PDFPageTree) kid.traverse(visitor);
++      if (kid instanceof PDFPageTree) {
++        state.depth += 1;
++        try {
++          kid.traverse(visitor, state);
++        } finally {
++          state.depth -= 1;
++        }
++      }
+       visitor(kid, kidRef);
+     }
+   }

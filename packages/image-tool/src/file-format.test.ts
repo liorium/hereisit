@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { inspectImageHeader } from "./file-format";
+import {
+  inspectImageHeader,
+  readJpegExifOrientation,
+  stripJpegMetadata,
+  stripPngMetadata,
+} from "./file-format";
 
 function writeUint32BE(bytes: Uint8Array, offset: number, value: number): void {
   bytes[offset] = (value >>> 24) & 0xff;
@@ -70,6 +75,104 @@ function heicHeader(
   return joinBytes(isoBox("ftyp", brandBytes), meta).buffer as ArrayBuffer;
 }
 
+function jpegWithExifOrientation(orientation: number, littleEndian = false): ArrayBuffer {
+  const payload = new Uint8Array(32);
+  payload.set([0x45, 0x78, 0x69, 0x66, 0, 0]);
+  const tiff = 6;
+  if (littleEndian) {
+    payload.set([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 1, 0], tiff);
+    payload.set([0x12, 0x01, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0], tiff + 10);
+  } else {
+    payload.set([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1], tiff);
+    payload.set([0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0], tiff + 10);
+  }
+  const bytes = new Uint8Array(2 + 2 + 2 + payload.byteLength + 2);
+  bytes.set([0xff, 0xd8, 0xff, 0xe1, 0, payload.byteLength + 2]);
+  bytes.set(payload, 6);
+  bytes.set([0xff, 0xd9], bytes.byteLength - 2);
+  return bytes.buffer;
+}
+
+function jpegSegment(marker: number, payload: Uint8Array): Uint8Array {
+  const bytes = new Uint8Array(payload.byteLength + 4);
+  bytes.set([
+    0xff,
+    marker,
+    ((payload.byteLength + 2) >>> 8) & 0xff,
+    (payload.byteLength + 2) & 0xff,
+  ]);
+  bytes.set(payload, 4);
+  return bytes;
+}
+
+function validIccProfile(): Uint8Array {
+  const profile = new Uint8Array(164);
+  writeUint32BE(profile, 0, profile.byteLength);
+  profile.set(new TextEncoder().encode("mntr"), 12);
+  profile.set(new TextEncoder().encode("RGB "), 16);
+  profile.set(new TextEncoder().encode("XYZ "), 20);
+  profile.set(new TextEncoder().encode("acsp"), 36);
+  writeUint32BE(profile, 128, 1);
+  profile.set(new TextEncoder().encode("wtpt"), 132);
+  writeUint32BE(profile, 136, 144);
+  writeUint32BE(profile, 140, 20);
+  profile.set(new TextEncoder().encode("XYZ "), 144);
+  writeUint32BE(profile, 152, 0x0000_f6d6);
+  writeUint32BE(profile, 156, 0x0001_0000);
+  writeUint32BE(profile, 160, 0x0000_d32d);
+  return profile;
+}
+
+function iccSegments(profile: Uint8Array, chunkCount = 2): Uint8Array[] {
+  const segments: Uint8Array[] = [];
+  for (let sequence = 1; sequence <= chunkCount; sequence += 1) {
+    const start = Math.floor(((sequence - 1) * profile.byteLength) / chunkCount);
+    const end = Math.floor((sequence * profile.byteLength) / chunkCount);
+    const payload = joinBytes(
+      new TextEncoder().encode("ICC_PROFILE\0"),
+      Uint8Array.from([sequence, chunkCount]),
+      profile.subarray(start, end),
+    );
+    segments.push(jpegSegment(0xe2, payload));
+  }
+  return segments;
+}
+
+function jpegWithSegments(
+  beforeScan: readonly Uint8Array[],
+  afterScan: readonly Uint8Array[] = [],
+): ArrayBuffer {
+  const frame = jpegSegment(
+    0xc0,
+    Uint8Array.from([8, 0, 10, 0, 20, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]),
+  );
+  const scan = jpegSegment(0xda, Uint8Array.from([3, 1, 0, 2, 0, 3, 0, 0, 0x3f, 0]));
+  return joinBytes(
+    Uint8Array.from([0xff, 0xd8]),
+    ...beforeScan,
+    frame,
+    scan,
+    Uint8Array.from([1, 2, 0xff, 0, 3]),
+    ...afterScan,
+    Uint8Array.from([0xff, 0xd9]),
+  ).buffer as ArrayBuffer;
+}
+
+function jpegWithPrivateMetadata(): ArrayBuffer {
+  const app0 = jpegSegment(0xe0, joinBytes(new TextEncoder().encode("JFIF\0"), new Uint8Array(9)));
+  const app1 = jpegSegment(
+    0xe1,
+    joinBytes(new TextEncoder().encode("Exif\0\0GPS_PRIVATE_SENTINEL"), new Uint8Array(8)),
+  );
+  const privateApp = jpegSegment(0xec, new TextEncoder().encode("PRIVATE_APP_DATA"));
+  const comment = jpegSegment(0xfe, new TextEncoder().encode("PRIVATE_COMMENT"));
+  const postScanMetadata = jpegSegment(0xed, new TextEncoder().encode("PRIVATE_IPTC"));
+  return jpegWithSegments(
+    [app0, app1, ...iccSegments(validIccProfile()), privateApp, comment],
+    [postScanMetadata],
+  );
+}
+
 describe("inspectImageHeader", () => {
   it("reads JPEG dimensions from a start-of-frame segment", () => {
     const bytes = Uint8Array.from([
@@ -91,6 +194,7 @@ describe("inspectImageHeader", () => {
         { type: "tEXt", data: new Uint8Array(600) },
         { type: "acTL", data: new Uint8Array(8) },
         { type: "IDAT", data: new Uint8Array(1) },
+        { type: "IEND", data: new Uint8Array() },
       ]),
     );
     expect(result).toMatchObject({ format: "png", width: 320, height: 240, animated: true });
@@ -103,6 +207,7 @@ describe("inspectImageHeader", () => {
         { type: "IHDR", data: pngHeader(10, 20) },
         { type: "tEXt", data: payload },
         { type: "IDAT", data: new Uint8Array(1) },
+        { type: "IEND", data: new Uint8Array() },
       ]),
     );
     expect(result.animated).toBe(false);
@@ -146,5 +251,131 @@ describe("inspectImageHeader", () => {
     const boxes = Array.from({ length: 4097 }, () => emptyBox);
     const bytes = joinBytes(new Uint8Array(heicHeader(100, 100)), ...boxes);
     expect(() => inspectImageHeader(bytes.buffer as ArrayBuffer)).toThrow();
+  });
+
+  it("rejects a duplicate IHDR even when it appears after image data", () => {
+    const bytes = pngWithChunks([
+      { type: "IHDR", data: pngHeader(1, 1) },
+      { type: "IDAT", data: new Uint8Array(1) },
+      { type: "IHDR", data: pngHeader(16_384, 16_384) },
+      { type: "IEND", data: new Uint8Array() },
+    ]);
+    expect(() => inspectImageHeader(bytes)).toThrow();
+  });
+
+  it("estimates the raw scanline buffer for a high-depth PNG", () => {
+    const header = pngHeader(3_000, 3_000);
+    header[8] = 16;
+    const result = inspectImageHeader(
+      pngWithChunks([
+        { type: "IHDR", data: header },
+        { type: "IDAT", data: new Uint8Array(1) },
+        { type: "IEND", data: new Uint8Array() },
+      ]),
+    );
+    expect(result.pngRawBytes).toBe(72_003_000);
+  });
+
+  it("finds APNG control chunks after IDAT", () => {
+    const result = inspectImageHeader(
+      pngWithChunks([
+        { type: "IHDR", data: pngHeader(1, 1) },
+        { type: "IDAT", data: new Uint8Array(1) },
+        { type: "fcTL", data: new Uint8Array(26) },
+        { type: "IEND", data: new Uint8Array() },
+      ]),
+    );
+    expect(result.animated).toBe(true);
+  });
+});
+
+describe("readJpegExifOrientation", () => {
+  it("reads big-endian and little-endian TIFF orientation values", () => {
+    expect(readJpegExifOrientation(jpegWithExifOrientation(6))).toBe(6);
+    expect(readJpegExifOrientation(jpegWithExifOrientation(8, true))).toBe(8);
+  });
+
+  it("falls back safely for malformed or unsupported EXIF values", () => {
+    expect(readJpegExifOrientation(jpegWithExifOrientation(9))).toBe(1);
+    const malformed = new Uint8Array(jpegWithExifOrientation(6));
+    malformed.set([0xff, 0xff, 0xff, 0xff], 16);
+    expect(readJpegExifOrientation(malformed.buffer)).toBe(1);
+    expect(readJpegExifOrientation(new Uint8Array([1, 2, 3]).buffer)).toBe(1);
+  });
+});
+
+describe("lossless image metadata stripping", () => {
+  it("removes PNG text chunks while retaining pixel chunks", () => {
+    const source = pngWithChunks([
+      { type: "IHDR", data: pngHeader(1, 1) },
+      { type: "tEXt", data: new TextEncoder().encode("GPS_PRIVATE_SENTINEL") },
+      { type: "IDAT", data: new Uint8Array([1, 2, 3]) },
+      { type: "IEND", data: new Uint8Array() },
+    ]);
+    const stripped = stripPngMetadata(source);
+    expect(new TextDecoder().decode(stripped)).not.toContain("GPS_PRIVATE_SENTINEL");
+    expect(inspectImageHeader(stripped)).toMatchObject({ format: "png", width: 1, height: 1 });
+  });
+
+  it("removes JPEG private metadata while retaining JFIF and a valid ICC profile", () => {
+    const stripped = stripJpegMetadata(jpegWithPrivateMetadata());
+    const text = new TextDecoder().decode(stripped);
+    expect(text).toContain("JFIF");
+    expect(text).toContain("ICC_PROFILE\0");
+    expect(text).toContain("acsp");
+    expect(text).not.toContain("GPS_PRIVATE_SENTINEL");
+    expect(text).not.toContain("PRIVATE_COMMENT");
+    expect(text).not.toContain("PRIVATE_IPTC");
+    expect(text).not.toContain("PRIVATE_APP_DATA");
+    expect(inspectImageHeader(stripped)).toMatchObject({ format: "jpeg", width: 20, height: 10 });
+  });
+
+  it("strips an APP2 payload that only pretends to be an ICC profile", () => {
+    const fakeProfile = jpegSegment(
+      0xe2,
+      joinBytes(
+        new TextEncoder().encode("ICC_PROFILE\0"),
+        Uint8Array.from([1, 1]),
+        new TextEncoder().encode("GPS_PRIVATE_SENTINEL"),
+      ),
+    );
+    const stripped = stripJpegMetadata(jpegWithSegments([fakeProfile]));
+    expect(new TextDecoder().decode(stripped)).not.toContain("GPS_PRIVATE_SENTINEL");
+  });
+
+  it("rejects a JPEG whose scan is not terminated by an EOI marker", () => {
+    const source = new Uint8Array(jpegWithPrivateMetadata());
+    const truncated = source.slice(0, -2);
+    expect(() => stripJpegMetadata(truncated.buffer)).toThrow("지원하지 않거나 손상된 이미지");
+  });
+
+  it("normalizes marker fill bytes for strict downstream JPEG decoders", () => {
+    const frame = jpegSegment(
+      0xc0,
+      Uint8Array.from([8, 0, 10, 0, 20, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]),
+    );
+    const scan = jpegSegment(0xda, Uint8Array.from([3, 1, 0, 2, 0, 3, 0, 0, 0x3f, 0]));
+    const source = joinBytes(
+      Uint8Array.from([0xff, 0xd8, 0xff]),
+      frame,
+      scan,
+      Uint8Array.from([1, 2, 3, 0xff, 0xd9]),
+    );
+
+    const stripped = new Uint8Array(stripJpegMetadata(source.buffer as ArrayBuffer));
+    expect(stripped.slice(0, 4)).toEqual(Uint8Array.from([0xff, 0xd8, 0xff, 0xc0]));
+    expect(stripped.byteLength).toBe(source.byteLength - 1);
+    expect(inspectImageHeader(stripped.buffer)).toMatchObject({
+      format: "jpeg",
+      width: 20,
+      height: 10,
+    });
+  });
+
+  it("caps JPEG markers before retained subarray views can amplify memory", () => {
+    const markers = Array.from({ length: 4_096 }, () => Uint8Array.from([0xff, 0x01]));
+    expect(() => stripJpegMetadata(jpegWithSegments(markers))).toThrow(
+      "지원하지 않거나 손상된 이미지",
+    );
   });
 });

@@ -25,6 +25,24 @@ const toolPages = [
     title: "이미지 형식 변환",
     description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
   },
+  {
+    file: "pdf/merge.html",
+    path: "/pdf/merge",
+    title: "PDF 합치기",
+    description: "여러 PDF 파일을 원하는 순서대로 하나로 합치세요.",
+  },
+  {
+    file: "pdf/split.html",
+    path: "/pdf/split",
+    title: "PDF 페이지 분할",
+    description: "PDF를 페이지별로 나누거나 필요한 페이지만 추출하세요.",
+  },
+  {
+    file: "pdf/image-to-pdf.html",
+    path: "/pdf/image-to-pdf",
+    title: "이미지를 PDF로 변환",
+    description: "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요.",
+  },
 ];
 
 async function collectJavaScript(directory) {
@@ -36,6 +54,22 @@ async function collectJavaScript(directory) {
     else if (entry.isFile() && entry.name.endsWith(".js")) files.push(absolute);
   }
   return files;
+}
+
+async function readReferencedJavaScript(pageHtml) {
+  const scriptPaths = Array.from(
+    new Set(
+      Array.from(
+        pageHtml.matchAll(/<script[^>]+src="(\/_next\/[^"?#]+)["?#]/g),
+        (match) => match[1],
+      ),
+    ),
+  );
+  return (
+    await Promise.all(
+      scriptPaths.map((scriptPath) => readFile(path.join(outputRoot, scriptPath.slice(1)), "utf8")),
+    )
+  ).join("\n");
 }
 
 await Promise.all([
@@ -54,8 +88,9 @@ const [html, headers, sitemap, robots, ...toolHtmlPages] = await Promise.all([
   readFile(path.join(outputRoot, "robots.txt"), "utf8"),
   ...toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 ]);
-assert.match(html, /이미지 작업/);
+assert.match(html, /파일 작업/);
 assert.match(html, /href="\/image\/compress"/);
+assert.match(html, /href="\/pdf\/merge"/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /connect-src \x27self\x27/);
 
@@ -83,9 +118,25 @@ assert.ok(assetPaths.length > 0, "The exported pages must reference Next.js asse
 await Promise.all(assetPaths.map((assetPath) => access(path.join(outputRoot, assetPath.slice(1)))));
 
 const scripts = await collectJavaScript(path.join(outputRoot, "_next"));
-const workerBundleFound = (
-  await Promise.all(scripts.map((script) => readFile(script, "utf8")))
-).some((source) => source.includes("hereisit-image-worker"));
-assert.ok(workerBundleFound, "The static export must include the image Worker bundle.");
+const scriptSources = await Promise.all(scripts.map((script) => readFile(script, "utf8")));
+assert.ok(
+  scriptSources.some((source) => source.includes("hereisit-image-worker")),
+  "The static export must include the image Worker bundle.",
+);
+assert.ok(
+  scriptSources.some((source) => source.includes("hereisit-pdf-worker")),
+  "The static export must include the PDF Worker bundle.",
+);
+
+const imagePageScripts = (
+  await Promise.all(toolHtmlPages.slice(0, 3).map(readReferencedJavaScript))
+).join("\n");
+const pdfPageScripts = (
+  await Promise.all(toolHtmlPages.slice(3).map(readReferencedJavaScript))
+).join("\n");
+assert.match(imagePageScripts, /hereisit-image-worker/);
+assert.doesNotMatch(imagePageScripts, /hereisit-pdf-worker/);
+assert.match(pdfPageScripts, /hereisit-pdf-worker/);
+assert.doesNotMatch(pdfPageScripts, /hereisit-image-worker/);
 
 console.log("Static export verified.");

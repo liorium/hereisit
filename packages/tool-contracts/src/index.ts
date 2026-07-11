@@ -3,6 +3,10 @@ import { z } from "zod";
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;
 export const IMAGE_TOOL_VERSION = 1 as const;
+export const PDF_MERGE_TOOL_ID = "pdf.merge" as const;
+export const PDF_SPLIT_TOOL_ID = "pdf.split" as const;
+export const PDF_IMAGES_TO_PDF_TOOL_ID = "pdf.images-to-pdf" as const;
+export const PDF_TOOL_VERSION = 1 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
@@ -230,4 +234,138 @@ export interface ToolPreset {
   description: string;
   badge: string;
   spec: ImagePipelineSpecV1;
+}
+
+export const pdfPageSelectionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("every-page") }),
+  z.object({
+    mode: z.literal("extract"),
+    pages: z
+      .array(z.number().int().min(1).max(500))
+      .min(1)
+      .max(500)
+      .refine((pages) => new Set(pages).size === pages.length, {
+        message: "페이지 번호는 중복될 수 없습니다.",
+      }),
+  }),
+]);
+
+export const pdfImagePageSchema = z.discriminatedUnion("size", [
+  z.object({
+    size: z.literal("a4"),
+    margin: z.number().int().min(0).max(72).default(24),
+  }),
+  z.object({ size: z.literal("image"), margin: z.literal(0).default(0) }),
+]);
+
+export const pdfPipelineSpecSchema = z.discriminatedUnion("operation", [
+  z.object({ version: z.literal(1), operation: z.literal("merge") }),
+  z.object({
+    version: z.literal(1),
+    operation: z.literal("split"),
+    selection: pdfPageSelectionSchema,
+  }),
+  z.object({
+    version: z.literal(1),
+    operation: z.literal("images-to-pdf"),
+    page: pdfImagePageSchema,
+  }),
+]);
+
+export type PdfPipelineSpecV1 = z.input<typeof pdfPipelineSpecSchema>;
+export type ParsedPdfPipelineSpecV1 = z.output<typeof pdfPipelineSpecSchema>;
+export type PdfToolId =
+  | typeof PDF_MERGE_TOOL_ID
+  | typeof PDF_SPLIT_TOOL_ID
+  | typeof PDF_IMAGES_TO_PDF_TOOL_ID;
+export type PdfPhase = "validating" | "loading" | "processing" | "serializing" | "finalizing";
+
+export type PdfWarning =
+  | "DOCUMENT_FEATURES_MAY_CHANGE"
+  | "SIGNATURES_INVALIDATED"
+  | "IMAGE_COLOR_MAY_CHANGE";
+
+export interface PdfPipelineResult {
+  bytes: ArrayBuffer;
+  suggestedName: string;
+  mime: "application/pdf" | "application/zip";
+  byteLength: number;
+  sourcePageCount: number;
+  outputPageCount: number;
+  outputDocumentCount: number;
+  warnings: PdfWarning[];
+  timing: {
+    loadMs: number;
+    processMs: number;
+    saveMs: number;
+    totalMs: number;
+  };
+}
+
+export type PdfToolErrorCode =
+  | "INVALID_SPEC"
+  | "UNSUPPORTED_INPUT"
+  | "PASSWORD_PROTECTED"
+  | "CORRUPT_PDF"
+  | "PAGE_RANGE_INVALID"
+  | "PAGE_LIMIT"
+  | "MEMORY_LIMIT"
+  | "WRITE_FAILED"
+  | "CANCELLED"
+  | "WORKER_CRASH";
+
+export interface PdfToolErrorPayload {
+  code: PdfToolErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface PdfRunRequest {
+  protocol: 1;
+  type: "run";
+  jobId: string;
+  tool: PdfToolId;
+  toolVersion: 1;
+  inputs: readonly {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    bytes: ArrayBuffer;
+  }[];
+  spec: PdfPipelineSpecV1;
+}
+
+export interface PdfCancelRequest {
+  protocol: 1;
+  type: "cancel";
+  jobId: string;
+}
+
+export type PdfWorkerRequest = PdfRunRequest | PdfCancelRequest;
+
+export type PdfWorkerEvent =
+  | {
+      protocol: 1;
+      type: "ready";
+      capabilities: { operations: readonly PdfToolId[] };
+    }
+  | {
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+      phase: PdfPhase;
+      fraction: number;
+    }
+  | { protocol: 1; type: "complete"; jobId: string; result: PdfPipelineResult }
+  | { protocol: 1; type: "failed"; jobId: string; error: PdfToolErrorPayload };
+
+export type PdfJobOutcome =
+  | { status: "fulfilled"; value: PdfPipelineResult }
+  | { status: "rejected"; error: PdfToolErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfJobHandle {
+  result: Promise<PdfJobOutcome>;
+  cancel(): void;
 }

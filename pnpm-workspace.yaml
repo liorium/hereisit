@@ -13,3 +13,6 @@ minimumReleaseAgeExclude:
 
 onlyBuiltDependencies:
   - sharp
+
+patchedDependencies:
+  '@cantoo/pdf-lib@2.7.1': patches/@cantoo__pdf-lib@2.7.1.patch

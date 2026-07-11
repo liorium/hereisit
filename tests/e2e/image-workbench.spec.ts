@@ -41,7 +41,7 @@ async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
 test("processes and downloads an image without external uploads", async ({ page }) => {
   const response = await page.goto("/");
   expect(response?.headers()["content-security-policy"]).toContain("connect-src 'self'");
-  await expect(page.getByRole("heading", { name: "이미지 작업, 여기서 끝." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "파일 작업, 여기서 끝." })).toBeVisible();
   const uploadButton = page.getByRole("button", { name: "이미지 선택" });
   const fileInput = page.locator("input[type=file]");
   await expect(uploadButton).toBeEnabled();
@@ -119,7 +119,7 @@ test("reaches the upload action through the real tab order", async ({ page }) =>
 
   await page.keyboard.press("Tab");
   await expect(homeLink).toBeFocused();
-  for (const name of ["이미지 용량 줄이기", "이미지 크기 조절", "이미지 형식 변환"]) {
+  for (const name of ["이미지", "PDF"]) {
     await page.keyboard.press("Tab");
     await expect(page.getByRole("link", { name, exact: true })).toBeFocused();
   }

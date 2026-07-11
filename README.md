@@ -1,8 +1,8 @@
 # HereItIs
 
-HereItIs is a fast, private, local-first toolbox for everyday file work. The first milestone is a
-browser-only batch image workbench: resize, crop, convert, and compress JPG, PNG, and WebP files in Web
-Workers without uploading them.
+HereItIs is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
+resize, crop, conversion, and compression plus PDF merge, split, page extraction, and JPG/PNG-to-PDF
+tools. File processing runs in Web Workers without uploads.
 
 ## Development
 
@@ -22,8 +22,8 @@ Core verification runs formatting/lint checks, TypeScript, unit tests, and a pro
 pnpm verify
 ~~~
 
-The browser suite additionally verifies local conversion, a downloaded WebP inside ZIP, keyboard
-navigation, Worker loading, and that conversion makes no external or write requests:
+The browser suite additionally verifies image and PDF conversion, downloaded artifacts, keyboard and
+mobile layouts, Worker loading, and that conversion makes no external or write requests:
 
 ~~~bash
 pnpm exec playwright install chromium
@@ -53,19 +53,22 @@ checklist.
 
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
   cannot meet the target are marked as already optimized and are not added to downloads.
-- Tested release browser: current Chromium (Chrome and Edge).
+- CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
 - Up to 100 files, 50MB per file, and 250MB total input per batch.
 - Up to 50 megapixels per input and 25 megapixels per output.
 - Up to 100MB per result and 500MB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
-- Files and filenames stay in the current tab. Closing the tab releases in-memory results.
+- PDF jobs accept up to 100MB total input and 500 pages; page-by-page split creates at most 200 files.
+- JPG/PNG-to-PDF uses a format-aware 128MB estimated decode-memory ceiling for each PNG.
+- Files and filenames stay in the current tab or its Worker. Closing the tab releases in-memory results.
 
 ## Repository layout
 
-- apps/web — Next.js application and local image workbench.
+- apps/web — Next.js application and local image/PDF workbenches.
 - packages/tool-contracts — versioned tool and Worker protocol.
 - packages/image-tool — structural image validation, geometry, and naming.
-- packages/browser-runtime — bounded Worker pool and browser execution runtime.
+- packages/pdf-tool — PDF page-range, layout, signature, and naming helpers.
+- packages/browser-runtime — bounded image/PDF Worker execution runtime.
 - packages/tool-registry — user-facing tool and preset metadata.
 
 See docs/architecture.md for execution and privacy boundaries.

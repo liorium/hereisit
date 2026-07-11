@@ -27,6 +27,11 @@ export default defineConfig({
       use: { ...devices["Desktop Firefox"] },
       testIgnore: /mobile\.spec\.ts/,
     },
+    {
+      name: "mobile-chromium",
+      use: { ...devices["iPhone 15"], browserName: "chromium" },
+      testMatch: /mobile\.spec\.ts/,
+    },
     ...(includeWebKit
       ? [
           {

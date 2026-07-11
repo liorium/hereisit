@@ -1,0 +1,706 @@
+.shell {
+  width: min(1360px, calc(100% - 48px));
+  margin: 0 auto;
+  position: relative;
+}
+
+.hiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.emptyDropzone {
+  width: 100%;
+  min-height: 430px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 36px;
+  padding: 64px 70px;
+  overflow: hidden;
+  border: 2px solid var(--ink);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 14px 14px 0 var(--yellow);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.emptyDropzone:hover,
+.emptyDropzone.dragging {
+  transform: translate(-3px, -3px);
+  background: #fffef8;
+  box-shadow: 20px 20px 0 var(--yellow);
+}
+
+.emptyDropzone::before {
+  content: "";
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  top: -110px;
+  right: 18%;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.dropIcon {
+  width: 94px;
+  height: 94px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.dropIcon span {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--blue);
+  color: white;
+  font-size: 30px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.17em;
+}
+
+.dropCopy h2,
+.workbenchHeader h2 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 50px);
+  line-height: 1;
+  letter-spacing: -0.055em;
+}
+
+.dropCopy > p:last-child {
+  margin: 15px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.dropActions {
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.primaryButton,
+.runButton {
+  min-height: 54px;
+  padding: 0 24px;
+  border: 1px solid var(--blue);
+  border-radius: 11px;
+  background: var(--blue);
+  color: white;
+  font-weight: 800;
+  box-shadow: 0 5px 0 var(--blue-dark);
+  cursor: pointer;
+}
+
+.primaryButton:disabled,
+.runButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  min-height: 32px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.localBadge {
+  position: absolute;
+  left: 70px;
+  bottom: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.localBadge span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+
+.workbench {
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 12px 12px 0 var(--yellow);
+}
+
+.workbenchHeader {
+  min-height: 112px;
+  padding: 28px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workbenchHeader h2 {
+  font-size: 34px;
+}
+
+.headerActions,
+.actionButtons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headerActions button,
+.secondaryButton {
+  min-height: 42px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.workspace {
+  min-height: 510px;
+  display: grid;
+  grid-template-columns: minmax(270px, 0.9fr) minmax(320px, 1.2fr) minmax(290px, 0.9fr);
+}
+
+.filePanel,
+.settingsPanel,
+.resultPanel {
+  min-width: 0;
+}
+
+.filePanel {
+  border-right: 1px solid var(--line);
+}
+
+.settingsPanel {
+  border-right: 1px solid var(--line);
+}
+
+.panelTitle {
+  min-height: 58px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.panelTitle strong {
+  font-size: 13px;
+}
+
+.panelTitle span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.fileList {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.fileRow {
+  min-height: 82px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.fileIndex {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.fileCopy {
+  min-width: 0;
+}
+
+.fileCopy strong,
+.fileCopy span {
+  display: block;
+}
+
+.fileCopy strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileCopy span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.fileActions {
+  display: flex;
+  gap: 4px;
+}
+
+.fileActions button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.fileActions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.fileTotal {
+  margin: 0;
+  padding: 14px 18px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settingCard,
+.optionGroup {
+  margin: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+}
+
+.settingCard strong {
+  font-size: 13px;
+}
+
+.settingCard p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.optionGroup {
+  display: grid;
+  gap: 10px;
+}
+
+.optionGroup legend {
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.optionGroup > label {
+  min-height: 60px;
+  padding: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.optionGroup input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--blue);
+}
+
+.optionGroup label strong,
+.optionGroup label small {
+  display: block;
+}
+
+.optionGroup label strong {
+  font-size: 11px;
+}
+
+.optionGroup label small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.rangeField {
+  padding-top: 8px;
+}
+
+.rangeField > label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.rangeField input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.rangeField input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.optionGroup .rangeField small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.privacyNotice {
+  margin: 18px;
+  padding: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--green) 8%, white);
+  color: var(--green);
+}
+
+.privacyNotice > span {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: white;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.privacyNotice p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.privacyNotice strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+.resultPanel {
+  padding: 38px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.68)),
+    radial-gradient(circle at 50% 35%, var(--yellow), transparent 50%);
+}
+
+.resultIcon {
+  width: 110px;
+  height: 138px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 12px 12px 24px 12px;
+  background: white;
+  color: var(--blue);
+  font-size: 20px;
+  font-weight: 950;
+  box-shadow: 8px 8px 0 var(--yellow);
+}
+
+.resultCopy {
+  margin-top: 28px;
+}
+
+.resultCopy strong {
+  font-size: 16px;
+}
+
+.resultCopy p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.progressTrack {
+  width: min(260px, 100%);
+  height: 8px;
+  margin-top: 24px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 10%, white);
+}
+
+.progressTrack span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--blue);
+  transition: width 160ms ease;
+}
+
+.resultWarning {
+  max-width: 280px;
+  margin: 18px 0 0;
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.actionBar {
+  min-height: 86px;
+  padding: 15px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid var(--ink);
+  background: white;
+}
+
+.statusCopy {
+  min-width: 0;
+}
+
+.statusCopy strong,
+.statusCopy span {
+  display: block;
+}
+
+.statusCopy strong {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.statusCopy span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.runButton {
+  min-height: 48px;
+  box-shadow: 0 4px 0 var(--blue-dark);
+  font-size: 12px;
+}
+
+@media (max-width: 1050px) {
+  .workspace {
+    grid-template-columns: minmax(240px, 0.8fr) minmax(330px, 1.2fr);
+  }
+
+  .resultPanel {
+    grid-column: 1 / -1;
+    min-height: 360px;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 800px) {
+  .shell {
+    width: min(100% - 32px, 640px);
+  }
+
+  .emptyDropzone {
+    min-height: 440px;
+    padding: 40px 24px 64px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 22px;
+    text-align: center;
+    box-shadow: 7px 7px 0 var(--yellow);
+  }
+
+  .emptyDropzone:hover,
+  .emptyDropzone.dragging {
+    transform: translate(-1px, -1px);
+    box-shadow: 10px 10px 0 var(--yellow);
+  }
+
+  .dropIcon {
+    width: 72px;
+    height: 72px;
+  }
+
+  .dropIcon span {
+    width: 40px;
+    height: 40px;
+    font-size: 24px;
+  }
+
+  .dropCopy h2 {
+    font-size: 32px;
+  }
+
+  .dropActions {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .localBadge {
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+
+  .workbench {
+    overflow: visible;
+    box-shadow: 7px 7px 0 var(--yellow);
+  }
+
+  .workbenchHeader {
+    min-height: 96px;
+    padding: 20px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workbenchHeader h2 {
+    font-size: 26px;
+  }
+
+  .headerActions button {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .workspace {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .filePanel,
+  .settingsPanel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .fileList {
+    max-height: 330px;
+  }
+
+  .fileRow {
+    min-height: 92px;
+  }
+
+  .fileActions button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .optionGroup > label {
+    min-height: 66px;
+  }
+
+  .optionGroup input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  .rangeField input {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .resultPanel {
+    min-height: 390px;
+    padding: 38px 24px;
+  }
+
+  .actionBar {
+    min-height: 132px;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    align-items: stretch;
+    flex-direction: column;
+    border-radius: 0 0 17px 17px;
+    box-shadow: 0 -10px 24px rgba(23, 25, 31, 0.1);
+  }
+
+  .actionButtons,
+  .actionButtons > button {
+    width: 100%;
+  }
+
+  .actionButtons > button {
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .emptyDropzone,
+  .progressTrack span {
+    transition: none;
+  }
+}

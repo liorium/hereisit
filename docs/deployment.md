@@ -1,7 +1,7 @@
 # Cloudflare Pages deployment
 
-HereItIs is deployed as a static Next.js export through Cloudflare Pages Git integration. Image
-processing remains in the browser; Pages serves only versioned static assets.
+HereItIs is deployed as a static Next.js export through Cloudflare Pages Git integration. Image and PDF
+processing remain in the browser; Pages serves only versioned static assets.
 
 ## Important choice
 
@@ -64,6 +64,7 @@ GitHub Actions deploy workflow, or server runtime is required.
 - The generated pages.dev URL loads over HTTPS.
 - The response includes the security headers from apps/web/public/_headers.
 - A sample image converts to WebP and downloads as a ZIP.
+- Two sample PDFs merge in order, a PDF splits into a ZIP, and JPG/PNG images download as one PDF.
 - Browser network activity contains no external upload or write request.
 - A pull request receives its own preview URL and deployment status check.
 

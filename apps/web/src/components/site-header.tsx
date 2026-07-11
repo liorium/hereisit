@@ -1,4 +1,4 @@
-import { imageToolList } from "../lib/site";
+import { categoryNavigation } from "../lib/site";
 
 export function SiteHeader({ activePath }: { activePath?: string }) {
   return (
@@ -10,16 +10,16 @@ export function SiteHeader({ activePath }: { activePath?: string }) {
         <span>HereItIs</span>
       </a>
       <div className="site-header-actions">
-        <nav className="site-nav" aria-label="이미지 도구">
-          {imageToolList.map((tool) => (
+        <nav className="site-nav" aria-label="주요 도구">
+          {categoryNavigation.map((category) => (
             <a
               className="site-nav-link"
-              href={tool.path}
-              aria-label={tool.title}
-              aria-current={activePath === tool.path ? "page" : undefined}
-              key={tool.path}
+              href={category.path}
+              aria-current={activePath === category.path ? "page" : undefined}
+              data-active={activePath?.startsWith(category.prefix) ? "true" : undefined}
+              key={category.path}
             >
-              {tool.navLabel}
+              {category.label}
             </a>
           ))}
         </nav>

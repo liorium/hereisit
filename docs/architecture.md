@@ -25,6 +25,10 @@ The source-relative `smaller-only` goal is a hard postcondition. The runtime ada
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
 
+The `pdf.merge@1`, `pdf.split@1`, and `pdf.images-to-pdf@1` tools copy or embed content in a dedicated
+one-job Worker. They do not rasterize PDF pages. New documents can invalidate electronic signatures and
+may not retain bookmarks or forms, so that limitation is shown before and after relevant operations.
+
 ## Resource policy
 
 Image dimensions are parsed from PNG, JPEG, and WebP structure before decode. The runtime then keeps a
@@ -32,6 +36,11 @@ defensive post-decode check, limits automatic concurrency to two Workers (one on
 and enforces per-file, pixel, output, batch-input, and retained-result budgets. Worker creation errors,
 message decode failures, and a three-minute job watchdog settle into structured failures instead of
 leaving a batch pending.
+
+PDF inputs are structurally checked before parsing and bounded by file size, page count, decoded stream
+bytes, object and cross-reference counts, filter depth, output size, and a three-minute watchdog. PNGs
+embedded into PDF are gated by an estimate of compressed-input copies, raw scanlines, RGBA conversion,
+and PDF embedding buffers before decode begins.
 
 ## Privacy
 

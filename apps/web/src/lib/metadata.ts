@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { type ImageToolConfig, SITE_NAME, SITE_URL } from "./site";
+import { type ImageToolConfig, type PdfToolConfig, SITE_NAME, SITE_URL } from "./site";
 
-export function createImageToolMetadata(tool: ImageToolConfig): Metadata {
+export function createToolMetadata(tool: ImageToolConfig | PdfToolConfig): Metadata {
   const canonical = new URL(tool.path, SITE_URL).toString();
   const socialTitle = `${tool.title} | ${SITE_NAME}`;
 
@@ -24,3 +24,5 @@ export function createImageToolMetadata(tool: ImageToolConfig): Metadata {
     },
   };
 }
+
+export const createImageToolMetadata = createToolMetadata;
