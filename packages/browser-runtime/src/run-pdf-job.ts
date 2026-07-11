@@ -80,6 +80,7 @@ export function runPdfJob(
         name: "hereisit-pdf-worker",
       });
       worker.onmessage = (message: MessageEvent<PdfWorkerEvent>) => {
+        if (settled || cancelled) return;
         const event = message.data;
         if (event.protocol !== WORKER_PROTOCOL_VERSION || event.type === "ready") return;
         if (event.jobId !== jobId) return;
