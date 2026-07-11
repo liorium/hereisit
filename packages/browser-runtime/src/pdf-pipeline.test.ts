@@ -309,6 +309,32 @@ describe("runPdfPipeline", () => {
     expect(result.warnings).toContain("WATERMARK_TEXT_RASTERIZED");
   });
 
+  it("maps a watermark page above the source count to PAGE_RANGE_INVALID", async () => {
+    const source = await samplePdf([100]);
+
+    await expect(
+      runPdfPipeline([input("report.pdf", source)], {
+        version: 1,
+        operation: "watermark",
+        watermark: {
+          text: "대외비",
+          placement: "center",
+          fontSize: 48,
+          opacity: 0.18,
+          rotation: -45,
+          color: "#334155",
+        },
+        selection: { mode: "extract", pages: [2] },
+      }),
+    ).rejects.toMatchObject({
+      payload: {
+        code: "PAGE_RANGE_INVALID",
+        message: "이 PDF는 1페이지까지 있어요.",
+        retryable: false,
+      },
+    });
+  });
+
   it("positions a watermark inside a non-zero crop box", async () => {
     const sourceDocument = await PDFDocument.create();
     const sourcePage = sourceDocument.addPage([400, 500]);

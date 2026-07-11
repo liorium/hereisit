@@ -158,6 +158,51 @@ describe("pdfPipelineSpecSchema", () => {
   });
 
   it.each([
+    ["every page", { mode: "every-page" }],
+    ["selected pages", { mode: "extract", pages: [1, 500] }],
+  ])("accepts watermark selection for %s", (_case, selection) => {
+    const result = pdfPipelineSpecSchema.safeParse({
+      version: 1,
+      operation: "watermark",
+      watermark: {
+        text: "대외비",
+        placement: "center",
+        fontSize: 48,
+        opacity: 0.18,
+        rotation: -45,
+        color: "#334155",
+      },
+      selection,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it.each([
+    ["an empty page array", []],
+    ["duplicate pages", [1, 1]],
+    ["page zero", [0]],
+    ["a negative page", [-1]],
+    ["more than 500 pages", Array.from({ length: 501 }, (_, index) => index + 1)],
+  ])("rejects watermark selection with %s", (_case, pages) => {
+    const result = pdfPipelineSpecSchema.safeParse({
+      version: 1,
+      operation: "watermark",
+      watermark: {
+        text: "대외비",
+        placement: "center",
+        fontSize: 48,
+        opacity: 0.18,
+        rotation: -45,
+        color: "#334155",
+      },
+      selection: { mode: "extract", pages },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it.each([
     ["empty text", "   "],
     ["81-character text", "가".repeat(81)],
     ["control characters", "검토\u0000금지"],
