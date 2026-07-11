@@ -61,8 +61,9 @@ checklist.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
 - PDF jobs accept up to 100MB total input and 500 pages; page-by-page split creates at most 200 files.
 - Page organization works on one PDF at a time and can reorder, quarter-turn, or omit pages locally.
-- Watermark text is rasterized locally into a bounded PNG before it is placed on every page. It
-  is not searchable or selectable text, and its exact glyph appearance can vary with the device font.
+- Watermark text is rasterized locally into a bounded PNG before it is placed on every page or the
+  selected pages. It is not searchable or selectable text, and its exact glyph appearance can vary with
+  the device font.
 - Organizing pages and adding a watermark create a new PDF. Existing electronic signatures become
   invalid, and advanced document features such as bookmarks or forms may change.
 - General PDF compression and image downsampling are not provided. PDF editing can make an output larger

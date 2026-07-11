@@ -31,7 +31,8 @@ page plan: order controls output order, quarter-turns are added to the source ro
 are deleted from the result. It copies page content instead of rendering whole pages.
 
 The watermark tool renders the validated text once with a bounded `OffscreenCanvas`, embeds that raster
-PNG, and reuses it as a centered or tiled overlay on the selected pages. PDF pages are not rasterized, but
+PNG, and reuses it as a centered or tiled overlay on every page or the selected pages.
+PDF pages are not rasterized, but
 the watermark itself is an image rather than searchable or selectable text. Placement uses each page's
 visible CropBox offset, and compensates for the page rotation so the chosen angle stays visually
 consistent. Its glyph shape can reflect the sans-serif font available on the user's device.

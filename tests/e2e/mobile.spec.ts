@@ -139,9 +139,17 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   const placement = page.getByRole("group", { name: "배치" }).getByLabel("반복 타일");
   await placement.check();
   const opacity = page.getByLabel(/불투명도/);
+  const scope = page
+    .getByRole("group", { name: "적용 페이지" })
+    .getByRole("radio", { name: /지정 페이지/ });
+  await scope.check();
+  const range = page.getByLabel("페이지 범위", { exact: true });
+  await range.fill("1");
+  const rangeFontSize = await range.evaluate((element) => getComputedStyle(element).fontSize);
+  expect(rangeFontSize).toBe("16px");
   const run = page.getByRole("button", { name: "워터마크 넣기 →" });
 
-  for (const control of [text, placement.locator(".."), opacity, run]) {
+  for (const control of [text, placement.locator(".."), opacity, scope.locator(".."), range, run]) {
     const box = await control.boundingBox();
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -149,10 +157,15 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
 
   await run.click();
   await expect(page.getByText("1페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
-  const save = page.getByRole("button", { name: "PDF 저장·공유 ↓" });
-  const saveBox = await save.boundingBox();
-  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const resultActions = [
+    page.getByRole("button", { name: "같은 설정으로 다시 실행" }),
+    page.getByRole("button", { name: "PDF 저장·공유 ↓" }),
+  ];
+  for (const control of resultActions) {
+    const box = await control.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
 
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
