@@ -3,7 +3,7 @@ export const SITE_URL = "https://hereisit.pages.dev";
 
 export const HOME_TITLE = "HereItIs — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
   "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
 
@@ -98,7 +98,15 @@ export function relatedImageTools(intent: ImageToolIntent): readonly ImageToolCo
   return imageToolList.filter((tool) => tool.intent !== intent);
 }
 
-export type PdfToolIntent = "merge" | "split" | "organize" | "watermark" | "image-to-pdf";
+export type PdfToolIntent =
+  | "merge"
+  | "split"
+  | "organize"
+  | "watermark"
+  | "to-image"
+  | "image-to-pdf";
+
+export type PdfEditingIntent = Exclude<PdfToolIntent, "to-image">;
 
 export interface PdfToolConfig {
   intent: PdfToolIntent;
@@ -190,6 +198,27 @@ export const pdfTools = {
         title: "새 PDF 저장",
         description: "선택한 페이지에 워터마크를 넣은 새 PDF를 기기에 저장해요.",
       },
+    ],
+  },
+  "to-image": {
+    intent: "to-image",
+    path: "/pdf/to-image",
+    navLabel: "PDF→이미지",
+    eyebrow: "PDF TO IMAGE",
+    title: "PDF를 JPG·PNG로 변환",
+    description:
+      "PDF 페이지를 JPG 또는 PNG 이미지로 변환하세요. 업로드 없이 브라우저에서 처리합니다.",
+    defaultSummary:
+      "기본값은 모든 페이지를 150DPI JPG(품질 85)로 만들고, 한 장은 이미지로 여러 장은 ZIP으로 저장해요.",
+    warning:
+      "결과는 래스터 이미지라 텍스트를 검색하거나 선택할 수 없고, 주석·양식 모양은 평면화되며 색상 프로필이 달라질 수 있어요.",
+    steps: [
+      { title: "PDF 선택", description: "변환할 PDF 한 개를 기기에서 선택하세요." },
+      {
+        title: "변환 설정",
+        description: "페이지·JPG/PNG·해상도와 JPG 품질을 정하세요.",
+      },
+      { title: "이미지 저장", description: "한 장은 이미지로, 여러 장은 ZIP으로 저장해요." },
     ],
   },
   "image-to-pdf": {

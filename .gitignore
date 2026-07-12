@@ -2,6 +2,7 @@ node_modules/
 .next/
 dist/
 out/
+apps/web/public/pdfjs/
 .wrangler/
 .dev.vars*
 coverage/

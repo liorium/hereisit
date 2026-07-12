@@ -24,6 +24,12 @@ const tools = [
   },
 ] as const;
 
+const pdfToImageTool = {
+  path: "/pdf/to-image",
+  title: "PDF를 JPG·PNG로 변환",
+  selectLabel: "PDF 선택",
+} as const;
+
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -65,4 +71,25 @@ test("publishes dedicated routes in the sitemap", async ({ request }) => {
   expect(response.ok()).toBe(true);
   const sitemap = await response.text();
   for (const tool of tools) expect(sitemap).toContain(tool.path);
+  expect(sitemap).toContain(pdfToImageTool.path);
+});
+
+test("publishes and links the PDF to image tool", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: pdfToImageTool.title }).first()).toHaveAttribute(
+    "href",
+    pdfToImageTool.path,
+  );
+
+  const response = await page.goto(pdfToImageTool.path);
+  expect(response?.ok()).toBe(true);
+  await expect(page.getByRole("heading", { level: 1, name: pdfToImageTool.title })).toBeVisible();
+  await expect(page.getByRole("button", { name: pdfToImageTool.selectLabel })).toBeEnabled();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    new RegExp(`${pdfToImageTool.path.replaceAll("/", "\\/")}\\/?$`),
+  );
+
+  await page.goto("/pdf/merge");
+  await expect(page.locator(`.related-tool-card[href="${pdfToImageTool.path}"]`)).toBeVisible();
 });

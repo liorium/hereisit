@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "**",
+      "!!apps/web/public/pdfjs",
       "!!**/.next",
       "!!**/.turbo",
       "!!**/coverage",

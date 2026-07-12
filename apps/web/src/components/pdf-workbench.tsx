@@ -22,7 +22,7 @@ import type {
 } from "@hereisit/tool-contracts";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
-import type { PdfToolIntent } from "../lib/site";
+import type { PdfEditingIntent } from "../lib/site";
 import styles from "./pdf-workbench.module.css";
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -47,7 +47,7 @@ interface PdfWorkItem {
 }
 
 const INTENT_CONFIG: Record<
-  PdfToolIntent,
+  PdfEditingIntent,
   {
     emptyTitle: string;
     selectLabel: string;
@@ -134,7 +134,7 @@ function resultBlob(result: PdfPipelineResult): Blob {
   return new Blob([result.bytes], { type: result.mime });
 }
 
-export function PdfWorkbench({ intent }: { intent: PdfToolIntent }) {
+export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
   const config = INTENT_CONFIG[intent];
   const [items, setItems] = useState<PdfWorkItem[]>([]);
   const [hydrated, setHydrated] = useState(false);

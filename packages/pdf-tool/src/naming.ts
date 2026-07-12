@@ -4,7 +4,16 @@ function safeStem(filename: string, fallback: string): string {
   const cleaned = Array.from(withoutExtension.replace(/[<>:"|?*]/g, "-"))
     .filter((character) => {
       const code = character.codePointAt(0) ?? 0;
-      return code > 31 && code !== 127;
+      return (
+        code > 31 &&
+        code !== 127 &&
+        !(code >= 0x80 && code <= 0x9f) &&
+        code !== 0x061c &&
+        code !== 0x200e &&
+        code !== 0x200f &&
+        !(code >= 0x202a && code <= 0x202e) &&
+        !(code >= 0x2066 && code <= 0x2069)
+      );
     })
     .join("")
     .trim()
@@ -41,4 +50,17 @@ export function organizedPdfName(filename: string): string {
 
 export function watermarkedPdfName(filename: string): string {
   return `${safeStem(filename, "document")}-watermarked-hereisit.pdf`;
+}
+
+export function pdfToImagePageName(
+  filename: string,
+  sourcePage: number,
+  format: "jpeg" | "png",
+): string {
+  const extension = format === "jpeg" ? "jpg" : "png";
+  return `${safeStem(filename, "document")}-page-${String(sourcePage).padStart(3, "0")}.${extension}`;
+}
+
+export function pdfToImagesArchiveName(filename: string): string {
+  return `${safeStem(filename, "document")}-images-hereisit.zip`;
 }

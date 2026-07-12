@@ -358,6 +358,7 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
   const tools = [
     ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
     ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
+    ["/pdf/to-image", "PDF를 JPG·PNG로 변환", "PDF 선택"],
     ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
     ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
     ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],

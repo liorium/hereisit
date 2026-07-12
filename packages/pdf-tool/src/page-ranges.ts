@@ -4,7 +4,7 @@ export type PageSelectionResult =
 
 const MAX_SELECTED_PAGES = 500;
 
-export function parsePageSelection(value: string, maxPage?: number): PageSelectionResult {
+function parsePageSelectionInInputOrder(value: string, maxPage?: number): PageSelectionResult {
   const input = value.trim();
   if (input.length === 0) {
     return { ok: false, message: "페이지 범위를 입력해 주세요." };
@@ -47,5 +47,16 @@ export function parsePageSelection(value: string, maxPage?: number): PageSelecti
     }
   }
 
-  return { ok: true, pages: Array.from(pages).sort((left, right) => left - right) };
+  return { ok: true, pages: Array.from(pages) };
+}
+
+export function parsePageSelection(value: string, maxPage?: number): PageSelectionResult {
+  const result = parsePageSelectionInInputOrder(value, maxPage);
+  return result.ok
+    ? { ok: true, pages: [...result.pages].sort((left, right) => left - right) }
+    : result;
+}
+
+export function parseOrderedPageSelection(value: string, maxPage?: number): PageSelectionResult {
+  return parsePageSelectionInInputOrder(value, maxPage);
 }

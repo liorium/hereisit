@@ -184,7 +184,7 @@
 
 .headerActions button,
 .secondaryButton {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -477,7 +477,7 @@
 
 .rangeField input {
   width: 100%;
-  height: 42px;
+  height: 44px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -764,6 +764,120 @@
   font-size: 12px;
 }
 
+.inspectionCard {
+  margin: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+}
+
+.inspectionCard strong {
+  font-size: 13px;
+}
+
+.inspectionCard p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.toImageSettings {
+  padding: 18px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.toImageSettings .optionGroup,
+.toImageSettings .segmentGroup,
+.toImageSettings .privacyNotice {
+  margin: 0;
+}
+
+.segmentGroup.twoColumnSegment > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.qualityGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.qualityGroup legend {
+  margin-bottom: 4px;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.qualityGroup input {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+
+.qualityGroup > div {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.validationNotice,
+.validationError {
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.validationNotice {
+  background: color-mix(in srgb, var(--blue) 7%, white);
+  color: var(--muted);
+}
+
+.validationError {
+  background: color-mix(in srgb, var(--red) 8%, white);
+  color: var(--red);
+}
+
+.resultCaveats {
+  max-width: 290px;
+  margin-top: 18px;
+  padding: 13px 14px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+}
+
+.resultCaveats p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.resultCaveats p + p {
+  margin-top: 5px;
+}
+
+.toImageActionButtons {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.toImageActionButtons button {
+  max-width: 100%;
+  white-space: normal;
+}
+
 @media (max-width: 1050px) {
   .workspace {
     grid-template-columns: minmax(240px, 0.8fr) minmax(330px, 1.2fr);
@@ -906,6 +1020,10 @@
 
   .controlGrid {
     grid-template-columns: 1fr;
+  }
+
+  .toImageSettings {
+    padding: 16px;
   }
 
   .resultPanel {

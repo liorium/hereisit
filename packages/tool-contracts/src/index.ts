@@ -9,6 +9,8 @@ export const PDF_IMAGES_TO_PDF_TOOL_ID = "pdf.images-to-pdf" as const;
 export const PDF_ORGANIZE_TOOL_ID = "pdf.organize" as const;
 export const PDF_WATERMARK_TOOL_ID = "pdf.watermark" as const;
 export const PDF_TOOL_VERSION = 1 as const;
+export const PDF_TO_IMAGES_TOOL_ID = "pdf.to-images" as const;
+export const PDF_TO_IMAGES_TOOL_VERSION = 1 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
@@ -460,5 +462,145 @@ export type PdfInspectionOutcome =
 
 export interface PdfInspectionHandle {
   result: Promise<PdfInspectionOutcome>;
+  cancel(): void;
+}
+
+const pdfToImagesPageNumbersSchema = z
+  .array(z.number().int().min(1).max(500))
+  .min(1)
+  .max(100)
+  .refine((pages) => new Set(pages).size === pages.length, {
+    message: "페이지 번호는 중복될 수 없습니다.",
+  });
+
+export const pdfToImagesSpecSchema = z.object({
+  version: z.literal(1),
+  selection: z.discriminatedUnion("mode", [
+    z.object({ mode: z.literal("every-page") }),
+    z.object({ mode: z.literal("extract"), pages: pdfToImagesPageNumbersSchema }),
+  ]),
+  output: z.discriminatedUnion("format", [
+    z.object({
+      format: z.literal("jpeg"),
+      quality: z.number().int().min(40).max(95),
+      background: z.literal("#ffffff"),
+    }),
+    z.object({ format: z.literal("png"), background: z.literal("#ffffff") }),
+  ]),
+  dpi: z.union([z.literal(96), z.literal(150), z.literal(300)]),
+});
+
+export type PdfToImagesSpecV1 = z.input<typeof pdfToImagesSpecSchema>;
+export type ParsedPdfToImagesSpecV1 = z.output<typeof pdfToImagesSpecSchema>;
+
+export type PdfToImagesWarning = "PDF_PAGE_RASTERIZED" | "COLOR_PROFILE_NORMALIZED";
+
+export interface PdfToImagesResult {
+  bytes: ArrayBuffer;
+  suggestedName: string;
+  mime: "image/jpeg" | "image/png" | "application/zip";
+  byteLength: number;
+  sourcePageCount: number;
+  outputPageCount: number;
+  outputFileCount: number;
+  format: "jpeg" | "png";
+  warnings: PdfToImagesWarning[];
+  timing: {
+    loadMs: number;
+    renderMs: number;
+    encodeMs: number;
+    archiveMs: number;
+    totalMs: number;
+  };
+}
+
+export type PdfToImagesErrorCode =
+  | "INVALID_SPEC"
+  | "UNSUPPORTED_INPUT"
+  | "PASSWORD_PROTECTED"
+  | "CORRUPT_PDF"
+  | "PAGE_RANGE_INVALID"
+  | "PAGE_LIMIT"
+  | "MEMORY_LIMIT"
+  | "RENDER_FAILED"
+  | "ENCODE_FAILED"
+  | "WORKER_CRASH";
+
+export interface PdfToImagesErrorPayload {
+  code: PdfToImagesErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export type PdfToImagesProgress =
+  | {
+      phase: "rendering" | "encoding";
+      fraction: number;
+      completedPages: number;
+      totalPages: number;
+    }
+  | {
+      phase: "validating" | "loading" | "archiving" | "finalizing";
+      fraction: number;
+    };
+
+export interface PdfToImagesRunRequest {
+  protocol: 1;
+  type: "run";
+  jobId: string;
+  tool: "pdf.to-images";
+  toolVersion: 1;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    bytes: ArrayBuffer;
+  };
+  spec: PdfToImagesSpecV1;
+}
+
+export interface PdfToImagesCancelRequest {
+  protocol: 1;
+  type: "cancel";
+  jobId: string;
+}
+
+export type PdfToImagesWorkerRequest = PdfToImagesRunRequest | PdfToImagesCancelRequest;
+
+export type PdfToImagesWorkerEvent =
+  | {
+      protocol: 1;
+      type: "ready";
+      capabilities: {
+        offscreenCanvas: boolean;
+        formats: readonly ["jpeg", "png"];
+      };
+    }
+  | (PdfToImagesProgress & {
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+    })
+  | {
+      protocol: 1;
+      type: "complete";
+      jobId: string;
+      result: PdfToImagesResult;
+    }
+  | {
+      protocol: 1;
+      type: "failed";
+      jobId: string;
+      error: PdfToImagesErrorPayload;
+    };
+
+export type PdfToImagesJobOutcome =
+  | { status: "fulfilled"; value: PdfToImagesResult }
+  | { status: "rejected"; error: PdfToImagesErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfToImagesJobHandle {
+  result: Promise<PdfToImagesJobOutcome>;
   cancel(): void;
 }

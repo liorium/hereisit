@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./image": "./src/run-image-batch.ts",
-    "./pdf": "./src/run-pdf-job.ts"
+    "./pdf": "./src/run-pdf-job.ts",
+    "./pdf-to-images": "./src/run-pdf-to-images-job.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -16,7 +17,8 @@
     "@hereisit/image-tool": "workspace:*",
     "@hereisit/pdf-tool": "workspace:*",
     "@hereisit/tool-contracts": "workspace:*",
-    "fflate": "0.8.3"
+    "fflate": "0.8.3",
+    "pdfjs-dist": "6.1.200"
   },
   "devDependencies": {
     "typescript": "6.0.3",

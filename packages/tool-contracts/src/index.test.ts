@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { imagePipelineSpecSchema, pdfPipelineSpecSchema } from "./index";
+import {
+  imagePipelineSpecSchema,
+  PDF_TO_IMAGES_TOOL_ID,
+  PDF_TO_IMAGES_TOOL_VERSION,
+  pdfPipelineSpecSchema,
+  pdfToImagesSpecSchema,
+} from "./index";
+
+const basePdfToImagesSpec = {
+  version: 1 as const,
+  selection: { mode: "every-page" as const },
+  output: { format: "jpeg" as const, quality: 85, background: "#ffffff" as const },
+  dpi: 150 as const,
+};
 
 describe("imagePipelineSpecSchema", () => {
   it("rejects an inverted target-size quality range", () => {
@@ -50,6 +63,95 @@ describe("imagePipelineSpecSchema", () => {
       minQuality: 35,
       maxAttempts: 6,
     });
+  });
+});
+
+describe("pdfToImagesSpecSchema", () => {
+  it("publishes the independent tool identity", () => {
+    expect(PDF_TO_IMAGES_TOOL_ID).toBe("pdf.to-images");
+    expect(PDF_TO_IMAGES_TOOL_VERSION).toBe(1);
+  });
+
+  it.each([40, 85, 95])("accepts JPEG quality %i", (quality) => {
+    expect(
+      pdfToImagesSpecSchema.safeParse({
+        ...basePdfToImagesSpec,
+        output: { format: "jpeg", quality, background: "#ffffff" },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([39, 40.5, 96])("rejects JPEG quality %s", (quality) => {
+    expect(
+      pdfToImagesSpecSchema.safeParse({
+        ...basePdfToImagesSpec,
+        output: { format: "jpeg", quality, background: "#ffffff" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([96, 150, 300])("accepts %iDPI", (dpi) => {
+    expect(pdfToImagesSpecSchema.safeParse({ ...basePdfToImagesSpec, dpi }).success).toBe(true);
+  });
+
+  it("accepts PNG without quality", () => {
+    expect(
+      pdfToImagesSpecSchema.safeParse({
+        ...basePdfToImagesSpec,
+        output: { format: "png", background: "#ffffff" },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["JPEG without quality", { format: "jpeg", background: "#ffffff" }],
+    ["WebP", { format: "webp", quality: 85, background: "#ffffff" }],
+    ["a non-white JPEG background", { format: "jpeg", quality: 85, background: "#000000" }],
+    ["a non-white PNG background", { format: "png", background: "#000000" }],
+  ])("rejects %s output", (_case, output) => {
+    expect(pdfToImagesSpecSchema.safeParse({ ...basePdfToImagesSpec, output }).success).toBe(false);
+  });
+
+  it.each([
+    ["72DPI", 72],
+    ["string DPI", "150"],
+  ])("rejects %s", (_case, dpi) => {
+    expect(pdfToImagesSpecSchema.safeParse({ ...basePdfToImagesSpec, dpi }).success).toBe(false);
+  });
+
+  it("rejects version 2", () => {
+    expect(pdfToImagesSpecSchema.safeParse({ ...basePdfToImagesSpec, version: 2 }).success).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ["an empty extraction", []],
+    ["duplicate pages", [1, 1]],
+    ["page zero", [0]],
+    ["a negative page", [-1]],
+    ["a fractional page", [1.5]],
+    ["page 501", [501]],
+    ["101 unique pages", Array.from({ length: 101 }, (_, index) => index + 1)],
+  ])("rejects extraction with %s", (_case, pages) => {
+    expect(
+      pdfToImagesSpecSchema.safeParse({
+        ...basePdfToImagesSpec,
+        selection: { mode: "extract", pages },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts extraction without sorting pages", () => {
+    const result = pdfToImagesSpecSchema.safeParse({
+      ...basePdfToImagesSpec,
+      selection: { mode: "extract", pages: [3, 1, 2] },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.selection).toEqual({ mode: "extract", pages: [3, 1, 2] });
+    }
   });
 });
 

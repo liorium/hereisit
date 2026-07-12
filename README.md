@@ -2,7 +2,8 @@
 
 HereItIs is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
 resize, crop, conversion, and compression plus PDF merge, split, page extraction, page organization,
-text watermarking, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
+text watermarking, PDF-page-to-JPG/PNG conversion, and JPG/PNG-to-PDF tools. File processing runs in Web
+Workers without uploads.
 
 ## Development
 
@@ -22,9 +23,9 @@ Core verification runs formatting/lint checks, TypeScript, unit tests, and a pro
 pnpm verify
 ~~~
 
-The browser suite additionally verifies image and PDF conversion, page organization, text watermarking,
-downloaded artifacts, keyboard and mobile layouts, Worker loading, and that conversion makes no external
-or write requests:
+The browser suite additionally verifies image and PDF conversion, PDF-page rasterization, page
+organization, text watermarking, downloaded artifacts, keyboard and mobile layouts, Worker loading, and
+that conversion makes no external or write requests:
 
 ~~~bash
 pnpm exec playwright install chromium
@@ -60,6 +61,16 @@ checklist.
 - Up to 100MB per result and 500MB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
 - PDF jobs accept up to 100MB total input and 500 pages; page-by-page split creates at most 200 files.
+- `pdf.to-images@1` accepts one PDF up to 50MiB and at most 500 source pages. It converts all pages by
+  default to JPG quality 85 at 150DPI; 96, 150, and 300DPI plus JPG quality 40–95 or PNG are available.
+  One selected page is returned directly, while 2–100 selected pages are returned in one ordered ZIP.
+- PDF-to-image rendering is sequential and allows at most 8,192px on either side, 16 megapixels or
+  64,000,000 RGBA bytes per output canvas/image, 100 megapixels across the selection, 128MiB across
+  HereItIs-managed output and display-layer scratch canvases, and a 100MiB final image or ZIP. PDF.js
+  parser image buffers have the same 16-megapixel per-image gate but are not counted in that 128MiB canvas
+  budget, so image-heavy pages can still hit browser memory limits and fail without partial output.
+- PDF-to-image output is raster data: text is no longer searchable or selectable. Rendered annotations
+  and form appearances are flattened, and browser canvas conversion can normalize color profiles.
 - Page organization works on one PDF at a time and can reorder, quarter-turn, or omit pages locally.
 - Watermark text is rasterized locally into a bounded PNG before it is placed on every page or the
   selected pages. It is not searchable or selectable text, and its exact glyph appearance can vary with
