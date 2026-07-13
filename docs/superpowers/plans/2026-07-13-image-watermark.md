@@ -512,7 +512,11 @@ Expected: FAIL because `runImageWatermarkBatch` is missing.
 
 Follow `run-image-batch.ts` generation/slot patterns without changing that file. Keep results in input order, emit guarded item/batch events, and settle all items. Use at most two slots, name each Worker `hereisit-image-watermark-worker`, arm a fresh 180-second timer only after assigning an item, and replace a crashed slot only while queued work remains.
 
-Read the logo once into a retained immutable `Uint8Array`; create one `.slice().buffer` per slot for transfer and release the retained copy after every active slot acknowledges configuration. Do not put logo bytes in item specs or events.
+Read the logo once into a retained `Uint8Array`; create one `.slice().buffer` per Worker instance for
+transfer, including a replacement Worker after a slot crash. Keep the bounded source copy only until the
+batch settles or is cancelled, then overwrite it with zeroes and release it on every terminal path. Never
+reread the logo, and do not put logo bytes in item specs or events. This retains at most 10MiB so queued
+logo jobs remain serviceable after a configured Worker crashes.
 
 - [ ] **Step 5: Export the runner and verify GREEN**
 
