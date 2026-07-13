@@ -6,7 +6,7 @@ const extensionByFormat: Record<ImageOutput["format"], string> = {
   webp: "webp",
 };
 
-function safeBaseName(inputName: string): string {
+export function safeImageBaseName(inputName: string): string {
   const normalized = inputName.replaceAll("\\", "/");
   const filename = normalized.split("/").at(-1)?.trim() ?? "";
   const lastDot = filename.lastIndexOf(".");
@@ -26,5 +26,5 @@ function safeBaseName(inputName: string): string {
 }
 
 export function suggestOutputName(inputName: string, format: ImageOutput["format"]): string {
-  return `${safeBaseName(inputName)}-hereisit.${extensionByFormat[format]}`;
+  return `${safeImageBaseName(inputName)}-hereisit.${extensionByFormat[format]}`;
 }
