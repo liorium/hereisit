@@ -47,6 +47,9 @@ importers:
       '@hereisit/browser-runtime':
         specifier: workspace:*
         version: link:../../packages/browser-runtime
+      '@hereisit/image-tool':
+        specifier: workspace:*
+        version: link:../../packages/image-tool
       '@hereisit/pdf-tool':
         specifier: workspace:*
         version: link:../../packages/pdf-tool

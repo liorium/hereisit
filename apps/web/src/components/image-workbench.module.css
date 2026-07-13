@@ -617,6 +617,195 @@
   color: white;
 }
 
+.watermarkSettings {
+  max-height: 720px;
+  overflow-y: auto;
+}
+
+.modeTabs {
+  padding: 3px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+}
+
+.modeTabs label {
+  min-height: 36px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.modeTabs input,
+.positionOption input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.modeTabs label:focus-within,
+.positionOption:focus-within {
+  outline: 3px solid color-mix(in srgb, var(--blue) 34%, transparent);
+  outline-offset: 2px;
+}
+
+.modeTabs .activeMode {
+  background: var(--ink);
+  color: white;
+}
+
+.textControlGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 9px;
+}
+
+.textField,
+.colorField {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.textField input,
+.colorField input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.textField input {
+  padding: 0 10px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.colorField input {
+  padding: 4px;
+  cursor: pointer;
+}
+
+.textControlGrid .itemError {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.logoPicker {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.logoPicker img {
+  width: 64px;
+  height: 52px;
+  grid-row: 1 / span 2;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  object-fit: contain;
+}
+
+.logoPicker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.logoPicker button {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.logoPicker [data-watermark-logo-hint] {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.logoPicker [data-watermark-logo-hint].itemError {
+  color: var(--red);
+}
+
+.positionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.positionOption {
+  min-height: 44px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: var(--muted);
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.selectedPosition {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, white);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.rangeValueRow {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.rangeValueRow strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.rangeValueRow input {
+  width: 100%;
+  height: 20px;
+  grid-column: 1 / -1;
+  accent-color: var(--blue);
+}
+
 .numberField,
 .selectField,
 .qualityField {
@@ -969,6 +1158,25 @@
   .settingsPanel {
     order: 2;
     display: block;
+  }
+
+  .watermarkSettings {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .modeTabs label,
+  .textField input,
+  .colorField input,
+  .logoPicker button,
+  .positionOption,
+  .rangeValueRow input {
+    min-height: 44px;
+  }
+
+  .modeTabs label,
+  .positionOption {
+    font-size: 11px;
   }
 
   .removeButton {

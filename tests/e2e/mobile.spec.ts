@@ -546,3 +546,56 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
+
+test("keeps image watermark controls ordered, reachable, and inside an iPhone viewport", async ({
+  page,
+}) => {
+  await page.goto("/image/watermark");
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "mobile.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  const files = page.getByLabel("선택한 이미지");
+  const settings = page.getByLabel("워터마크 설정");
+  const preview = page.getByLabel("원본과 워터마크 결과");
+  const [filesBox, settingsBox, previewBox] = await Promise.all([
+    files.boundingBox(),
+    settings.boundingBox(),
+    preview.boundingBox(),
+  ]);
+  expect(filesBox).not.toBeNull();
+  expect(settingsBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  expect(filesBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
+  expect(settingsBox?.y ?? 0).toBeLessThan(previewBox?.y ?? 0);
+
+  const positions = page.getByRole("group", { name: "위치" }).getByRole("radio");
+  await expect(positions).toHaveCount(9);
+  for (let index = 0; index < 9; index += 1) {
+    const box = await positions.nth(index).locator("..").boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+
+  const run = page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" });
+  await run.scrollIntoViewIfNeeded();
+  await expect(run).toBeInViewport();
+  const runBox = await run.boundingBox();
+  expect(runBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(runBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect(
+    await run
+      .locator("..")
+      .locator("..")
+      .evaluate((element) => getComputedStyle(element).position),
+  ).toBe("sticky");
+
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hereisit/browser-runtime": "workspace:*",
+    "@hereisit/image-tool": "workspace:*",
     "@hereisit/pdf-tool": "workspace:*",
     "@hereisit/tool-contracts": "workspace:*",
     "@hereisit/tool-registry": "workspace:*",
