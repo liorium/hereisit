@@ -11,6 +11,8 @@ export const PDF_WATERMARK_TOOL_ID = "pdf.watermark" as const;
 export const PDF_TOOL_VERSION = 1 as const;
 export const PDF_TO_IMAGES_TOOL_ID = "pdf.to-images" as const;
 export const PDF_TO_IMAGES_TOOL_VERSION = 1 as const;
+export const PDF_COMPRESS_SCANNED_TOOL_ID = "pdf.compress-scanned" as const;
+export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 1 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
@@ -602,5 +604,142 @@ export type PdfToImagesJobOutcome =
 
 export interface PdfToImagesJobHandle {
   result: Promise<PdfToImagesJobOutcome>;
+  cancel(): void;
+}
+
+export const pdfCompressScannedSpecSchema = z
+  .object({
+    version: z.literal(1),
+    preset: z.enum(["balanced", "minimum"]),
+  })
+  .strict();
+
+export type PdfCompressScannedPreset = "balanced" | "minimum";
+export type PdfCompressScannedSpecV1 = z.input<typeof pdfCompressScannedSpecSchema>;
+export type ParsedPdfCompressScannedSpecV1 = z.output<typeof pdfCompressScannedSpecSchema>;
+
+export type PdfCompressScannedWarning =
+  | "PDF_PAGES_RASTERIZED"
+  | "SEARCHABLE_CONTENT_REMOVED"
+  | "INTERACTIVE_CONTENT_REMOVED"
+  | "SIGNATURES_INVALIDATED"
+  | "COLOR_PROFILE_NORMALIZED";
+
+export interface PdfCompressScannedResult {
+  bytes: ArrayBuffer;
+  suggestedName: string;
+  mime: "application/pdf";
+  sourceByteLength: number;
+  byteLength: number;
+  pageCount: number;
+  preset: PdfCompressScannedPreset;
+  dpi: 96 | 150;
+  quality: 55 | 72;
+  warnings: PdfCompressScannedWarning[];
+  timing: {
+    loadMs: number;
+    renderMs: number;
+    encodeMs: number;
+    assembleMs: number;
+    serializeMs: number;
+    totalMs: number;
+  };
+}
+
+export type PdfCompressScannedErrorCode =
+  | "INVALID_SPEC"
+  | "UNSUPPORTED_BROWSER"
+  | "UNSUPPORTED_INPUT"
+  | "PASSWORD_PROTECTED"
+  | "CORRUPT_PDF"
+  | "PAGE_LIMIT"
+  | "MEMORY_LIMIT"
+  | "RENDER_FAILED"
+  | "ENCODE_FAILED"
+  | "ASSEMBLY_FAILED"
+  | "NO_SIZE_REDUCTION"
+  | "WORKER_CRASH";
+
+export interface PdfCompressScannedErrorPayload {
+  code: PdfCompressScannedErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export type PdfCompressScannedProgress =
+  | {
+      phase: "rendering" | "encoding" | "assembling";
+      fraction: number;
+      completedPages: number;
+      totalPages: number;
+    }
+  | {
+      phase: "validating" | "loading" | "serializing" | "finalizing";
+      fraction: number;
+    };
+
+export interface PdfCompressScannedRunRequest {
+  protocol: 1;
+  type: "run";
+  jobId: string;
+  tool: "pdf.compress-scanned";
+  toolVersion: 1;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    bytes: ArrayBuffer;
+  };
+  spec: PdfCompressScannedSpecV1;
+}
+
+export interface PdfCompressScannedCancelRequest {
+  protocol: 1;
+  type: "cancel";
+  jobId: string;
+}
+
+export type PdfCompressScannedWorkerRequest =
+  | PdfCompressScannedRunRequest
+  | PdfCompressScannedCancelRequest;
+
+export type PdfCompressScannedWorkerEvent =
+  | {
+      protocol: 1;
+      type: "ready";
+      capabilities: {
+        offscreenCanvas: boolean;
+        jpegEncoder: boolean;
+        pdfjsWorker: boolean;
+        pdfAssembly: boolean;
+      };
+      error: PdfCompressScannedErrorPayload | null;
+    }
+  | (PdfCompressScannedProgress & {
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+    })
+  | {
+      protocol: 1;
+      type: "complete";
+      jobId: string;
+      result: PdfCompressScannedResult;
+    }
+  | {
+      protocol: 1;
+      type: "failed";
+      jobId: string;
+      error: PdfCompressScannedErrorPayload;
+    };
+
+export type PdfCompressScannedJobOutcome =
+  | { status: "fulfilled"; value: PdfCompressScannedResult }
+  | { status: "rejected"; error: PdfCompressScannedErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfCompressScannedJobHandle {
+  result: Promise<PdfCompressScannedJobOutcome>;
   cancel(): void;
 }

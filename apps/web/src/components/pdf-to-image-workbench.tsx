@@ -1,6 +1,6 @@
 "use client";
 
-import { inspectPdfFile } from "@hereisit/browser-runtime/pdf";
+import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import {
   type PdfToImagesJobHandle,
   type PdfToImagesProgress,

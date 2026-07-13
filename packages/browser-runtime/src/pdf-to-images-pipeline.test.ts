@@ -1,14 +1,12 @@
-import type { PdfToImagesErrorCode, PdfToImagesSpecV1 } from "@hereisit/tool-contracts";
+import type { PdfToImagesSpecV1 } from "@hereisit/tool-contracts";
 import { unzipSync } from "fflate";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { WorkerCanvasFactory } from "./pdf-raster-runtime";
 import {
   PdfToImagesPipelineError,
   type PdfToImagesRendererAdapter,
   runPdfToImagesPipeline,
   toPdfToImagesErrorPayload,
-  WorkerCanvasBudget,
-  WorkerCanvasFactory,
-  WorkerFilterFactory,
 } from "./pdf-to-images-pipeline";
 
 const PNG_BYTES = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1);
@@ -63,8 +61,10 @@ interface FakeConfiguration {
   pages?: readonly FakePageGeometry[];
   sourcePageCount?: number;
   viewportByPage?: Readonly<Record<number, { width: number; height: number }>>;
+  viewportErrorByPage?: Readonly<Record<number, unknown>>;
   encodedBytesByPage?: Readonly<Record<number, Uint8Array>>;
   encodedSizeByPage?: Readonly<Record<number, number>>;
+  encodeErrorByPage?: Readonly<Record<number, unknown>>;
   encodeGate?: Promise<void>;
   loadError?: unknown;
   blockLoad?: boolean;
@@ -73,6 +73,7 @@ interface FakeConfiguration {
   renderErrorPage?: number;
   encodeErrorPage?: number;
   blockRenderPage?: number;
+  onFill?: () => void;
   createArchive?: NonNullable<PdfToImagesRendererAdapter["createArchive"]>;
 }
 
@@ -171,6 +172,8 @@ function fakeAdapter(configuration: FakeConfiguration = {}): {
       const page = {
         rotate: geometry.rotation ?? 0,
         getViewport({ scale, rotation }: { scale: number; rotation?: number }) {
+          const viewportError = configuration.viewportErrorByPage?.[sourcePage];
+          if (viewportError !== undefined) throw viewportError;
           if (scale === 1 && rotation === 0) {
             return { width: geometry.width, height: geometry.height };
           }
@@ -284,6 +287,8 @@ function fakeAdapter(configuration: FakeConfiguration = {}): {
           counters.encodeOptions.push(options);
           const { type } = options;
           await configuration.encodeGate;
+          const encodeError = configuration.encodeErrorByPage?.[currentSourcePage];
+          if (encodeError !== undefined) throw encodeError;
           if (configuration.encodeErrorPage === currentSourcePage) {
             throw new Error("encode fixture failure");
           }
@@ -314,6 +319,7 @@ function fakeAdapter(configuration: FakeConfiguration = {}): {
             width: fillWidth,
             height: fillHeight,
           });
+          configuration.onFill?.();
         },
       };
       let destroyed = false;
@@ -349,11 +355,6 @@ function fakeAdapter(configuration: FakeConfiguration = {}): {
     },
   };
 }
-
-afterEach(() => {
-  vi.doUnmock("pdfjs-dist");
-  vi.unstubAllGlobals();
-});
 
 describe("runPdfToImagesPipeline output and progress", () => {
   it.each([
@@ -427,6 +428,23 @@ describe("runPdfToImagesPipeline output and progress", () => {
     expect(counters.encodeOptions).toEqual([
       output.format === "jpeg" ? { type: "image/jpeg", quality: 0.85 } : { type: "image/png" },
     ]);
+  });
+
+  it("excludes the white canvas fill from renderMs while retaining it in total time", async () => {
+    let clock = 0;
+    const { adapter, counters } = fakeAdapter({
+      onFill() {
+        clock += 25;
+      },
+    });
+
+    const result = await runPdfToImagesPipeline(pdfInput(), spec(), {
+      adapter,
+      now: () => clock,
+    });
+
+    expect(result.timing).toMatchObject({ renderMs: 0, totalMs: 25 });
+    expect(counters.fills).toEqual([{ fillStyle: "#ffffff", x: 0, y: 0, width: 96, height: 96 }]);
   });
 
   it("streams ZIP entries in selection order while keeping source page numbers", async () => {
@@ -669,6 +687,87 @@ describe("runPdfToImagesPipeline resource gates", () => {
     );
   });
 
+  it("maps a nested canvas-memory marker from getViewport to the public memory error", async () => {
+    const { adapter, counters } = fakeAdapter({
+      viewportErrorByPage: {
+        1: { cause: { details: "[HEREISIT_PDF_CANVAS_MEMORY_LIMIT] nested viewport failure" } },
+      },
+    });
+
+    await expect(runPdfToImagesPipeline(pdfInput(), spec(), { adapter })).rejects.toEqual(
+      expect.objectContaining({
+        code: "MEMORY_LIMIT",
+        message:
+          "선택한 해상도에서 이미지를 안전하게 만들 수 없어요. 페이지 수나 해상도를 줄여 주세요.",
+      }),
+    );
+    expect(counters.createCanvas).toBe(0);
+    expect(counters.documentCleanup).toBe(1);
+  });
+
+  it("maps a nested canvas-memory marker from convertToBlob to the public memory error", async () => {
+    const { adapter, counters } = fakeAdapter({
+      encodeErrorByPage: {
+        1: {
+          originalError: { reason: "[HEREISIT_PDF_CANVAS_MEMORY_LIMIT] nested encode failure" },
+        },
+      },
+    });
+
+    await expect(runPdfToImagesPipeline(pdfInput(), spec(), { adapter })).rejects.toEqual(
+      expect.objectContaining({
+        code: "MEMORY_LIMIT",
+        message:
+          "선택한 해상도에서 이미지를 안전하게 만들 수 없어요. 페이지 수나 해상도를 줄여 주세요.",
+      }),
+    );
+    expect(counters.canvasDestroy).toBe(1);
+    expect(counters.documentCleanup).toBe(1);
+  });
+
+  it.each([
+    "create",
+    "add",
+    "end",
+  ] as const)("maps a nested canvas-memory marker from ZIP %s to the public memory error", async (failureStage) => {
+    const nestedMemoryFailure = {
+      cause: { message: "[HEREISIT_PDF_CANVAS_MEMORY_LIMIT] nested archive failure" },
+    };
+    const { adapter, counters } = fakeAdapter({
+      pages: [
+        { width: 72, height: 72 },
+        { width: 72, height: 72 },
+      ],
+      createArchive(onData) {
+        if (failureStage === "create") throw nestedMemoryFailure;
+        return {
+          add() {
+            if (failureStage === "add") throw nestedMemoryFailure;
+          },
+          end() {
+            if (failureStage === "end") throw nestedMemoryFailure;
+            onData(null, new Uint8Array(), true);
+          },
+          terminate: vi.fn(),
+        };
+      },
+    });
+
+    await expect(
+      runPdfToImagesPipeline(pdfInput(), spec({ selection: { mode: "extract", pages: [1, 2] } }), {
+        adapter,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "MEMORY_LIMIT",
+        message:
+          "선택한 해상도에서 이미지를 안전하게 만들 수 없어요. 페이지 수나 해상도를 줄여 주세요.",
+      }),
+    );
+    expect(counters.documentCleanup).toBe(1);
+    expect(counters.loadingTaskDestroy).toBe(1);
+  });
+
   it.each([
     "create",
     "add",
@@ -706,6 +805,19 @@ describe("runPdfToImagesPipeline resource gates", () => {
 });
 
 describe("runPdfToImagesPipeline errors and cleanup", () => {
+  it("preserves the page-less PDF error at the image pipeline boundary", async () => {
+    const { adapter, counters } = fakeAdapter({ sourcePageCount: 0 });
+
+    await expect(runPdfToImagesPipeline(pdfInput(), spec(), { adapter })).rejects.toEqual(
+      expect.objectContaining({
+        code: "CORRUPT_PDF",
+        message: "페이지가 없는 PDF는 처리할 수 없어요.",
+      }),
+    );
+    expect(counters.getPage).toBe(0);
+    expect(counters.documentCleanup).toBe(1);
+  });
+
   it.each([
     ["password loading", new FakePdfError("PASSWORD_PROTECTED"), "PASSWORD_PROTECTED"],
     ["corrupt loading", new FakePdfError("CORRUPT_PDF"), "CORRUPT_PDF"],
@@ -958,7 +1070,7 @@ describe("runPdfToImagesPipeline errors and cleanup", () => {
     ).rejects.toMatchObject({ code: "WORKER_CRASH", retryable: true });
     expect(counters.getPage).toBe(4);
     expect(counters.render).toBe(1);
-    expect(counters.pageCleanup).toBe(3);
+    expect(counters.pageCleanup).toBe(4);
     expect(counters.documentCleanup).toBe(1);
     expect(counters.loadingTaskDestroy).toBe(1);
     expect(counters.pdfWorkerDestroy).toBe(1);
@@ -1005,8 +1117,8 @@ describe("runPdfToImagesPipeline errors and cleanup", () => {
     expect(counters.loadingTaskDestroy).toBe(1);
     expect(counters.pdfWorkerDestroy).toBe(1);
     expect(counters.parserPortTerminate).toBe(1);
-    expect(addListener).toHaveBeenCalledTimes(1);
-    expect(removeListener).toHaveBeenCalledTimes(1);
+    expect(addListener).toHaveBeenCalledTimes(2);
+    expect(removeListener).toHaveBeenCalledTimes(2);
   });
 
   it("rejects cancellation while waiting for the ZIP final callback", async () => {
@@ -1066,273 +1178,5 @@ describe("runPdfToImagesPipeline errors and cleanup", () => {
       message: "PDF 이미지 변환 작업을 완료하지 못했어요.",
       retryable: true,
     });
-  });
-});
-
-describe("default PDF.js adapter parser failures", () => {
-  it.each([
-    "error",
-    "messageerror",
-  ] as const)("observes parser Worker %s and settles startup without a watchdog", async (eventType) => {
-    const addedListenerTypes: string[] = [];
-    const removedListenerTypes: string[] = [];
-    class FakeParserWorker {
-      static instances: FakeParserWorker[] = [];
-      readonly listeners = new Map<string, Set<(event: Event) => void>>();
-      readonly terminate = vi.fn();
-
-      constructor(
-        readonly url: URL,
-        readonly options: WorkerOptions,
-      ) {
-        FakeParserWorker.instances.push(this);
-      }
-
-      addEventListener(type: string, listener: unknown) {
-        addedListenerTypes.push(type);
-        const listeners = this.listeners.get(type) ?? new Set<(event: Event) => void>();
-        listeners.add(listener as (event: Event) => void);
-        this.listeners.set(type, listeners);
-      }
-
-      removeEventListener(type: string, listener: unknown) {
-        removedListenerTypes.push(type);
-        this.listeners.get(type)?.delete(listener as (event: Event) => void);
-      }
-
-      emit(type: string) {
-        const event = { type, preventDefault: vi.fn() } as unknown as Event;
-        for (const listener of this.listeners.get(type) ?? []) listener(event);
-      }
-    }
-
-    class FakePDFWorker {
-      static instances: FakePDFWorker[] = [];
-      readonly destroy = vi.fn();
-
-      constructor(readonly options: { port: FakeParserWorker }) {
-        FakePDFWorker.instances.push(this);
-      }
-    }
-    class FakePdfException extends Error {}
-    const loadingTask = {
-      promise: new Promise<never>(() => undefined),
-      destroy: vi.fn(async () => undefined),
-    };
-    const getDocument = vi.fn((_parameters: Record<string, unknown>) => loadingTask);
-    vi.resetModules();
-    vi.doMock("pdfjs-dist", () => ({
-      AbortException: FakePdfException,
-      getDocument,
-      InvalidPDFException: FakePdfException,
-      PasswordException: FakePdfException,
-      PDFWorker: FakePDFWorker,
-      RenderingCancelledException: FakePdfException,
-      ResponseException: FakePdfException,
-      VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
-    }));
-    vi.stubGlobal("Worker", FakeParserWorker);
-    vi.stubGlobal("self", { location: { origin: "https://example.test" } });
-
-    const result = runPdfToImagesPipeline(pdfInput(), spec());
-    await vi.waitFor(() => expect(getDocument).toHaveBeenCalledOnce());
-    const parserPort = FakeParserWorker.instances[0];
-    expect(parserPort).toBeDefined();
-    expect(parserPort?.url.href).toBe("https://example.test/pdfjs/6.1.200/pdf.worker.min.mjs");
-    expect(parserPort?.options).toEqual({
-      type: "module",
-      name: "hereisit-pdfjs-parser-worker",
-    });
-    expect(addedListenerTypes).toEqual(["error", "messageerror"]);
-
-    parserPort?.emit(eventType);
-
-    await expect(settleBeforeNextTimer(result)).resolves.toMatchObject({
-      status: "rejected",
-      error: { code: "WORKER_CRASH", retryable: true },
-    });
-    expect(loadingTask.destroy).toHaveBeenCalledOnce();
-    expect(FakePDFWorker.instances[0]?.destroy).toHaveBeenCalledOnce();
-    expect(parserPort?.terminate).toHaveBeenCalledOnce();
-    expect(removedListenerTypes).toEqual(["error", "messageerror"]);
-
-    const parameters = getDocument.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(Object.keys(parameters).sort()).toEqual(
-      [
-        "CanvasFactory",
-        "FilterFactory",
-        "cMapPacked",
-        "cMapUrl",
-        "canvasMaxAreaInBytes",
-        "data",
-        "disableFontFace",
-        "enableXfa",
-        "isImageDecoderSupported",
-        "isOffscreenCanvasSupported",
-        "maxImageSize",
-        "standardFontDataUrl",
-        "stopAtErrors",
-        "useSystemFonts",
-        "useWasm",
-        "useWorkerFetch",
-        "verbosity",
-        "worker",
-      ].sort(),
-    );
-    expect(parameters).toMatchObject({
-      cMapUrl: "https://example.test/pdfjs/6.1.200/cmaps/",
-      cMapPacked: true,
-      standardFontDataUrl: "https://example.test/pdfjs/6.1.200/standard_fonts/",
-      useWorkerFetch: true,
-      useWasm: false,
-      enableXfa: false,
-      stopAtErrors: true,
-      disableFontFace: true,
-      useSystemFonts: false,
-      maxImageSize: 16_000_000,
-      canvasMaxAreaInBytes: 64_000_000,
-      isOffscreenCanvasSupported: false,
-      isImageDecoderSupported: false,
-      verbosity: 0,
-      worker: FakePDFWorker.instances[0],
-    });
-    expect(parameters.data).toBeInstanceOf(Uint8Array);
-  });
-});
-
-describe("WorkerCanvasBudget and Worker factories", () => {
-  function installOffscreenCanvas() {
-    const constructorCalls = vi.fn();
-    class FakeOffscreenCanvas {
-      width: number;
-      height: number;
-
-      constructor(width: number, height: number) {
-        constructorCalls(width, height);
-        this.width = width;
-        this.height = height;
-      }
-
-      getContext() {
-        return { fillStyle: "", fillRect: vi.fn() };
-      }
-    }
-    vi.stubGlobal("OffscreenCanvas", FakeOffscreenCanvas);
-    return constructorCalls;
-  }
-
-  it.each([
-    [8_193, 1_000],
-    [4_001, 4_000],
-  ])("rejects an unsafe %i x %i scratch canvas before allocation", (width, height) => {
-    const constructorCalls = installOffscreenCanvas();
-    const factory = new WorkerCanvasFactory(new WorkerCanvasBudget());
-
-    expect(() => factory.create(width, height)).toThrowError(
-      expect.objectContaining({ code: "MEMORY_LIMIT" satisfies PdfToImagesErrorCode }),
-    );
-    expect(constructorCalls).not.toHaveBeenCalled();
-  });
-
-  it("accounts reset deltas and releases live RGBA budget exactly once", () => {
-    installOffscreenCanvas();
-    const budget = new WorkerCanvasBudget();
-    const factory = new WorkerCanvasFactory(budget);
-    const first = factory.create(4_000, 4_000);
-    const second = factory.create(4_000, 4_000);
-    const small = factory.create(1, 1);
-
-    expect(() => factory.reset(small, 1_024, 2_048)).toThrowError(
-      expect.objectContaining({ code: "MEMORY_LIMIT" satisfies PdfToImagesErrorCode }),
-    );
-    expect(small.canvas).toMatchObject({ width: 1, height: 1 });
-
-    factory.destroy(first);
-    expect(() => factory.reset(small, 1_024, 2_048)).not.toThrow();
-    const activeAfterReset = budget.activeBytes;
-    factory.destroy(first);
-    expect(budget.activeBytes).toBe(activeAfterReset);
-    factory.destroy(second);
-    factory.destroy(small);
-
-    expect(budget.activeBytes).toBe(0);
-    expect(first).toEqual({ canvas: null, context: null });
-    expect(second).toEqual({ canvas: null, context: null });
-    expect(small).toEqual({ canvas: null, context: null });
-  });
-
-  it("releases the old backing store before changing both reset dimensions", () => {
-    let peakPixels = 0;
-    class PeakTrackingOffscreenCanvas {
-      #width: number;
-      #height: number;
-
-      constructor(width: number, height: number) {
-        this.#width = width;
-        this.#height = height;
-        peakPixels = Math.max(peakPixels, width * height);
-      }
-
-      get width() {
-        return this.#width;
-      }
-
-      set width(value: number) {
-        this.#width = value;
-        peakPixels = Math.max(peakPixels, this.#width * this.#height);
-      }
-
-      get height() {
-        return this.#height;
-      }
-
-      set height(value: number) {
-        this.#height = value;
-        peakPixels = Math.max(peakPixels, this.#width * this.#height);
-      }
-
-      getContext() {
-        return { fillStyle: "", fillRect: vi.fn() };
-      }
-    }
-    vi.stubGlobal("OffscreenCanvas", PeakTrackingOffscreenCanvas);
-    const factory = new WorkerCanvasFactory(new WorkerCanvasBudget());
-    const holder = factory.create(4_000, 4_000);
-
-    factory.reset(holder, 8_000, 2_000);
-
-    expect(peakPixels).toBe(16_000_000);
-    factory.destroy(holder);
-  });
-
-  it.each([
-    [8_193, 1_000],
-    [4_001, 4_000],
-  ])("rejects an unsafe %i x %i scratch reset without changing its holder", (width, height) => {
-    installOffscreenCanvas();
-    const budget = new WorkerCanvasBudget();
-    const factory = new WorkerCanvasFactory(budget);
-    const holder = factory.create(1, 1);
-
-    expect(() => factory.reset(holder, width, height)).toThrowError(
-      expect.objectContaining({ code: "MEMORY_LIMIT" satisfies PdfToImagesErrorCode }),
-    );
-    expect(holder.canvas).toMatchObject({ width: 1, height: 1 });
-    factory.destroy(holder);
-    expect(budget.activeBytes).toBe(0);
-  });
-
-  it("provides a DOM-free filter factory surface", () => {
-    const factory = new WorkerFilterFactory();
-
-    expect(factory.addFilter([])).toBe("none");
-    expect(factory.addHCMFilter("#000", "#fff")).toBe("none");
-    expect(factory.addAlphaFilter(new Uint8Array())).toBe("none");
-    expect(factory.addLuminosityFilter(new Uint8Array())).toBe("none");
-    expect(factory.addKnockoutFilter()).toBe("none");
-    expect(factory.addSelectionFilter()).toBe("none");
-    expect(factory.createSelectionStyle()).toBeNull();
-    expect(() => factory.destroy()).not.toThrow();
   });
 });

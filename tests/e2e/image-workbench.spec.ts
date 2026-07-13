@@ -113,7 +113,7 @@ test("processes and downloads an image without external uploads", async ({ page 
 
 test("reaches the upload action through the real tab order", async ({ page }) => {
   await page.goto("/");
-  const homeLink = page.getByRole("link", { name: "HereItIs 홈" });
+  const homeLink = page.getByRole("link", { name: "HereIsIt 홈" });
   const uploadButton = page.getByRole("button", { name: "이미지 선택" });
   await expect(uploadButton).toBeEnabled();
 

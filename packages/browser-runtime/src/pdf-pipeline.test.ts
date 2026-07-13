@@ -186,8 +186,10 @@ describe("runPdfPipeline", () => {
     expect(result.mime).toBe("application/pdf");
     expect(result.sourcePageCount).toBe(3);
     expect(hasPdfSignature(result.bytes)).toBe(true);
-    const merged = await PDFDocument.load(result.bytes);
+    const merged = await PDFDocument.load(result.bytes, { updateMetadata: false });
     expect(merged.getPages().map((page) => page.getWidth())).toEqual([100, 200, 300]);
+    expect(merged.getCreator()).toBe("HereIsIt");
+    expect(merged.getProducer()).toBe("HereIsIt");
   });
 
   it("splits every page into a zero-compression ZIP", async () => {

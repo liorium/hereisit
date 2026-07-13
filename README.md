@@ -1,9 +1,9 @@
-# HereItIs
+# HereIsIt
 
-HereItIs is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
+HereIsIt is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
 resize, crop, conversion, and compression plus PDF merge, split, page extraction, page organization,
-text watermarking, PDF-page-to-JPG/PNG conversion, and JPG/PNG-to-PDF tools. File processing runs in Web
-Workers without uploads.
+text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster compression, and
+JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
 
 ## Development
 
@@ -44,6 +44,15 @@ pnpm cloudflare:preview
 
 The static site is written to apps/web/out.
 
+With that preview running on its default port, exercise both tracked PDF raster smokes:
+
+~~~bash
+node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
+node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
+~~~
+
+Omitting the base URL targets the production Pages origin.
+
 ## Deployment
 
 Production deployment uses Cloudflare Pages Git integration with the GitHub main branch. Every push to
@@ -66,19 +75,34 @@ checklist.
   One selected page is returned directly, while 2–100 selected pages are returned in one ordered ZIP.
 - PDF-to-image rendering is sequential and allows at most 8,192px on either side, 16 megapixels or
   64,000,000 RGBA bytes per output canvas/image, 100 megapixels across the selection, 128MiB across
-  HereItIs-managed output and display-layer scratch canvases, and a 100MiB final image or ZIP. PDF.js
+  HereIsIt-managed output and display-layer scratch canvases, and a 100MiB final image or ZIP. PDF.js
   parser image buffers have the same 16-megapixel per-image gate but are not counted in that 128MiB canvas
   budget, so image-heavy pages can still hit browser memory limits and fail without partial output.
 - PDF-to-image output is raster data: text is no longer searchable or selectable. Rendered annotations
   and form appearances are flattened, and browser canvas conversion can normalize color profiles.
+- `pdf.compress-scanned@1` rebuilds every page of one 1-byte–50MiB, 1–100-page PDF as JPEG. Its fixed
+  presets are exactly balanced 150DPI/JPEG quality 72 and minimum 96DPI/JPEG quality 55, both on white.
+  A result is offered only when its final PDF is at most
+  `sourceBytes - max(1, ceil(sourceBytes / 100))`, guaranteeing at least 1% savings.
+- Scanned-PDF compression is destructive: searchable/copyable text and OCR, vector graphics, links,
+  forms, annotations, bookmarks, attachments, layers, source metadata, and other interactive structure
+  are removed or flattened; electronic signatures become invalid and color profiles may be normalized.
+  It preserves every page's displayed physical size and orientation from the authoritative PDF.js
+  CropBox/rotation/UserUnit-aware viewport, while output pages normalize rotation to 0.
+- Compression renders strictly one page at a time and allows at most 8,192px per side, 16 megapixels and
+  64,000,000 RGBA bytes per page, 100 megapixels per job, 128MiB of active HereIsIt-managed output and
+  display-layer canvas storage, and 180 seconds. PDF.js parser-decoded arrays and PDF-library/JavaScript
+  overhead are outside that managed budget, so image-heavy documents can still exhaust browser memory
+  without producing a partial result.
 - Page organization works on one PDF at a time and can reorder, quarter-turn, or omit pages locally.
 - Watermark text is rasterized locally into a bounded PNG before it is placed on every page or the
   selected pages. It is not searchable or selectable text, and its exact glyph appearance can vary with
   the device font.
 - Organizing pages and adding a watermark create a new PDF. Existing electronic signatures become
   invalid, and advanced document features such as bookmarks or forms may change.
-- General PDF compression and image downsampling are not provided. PDF editing can make an output larger
-  than its source.
+- Structure-preserving general PDF compression and internal-image-only optimization are not provided.
+  The scan-oriented compressor above intentionally rasterizes whole pages; other PDF editing can make an
+  output larger than its source.
 - JPG/PNG-to-PDF uses a format-aware 128MB estimated decode-memory ceiling for each PNG.
 - Files and filenames stay in the current tab or its Worker. Closing the tab releases in-memory results.
 

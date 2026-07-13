@@ -1,11 +1,13 @@
-export const SITE_NAME = "HereItIs";
+export const SITE_NAME = "HereIsIt";
 export const SITE_URL = "https://hereisit.pages.dev";
 
-export const HOME_TITLE = "HereItIs — 이미지·PDF 작업, 여기서 끝";
+export const HOME_TITLE = "HereIsIt — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환을 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환·스캔 PDF 용량 줄이기를 업로드 없이 내 기기에서 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
   "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
+export const PDF_COMPRESS_SCANNED_WARNING =
+  "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
 
 export type ImageToolIntent = "compress" | "resize" | "convert";
 
@@ -104,12 +106,19 @@ export type PdfToolIntent =
   | "organize"
   | "watermark"
   | "to-image"
-  | "image-to-pdf";
+  | "image-to-pdf"
+  | "compress";
 
-export type PdfEditingIntent = Exclude<PdfToolIntent, "to-image">;
+export type PdfEditingIntent = Exclude<PdfToolIntent, "compress" | "to-image">;
+export type PdfToolIntentClass = "editing" | "pdf-to-images" | "pdf-compress-scanned";
+
+export function isPdfEditingIntent(intent: PdfToolIntent): intent is PdfEditingIntent {
+  return intent !== "compress" && intent !== "to-image";
+}
 
 export interface PdfToolConfig {
   intent: PdfToolIntent;
+  intentClass: PdfToolIntentClass;
   path: `/pdf/${PdfToolIntent}`;
   navLabel: string;
   eyebrow: string;
@@ -123,6 +132,7 @@ export interface PdfToolConfig {
 export const pdfTools = {
   merge: {
     intent: "merge",
+    intentClass: "editing",
     path: "/pdf/merge",
     navLabel: "PDF 합치기",
     eyebrow: "PDF MERGER",
@@ -140,6 +150,7 @@ export const pdfTools = {
   },
   split: {
     intent: "split",
+    intentClass: "editing",
     path: "/pdf/split",
     navLabel: "페이지 분할",
     eyebrow: "PDF SPLITTER",
@@ -157,6 +168,7 @@ export const pdfTools = {
   },
   organize: {
     intent: "organize",
+    intentClass: "editing",
     path: "/pdf/organize",
     navLabel: "페이지 정리",
     eyebrow: "PDF ORGANIZER",
@@ -178,6 +190,7 @@ export const pdfTools = {
   },
   watermark: {
     intent: "watermark",
+    intentClass: "editing",
     path: "/pdf/watermark",
     navLabel: "워터마크",
     eyebrow: "PDF WATERMARK",
@@ -202,6 +215,7 @@ export const pdfTools = {
   },
   "to-image": {
     intent: "to-image",
+    intentClass: "pdf-to-images",
     path: "/pdf/to-image",
     navLabel: "PDF→이미지",
     eyebrow: "PDF TO IMAGE",
@@ -223,6 +237,7 @@ export const pdfTools = {
   },
   "image-to-pdf": {
     intent: "image-to-pdf",
+    intentClass: "editing",
     path: "/pdf/image-to-pdf",
     navLabel: "이미지→PDF",
     eyebrow: "IMAGE TO PDF",
@@ -236,6 +251,30 @@ export const pdfTools = {
       { title: "이미지 선택", description: "JPG 또는 PNG 이미지를 최대 100장 선택하세요." },
       { title: "순서·페이지 설정", description: "페이지 순서와 A4 또는 이미지 맞춤을 골라요." },
       { title: "PDF 저장", description: "모든 이미지를 담은 PDF 한 개를 기기에 저장해요." },
+    ],
+  },
+  compress: {
+    intent: "compress",
+    intentClass: "pdf-compress-scanned",
+    path: "/pdf/compress",
+    navLabel: "PDF 용량 줄이기",
+    eyebrow: "PDF COMPRESSOR",
+    title: "스캔 PDF 용량 줄이기",
+    description:
+      "스캔한 PDF 페이지를 가볍게 다시 만들어 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
+    defaultSummary:
+      "기본값은 모든 페이지를 추천 150DPI로 다시 만들고, 원본보다 1% 이상 작을 때만 새 PDF를 제공해요.",
+    warning: PDF_COMPRESS_SCANNED_WARNING,
+    steps: [
+      { title: "PDF 선택", description: "용량을 줄일 PDF 한 개를 선택하세요." },
+      {
+        title: "압축 수준 선택",
+        description: "균형 150DPI 또는 최소 용량 96DPI를 골라요.",
+      },
+      {
+        title: "새 PDF 저장",
+        description: "원본보다 최소 1% 작을 때만 새 PDF를 저장해요.",
+      },
     ],
   },
 } as const satisfies Record<PdfToolIntent, PdfToolConfig>;

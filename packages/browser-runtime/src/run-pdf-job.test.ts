@@ -5,7 +5,7 @@ import type {
   PdfWorkerRequest,
 } from "@hereisit/tool-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runPdfJob } from "./run-pdf-job";
+import { inspectPdfFile, runPdfJob } from "./run-pdf-job";
 
 const watermarkSpec: PdfPipelineSpecV1 = {
   version: 1,
@@ -41,6 +41,13 @@ function pdfResult(suggestedName = "result.pdf"): PdfPipelineResult {
     outputDocumentCount: 1,
     warnings: [],
     timing: { loadMs: 0, processMs: 0, saveMs: 0, totalMs: 0 },
+  };
+}
+
+function inspectionResult() {
+  return {
+    pageCount: 1,
+    pages: [{ sourcePage: 1, width: 72, height: 72, rotation: 0 }],
   };
 }
 
@@ -207,5 +214,81 @@ describe("runPdfJob", () => {
       status: "rejected",
       error: { code: "WORKER_CRASH", retryable: true },
     });
+  });
+});
+
+describe("inspectPdfFile", () => {
+  it("waits for inspection Worker readiness before reading the file", async () => {
+    installWorker();
+    const arrayBuffer = vi.fn(async () => Uint8Array.of(1).buffer);
+    const handle = inspectPdfFile({
+      name: "report.pdf",
+      type: "application/pdf",
+      size: 1,
+      arrayBuffer,
+    } as unknown as File);
+    const worker = SilentWorker.latest as SilentWorker;
+
+    await Promise.resolve();
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(worker.messages).toEqual([]);
+
+    worker.emit({
+      protocol: 1,
+      type: "ready",
+      capabilities: {
+        operations: [
+          "pdf.merge",
+          "pdf.split",
+          "pdf.images-to-pdf",
+          "pdf.organize",
+          "pdf.watermark",
+        ],
+      },
+    });
+    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
+    const request = worker.messages.find((message) => message.type === "inspect");
+    expect(request).toBeDefined();
+
+    worker.emit({
+      protocol: 1,
+      type: "inspected",
+      jobId: request?.jobId ?? "missing",
+      result: inspectionResult(),
+    });
+    await expect(handle.result).resolves.toEqual({
+      status: "fulfilled",
+      value: inspectionResult(),
+    });
+  });
+
+  it("cancels inspection before readiness without reading the file", async () => {
+    installWorker();
+    const arrayBuffer = vi.fn(async () => Uint8Array.of(1).buffer);
+    const handle = inspectPdfFile({
+      name: "report.pdf",
+      type: "application/pdf",
+      size: 1,
+      arrayBuffer,
+    } as unknown as File);
+    const worker = SilentWorker.latest as SilentWorker;
+
+    handle.cancel();
+    worker.emit({
+      protocol: 1,
+      type: "ready",
+      capabilities: {
+        operations: [
+          "pdf.merge",
+          "pdf.split",
+          "pdf.images-to-pdf",
+          "pdf.organize",
+          "pdf.watermark",
+        ],
+      },
+    });
+
+    await expect(handle.result).resolves.toEqual({ status: "cancelled" });
+    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 });

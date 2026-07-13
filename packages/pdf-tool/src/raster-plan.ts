@@ -5,11 +5,37 @@ import type {
   PdfToImagesSpecV1,
 } from "@hereisit/tool-contracts";
 
-export const MAX_PDF_TO_IMAGE_DIMENSION = 8_192;
-export const MAX_PDF_TO_IMAGE_PAGE_PIXELS = 16_000_000;
+export const MAX_PDF_RASTER_DIMENSION = 8_192;
+export const MAX_PDF_RASTER_PAGE_PIXELS = 16_000_000;
+export const PDF_RASTER_RGBA_BYTES_PER_PIXEL = 4;
+
+export const MAX_PDF_TO_IMAGE_DIMENSION = MAX_PDF_RASTER_DIMENSION;
+export const MAX_PDF_TO_IMAGE_PAGE_PIXELS = MAX_PDF_RASTER_PAGE_PIXELS;
 export const MAX_PDF_TO_IMAGES_TOTAL_PIXELS = 100_000_000;
 export const MAX_PDF_TO_IMAGES_OUTPUT_PAGES = 100;
-export const PDF_TO_IMAGE_RGBA_BYTES_PER_PIXEL = 4;
+export const PDF_TO_IMAGE_RGBA_BYTES_PER_PIXEL = PDF_RASTER_RGBA_BYTES_PER_PIXEL;
+
+export interface PdfRasterVisibleSize {
+  widthPoints: number;
+  heightPoints: number;
+}
+
+export interface PdfRasterAllocation {
+  width: number;
+  height: number;
+  pixels: number;
+  rgbaBytes: number;
+}
+
+export class PdfRasterAllocationError extends Error {
+  constructor(
+    readonly reason: "INVALID_GEOMETRY" | "SIDE_LIMIT" | "PAGE_PIXEL_LIMIT",
+    message: string,
+  ) {
+    super(message);
+    this.name = "PdfRasterAllocationError";
+  }
+}
 
 export interface PdfToImagePagePlan {
   sourcePage: number;
@@ -37,6 +63,10 @@ const TOTAL_MEMORY_LIMIT_MESSAGE =
   "선택한 페이지의 전체 이미지 크기가 너무 커요. 페이지 수나 해상도를 줄여 주세요.";
 const PAGE_LIMIT_MESSAGE = `한 번에 최대 ${MAX_PDF_TO_IMAGES_OUTPUT_PAGES}페이지까지 이미지로 변환할 수 있어요.`;
 const INVALID_INSPECTION_MESSAGE = "PDF 페이지 정보를 확인할 수 없어요. 파일을 다시 선택해 주세요.";
+const INVALID_RASTER_GEOMETRY_MESSAGE =
+  "PDF raster geometry must use positive finite dimensions and a positive integer DPI.";
+const RASTER_SIDE_LIMIT_MESSAGE = `PDF raster dimensions cannot exceed ${MAX_PDF_RASTER_DIMENSION} pixels per side.`;
+const RASTER_PAGE_PIXEL_LIMIT_MESSAGE = `PDF raster allocation cannot exceed ${MAX_PDF_RASTER_PAGE_PIXELS} pixels.`;
 
 export class PdfToImagesPlanError extends Error {
   readonly code: PdfToImagesPlanErrorCode;
@@ -64,31 +94,89 @@ function normalizeRotation(rotation: number): 0 | 90 | 180 | 270 {
   return normalized;
 }
 
-function calculatePixelDimension(points: number, dpi: number): number {
-  if (!Number.isFinite(points) || points <= 0 || !Number.isSafeInteger(dpi) || dpi <= 0) {
-    return fail("MEMORY_LIMIT", INVALID_GEOMETRY_MESSAGE);
+function failRasterAllocation(reason: PdfRasterAllocationError["reason"], message: string): never {
+  throw new PdfRasterAllocationError(reason, message);
+}
+
+export function calculatePdfRasterDimensions(
+  visibleSize: PdfRasterVisibleSize,
+  dpi: number,
+): { width: number; height: number } {
+  if (
+    !Number.isFinite(visibleSize.widthPoints) ||
+    visibleSize.widthPoints <= 0 ||
+    !Number.isFinite(visibleSize.heightPoints) ||
+    visibleSize.heightPoints <= 0 ||
+    !Number.isSafeInteger(dpi) ||
+    dpi <= 0
+  ) {
+    return failRasterAllocation("INVALID_GEOMETRY", INVALID_RASTER_GEOMETRY_MESSAGE);
   }
 
-  const pixels = Math.ceil((points * dpi) / 72);
-  if (!Number.isSafeInteger(pixels) || pixels <= 0) {
-    return fail("MEMORY_LIMIT", INVALID_GEOMETRY_MESSAGE);
+  const width = Math.ceil((visibleSize.widthPoints * dpi) / 72);
+  const height = Math.ceil((visibleSize.heightPoints * dpi) / 72);
+  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0) {
+    return failRasterAllocation("INVALID_GEOMETRY", INVALID_RASTER_GEOMETRY_MESSAGE);
   }
-  return pixels;
+
+  return { width, height };
+}
+
+export function calculatePdfRasterAllocation(
+  visibleSize: PdfRasterVisibleSize,
+  dpi: number,
+): PdfRasterAllocation {
+  const { width, height } = calculatePdfRasterDimensions(visibleSize, dpi);
+  if (width > MAX_PDF_RASTER_DIMENSION || height > MAX_PDF_RASTER_DIMENSION) {
+    return failRasterAllocation("SIDE_LIMIT", RASTER_SIDE_LIMIT_MESSAGE);
+  }
+
+  const pixels = width * height;
+  const rgbaBytes = pixels * PDF_RASTER_RGBA_BYTES_PER_PIXEL;
+  if (
+    !Number.isSafeInteger(pixels) ||
+    !Number.isSafeInteger(rgbaBytes) ||
+    pixels > MAX_PDF_RASTER_PAGE_PIXELS ||
+    rgbaBytes > MAX_PDF_RASTER_PAGE_PIXELS * PDF_RASTER_RGBA_BYTES_PER_PIXEL
+  ) {
+    return failRasterAllocation("PAGE_PIXEL_LIMIT", RASTER_PAGE_PIXEL_LIMIT_MESSAGE);
+  }
+
+  return { width, height, pixels, rgbaBytes };
+}
+
+function calculatePdfToImageVisibleSize(
+  page: Pick<PdfInspectionPage, "width" | "height" | "rotation">,
+): PdfRasterVisibleSize {
+  const rotation = normalizeRotation(page.rotation);
+  const swapsAxes = rotation === 90 || rotation === 270;
+  return {
+    widthPoints: swapsAxes ? page.height : page.width,
+    heightPoints: swapsAxes ? page.width : page.height,
+  };
+}
+
+function mapPdfRasterAllocationError(error: unknown): never {
+  if (!(error instanceof PdfRasterAllocationError)) {
+    throw error;
+  }
+
+  return fail(
+    "MEMORY_LIMIT",
+    error.reason === "INVALID_GEOMETRY" ? INVALID_GEOMETRY_MESSAGE : PAGE_MEMORY_LIMIT_MESSAGE,
+  );
 }
 
 export function calculatePdfToImageDimensions(
   page: Pick<PdfInspectionPage, "width" | "height" | "rotation">,
   dpi: PdfToImagesSpecV1["dpi"],
 ): { width: number; height: number } {
-  const rotation = normalizeRotation(page.rotation);
-  const swapsAxes = rotation === 90 || rotation === 270;
-  const widthPoints = swapsAxes ? page.height : page.width;
-  const heightPoints = swapsAxes ? page.width : page.height;
-
-  return {
-    width: calculatePixelDimension(widthPoints, dpi),
-    height: calculatePixelDimension(heightPoints, dpi),
-  };
+  const visibleSize = calculatePdfToImageVisibleSize(page);
+  try {
+    return calculatePdfRasterDimensions(visibleSize, dpi);
+  } catch (error) {
+    return mapPdfRasterAllocationError(error);
+  }
 }
 
 export function calculatePdfToImagePagePlan(
@@ -99,23 +187,15 @@ export function calculatePdfToImagePagePlan(
     return fail("PAGE_RANGE_INVALID", INVALID_INSPECTION_MESSAGE);
   }
 
-  const { width, height } = calculatePdfToImageDimensions(page, dpi);
-  if (width > MAX_PDF_TO_IMAGE_DIMENSION || height > MAX_PDF_TO_IMAGE_DIMENSION) {
-    return fail("MEMORY_LIMIT", PAGE_MEMORY_LIMIT_MESSAGE);
+  const visibleSize = calculatePdfToImageVisibleSize(page);
+  try {
+    return {
+      sourcePage: page.sourcePage,
+      ...calculatePdfRasterAllocation(visibleSize, dpi),
+    };
+  } catch (error) {
+    return mapPdfRasterAllocationError(error);
   }
-
-  const pixels = width * height;
-  const rgbaBytes = pixels * PDF_TO_IMAGE_RGBA_BYTES_PER_PIXEL;
-  if (
-    !Number.isSafeInteger(pixels) ||
-    !Number.isSafeInteger(rgbaBytes) ||
-    pixels > MAX_PDF_TO_IMAGE_PAGE_PIXELS ||
-    rgbaBytes > MAX_PDF_TO_IMAGE_PAGE_PIXELS * PDF_TO_IMAGE_RGBA_BYTES_PER_PIXEL
-  ) {
-    return fail("MEMORY_LIMIT", PAGE_MEMORY_LIMIT_MESSAGE);
-  }
-
-  return { sourcePage: page.sourcePage, width, height, pixels, rgbaBytes };
 }
 
 export function normalizePdfToImagesPages(

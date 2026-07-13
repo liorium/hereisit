@@ -30,6 +30,14 @@ const pdfToImageTool = {
   selectLabel: "PDF 선택",
 } as const;
 
+const pdfCompressionTool = {
+  path: "/pdf/compress",
+  title: "스캔 PDF 용량 줄이기",
+  selectLabel: "PDF 선택",
+  description:
+    "스캔한 PDF 페이지를 가볍게 다시 만들어 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
+} as const;
+
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -72,6 +80,34 @@ test("publishes dedicated routes in the sitemap", async ({ request }) => {
   const sitemap = await response.text();
   for (const tool of tools) expect(sitemap).toContain(tool.path);
   expect(sitemap).toContain(pdfToImageTool.path);
+  expect(sitemap).toContain(pdfCompressionTool.path);
+});
+
+test("publishes and links the scanned PDF compression tool", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: pdfCompressionTool.title }).first()).toHaveAttribute(
+    "href",
+    pdfCompressionTool.path,
+  );
+
+  const response = await page.goto(pdfCompressionTool.path);
+  expect(response?.ok()).toBe(true);
+  await expect(page).toHaveTitle(`${pdfCompressionTool.title} | HereIsIt`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: pdfCompressionTool.title }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: pdfCompressionTool.selectLabel })).toBeEnabled();
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    pdfCompressionTool.description,
+  );
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://hereisit.pages.dev/pdf/compress",
+  );
+
+  await page.goto("/pdf/merge");
+  await expect(page.locator(`.related-tool-card[href="${pdfCompressionTool.path}"]`)).toBeVisible();
 });
 
 test("publishes and links the PDF to image tool", async ({ page }) => {

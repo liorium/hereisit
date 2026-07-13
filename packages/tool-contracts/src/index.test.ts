@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   imagePipelineSpecSchema,
+  PDF_COMPRESS_SCANNED_TOOL_ID,
+  PDF_COMPRESS_SCANNED_TOOL_VERSION,
   PDF_TO_IMAGES_TOOL_ID,
   PDF_TO_IMAGES_TOOL_VERSION,
+  pdfCompressScannedSpecSchema,
   pdfPipelineSpecSchema,
   pdfToImagesSpecSchema,
 } from "./index";
@@ -152,6 +155,31 @@ describe("pdfToImagesSpecSchema", () => {
     if (result.success) {
       expect(result.data.selection).toEqual({ mode: "extract", pages: [3, 1, 2] });
     }
+  });
+});
+
+describe("pdfCompressScannedSpecSchema", () => {
+  it("publishes the independent scanned compression identity", () => {
+    expect(PDF_COMPRESS_SCANNED_TOOL_ID).toBe("pdf.compress-scanned");
+    expect(PDF_COMPRESS_SCANNED_TOOL_VERSION).toBe(1);
+  });
+
+  it.each(["balanced", "minimum"])("accepts the %s preset", (preset) => {
+    expect(pdfCompressScannedSpecSchema.safeParse({ version: 1, preset }).success).toBe(true);
+  });
+
+  it.each([
+    {},
+    { version: 0, preset: "balanced" },
+    { version: 2, preset: "balanced" },
+    { version: 1 },
+    { version: 1, preset: "adaptive" },
+    { version: 1, preset: 96 },
+    { version: 1, preset: "balanced", dpi: 96 },
+    { version: 1, preset: "balanced", quality: 20 },
+    { version: 1, preset: "balanced", background: "#000000" },
+  ])("rejects caller-controlled or invalid settings %#", (value) => {
+    expect(pdfCompressScannedSpecSchema.safeParse(value).success).toBe(false);
   });
 });
 

@@ -362,6 +362,7 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
     ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
     ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
     ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],
+    ["/pdf/compress", "스캔 PDF 용량 줄이기", "PDF 선택"],
   ] as const;
 
   await page.goto("/");
@@ -378,6 +379,17 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
       "href",
       new RegExp(`${path.replaceAll("/", "\\/")}\\/?$`),
     );
+    if (path === "/pdf/compress") {
+      await expect(page).toHaveTitle("스캔 PDF 용량 줄이기 | HereIsIt");
+      await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+        "content",
+        "스캔한 PDF 페이지를 가볍게 다시 만들어 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
+      );
+      await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+        "href",
+        "https://hereisit.pages.dev/pdf/compress",
+      );
+    }
   }
 
   await page.goto("/pdf/split");

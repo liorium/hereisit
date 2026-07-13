@@ -2,7 +2,7 @@
 
 ## Execution policy
 
-HereItIs chooses the narrowest execution target that can produce a correct result:
+HereIsIt chooses the narrowest execution target that can produce a correct result:
 
 1. Browser Worker for supported local transformations.
 2. Browser Worker plus a lazily loaded WASM codec when the platform codec is insufficient.
@@ -35,13 +35,19 @@ It defaults to all pages as JPG quality 85 at 150DPI and also accepts 96/150/300
 validated page selection. One output page returns a JPG or PNG directly; multiple pages return an ordered
 ZIP whose filenames retain their source page numbers.
 
-After a bounded local inspection, a dedicated renderer Worker imports pinned PDF.js 6.1.200 and renders
-exactly one page at a time. Its parser Worker, packed CMaps, and standard fonts are versioned, copied from
-the same pinned package, and served from the Pages origin. The renderer receives PDF bytes as a transferred
-typed array; it never passes an input URL to PDF.js. Existing image and PDF-edit routes do not import this
-renderer.
+`pdf.compress-scanned@1` is the scan-oriented raster-compression contract. Its only presets resolve to
+balanced 150DPI/JPEG quality 72/white or minimum 96DPI/JPEG quality 55/white. It renders and immediately
+embeds every page, then offers the final PDF only when it is at most
+`sourceBytes - max(1, ceil(sourceBytes / 100))`. This is at least 1% smaller and never an automatic
+download. It is not structure-preserving general PDF compression or internal-image-only optimization.
 
-This path has no upload, CDN dependency, WebAssembly decoder, server renderer, or server fallback. PDF.js
+After a bounded local inspection, the PDF-to-image and scanned-compression paths use separate dedicated
+Workers around shared raster internals. They import pinned PDF.js 6.1.200 and render exactly one page at a
+time. The parser Worker, packed CMaps, and standard fonts are versioned, copied from the same pinned
+package, and served from the Pages origin. Each renderer receives PDF bytes as a transferred typed array;
+it never passes an input URL to PDF.js. Existing image and PDF-edit routes import neither renderer.
+
+These paths have no upload, CDN dependency, WebAssembly decoder, server renderer, or server fallback. PDF.js
 6.1.200 removed the `isEvalSupported` option, so the runtime intentionally does not pass it. The deployed
 Content Security Policy, which does not grant `unsafe-eval` or `wasm-unsafe-eval`, remains the evaluation
 boundary. A browser that cannot provide the Worker and `OffscreenCanvas` chain receives an unsupported
@@ -50,6 +56,15 @@ browser result instead of a main-thread fallback.
 PDF-to-image output is raster data, so text cannot remain searchable or selectable. Annotations and form
 appearances are flattened as PDF.js renders them, and the browser canvas can normalize source color
 profiles. This is page rendering, not embedded-image extraction or OCR.
+
+Scanned-PDF compression removes or flattens searchable/copyable text and OCR, vector graphics, links,
+forms, annotations, bookmarks, attachments, layers, source metadata, and other interactive structure.
+Electronic signatures become invalid and browser JPEG conversion may normalize color profiles. Each
+output page uses the authoritative rotated scale-1 PDF.js viewport, so the visible CropBox, source
+rotation, and UserUnit determine its preserved displayed physical width, height, and orientation. Raster
+pixel dimensions are rounded up separately; the new page normalizes rotation to 0. The Worker plans the
+whole document first, then renders, encodes, embeds, and cleans one page before starting the next. It
+retains no public intermediate image or partial PDF.
 
 The watermark tool renders the validated text once with a bounded `OffscreenCanvas`, embeds that raster
 PNG, and reuses it as a centered or tiled overlay on every page or the selected pages.
@@ -60,8 +75,9 @@ consistent. Its glyph shape can reflect the sans-serif font available on the use
 
 All of these edits create a new PDF. They can invalidate electronic signatures and may not retain every
 bookmark, form, attachment, or other advanced document feature, so that limitation is shown before and
-after relevant operations. HereItIs does not currently claim general PDF compression or image
-downsampling; edited results can be larger than their sources.
+after relevant operations. Structure-preserving general PDF compression and internal-image-only
+optimization are not provided. The scan-oriented raster compressor has a hard smaller-only postcondition
+and never offers a larger result. Only other PDF edits can make an output larger than its source.
 
 ## Resource policy
 
@@ -79,7 +95,7 @@ and PDF embedding buffers before decode begins. Watermark rendering is capped at
 
 PDF-to-image jobs accept one 1-byte–50MiB PDF with at most 500 source pages and 1–100 output pages. Each
 rendered side is at most 8,192px; a page is limited to 16,000,000 pixels/64,000,000 RGBA bytes, and a
-selected job to 100,000,000 rendered pixels. Rendering is sequential, and the HereItIs-owned output canvas
+selected job to 100,000,000 rendered pixels. Rendering is sequential, and the HereIsIt-owned output canvas
 plus custom display-layer `CanvasFactory` scratch storage share a 128MiB active budget. The nested parser
 Worker has its own `OffscreenCanvas` and `ImageDecoder` paths disabled, its canvas area fixed at 64,000,000
 bytes to prevent capability probes, and `maxImageSize` limits each decoded image to 16,000,000 pixels.
@@ -88,8 +104,28 @@ can still reach browser memory limits; the dedicated Worker then fails without r
 The final direct image or ZIP is limited to 100MiB, and the job has the same three-minute watchdog. Limits
 are checked before allocation when dimensions are known and again against the PDF.js viewport.
 
+Scanned-PDF compression accepts exactly one 1-byte–50MiB PDF and includes all 1–100 pages. Each rendered
+side is limited to 8,192px, each page to 16,000,000 pixels/64,000,000 RGBA bytes, and the job to
+100,000,000 pixels. It shares the 128MiB active HereIsIt-managed output/display-layer canvas budget and
+has a 180-second public watchdog. Cumulative JPEG bytes and the final PDF cannot exceed the exact
+smaller-only target. Processing is strictly sequential. PDF.js parser-decoded arrays and
+PDF-library/JavaScript overhead are outside the managed canvas budget, so it is not a whole-process RSS
+ceiling; an image-heavy document can still exhaust browser memory and fails without partial output.
+
 ## Privacy
 
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
+
+## Release proof
+
+After serving `apps/web/out` through the local Pages runtime, the tracked browser smokes prove both PDF
+raster paths without uploading the fixtures:
+
+~~~bash
+node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
+node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
+~~~
+
+Without a base URL, both scripts target the production Pages origin.

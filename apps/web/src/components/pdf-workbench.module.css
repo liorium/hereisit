@@ -878,6 +878,187 @@
   white-space: normal;
 }
 
+.compressionPicker {
+  min-height: 450px;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  text-align: center;
+  transition: background 160ms ease;
+}
+
+.compressionPicker.dragging {
+  background: color-mix(in srgb, var(--yellow) 24%, white);
+}
+
+.compressionPickerIcon {
+  width: 82px;
+  height: 102px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 10px 10px 20px 10px;
+  background: white;
+  color: var(--blue);
+  font-size: 16px;
+  font-weight: 950;
+  box-shadow: 6px 6px 0 var(--yellow);
+}
+
+.compressionPicker p {
+  max-width: 260px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.compressionSettings {
+  padding: 18px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.presetGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  border: 0;
+}
+
+.presetGroup legend {
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.presetGroup > label {
+  min-height: 104px;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: white;
+  cursor: pointer;
+}
+
+.presetGroup > label:has(input:checked) {
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.presetGroup input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 1px 0 0;
+  accent-color: var(--blue);
+}
+
+.presetGroup label > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.presetHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.presetHeading strong {
+  font-size: 14px;
+}
+
+.presetHeading em {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue) 9%, white);
+  color: var(--blue);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.presetGroup label small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.compressionSettings .privacyNotice {
+  margin: 0;
+}
+
+.compressionWarning,
+.compressionResultWarning {
+  margin: 0;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--red) 26%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--red) 7%, white);
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.savingsSummary {
+  margin-top: 16px;
+  color: var(--green);
+  font-size: 20px;
+}
+
+.compressionResultDetails {
+  width: min(290px, 100%);
+  margin: 14px 0 0;
+  padding: 13px 14px;
+  display: grid;
+  gap: 7px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.78);
+  text-align: left;
+}
+
+.compressionResultDetails div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compressionResultDetails dt,
+.compressionResultDetails dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.compressionResultDetails dt {
+  color: var(--muted);
+}
+
+.compressionResultDetails dd {
+  font-weight: 800;
+  text-align: right;
+}
+
+.compressionResultWarning {
+  max-width: 290px;
+  margin-top: 14px;
+  font-size: 10px;
+}
+
 @media (max-width: 1050px) {
   .workspace {
     grid-template-columns: minmax(240px, 0.8fr) minmax(330px, 1.2fr);
@@ -1024,6 +1205,43 @@
 
   .toImageSettings {
     padding: 16px;
+  }
+
+  .compressionPicker {
+    min-height: 330px;
+  }
+
+  .compressionSettings {
+    padding: 16px;
+  }
+
+  .presetGroup legend,
+  .presetHeading strong,
+  .presetGroup label small {
+    font-size: 16px;
+  }
+
+  .presetHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .presetHeading em {
+    font-size: 16px;
+  }
+
+  .presetGroup > label {
+    min-height: 118px;
+  }
+
+  .presetGroup input {
+    width: 22px;
+    height: 22px;
+  }
+
+  .compressionWorkbench .headerActions button,
+  .compressionWorkbench .actionButtons > button {
+    font-size: 16px;
   }
 
   .resultPanel {

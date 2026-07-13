@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compressedPdfName,
   extractedPdfName,
   imagesPdfName,
   mergedPdfName,
@@ -39,5 +40,23 @@ describe("PDF output naming", () => {
   it("uses the document fallback for an empty sanitized PDF stem", () => {
     expect(pdfToImagePageName("folder/\u0000.pdf", 2, "jpeg")).toBe("document-page-002.jpg");
     expect(pdfToImagesArchiveName("folder/\u0000.pdf")).toBe("document-images-hereisit.zip");
+  });
+
+  it("creates a safe source-relative compressed PDF name", () => {
+    expect(compressedPdfName("../report.pdf")).toBe("report-compressed-hereisit.pdf");
+  });
+
+  it("removes C0, C1, and bidi controls from compressed PDF names", () => {
+    expect(
+      compressedPdfName(
+        "s\u0000a\u001ff\u0080e\u009f\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069.pdf",
+      ),
+    ).toBe("safe-compressed-hereisit.pdf");
+  });
+
+  it("uses the document fallback for an empty compressed PDF stem", () => {
+    expect(compressedPdfName("folder/\u0000\u0080\u202e.pdf")).toBe(
+      "document-compressed-hereisit.pdf",
+    );
   });
 });

@@ -27,6 +27,10 @@ export function mergedPdfName(): string {
   return "merged-hereisit.pdf";
 }
 
+export function compressedPdfName(filename: string): string {
+  return `${safeStem(filename, "document")}-compressed-hereisit.pdf`;
+}
+
 export function splitPdfArchiveName(filename: string): string {
   return `${safeStem(filename, "document")}-pages-hereisit.zip`;
 }

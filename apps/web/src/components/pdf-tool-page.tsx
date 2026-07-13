@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { type PdfToolConfig, relatedPdfTools } from "../lib/site";
-import { PdfWorkbench } from "./pdf-workbench";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
-export function PdfToolPage({ tool, workbench }: { tool: PdfToolConfig; workbench?: ReactNode }) {
+export function PdfToolPage({ tool, workbench }: { tool: PdfToolConfig; workbench: ReactNode }) {
   const relatedTools = relatedPdfTools(tool.intent);
 
   return (
@@ -21,11 +20,7 @@ export function PdfToolPage({ tool, workbench }: { tool: PdfToolConfig; workbenc
         </div>
       </section>
 
-      {workbench !== undefined ? (
-        workbench
-      ) : tool.intent !== "to-image" ? (
-        <PdfWorkbench key={tool.intent} intent={tool.intent} />
-      ) : null}
+      {workbench}
 
       <section className="principles-section tool-steps" aria-labelledby="steps-title">
         <div className="section-heading">

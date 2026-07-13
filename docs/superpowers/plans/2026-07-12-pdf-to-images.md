@@ -16,7 +16,7 @@
 - Keep existing `pdf.*@1` editing contracts and `PdfWorkbench` behavior unchanged; the new result, errors, Worker protocol types, and workbench are siblings.
 - Defaults are every page, JPG quality 85, opaque white background, and 150DPI; PNG hides quality.
 - Input is one PDF from 1 byte through 50 MiB; source maximum is 500 pages; output maximum is 100 pages.
-- Enforce 8,192px per side, 16,000,000 pixels and 64,000,000 RGBA bytes per managed canvas/page, a 128 MiB simultaneous budget for HereItIs output and custom display-layer `CanvasFactory` canvases, 100,000,000 selected pixels, 100 MiB final output, sequential concurrency of one, and a 180-second watchdog. Disable nested parser `OffscreenCanvas`/`ImageDecoder`; its decoded image arrays retain the per-image 16MP gate but are outside the managed canvas budget.
+- Enforce 8,192px per side, 16,000,000 pixels and 64,000,000 RGBA bytes per managed canvas/page, a 128 MiB simultaneous budget for HereIsIt output and custom display-layer `CanvasFactory` canvases, 100,000,000 selected pixels, 100 MiB final output, sequential concurrency of one, and a 180-second watchdog. Disable nested parser `OffscreenCanvas`/`ImageDecoder`; its decoded image arrays retain the per-image 16MP gate but are outside the managed canvas budget.
 - Preserve explicit extracted-page order while filenames retain source page numbers. One page returns an image; two or more return a streaming ZIP.
 - Rendering and encoding progress must carry actual `completedPages` and `totalPages`; cancellation terminates the top-level Worker immediately and settles once.
 - Every canvas, page, render task, archive, PDF document/loading task, parser Worker, result URL, and transferred buffer must have an explicit cleanup path.
@@ -348,7 +348,7 @@ Define fake loading task, document, page, render task, canvas, Blob encoder, and
 - final direct output and cumulative ZIP output fail above 100 MiB;
 - password, corrupt, page range, render, and encode failures map to exact error codes;
 - success, failure, and `AbortController.abort()` cancellation cancel an active render when applicable, call `page.cleanup()`, zero canvases, terminate an unfinished ZIP, call `document.cleanup()`, destroy loading task, destroy `PDFWorker`, terminate its supplied parser port, and drop page/input references;
-- custom display-layer PDF.js scratch-canvas create/reset rejects an over-8,192 side, over-16MP canvas, and simultaneous HereItIs-managed canvas usage above 128 MiB, then releases the budget on destroy;
+- custom display-layer PDF.js scratch-canvas create/reset rejects an over-8,192 side, over-16MP canvas, and simultaneous HereIsIt-managed canvas usage above 128 MiB, then releases the budget on destroy;
 - maximum active canvas/render count is exactly one.
 
 Run:
@@ -394,7 +394,7 @@ Never allow PDF.js to call its default `window.location` Worker initializer or f
 
 Provide constructor-compatible Worker factories:
 
-- `WorkerCanvasFactory` creates `OffscreenCanvas`, obtains a non-null 2D context with `willReadFrequently`, resets dimensions only after zeroing the old backing store, and destroys by setting width/height to zero and clearing the holder. It owns a shared `WorkerCanvasBudget` that validates every output and custom display-layer scratch canvas against 8,192px/16MP, accounts reset deltas, caps all simultaneously live HereItIs-managed canvas RGBA allocations at 128 MiB, and releases each holder exactly once. A budget exception must survive PDF.js wrapping and map to `MEMORY_LIMIT`, not generic `RENDER_FAILED`.
+- `WorkerCanvasFactory` creates `OffscreenCanvas`, obtains a non-null 2D context with `willReadFrequently`, resets dimensions only after zeroing the old backing store, and destroys by setting width/height to zero and clearing the holder. It owns a shared `WorkerCanvasBudget` that validates every output and custom display-layer scratch canvas against 8,192px/16MP, accounts reset deltas, caps all simultaneously live HereIsIt-managed canvas RGBA allocations at 128 MiB, and releases each holder exactly once. A budget exception must survive PDF.js wrapping and map to `MEMORY_LIMIT`, not generic `RENDER_FAILED`.
 - `WorkerFilterFactory` implements PDF.js's filter-factory surface with `"none"` results and no DOM access.
 
 Use `disableFontFace: true` and `useSystemFonts: false` so font rendering stays Worker-safe, but supply versioned `standardFontDataUrl`. Set `useWorkerFetch: true` so the nested parser Worker loads packed CMaps/fonts directly from the same origin. Call only:

@@ -1,4 +1,4 @@
-# HereItIs engineering guide
+# HereIsIt engineering guide
 
 ## Product principles
 

@@ -236,8 +236,8 @@ async function loadPdf(input: PdfPipelineInput): Promise<PDFDocument> {
 
 async function createOutputDocument(): Promise<PDFDocument> {
   const document = await PDFDocument.create({ updateMetadata: false });
-  document.setCreator("HereItIs");
-  document.setProducer("HereItIs");
+  document.setCreator("HereIsIt");
+  document.setProducer("HereIsIt");
   return document;
 }
 

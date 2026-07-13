@@ -3,11 +3,11 @@ import { categoryNavigation } from "../lib/site";
 export function SiteHeader({ activePath }: { activePath?: string }) {
   return (
     <header className="site-header">
-      <a className="brand" href="/" aria-label="HereItIs 홈">
+      <a className="brand" href="/" aria-label="HereIsIt 홈">
         <span className="brand-mark" aria-hidden="true">
           H
         </span>
-        <span>HereItIs</span>
+        <span>HereIsIt</span>
       </a>
       <div className="site-header-actions">
         <nav className="site-nav" aria-label="주요 도구">

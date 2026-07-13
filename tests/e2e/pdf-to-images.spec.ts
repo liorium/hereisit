@@ -4,6 +4,49 @@ import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
 const PDF_TO_IMAGES_ROUTE = "/pdf/to-image";
+const PDF_INSPECTION_TIMEOUT_MS = 60_000;
+const LOCAL_PAGES_ORIGIN = "http://127.0.0.1:4173";
+
+async function scanLoadedJavaScriptMarkers(
+  page: Page,
+  requestUrls: readonly string[],
+  markers: readonly string[],
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (const requestUrl of requestUrls) {
+    try {
+      const requested = new URL(requestUrl);
+      if (requested.origin !== LOCAL_PAGES_ORIGIN || !requested.pathname.endsWith(".js")) {
+        throw new Error("Unexpected JavaScript response identity");
+      }
+      const response = await page.context().request.get(requestUrl, {
+        headers: { "Accept-Encoding": "identity" },
+        maxRedirects: 0,
+      });
+      if (
+        response.status() !== 200 ||
+        response.url() !== requestUrl ||
+        new URL(response.url()).origin !== LOCAL_PAGES_ORIGIN
+      ) {
+        throw new Error("Unexpected JavaScript refetch response");
+      }
+      const body = await response.text();
+      for (const marker of markers) {
+        if (body.includes(marker)) found.add(marker);
+      }
+    } catch {
+      throw new Error("Loaded JavaScript isolation scan failed");
+    }
+  }
+  return found;
+}
+
+async function openReadyPdfToImages(page: Page): Promise<void> {
+  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({
+    timeout: 60_000,
+  });
+}
 
 async function createVectorPdf(
   pages: readonly { width: number; height: number; rotation?: 90 }[],
@@ -128,6 +171,9 @@ async function observePrivateConversion(page: Page) {
     if (url.origin !== origin) violations.push("cross-origin");
     if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
     if (request.postData() !== null) violations.push("request-body");
+    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.1.200/")) {
+      violations.push("unpinned-pdfjs");
+    }
     if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
     await route.continue();
   });
@@ -207,14 +253,16 @@ async function objectUrlCounts(page: Page): Promise<{ created: number; revoked: 
 }
 
 async function prepareSinglePageResult(page: Page) {
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
     buffer: await createVectorPdf([{ width: 72, height: 72 }]),
   });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
   return privacy;
@@ -234,7 +282,7 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
   page,
 }) => {
   await forceDownloadFallback(page);
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   let downloadCount = 0;
   page.on("download", () => {
@@ -250,7 +298,9 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
     mimeType: "application/pdf",
     buffer: pdf,
   });
-  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
   await expect(page.getByText("이미지 2개 ZIP 준비 완료")).toBeVisible({ timeout: 60_000 });
   await settleRenderedState(page);
@@ -280,7 +330,7 @@ test("keeps explicitly selected pages in source selection order inside the ZIP",
   page,
 }) => {
   await forceDownloadFallback(page);
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
@@ -289,7 +339,9 @@ test("keeps explicitly selected pages in source selection order inside the ZIP",
       { width: 72, height: 72 },
     ]),
   });
-  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page
     .getByRole("group", { name: "변환할 페이지" })
     .getByRole("radio", { name: /지정 페이지/ })
@@ -312,14 +364,16 @@ test("renders a page containing multiple embedded image XObjects", async ({
 }) => {
   const pdf = await createMultiImagePdf(page);
   await forceDownloadFallback(page);
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
     buffer: pdf,
   });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.getByRole("group", { name: "출력 형식" }).getByRole("radio", { name: "PNG" }).check();
   await page.getByRole("group", { name: "해상도" }).getByRole("radio", { name: "96DPI" }).check();
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
@@ -366,7 +420,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
 
 test("converts only a rotated second page to a direct 96DPI PNG", async ({ browserName, page }) => {
   await forceDownloadFallback(page);
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   let downloadCount = 0;
   page.on("download", () => {
@@ -381,7 +435,9 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
     mimeType: "application/pdf",
     buffer: pdf,
   });
-  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
 
   const quality = page.getByRole("slider", { name: "JPG 품질 85" });
   await expect(quality).toBeVisible();
@@ -421,14 +477,14 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
 });
 
 test("blocks every-page and extracted outputs above the 100-page cap", async ({ page }) => {
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
     buffer: await createBlankPdf(101),
   });
   await expect(page.getByText("101페이지 · 썸네일 없이 크기만 확인했어요.")).toBeVisible({
-    timeout: 20_000,
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
   const correctiveCopy = "한 번에 최대 100페이지까지 이미지로 변환할 수 있어요.";
   await expect(page.getByText(correctiveCopy).first()).toBeVisible();
@@ -444,7 +500,7 @@ test("blocks every-page and extracted outputs above the 100-page cap", async ({ 
 });
 
 test("reports count-based rendering and encoding progress", async ({ browserName, page }) => {
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
@@ -454,7 +510,9 @@ test("reports count-based rendering and encoding progress", async ({ browserName
       { width: 612, height: 792 },
     ]),
   });
-  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.evaluate(() => {
     const progress = document.querySelector('[role="progressbar"]');
     const observedWindow = window as Window & { __hereisitProgressLabels?: string[] };
@@ -483,7 +541,7 @@ test("reports count-based rendering and encoding progress", async ({ browserName
 });
 
 test("cancels before a result or download is offered", async ({ page }) => {
-  await page.goto(PDF_TO_IMAGES_ROUTE);
+  await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   let downloadCount = 0;
   page.on("download", () => {
@@ -497,7 +555,9 @@ test("cancels before a result or download is offered", async ({ page }) => {
       { width: 612, height: 792 },
     ]),
   });
-  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.evaluate(() => {
     const originalAnimationFrame = window.requestAnimationFrame.bind(window);
     const pendingFrames: FrameRequestCallback[] = [];
@@ -548,7 +608,9 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
     mimeType: "application/pdf",
     buffer: await createVectorPdf([{ width: 72, height: 72 }]),
   });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 3 });
@@ -560,7 +622,9 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
     mimeType: "application/pdf",
     buffer: await createVectorPdf([{ width: 72, height: 72 }]),
   });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 4 });
 
@@ -577,7 +641,7 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   privacy.assertClean(browserName !== "firefox");
 });
 
-test("keeps PDF.js and the PDF-to-images runtime off existing tool routes", async ({ page }) => {
+test("keeps PDF.js and both raster runtimes off image and PDF editing routes", async ({ page }) => {
   const routes = [
     ["/image/compress", "이미지 용량 줄이기"],
     ["/image/resize", "이미지 크기 조절"],
@@ -589,25 +653,23 @@ test("keeps PDF.js and the PDF-to-images runtime off existing tool routes", asyn
     ["/pdf/watermark", "PDF 워터마크 넣기"],
   ] as const;
   let pdfjsRequests = 0;
-  let rendererRuntimeResponses = 0;
   let failedRequests = 0;
   let pageErrors = 0;
-  const responseScans: Promise<void>[] = [];
+  const loadedJavaScriptUrls = new Set<string>();
+  const scannedJavaScriptUrls = new Set<string>();
+  const forbiddenMarkers = [
+    "hereisit-pdf-to-images-worker",
+    "hereisit-pdf-compress-scanned-worker",
+  ] as const;
+  const loadedForbiddenMarkers = new Set<string>();
 
   page.context().on("request", (request) => {
     if (new URL(request.url()).pathname.startsWith("/pdfjs/")) pdfjsRequests += 1;
   });
   page.context().on("response", (response) => {
     const url = new URL(response.url());
-    if (url.origin !== "http://127.0.0.1:4173" || !url.pathname.endsWith(".js")) return;
-    responseScans.push(
-      response
-        .text()
-        .then((body) => {
-          if (body.includes("hereisit-pdf-to-images-worker")) rendererRuntimeResponses += 1;
-        })
-        .catch(() => undefined),
-    );
+    if (url.origin !== LOCAL_PAGES_ORIGIN || !url.pathname.endsWith(".js")) return;
+    loadedJavaScriptUrls.add(response.url());
   });
   page.context().on("requestfailed", () => {
     failedRequests += 1;
@@ -619,12 +681,75 @@ test("keeps PDF.js and the PDF-to-images runtime off existing tool routes", asyn
   for (const [path, title] of routes) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await settleRenderedState(page);
+    const newJavaScriptUrls = [...loadedJavaScriptUrls].filter(
+      (requestUrl) => !scannedJavaScriptUrls.has(requestUrl),
+    );
+    const routeMarkers = await scanLoadedJavaScriptMarkers(
+      page,
+      newJavaScriptUrls,
+      forbiddenMarkers,
+    );
+    for (const marker of routeMarkers) loadedForbiddenMarkers.add(marker);
+    for (const requestUrl of newJavaScriptUrls) scannedJavaScriptUrls.add(requestUrl);
   }
-  await Promise.all(responseScans);
   expect(pdfjsRequests).toBe(0);
-  expect(rendererRuntimeResponses).toBe(0);
+  expect([...loadedForbiddenMarkers]).toEqual([]);
   expect(failedRequests).toBe(0);
   expect(pageErrors).toBe(0);
+});
+
+test("loads only each raster route's inspection and dedicated Worker markers", async ({ page }) => {
+  const routes = [
+    {
+      path: "/pdf/to-image",
+      title: "PDF를 JPG·PNG로 변환",
+      required: ["hereisit-pdf-inspection-worker", "hereisit-pdf-to-images-worker"],
+      forbidden: ["hereisit-pdf-worker", "hereisit-pdf-compress-scanned-worker"],
+    },
+    {
+      path: "/pdf/compress",
+      title: "스캔 PDF 용량 줄이기",
+      required: ["hereisit-pdf-inspection-worker", "hereisit-pdf-compress-scanned-worker"],
+      forbidden: ["hereisit-pdf-worker", "hereisit-pdf-to-images-worker"],
+    },
+  ] as const;
+
+  for (const route of routes) {
+    const loadedJavaScriptUrls = new Set<string>();
+    const pdfjsRequests: string[] = [];
+    const onRequest = (request: import("@playwright/test").Request) => {
+      if (new URL(request.url()).pathname.startsWith("/pdfjs/")) pdfjsRequests.push(request.url());
+    };
+    const onResponse = (response: import("@playwright/test").Response) => {
+      const url = new URL(response.url());
+      if (url.origin !== LOCAL_PAGES_ORIGIN || !url.pathname.endsWith(".js")) return;
+      loadedJavaScriptUrls.add(response.url());
+    };
+    page.on("request", onRequest);
+    page.on("response", onResponse);
+
+    await page.goto(route.path);
+    await expect(page.getByRole("heading", { level: 1, name: route.title })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await settleRenderedState(page);
+    const routeMarkers = await scanLoadedJavaScriptMarkers(
+      page,
+      [...loadedJavaScriptUrls],
+      [...route.required, ...route.forbidden],
+    );
+    for (const marker of route.required) expect(routeMarkers.has(marker)).toBe(true);
+    for (const marker of route.forbidden) expect(routeMarkers.has(marker)).toBe(false);
+    for (const requestUrl of pdfjsRequests) {
+      const url = new URL(requestUrl);
+      expect(url.origin).toBe(LOCAL_PAGES_ORIGIN);
+      expect(url.pathname.startsWith("/pdfjs/6.1.200/")).toBe(true);
+    }
+
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+  }
 });
 
 test("ignores a fulfilled share after reset invalidates its result URL", async ({

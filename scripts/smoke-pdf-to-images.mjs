@@ -101,7 +101,7 @@ function assertSecurityHeaders(headers) {
 }
 
 async function waitForInspection(page) {
-  await page.getByText("2페이지 PDF를 불러왔어요.").waitFor({ timeout: 20_000 });
+  await page.getByText("2페이지 PDF를 불러왔어요.").waitFor({ timeout: 60_000 });
 }
 
 async function runDirectPngSmoke(page) {

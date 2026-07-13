@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculatePdfRasterAllocation,
+  calculatePdfRasterDimensions,
   calculatePdfToImageDimensions,
   calculatePdfToImagePagePlan,
   MAX_PDF_TO_IMAGES_TOTAL_PIXELS,
   normalizePdfToImagesPages,
+  PdfRasterAllocationError,
   PdfToImagesPlanError,
   planPdfToImagesRasterization,
 } from "./raster-plan";
@@ -36,6 +39,51 @@ function createInspection(
     })),
   };
 }
+
+describe("shared PDF raster allocation", () => {
+  it("accepts an 8,192-pixel side and rejects 8,193 pixels", () => {
+    expect(calculatePdfRasterDimensions({ widthPoints: 6_144, heightPoints: 72 }, 96)).toEqual({
+      width: 8_192,
+      height: 96,
+    });
+    expect(() =>
+      calculatePdfRasterAllocation({ widthPoints: 6_144.75, heightPoints: 72 }, 96),
+    ).toThrowError(PdfRasterAllocationError);
+  });
+
+  it("accepts exactly 16,000,000 pixels and 64,000,000 RGBA bytes", () => {
+    expect(
+      calculatePdfRasterAllocation({ widthPoints: 3_000, heightPoints: 3_000 }, 96),
+    ).toMatchObject({
+      width: 4_000,
+      height: 4_000,
+      pixels: 16_000_000,
+      rgbaBytes: 64_000_000,
+    });
+    expect(() =>
+      calculatePdfRasterAllocation({ widthPoints: 3_000, heightPoints: 3_000.75 }, 96),
+    ).toThrowError(PdfRasterAllocationError);
+  });
+
+  it.each([
+    [{ widthPoints: Number.NaN, heightPoints: 72 }, 96, "NaN points"],
+    [{ widthPoints: 72, heightPoints: Number.POSITIVE_INFINITY }, 96, "infinite points"],
+    [{ widthPoints: 0, heightPoints: 72 }, 96, "zero points"],
+    [{ widthPoints: 72, heightPoints: -1 }, 96, "negative points"],
+    [{ widthPoints: 72, heightPoints: 72 }, Number.NaN, "NaN DPI"],
+    [{ widthPoints: 72, heightPoints: 72 }, Number.POSITIVE_INFINITY, "infinite DPI"],
+    [{ widthPoints: 72, heightPoints: 72 }, 96.5, "fractional DPI"],
+    [{ widthPoints: 72, heightPoints: 72 }, 0, "zero DPI"],
+    [{ widthPoints: 72, heightPoints: 72 }, -96, "negative DPI"],
+  ] as const)("rejects invalid geometry: %s at %s DPI (%s)", (visibleSize, dpi, _label) => {
+    expect(() => calculatePdfRasterAllocation(visibleSize, dpi)).toThrowError(
+      expect.objectContaining({
+        name: "PdfRasterAllocationError",
+        reason: "INVALID_GEOMETRY",
+      }),
+    );
+  });
+});
 
 describe("PDF-to-image dimensions", () => {
   it.each([
