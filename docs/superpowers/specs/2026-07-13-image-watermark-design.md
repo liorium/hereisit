@@ -189,9 +189,12 @@ Add `ImageWatermarkWorkbench`, `ImageToolPage` support for the `watermark` inten
 `/image/watermark` route. Site metadata, sitemap, navigation, home cards, and related-image tools continue
 to derive from the central site registry.
 
-The dedicated workbench owns source files, optional logo file, settings, object URLs, result state,
-batch handle, and save/share/ZIP lifecycle. It follows the existing three-column desktop anatomy and
-mobile order: source list, settings, selected original/result preview, then sticky actions. It does not
+The dedicated workbench owns source and optional-logo `File` references, settings, generated-result and
+archive object URLs, result state, batch handle, and save/share/ZIP lifecycle. Source and logo files never
+receive object URLs or main-thread image decodes: before processing they appear as filename-and-size
+placeholders, and after success the source area adds Worker-validated dimensions while only the newly
+encoded result is rendered as an image. The workbench follows the existing three-column desktop anatomy
+and mobile order: source list, settings, source metadata/result preview, then sticky actions. It does not
 add a new visual system or change existing tool pages.
 
 ## User experience
@@ -216,12 +219,14 @@ selection, the settings panel provides:
 
 Changing any setting invalidates prior results and revokes their object URLs. Switching away from logo
 mode retains the selected logo for convenience but does not send or decode it for text jobs. Removing or
-replacing the logo revokes its preview and invalidates results. The action says `N개 이미지에 워터마크
-넣기 →` and is disabled for invalid text, a missing/invalid logo, unsupported runtime, or an empty batch.
+replacing the logo invalidates results; neither source nor logo selection creates a preview URL. The action
+says `N개 이미지에 워터마크 넣기 →` and is disabled for invalid text, a missing/invalid logo,
+unsupported runtime, or an empty batch.
 
 Processing shows per-item phase and overall completed count. Cancellation immediately terminates active
 Workers; already completed results remain explicitly savable and unfinished items become cancelled.
-Successful items show source and output dimensions, byte size, elapsed time, and the generated preview.
+Successful items show source and output dimensions, byte size, elapsed time, and the generated result
+preview.
 Failed items show their own corrective error without discarding other successes.
 
 Before and after processing, the UI states that files stay on the device, metadata is removed, the
@@ -250,13 +255,15 @@ bytes from a failed item are exposed.
 ## Privacy and security
 
 - Source and logo bytes are read only after the dedicated Worker reports supported capabilities.
-- No input URL is passed to a decoder; Workers receive transferred local `ArrayBuffer` values.
+- Source and logo files never receive object URLs and are never decoded by the main-thread UI. Workers
+  receive transferred local `ArrayBuffer` values; only generated results and archives receive object URLs.
 - No request, upload, CDN, analytics payload, or server fallback carries bytes, filenames, previews, or
   object URLs.
 - Filenames and file contents are not logged.
 - Existing CSP remains unchanged; the feature needs no evaluation, WebAssembly, remote script, or extra
   network origin.
-- Object URLs are owned by the workbench and revoked on every replace, rerun, reset, and unmount path.
+- Generated result/archive object URLs are owned by the workbench and revoked on replacement, rerun,
+  reset, removal, unmount, archive failure, and archive timeout.
 
 ## Testing and release proof
 

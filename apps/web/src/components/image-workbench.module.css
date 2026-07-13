@@ -463,6 +463,53 @@
   font-weight: 700;
 }
 
+.sourceInfoCard {
+  min-width: 0;
+  width: min(100%, 320px);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--muted);
+  text-align: center;
+}
+
+.sourceInfoIcon,
+.logoPlaceholder {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #e8e9e4;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.sourceInfoIcon {
+  width: 72px;
+  height: 58px;
+}
+
+.sourceInfoCard strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceInfoCard span,
+.sourceInfoCard small {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .previewMemoryNotice {
   max-width: 340px;
   padding: 22px 24px;
@@ -721,6 +768,12 @@
   border-radius: 8px;
   background: white;
   object-fit: contain;
+}
+
+.logoPlaceholder {
+  width: 64px;
+  height: 52px;
+  grid-row: 1 / span 2;
 }
 
 .logoPicker > div {

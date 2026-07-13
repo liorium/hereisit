@@ -29,11 +29,19 @@ PDF-page rasterization, page organization, PDF text watermarking, downloaded art
 Worker isolation, and that processing makes no external, write, or request-body traffic:
 
 ~~~bash
-pnpm exec playwright install chromium
+pnpm exec playwright install --with-deps chromium firefox
 pnpm build
 pnpm test:e2e
 # or run core and browser checks together
 pnpm verify:all
+~~~
+
+The default local suite covers desktop Chromium and Firefox plus mobile Chromium. To include the same
+desktop and mobile WebKit projects used by CI:
+
+~~~bash
+pnpm exec playwright install --with-deps webkit
+PLAYWRIGHT_WEBKIT=1 pnpm test:e2e
 ~~~
 
 Build and preview the exact Cloudflare Pages output locally:
@@ -76,7 +84,9 @@ checklist.
   Source-format output is resolved from inspected bytes: JPG stays JPG, PNG stays lossless PNG, WebP stays
   WebP, and a supported HEIC/HEIF source becomes JPG. JPG uses a white matte while PNG/WebP retain alpha.
   Every result is newly canvas-encoded with metadata removed, so color profiles and byte size can change;
-  there is no size-reduction guarantee and no automatic download.
+  there is no size-reduction guarantee and no automatic download. Source and logo files appear as
+  metadata placeholders and never receive object URLs or main-thread image decodes; only the newly encoded
+  result is rendered as an image.
 - Image-watermark batches accept 1–100 sources of 1 byte–50MiB each and 250MiB combined. A source is
   limited to 16,384px per side and 25,000,000 displayed pixels. The optional logo is 1 byte–10MiB,
   8,192px per side, and 16,000,000 pixels. Results are limited to 100MiB each and 500MiB retained per

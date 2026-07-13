@@ -145,12 +145,13 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
 - Image-watermark source/logo bytes move only as transferred local buffers between the tab and its
-  dedicated Workers; no decoder receives an input URL and no upload, CDN, WebAssembly, or server fallback
-  exists.
-- Image-watermark filenames, previews, results, and object URLs are likewise excluded from network and
-  analytics payloads and remain in tab/Worker-owned memory.
-- Image-watermark object URLs are revoked on replacement, rerun, reset, and unmount, and no save begins
-  until the user explicitly requests one.
+  dedicated Workers. Source and logo `File` objects never receive object URLs and are never decoded by the
+  main-thread UI; filename, size, and Worker-validated dimensions are shown as metadata instead. No remote
+  decoder, upload, CDN, WebAssembly, or server fallback exists.
+- Only Worker-validated, newly encoded image results and generated ZIP archives receive image-watermark
+  object URLs. They are excluded from network and analytics payloads and remain in tab-owned memory.
+- Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
+  archive failure, and archive timeout. No save begins until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
 
 ## Release proof

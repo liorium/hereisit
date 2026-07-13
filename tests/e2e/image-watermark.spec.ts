@@ -145,6 +145,55 @@ async function samplePixels(
   );
 }
 
+async function countMateriallyChangedBottomRightPixels(
+  page: Page,
+  source: Uint8Array,
+  output: Uint8Array,
+): Promise<number> {
+  return page.evaluate(
+    async ({ outputBytes, sourceBytes }) => {
+      const decode = async (encoded: number[]) => {
+        const bitmap = await createImageBitmap(
+          new Blob([Uint8Array.from(encoded)], { type: "image/png" }),
+        );
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (context === null) throw new Error("2D canvas is unavailable");
+          context.drawImage(bitmap, 0, 0);
+          return {
+            width: bitmap.width,
+            height: bitmap.height,
+            pixels: context.getImageData(0, 0, bitmap.width, bitmap.height).data,
+          };
+        } finally {
+          bitmap.close();
+        }
+      };
+      const [before, after] = await Promise.all([decode(sourceBytes), decode(outputBytes)]);
+      if (before.width !== after.width || before.height !== after.height) {
+        throw new Error("Decoded image dimensions differ");
+      }
+      let changed = 0;
+      for (let y = Math.floor(before.height * 0.75); y < before.height; y += 1) {
+        for (let x = Math.floor(before.width * 0.75); x < before.width; x += 1) {
+          const offset = (y * before.width + x) * 4;
+          const delta = Math.max(
+            Math.abs((before.pixels[offset] ?? 0) - (after.pixels[offset] ?? 0)),
+            Math.abs((before.pixels[offset + 1] ?? 0) - (after.pixels[offset + 1] ?? 0)),
+            Math.abs((before.pixels[offset + 2] ?? 0) - (after.pixels[offset + 2] ?? 0)),
+          );
+          if (delta >= 32) changed += 1;
+        }
+      }
+      return changed;
+    },
+    { outputBytes: Array.from(output), sourceBytes: Array.from(source) },
+  );
+}
+
 function expectPixelNear(
   actual: readonly number[] | undefined,
   expected: readonly number[],
@@ -162,6 +211,21 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+    const trackedWindow = window as Window & {
+      __rawWatermarkPreviewUrls?: number;
+      __watermarkObjectUrls?: number;
+    };
+    const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+    trackedWindow.__rawWatermarkPreviewUrls = 0;
+    trackedWindow.__watermarkObjectUrls = 0;
+    URL.createObjectURL = (object) => {
+      trackedWindow.__watermarkObjectUrls = (trackedWindow.__watermarkObjectUrls ?? 0) + 1;
+      if (object instanceof File) {
+        trackedWindow.__rawWatermarkPreviewUrls =
+          (trackedWindow.__rawWatermarkPreviewUrls ?? 0) + 1;
+      }
+      return nativeCreateObjectUrl(object);
+    };
   });
   const requestViolations: string[] = [];
   let failedRequests = 0;
@@ -189,6 +253,17 @@ test("text watermark uses the approved defaults and saves only on request", asyn
     mimeType: "image/png",
     buffer: source,
   });
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __rawWatermarkPreviewUrls?: number }).__rawWatermarkPreviewUrls,
+    ),
+  ).toBe(0);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls,
+    ),
+  ).toBe(0);
+  await expect(page.getByAltText("source.png 원본")).toHaveCount(0);
 
   await expect(page.getByRole("radio", { name: "문구", exact: true })).toBeChecked();
   await expect(page.getByLabel("워터마크 문구")).toHaveValue("© HereIsIt");
@@ -208,6 +283,23 @@ test("text watermark uses the approved defaults and saves only on request", asyn
     timeout: 20_000,
   });
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toBeVisible();
+  await expect(page.getByAltText("source.png 원본")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __rawWatermarkPreviewUrls?: number }).__rawWatermarkPreviewUrls ??
+          0,
+      ),
+    )
+    .toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls ?? 0,
+      ),
+    )
+    .toBe(1);
   await expect(page.getByText("원본 320×180", { exact: true })).toBeVisible();
   await expect(page.getByText("결과 320×180", { exact: true })).toBeVisible();
   await expect(page.getByText(/메타데이터.*제거/)).toBeVisible();
@@ -224,6 +316,12 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   const output = new Uint8Array(await readFile(path as string));
   expect(Array.from(output.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   expect(pngDimensions(output)).toEqual({ width: 320, height: 180 });
+  expect(await countMateriallyChangedBottomRightPixels(page, source, output)).toBeGreaterThan(8);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls,
+    ),
+  ).toBe(1);
   expect(downloads).toBe(1);
   expect(requestViolations).toEqual([]);
   expect(failedRequests).toBe(0);
@@ -264,6 +362,21 @@ test("places a real logo at the top-left and preserves pixels outside it", async
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+    const trackedWindow = window as Window & {
+      __rawWatermarkPreviewUrls?: number;
+      __watermarkObjectUrls?: number;
+    };
+    const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+    trackedWindow.__rawWatermarkPreviewUrls = 0;
+    trackedWindow.__watermarkObjectUrls = 0;
+    URL.createObjectURL = (object) => {
+      trackedWindow.__watermarkObjectUrls = (trackedWindow.__watermarkObjectUrls ?? 0) + 1;
+      if (object instanceof File) {
+        trackedWindow.__rawWatermarkPreviewUrls =
+          (trackedWindow.__rawWatermarkPreviewUrls ?? 0) + 1;
+      }
+      return nativeCreateObjectUrl(object);
+    };
   });
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 320, 180, "#ffffff");
@@ -284,6 +397,18 @@ test("places a real logo at the top-left and preserves pixels outside it", async
     mimeType: "image/png",
     buffer: logo,
   });
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __rawWatermarkPreviewUrls?: number }).__rawWatermarkPreviewUrls,
+    ),
+  ).toBe(0);
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls,
+    ),
+  ).toBe(0);
+  await expect(page.getByAltText("white.png 원본")).toHaveCount(0);
+  await expect(page.getByAltText("선택한 워터마크 로고")).toHaveCount(0);
   await page.getByRole("radio", { name: "왼쪽 위", exact: true }).check();
   await page.getByRole("slider", { name: /로고 크기/ }).fill("20");
   await page.getByRole("slider", { name: /여백/ }).fill("0");
@@ -292,6 +417,24 @@ test("places a real logo at the top-left and preserves pixels outside it", async
 
   await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
   await waitForCompleted(page, 1);
+  await expect(page.getByAltText("white.png 원본")).toHaveCount(0);
+  await expect(page.getByAltText("선택한 워터마크 로고")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __rawWatermarkPreviewUrls?: number }).__rawWatermarkPreviewUrls ??
+          0,
+      ),
+    )
+    .toBe(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls ?? 0,
+      ),
+    )
+    .toBe(1);
   expect(downloads).toBe(0);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -614,19 +757,11 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
     mimeType: "image/png",
     buffer: firstLogo,
   });
-  const logoPreviewUrl = await page.getByAltText("선택한 워터마크 로고").getAttribute("src");
-  expect(logoPreviewUrl).not.toBeNull();
+  await expect(page.getByAltText("선택한 워터마크 로고")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "로고 바꾸기" })).toBeVisible();
   await page.getByRole("radio", { name: "문구", exact: true }).check();
-  expect(
-    await page.evaluate(
-      (url) =>
-        (window as Window & { __revokedWatermarkUrls?: string[] }).__revokedWatermarkUrls?.includes(
-          url,
-        ) ?? false,
-      logoPreviewUrl as string,
-    ),
-  ).toBe(false);
   await page.getByRole("radio", { name: "로고 이미지", exact: true }).check();
+  await expect(page.getByRole("button", { name: "로고 바꾸기" })).toBeVisible();
   await run.click();
   await waitForCompleted(page, 1);
   const logoResultUrl = await page
@@ -641,19 +776,17 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
   });
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
   await expect(page.getByRole("button", { name: "결과 저장·공유 ↓" })).toHaveCount(0);
-  for (const staleUrl of [logoResultUrl as string, logoPreviewUrl as string]) {
-    await expect
-      .poll(() =>
-        page.evaluate(
-          (url) =>
-            (
-              window as Window & { __revokedWatermarkUrls?: string[] }
-            ).__revokedWatermarkUrls?.includes(url) ?? false,
-          staleUrl,
-        ),
-      )
-      .toBe(true);
-  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (url) =>
+          (
+            window as Window & { __revokedWatermarkUrls?: string[] }
+          ).__revokedWatermarkUrls?.includes(url) ?? false,
+        logoResultUrl as string,
+      ),
+    )
+    .toBe(true);
 });
 
 test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ page }) => {

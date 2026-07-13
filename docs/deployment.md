@@ -29,9 +29,14 @@ Requirements: Node.js 24 LTS and pnpm 11.11.0.
 
 ~~~bash
 pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium firefox
 pnpm verify:all
 pnpm cloudflare:preview
 ~~~
+
+The default local browser projects are desktop Chromium and Firefox plus mobile Chromium. GitHub CI also
+installs WebKit and runs its desktop and mobile projects. Install it locally and set
+`PLAYWRIGHT_WEBKIT=1` when the same Safari-engine coverage is required.
 
 The preview is available at http://127.0.0.1:3000 and serves apps/web/out through the same
 Wrangler Pages runtime used for deployment. Local preview does not require a Cloudflare login.

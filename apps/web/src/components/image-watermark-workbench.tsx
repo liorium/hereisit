@@ -57,7 +57,6 @@ type ItemStatus = "ready" | "queued" | "processing" | "completed" | "failed" | "
 interface WorkItem {
   id: string;
   file: File;
-  previewUrl: string;
   result?: ImageWatermarkResult;
   resultUrl?: string;
   status: ItemStatus;
@@ -68,7 +67,6 @@ interface WorkItem {
 
 interface LogoSelection {
   file: File;
-  previewUrl: string;
 }
 
 function makeId(): string {
@@ -121,7 +119,6 @@ function resetItem(item: WorkItem, status: ItemStatus = "ready", error?: string)
   const next: WorkItem = {
     id: item.id,
     file: item.file,
-    previewUrl: item.previewUrl,
     status,
     progress: 0,
   };
@@ -216,6 +213,9 @@ export function ImageWatermarkWorkbench() {
   }, []);
 
   const createOwnedUrl = useCallback((blob: Blob): string => {
+    if (blob instanceof File) {
+      throw new TypeError("Raw input files cannot become object URLs.");
+    }
     const url = URL.createObjectURL(blob);
     ownedUrlsRef.current.add(url);
     return url;
@@ -306,7 +306,6 @@ export function ImageWatermarkWorkbench() {
       const additions = accepted.map<WorkItem>((file) => ({
         id: makeId(),
         file,
-        previewUrl: createOwnedUrl(file),
         status: "ready",
         progress: 0,
       }));
@@ -324,7 +323,7 @@ export function ImageWatermarkWorkbench() {
         );
       }
     },
-    [busy, commitItems, createOwnedUrl, hydrated, invalidateResults, runtimeSupported],
+    [busy, commitItems, hydrated, invalidateResults, runtimeSupported],
   );
 
   const selected = useMemo(
@@ -573,7 +572,6 @@ export function ImageWatermarkWorkbench() {
     invalidateResults("파일이 바뀌었어요. 다시 처리해 주세요.");
     const target = itemsRef.current.find((item) => item.id === id);
     if (target === undefined) return;
-    revokeOwnedUrl(target.previewUrl);
     revokeOwnedUrl(target.resultUrl);
     const next = itemsRef.current.filter((item) => item.id !== id);
     itemsRef.current = next;
@@ -584,7 +582,6 @@ export function ImageWatermarkWorkbench() {
 
   const replaceLogo = (file: File | undefined) => {
     invalidateResults("로고가 바뀌었어요. 다시 처리해 주세요.");
-    revokeOwnedUrl(logoRef.current?.previewUrl);
     logoRef.current = undefined;
     setLogo(undefined);
     setLogoMessage(undefined);
@@ -597,10 +594,12 @@ export function ImageWatermarkWorkbench() {
       setLogoMessage("로고는 비어 있지 않은 10MB 이하 파일이어야 해요.");
       return;
     }
-    const selection = { file, previewUrl: createOwnedUrl(file) };
+    const selection = { file };
     logoRef.current = selection;
     setLogo(selection);
-    setLogoMessage("선택한 로고는 작업할 때 한 번만 읽어요.");
+    setLogoMessage(
+      `${file.name} · ${formatBytes(file.size)} · Worker에서 안전을 확인한 뒤 결과에 적용해요.`,
+    );
   };
 
   const reset = () => {
@@ -759,8 +758,9 @@ export function ImageWatermarkWorkbench() {
                       type="button"
                       onClick={() => setSelectedId(item.id)}
                     >
-                      {/* biome-ignore lint/performance/noImgElement: local object URL thumbnail */}
-                      <img src={item.previewUrl} alt="" />
+                      <span className={styles.filePlaceholder} aria-hidden="true">
+                        IMG
+                      </span>
                       <span className={styles.fileCopy}>
                         <strong>{item.file.name}</strong>
                         <small>
@@ -796,7 +796,7 @@ export function ImageWatermarkWorkbench() {
               </div>
             </aside>
 
-            <section className={styles.previewPanel} aria-label="원본과 워터마크 결과">
+            <section className={styles.previewPanel} aria-label="원본 정보와 워터마크 결과">
               <div className={styles.previewTopline}>
                 <span>{selected?.file.name}</span>
                 <span>{selected === undefined ? "" : formatBytes(selected.file.size)}</span>
@@ -805,15 +805,24 @@ export function ImageWatermarkWorkbench() {
                 className={`${styles.previewStage} ${selected?.resultUrl !== undefined ? styles.withResult : ""}`}
               >
                 {selected !== undefined ? (
-                  <figure>
-                    {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                    <img src={selected.previewUrl} alt={`${selected.file.name} 원본`} />
-                    <figcaption>
+                  <section
+                    className={styles.sourceInfoCard}
+                    aria-labelledby={`image-watermark-source-${selected.id}`}
+                  >
+                    <span className={styles.sourceInfoIcon} aria-hidden="true">
+                      IMG
+                    </span>
+                    <strong id={`image-watermark-source-${selected.id}`}>
+                      {selected.file.name}
+                    </strong>
+                    <span>{formatBytes(selected.file.size)}</span>
+                    <span>
                       {selected.result === undefined
-                        ? "원본"
+                        ? "원본 크기는 Worker 안전 확인 후 표시해요."
                         : `원본 ${selected.result.width}×${selected.result.height}`}
-                    </figcaption>
-                  </figure>
+                    </span>
+                    <small>원본 파일은 메인 화면에서 디코드하지 않아요.</small>
+                  </section>
                 ) : null}
                 {selected?.resultUrl !== undefined && selected.result !== undefined ? (
                   <figure>
@@ -930,10 +939,9 @@ export function ImageWatermarkWorkbench() {
                 ) : (
                   <div className={styles.logoPicker}>
                     {logo !== undefined ? (
-                      <>
-                        {/* biome-ignore lint/performance/noImgElement: local object URL logo preview */}
-                        <img src={logo.previewUrl} alt="선택한 워터마크 로고" />
-                      </>
+                      <span className={styles.logoPlaceholder} aria-hidden="true">
+                        LOGO
+                      </span>
                     ) : null}
                     <div>
                       <button type="button" onClick={() => logoInputRef.current?.click()}>

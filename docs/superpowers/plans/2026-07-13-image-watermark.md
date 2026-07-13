@@ -597,13 +597,16 @@ git commit -m "feat: publish image watermark route"
 
 **Interfaces:**
 - Consumes: `runImageWatermarkBatch()`, `supportsBrowserImageWatermarkRuntime()`, `ImageWatermarkSpecV1`, `ImageWatermarkRuntimeEvent`, existing `createZipArchive()`, `downloadUrl()`, byte/time formatting, and shared image workbench CSS anatomy.
-- Produces: source/optional-logo selection, settings validation, batch run/cancel, result previews, explicit single save/share, collision-safe ZIP save, and complete object-URL cleanup.
+- Produces: source/optional-logo metadata selection, settings validation, batch run/cancel, generated-result previews, explicit single save/share, collision-safe ZIP save, and complete generated object-URL cleanup.
 
 - [ ] **Step 1: Write the failing default text-flow browser test**
 
 Create a solid 320×180 PNG in the browser, set it on the source input, and assert the approved defaults: `© HereIsIt`, bottom-right selected, size 12%, margin 3%, opacity 55%, color `#111827`, source format, quality 90. Assert no result URL or download occurs before clicking `1개 이미지에 워터마크 넣기 →`.
 
-After completion, save explicitly and assert `source-watermarked-hereisit.png`, PNG signature, `320×180`, result preview, metadata-removal/re-encoding notice, and no external/write/body request during processing.
+Before processing, assert that source/logo files create no object URLs or image elements. After completion,
+save explicitly and assert `source-watermarked-hereisit.png`, PNG signature, `320×180`, a materially
+changed bottom-right pixel region, result preview, metadata-removal/re-encoding notice, and no
+external/write/body request during processing.
 
 - [ ] **Step 2: Run the text-flow test and verify RED**
 
@@ -613,19 +616,35 @@ Expected: FAIL because the temporary shell has no controls or processing flow.
 
 - [ ] **Step 3: Implement state, validation, and source lifecycle**
 
-Model each source item with `id`, `file`, `previewUrl`, optional `result/resultUrl/error`, status, phase, and progress. Keep refs for the current items, owned URLs, active run generation, input elements, and batch handle. Accept extensions only when MIME is empty; enforce source count/size/total limits before creating URLs.
+Model each source item with `id`, `file`, optional `result/resultUrl/error`, status, phase, and progress.
+Keep refs for the current items, generated URLs, active run generation, input elements, and batch handle.
+Accept extensions only when MIME is empty and enforce source count/size/total limits without creating an
+object URL from a source or logo `File`. Render filename-and-size placeholders before processing; after
+completion, show Worker-returned dimensions and the generated result preview.
 
-Add exact default spec and controls. Use one accessible radio group for mode, one labeled text field/color input or logo selector, one nine-radio grid with Korean accessible names, and labeled range inputs with numeric values. Keep the logo object URL while switching to text but pass no logo file to text jobs. Any setting/logo/source change revokes old result URLs, preserves source preview URLs, and returns non-processing items to ready.
+Add exact default spec and controls. Use one accessible radio group for mode, one labeled text field/color
+input or logo selector, one nine-radio grid with Korean accessible names, and labeled range inputs with
+numeric values. Keep only the selected logo `File` reference while switching to text and pass no logo file
+to text jobs. Any setting/logo/source change revokes old generated result URLs and returns non-processing
+items to ready; source and logo inputs never own URLs.
 
 - [ ] **Step 4: Implement run, event, cancel, and result lifecycle**
 
 Clone one validated spec per item. Guard every event and promise continuation with the active run generation. On fulfilled results, create one owned URL and preserve partial successes. On cancel, terminate the handle, preserve fulfilled results, mark unfinished items cancelled, and expose only completed results.
 
-Single save prefers Web Share only when `navigator.canShare({ files })` succeeds; otherwise use explicit anchor download. Batch save passes `dedupeArchiveNames()` output to `createZipArchive()` and downloads `hereisit-watermarked-images.zip`. Handle delayed share resolve/reject after reset by checking generation before message/download fallback. Revoke all source/logo/result/archive URLs on replace, rerun, reset, unmount, and completed archive timeout.
+Single save prefers Web Share only when `navigator.canShare({ files })` succeeds; otherwise use explicit
+anchor download. Batch save passes `dedupeArchiveNames()` output to `createZipArchive()` and downloads
+`hereisit-watermarked-images.zip`. Handle delayed share resolve/reject after reset by checking generation
+before message/download fallback. Revoke every generated result/archive URL on replacement, rerun, reset,
+removal, unmount, archive failure, and archive timeout.
 
 - [ ] **Step 5: Implement result preview and responsive controls**
 
-Reuse the existing desktop grid and action-bar vocabulary. Add only focused classes for the three-by-three position grid, selected position, logo picker/thumbnail, range-value row, and compact mode tabs. At widths covered by `mobile.spec.ts`, order source list → settings → preview/result → safe-area action bar, keep controls at least 44px, avoid horizontal overflow, and retain keyboard focus rings and reduced-motion behavior.
+Reuse the existing desktop grid and action-bar vocabulary. Add only focused classes for the three-by-three
+position grid, selected position, logo metadata placeholder, range-value row, and compact mode tabs. At
+widths covered by `mobile.spec.ts`, order source list → settings → source metadata/generated-result preview
+→ safe-area action bar, keep controls at least 44px, avoid horizontal overflow, and retain keyboard focus
+rings and reduced-motion behavior.
 
 - [ ] **Step 6: Add logo, batch, invalidation, and cancellation browser tests**
 

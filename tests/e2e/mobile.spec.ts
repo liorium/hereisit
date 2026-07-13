@@ -560,7 +560,7 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
 
   const files = page.getByLabel("선택한 이미지");
   const settings = page.getByLabel("워터마크 설정");
-  const preview = page.getByLabel("원본과 워터마크 결과");
+  const preview = page.getByLabel("원본 정보와 워터마크 결과");
   const [filesBox, settingsBox, previewBox] = await Promise.all([
     files.boundingBox(),
     settings.boundingBox(),
