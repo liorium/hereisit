@@ -495,6 +495,36 @@ describe("imageWatermarkSpecSchema", () => {
   });
 
   it.each([
+    ["C1 next-line control", "\u0085"],
+    ["Unicode line separator", "\u2028"],
+    ["Unicode paragraph separator", "\u2029"],
+  ])("rejects %s without changing PDF watermark parsing", (_case, separator) => {
+    const text = `Here${separator}IsIt`;
+
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, text },
+      }).success,
+    ).toBe(false);
+    expect(
+      pdfPipelineSpecSchema.safeParse({
+        version: 1,
+        operation: "watermark",
+        watermark: {
+          text,
+          placement: "center",
+          fontSize: 36,
+          opacity: 0.25,
+          rotation: 0,
+          color: "#123456",
+        },
+        selection: { mode: "every-page" },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([
     ["source", { format: "source", quality: 90 }],
     ["JPEG", { format: "jpeg", quality: 90, matte: "#ffffff" }],
     ["WebP", { format: "webp", quality: 90 }],

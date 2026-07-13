@@ -31,6 +31,7 @@ const MAX_RESULT_BYTES = 100 * MEBIBYTE;
 const MAX_BATCH_RESULT_BYTES = 500 * MEBIBYTE;
 const MAX_WORKERS = 2;
 const JOB_TIMEOUT_MS = 180_000;
+const MAX_SETUP_REPLACEMENTS = 1;
 const MAX_ID_LENGTH = 128;
 const MAX_INPUT_NAME_LENGTH = 512;
 const MAX_MIME_HINT_LENGTH = 100;
@@ -598,6 +599,7 @@ export function runImageWatermarkBatch(
   const logoAssetId = makeId("logo");
   let capturedLogo: CapturedFile | undefined;
   let desiredConcurrency = 0;
+  let remainingSetupReplacements = MAX_SETUP_REPLACEMENTS;
 
   const emit = (event: ImageWatermarkRuntimeEvent): void => {
     try {
@@ -683,6 +685,8 @@ export function runImageWatermarkBatch(
 
   const failSlot = (slot: WorkerSlot, error: ImageWatermarkErrorPayload): void => {
     if (!slots.has(slot)) return;
+    const setupFailure =
+      slot.state === "starting" || slot.state === "ready" || slot.state === "configuring-logo";
     const index = slot.itemIndex;
     const captured = index === undefined ? undefined : capturedItems.get(index);
     slot.generation += 1;
@@ -698,12 +702,28 @@ export function runImageWatermarkBatch(
     }
     finishIfReady();
     if (settled || cancelled || queue.length === 0) return;
+    if (setupFailure) {
+      if (remainingSetupReplacements === 0) {
+        rejectUnsettled(error);
+        return;
+      }
+      remainingSetupReplacements -= 1;
+    }
     if (!createSlot() && slots.size === 0) rejectUnsettled(WORKER_FAILURE_ERROR);
   };
 
   const armSlotTimeout = (slot: WorkerSlot): void => {
     clearSlotTimeout(slot);
     slot.timeoutId = setTimeout(() => {
+      if (
+        slot.state === "starting" ||
+        slot.state === "ready" ||
+        slot.state === "configuring-logo"
+      ) {
+        terminateSlot(slot);
+        rejectUnsettled(WORKER_FAILURE_ERROR);
+        return;
+      }
       failSlot(slot, WORKER_FAILURE_ERROR);
     }, JOB_TIMEOUT_MS);
   };
@@ -799,9 +819,16 @@ export function runImageWatermarkBatch(
       },
     };
     try {
+      clearSlotTimeout(slot);
       slot.state = "configuring-logo";
+      armSlotTimeout(slot);
       slot.worker.postMessage(request, [bytes]);
     } catch {
+      try {
+        new Uint8Array(bytes).fill(0);
+      } catch {
+        // A transferred or hostile buffer has no locally owned bytes left to release.
+      }
       failSlot(slot, WORKER_FAILURE_ERROR);
     }
   };
@@ -873,10 +900,13 @@ export function runImageWatermarkBatch(
             terminateSlot(slot);
             rejectUnsettled(UNSUPPORTED_INPUT_ERROR);
           } else if (capturedLogo !== undefined) {
+            clearSlotTimeout(slot);
             slot.state = "ready";
+            armSlotTimeout(slot);
             beginLogoRead();
             configureLogo(slot);
           } else {
+            clearSlotTimeout(slot);
             slot.state = "idle";
             void assignNext(slot);
           }
@@ -899,6 +929,7 @@ export function runImageWatermarkBatch(
               failSlot(slot, WORKER_FAILURE_ERROR);
               return;
             }
+            clearSlotTimeout(slot);
             slot.logoConfigured = true;
             slot.state = "idle";
             void assignNext(slot);
@@ -1055,6 +1086,7 @@ export function runImageWatermarkBatch(
     };
     slots.add(slot);
     attachWorker(slot);
+    armSlotTimeout(slot);
     return true;
   }
 

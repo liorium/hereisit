@@ -103,6 +103,9 @@ function validWatermarkText(value: string): boolean {
       return (
         code > 31 &&
         code !== 127 &&
+        (code < 0x80 || code > 0x9f) &&
+        code !== 0x2028 &&
+        code !== 0x2029 &&
         (code < 0x202a || code > 0x202e) &&
         (code < 0x2066 || code > 0x2069)
       );
@@ -805,7 +808,11 @@ export function ImageWatermarkWorkbench() {
                   <figure>
                     {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
                     <img src={selected.previewUrl} alt={`${selected.file.name} 원본`} />
-                    <figcaption>원본</figcaption>
+                    <figcaption>
+                      {selected.result === undefined
+                        ? "원본"
+                        : `원본 ${selected.result.width}×${selected.result.height}`}
+                    </figcaption>
                   </figure>
                 ) : null}
                 {selected?.resultUrl !== undefined && selected.result !== undefined ? (
@@ -813,8 +820,10 @@ export function ImageWatermarkWorkbench() {
                     {/* biome-ignore lint/performance/noImgElement: local generated result */}
                     <img src={selected.resultUrl} alt={`${selected.file.name} 워터마크 결과`} />
                     <figcaption>
-                      {selected.result.width}×{selected.result.height} ·{" "}
-                      {formatBytes(selected.result.byteLength)} ·{" "}
+                      <strong>
+                        결과 {selected.result.width}×{selected.result.height}
+                      </strong>{" "}
+                      · {formatBytes(selected.result.byteLength)} ·{" "}
                       {formatDuration(selected.result.timing.totalMs)}
                     </figcaption>
                     <button

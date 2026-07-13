@@ -1,5 +1,6 @@
 import type {
   ImageWatermarkBatchItem,
+  ImageWatermarkBatchItemResult,
   ImageWatermarkErrorPayload,
   ImageWatermarkResult,
   ImageWatermarkRuntimeEvent,
@@ -279,6 +280,7 @@ function emitFailed(
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   StubWorker.instances = [];
   SupportedOffscreenCanvas.instances = [];
@@ -1261,6 +1263,191 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
       { itemId: "second", status: "fulfilled" },
     ]);
     expect(crashed.terminateCount).toBe(1);
+  });
+
+  it("settles and terminates when a Worker never reports readiness", async () => {
+    vi.useFakeTimers();
+    installSupportedRuntime();
+    const source = fakeFile();
+    const handle = runImageWatermarkBatch([item("silent-startup", source.file)], {
+      concurrency: 1,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+    let outcome: readonly ImageWatermarkBatchItemResult[] | undefined;
+    void handle.result.then((results) => {
+      outcome = results;
+    });
+
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(worker.terminateCount).toBe(0);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toMatchObject([
+      {
+        itemId: "silent-startup",
+        status: "rejected",
+        error: { code: "WORKER_CRASH" },
+      },
+    ]);
+    expect(worker.terminateCount).toBe(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(StubWorker.instances).toHaveLength(1);
+    expect(worker.terminateCount).toBe(1);
+  });
+
+  it("bounds replacement when Workers repeatedly fail during startup", async () => {
+    vi.useFakeTimers();
+    installSupportedRuntime();
+    const source = fakeFile();
+    const handle = runImageWatermarkBatch([item("failed-startup", source.file)], {
+      concurrency: 1,
+    });
+    const firstWorker = StubWorker.instances[0];
+    if (firstWorker === undefined) throw new Error("Expected a Worker.");
+    let outcome: readonly ImageWatermarkBatchItemResult[] | undefined;
+    void handle.result.then((results) => {
+      outcome = results;
+    });
+
+    firstWorker.onerror?.(new Error("startup failed"));
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected one replacement Worker.");
+    expect(outcome).toBeUndefined();
+
+    replacement.onerror?.(new Error("replacement startup failed"));
+    await Promise.resolve();
+
+    expect(outcome).toMatchObject([
+      {
+        itemId: "failed-startup",
+        status: "rejected",
+        error: { code: "WORKER_CRASH" },
+      },
+    ]);
+    expect(firstWorker.terminateCount).toBe(1);
+    expect(replacement.terminateCount).toBe(1);
+    expect(StubWorker.instances).toHaveLength(2);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(StubWorker.instances).toHaveLength(2);
+  });
+
+  it("settles, terminates, and releases retained logo bytes when configuration stays silent", async () => {
+    vi.useFakeTimers();
+    installSupportedRuntime();
+    const source = fakeFile();
+    const logoBytes = new Uint8Array([1, 2, 3, 4]);
+    const logo = fakeFile({
+      name: "logo.png",
+      type: "image/png",
+      read: Promise.resolve(logoBytes.buffer),
+    });
+    const fillSpy = vi.spyOn(Uint8Array.prototype, "fill");
+    const handle = runImageWatermarkBatch([item("silent-logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+    let outcome: readonly ImageWatermarkBatchItemResult[] | undefined;
+    void handle.result.then((results) => {
+      outcome = results;
+    });
+
+    worker.emit(readyEvent());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(messagesOfType(worker, "configure-logo")).toHaveLength(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(worker.terminateCount).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toMatchObject([
+      {
+        itemId: "silent-logo",
+        status: "rejected",
+        error: { code: "WORKER_CRASH" },
+      },
+    ]);
+    expect(worker.terminateCount).toBe(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(StubWorker.instances).toHaveLength(1);
+    expect(worker.terminateCount).toBe(1);
+  });
+
+  it("settles and releases retained logo bytes when configuration cannot be posted", async () => {
+    vi.useFakeTimers();
+    class ThrowingConfigurationWorker extends StubWorker {
+      override postMessage(message: unknown, transfer: readonly Transferable[] = []): void {
+        if (
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "configure-logo"
+        ) {
+          throw new DOMException("closed", "InvalidStateError");
+        }
+        super.postMessage(message, transfer);
+      }
+    }
+    installSupportedRuntime({ worker: ThrowingConfigurationWorker });
+    const source = fakeFile();
+    const logoBytes = new Uint8Array([1, 2, 3, 4]);
+    const logo = fakeFile({
+      name: "logo.png",
+      type: "image/png",
+      read: Promise.resolve(logoBytes.buffer),
+    });
+    const fillSpy = vi.spyOn(Uint8Array.prototype, "fill");
+    const handle = runImageWatermarkBatch([item("unpostable-logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+    let outcome: readonly ImageWatermarkBatchItemResult[] | undefined;
+    void handle.result.then((results) => {
+      outcome = results;
+    });
+
+    worker.emit(readyEvent());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected one replacement Worker.");
+    expect(outcome).toBeUndefined();
+    replacement.emit(readyEvent());
+    await Promise.resolve();
+
+    expect(outcome).toMatchObject([
+      {
+        itemId: "unpostable-logo",
+        status: "rejected",
+        error: { code: "WORKER_CRASH" },
+      },
+    ]);
+    expect(worker.terminateCount).toBe(1);
+    expect(replacement.terminateCount).toBe(1);
+    expect(StubWorker.instances).toHaveLength(2);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(4);
+
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(StubWorker.instances).toHaveLength(2);
   });
 
   it("terminates a timed-out slot and replaces it only while queued work remains", async () => {

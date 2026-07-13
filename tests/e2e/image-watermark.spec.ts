@@ -193,7 +193,8 @@ test("text watermark uses the approved defaults and saves only on request", asyn
     timeout: 20_000,
   });
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toBeVisible();
-  await expect(page.getByText("320×180", { exact: true })).toBeVisible();
+  await expect(page.getByText("원본 320×180", { exact: true })).toBeVisible();
+  await expect(page.getByText("결과 320×180", { exact: true })).toBeVisible();
   await expect(page.getByText(/메타데이터.*제거/)).toBeVisible();
   await expect(page.getByText(/다시 인코딩|재인코딩/)).toBeVisible();
   expect(downloads).toBe(0);
@@ -872,6 +873,10 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await expect(run).toBeDisabled();
   await textInput.fill(`  ${"😀".repeat(80)}  `);
   await expect(run).toBeEnabled();
+  for (const separator of ["\u0085", "\u2028", "\u2029"]) {
+    await textInput.fill(`Here${separator}IsIt`);
+    await expect(run).toBeDisabled();
+  }
 
   await textInput.fill("© HereIsIt");
   const textSize = page.getByRole("slider", { name: /문구 크기/ });

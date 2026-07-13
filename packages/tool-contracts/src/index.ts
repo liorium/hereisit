@@ -43,6 +43,17 @@ const safeWatermarkTextSchema = z
     message: "워터마크에는 제어 문자를 사용할 수 없습니다.",
   });
 
+function isSingleLineImageWatermarkText(value: string): boolean {
+  return Array.from(value).every((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return (code < 0x80 || code > 0x9f) && code !== 0x2028 && code !== 0x2029;
+  });
+}
+
+const imageWatermarkTextSchema = safeWatermarkTextSchema.refine(isSingleLineImageWatermarkText, {
+  message: "이미지 워터마크는 한 줄로 입력해야 합니다.",
+});
+
 export const imageSizeGoalSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("allow-growth") }),
   z.object({
@@ -138,7 +149,7 @@ export const imageWatermarkSpecSchema = z
       z
         .object({
           kind: z.literal("text"),
-          text: safeWatermarkTextSchema,
+          text: imageWatermarkTextSchema,
           color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
           sizePercent: z.number().int().min(4).max(30),
         })
