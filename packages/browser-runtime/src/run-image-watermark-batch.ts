@@ -805,24 +805,46 @@ export function runImageWatermarkBatch(
 
   const beginLogoRead = (): void => {
     if (logoReadStarted || capturedLogo === undefined || settled || cancelled) return;
+    const logo = capturedLogo;
     logoReadStarted = true;
     void (async () => {
-      let bytes: ArrayBuffer;
+      let readValue: unknown;
       try {
-        bytes = await capturedLogo.read();
+        readValue = await logo.read();
       } catch {
         if (!settled && !cancelled) rejectUnsettled(CORRUPT_INPUT_ERROR);
         return;
       }
-      if (settled || cancelled) return;
-      const validatedBytes = validatedReadBuffer(bytes, capturedLogo.size);
-      if (validatedBytes === undefined) {
-        rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
+
+      let ownedBytes: ArrayBuffer | undefined;
+      try {
+        if (isOrdinaryArrayBuffer(readValue)) ownedBytes = readValue;
+      } catch {
+        // Hostile values are validation failures and have no ordinary buffer to release.
+      }
+      if (ownedBytes === undefined) {
+        if (!settled && !cancelled) {
+          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
+        }
         return;
       }
-      retainedLogo = new Uint8Array(validatedBytes).slice();
-      new Uint8Array(validatedBytes).fill(0);
-      for (const slot of slots) configureLogo(slot);
+
+      try {
+        if (settled || cancelled) return;
+        const validatedBytes = validatedReadBuffer(ownedBytes, logo.size);
+        if (validatedBytes === undefined) {
+          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
+          return;
+        }
+        retainedLogo = new Uint8Array(validatedBytes).slice();
+        for (const slot of slots) configureLogo(slot);
+      } finally {
+        try {
+          new Uint8Array(ownedBytes).fill(0);
+        } catch {
+          // A detached buffer has no remaining bytes to release.
+        }
+      }
     })();
   };
 
@@ -835,17 +857,15 @@ export function runImageWatermarkBatch(
           failSlot(slot, WORKER_FAILURE_ERROR);
           return;
         }
-        const eventJobId = value.jobId;
-        if (typeof eventJobId === "string" && eventJobId !== slot.jobId) return;
-        const eventAssetId = value.assetId;
-        if (typeof eventAssetId === "string" && eventAssetId !== logoAssetId) return;
-        const type = value.type;
-        if (type === "ready") {
-          if (slot.state !== "starting") return;
+
+        if (slot.state === "starting") {
+          if (value.type !== "ready") {
+            failSlot(slot, WORKER_FAILURE_ERROR);
+            return;
+          }
           const supported = decodeReady(value);
           if (supported === undefined) {
-            terminateSlot(slot);
-            rejectUnsettled(WORKER_FAILURE_ERROR);
+            failSlot(slot, WORKER_FAILURE_ERROR);
           } else if (!supported) {
             terminateSlot(slot);
             rejectUnsettled(UNSUPPORTED_INPUT_ERROR);
@@ -859,8 +879,15 @@ export function runImageWatermarkBatch(
           }
           return;
         }
-        if (type === "logo-ready" || type === "logo-failed") {
-          if (slot.state !== "configuring-logo" || value.assetId !== logoAssetId) return;
+
+        if (slot.state === "configuring-logo") {
+          const eventAssetId = value.assetId;
+          if (typeof eventAssetId === "string" && eventAssetId !== logoAssetId) return;
+          if (eventAssetId !== logoAssetId) {
+            failSlot(slot, WORKER_FAILURE_ERROR);
+            return;
+          }
+          const type = value.type;
           if (type === "logo-ready") {
             if (
               !hasExactKeys(value, ["protocol", "type", "assetId"]) ||
@@ -872,7 +899,7 @@ export function runImageWatermarkBatch(
             slot.logoConfigured = true;
             slot.state = "idle";
             void assignNext(slot);
-          } else {
+          } else if (type === "logo-failed") {
             if (
               !hasExactKeys(value, ["protocol", "type", "assetId", "error"]) ||
               value.protocol !== WORKER_PROTOCOL_VERSION
@@ -886,14 +913,40 @@ export function runImageWatermarkBatch(
               return;
             }
             rejectUnsettled(error);
+          } else {
+            failSlot(slot, WORKER_FAILURE_ERROR);
           }
           return;
         }
-        if (slot.state !== "running" || eventJobId !== slot.jobId || slot.itemIndex === undefined) {
+
+        if (slot.state === "ready") {
+          failSlot(slot, WORKER_FAILURE_ERROR);
           return;
         }
+
+        if (slot.state === "idle") {
+          if (typeof value.jobId === "string" || typeof value.assetId === "string") return;
+          failSlot(slot, WORKER_FAILURE_ERROR);
+          return;
+        }
+
+        const eventJobId = value.jobId;
+        if (typeof eventJobId === "string" && eventJobId !== slot.jobId) return;
+        if (eventJobId !== slot.jobId || slot.itemIndex === undefined) {
+          failSlot(slot, WORKER_FAILURE_ERROR);
+          return;
+        }
+        if (slot.state === "reading") {
+          failSlot(slot, WORKER_FAILURE_ERROR);
+          return;
+        }
+
         const captured = capturedItems.get(slot.itemIndex);
-        if (captured === undefined) return;
+        if (captured === undefined) {
+          failSlot(slot, WORKER_FAILURE_ERROR);
+          return;
+        }
+        const type = value.type;
         if (type === "progress") {
           const progress = decodeProgress(value);
           if (progress === undefined) {

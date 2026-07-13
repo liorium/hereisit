@@ -709,6 +709,26 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
   });
 
+  it("replaces a startup slot that sends an unrouteable plain object", async () => {
+    installSupportedRuntime();
+    const source = fakeFile();
+    const handle = runImageWatermarkBatch([item("one", source.file)], { concurrency: 1 });
+    const malformedWorker = StubWorker.instances[0];
+    if (malformedWorker === undefined) throw new Error("Expected a Worker.");
+
+    malformedWorker.emit({});
+
+    await vi.waitFor(() => expect(StubWorker.instances).toHaveLength(2));
+    expect(malformedWorker.terminateCount).toBe(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected replacement.");
+    replacement.emit(readyEvent());
+    const run = await waitForMessage(replacement, "run");
+    emitComplete(replacement, run);
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
+  });
+
   it("rejects unsupported Worker capability without reading", async () => {
     installSupportedRuntime();
     const source = fakeFile();
@@ -776,6 +796,34 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
       { itemId: "hostile", status: "rejected", error: { code: "CORRUPT_INPUT" } },
       { itemId: "next", status: "fulfilled" },
     ]);
+  });
+
+  it("zeroes a mismatched returned logo buffer before rejecting the batch", async () => {
+    installSupportedRuntime();
+    const returnedLogoBytes = Uint8Array.of(1, 2, 3);
+    const logo = fakeFile({
+      name: "logo.png",
+      type: "image/png",
+      size: 4,
+      read: Promise.resolve(returnedLogoBytes.buffer),
+    });
+    const source = fakeFile();
+    const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+
+    worker.emit(readyEvent());
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "logo", status: "rejected", error: { code: "CORRUPT_INPUT" } },
+    ]);
+    expect([...returnedLogoBytes]).toEqual([0, 0, 0]);
+    expect(messagesOfType(worker, "configure-logo")).toHaveLength(0);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    expect(worker.terminateCount).toBe(1);
   });
 
   it("settles a logo configuration failure without reading a source", async () => {
@@ -889,6 +937,140 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
 
     await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
     expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a configuring slot that sends an unrouteable plain object", async () => {
+    installSupportedRuntime();
+    const source = fakeFile();
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
+    const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const malformedWorker = StubWorker.instances[0];
+    if (malformedWorker === undefined) throw new Error("Expected a Worker.");
+    malformedWorker.emit(readyEvent());
+    await waitForMessage(malformedWorker, "configure-logo");
+
+    malformedWorker.emit({});
+
+    await vi.waitFor(() => expect(StubWorker.instances).toHaveLength(2));
+    expect(malformedWorker.terminateCount).toBe(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected replacement.");
+    replacement.emit(readyEvent());
+    const configuration = await waitForMessage(replacement, "configure-logo");
+    replacement.emit({
+      protocol: 1,
+      type: "logo-ready",
+      assetId: messageId(configuration, "assetId"),
+    });
+    const run = await waitForMessage(replacement, "run");
+    emitComplete(replacement, run);
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
+    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a matching logo acknowledgement that carries a foreign job ID", async () => {
+    installSupportedRuntime();
+    const source = fakeFile();
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
+    const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const malformedWorker = StubWorker.instances[0];
+    if (malformedWorker === undefined) throw new Error("Expected a Worker.");
+    malformedWorker.emit(readyEvent());
+    const configuration = await waitForMessage(malformedWorker, "configure-logo");
+
+    malformedWorker.emit({
+      protocol: 1,
+      type: "logo-ready",
+      assetId: messageId(configuration, "assetId"),
+      jobId: "foreign-job",
+    });
+
+    await vi.waitFor(() => expect(StubWorker.instances).toHaveLength(2));
+    expect(malformedWorker.terminateCount).toBe(1);
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected replacement.");
+    replacement.emit(readyEvent());
+    const replacementConfiguration = await waitForMessage(replacement, "configure-logo");
+    replacement.emit({
+      protocol: 1,
+      type: "logo-ready",
+      assetId: messageId(replacementConfiguration, "assetId"),
+    });
+    const run = await waitForMessage(replacement, "run");
+    emitComplete(replacement, run);
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
+  });
+
+  it("rejects a matching active-job event that carries a foreign asset ID", async () => {
+    installSupportedRuntime();
+    const handle = runImageWatermarkBatch([item("first"), item("second")], { concurrency: 1 });
+    const malformedWorker = StubWorker.instances[0];
+    if (malformedWorker === undefined) throw new Error("Expected a Worker.");
+    malformedWorker.emit(readyEvent());
+    const firstRun = await waitForMessage(malformedWorker, "run");
+
+    malformedWorker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: messageId(firstRun, "jobId"),
+      assetId: "foreign-asset",
+      sequence: 0,
+      phase: "validating",
+      fraction: 0.02,
+    });
+
+    await vi.waitFor(() => expect(StubWorker.instances).toHaveLength(2));
+    expect(malformedWorker.terminateCount).toBe(1);
+    const replacement = StubWorker.instances[1];
+    if (replacement === undefined) throw new Error("Expected replacement.");
+    replacement.emit(readyEvent());
+    const secondRun = await waitForMessage(replacement, "run");
+    emitComplete(replacement, secondRun);
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "first", status: "rejected", error: { code: "WORKER_CRASH" } },
+      { itemId: "second", status: "fulfilled" },
+    ]);
+  });
+
+  it("routes a foreign logo asset before touching its hostile type during configuration", async () => {
+    installSupportedRuntime();
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
+    const handle = runImageWatermarkBatch([item("logo", undefined, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+    worker.emit(readyEvent());
+    const configuration = await waitForMessage(worker, "configure-logo");
+    const foreign = { protocol: 1, assetId: "foreign-asset" } as Record<PropertyKey, unknown>;
+    const typeGetter = vi.fn<() => never>(() => {
+      throw new Error("foreign logo type must not be decoded");
+    });
+    Object.defineProperty(foreign, "type", {
+      configurable: true,
+      enumerable: true,
+      get: typeGetter,
+    });
+
+    expect(() => worker.emit(foreign)).not.toThrow();
+    expect(typeGetter).not.toHaveBeenCalled();
+    worker.emit({
+      protocol: 1,
+      type: "logo-ready",
+      assetId: messageId(configuration, "assetId"),
+    });
+    const run = await waitForMessage(worker, "run");
+    emitComplete(worker, run);
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
   });
 
   it("ignores a foreign completion without touching its hostile result payload", async () => {
@@ -1279,8 +1461,9 @@ describe("runImageWatermarkBatch cancellation", () => {
     for (const worker of workers) worker.emit(readyEvent());
     await vi.waitFor(() => expect(logo.arrayBuffer).toHaveBeenCalledOnce());
 
+    const returnedLogoBytes = Uint8Array.of(1, 2, 3, 4);
     handle.cancel();
-    logoRead.resolve(new ArrayBuffer(4));
+    logoRead.resolve(returnedLogoBytes.buffer);
     await Promise.resolve();
     await Promise.resolve();
 
@@ -1292,6 +1475,7 @@ describe("runImageWatermarkBatch cancellation", () => {
     expect(workers.flatMap((worker) => messagesOfType(worker, "configure-logo"))).toHaveLength(0);
     expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
+    expect([...returnedLogoBytes]).toEqual([0, 0, 0, 0]);
   });
 
   it("cancels during a source read, posts no run, and starts no later read", async () => {
