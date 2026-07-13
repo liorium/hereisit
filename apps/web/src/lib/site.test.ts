@@ -1,5 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { isPdfEditingIntent, pdfToolList, pdfTools } from "./site";
+import {
+  imageToolList,
+  imageTools,
+  isPdfEditingIntent,
+  pdfToolList,
+  pdfTools,
+  relatedImageTools,
+} from "./site";
+
+describe("image tool registry", () => {
+  it("registers the image watermark route and approved defaults", () => {
+    expect(imageTools.watermark).toMatchObject({
+      intent: "watermark",
+      path: "/image/watermark",
+      navLabel: "이미지 워터마크",
+      title: "이미지에 워터마크 넣기",
+      description: "사진과 이미지에 문구 또는 로고를 넣으세요. 파일은 서버로 전송되지 않습니다.",
+    });
+    expect(imageTools.watermark.defaultSummary).toContain("© HereIsIt");
+    expect(imageTools.watermark.defaultSummary).toContain("12%");
+    expect(imageTools.watermark.defaultSummary).toContain("3%");
+    expect(imageTools.watermark.defaultSummary).toContain("55%");
+    expect(imageTools.watermark.defaultSummary).toContain("#111827");
+    expect(imageTools.watermark.defaultSummary).toContain("품질 90");
+  });
+
+  it("keeps four unique image intents and paths in registry-derived related cards", () => {
+    expect(imageToolList).toHaveLength(4);
+    expect(new Set(imageToolList.map((tool) => tool.intent)).size).toBe(4);
+    expect(new Set(imageToolList.map((tool) => tool.path)).size).toBe(4);
+    expect(relatedImageTools("compress")).toContain(imageTools.watermark);
+    expect(relatedImageTools("watermark")).toHaveLength(3);
+  });
+});
 
 describe("PDF tool registry classification", () => {
   it("registers the scanned PDF compressor with its exact public route and copy", () => {

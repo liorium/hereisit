@@ -1,10 +1,33 @@
-import { type ImageToolConfig, relatedImageTools } from "../lib/site";
-import { ImageWorkbench } from "./image-workbench";
+import type { ReactNode } from "react";
+import { type ImageToolConfig, type ImageToolIntent, relatedImageTools } from "../lib/site";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
-export function ImageToolPage({ tool }: { tool: ImageToolConfig }) {
+type ImageToolConfigFor<Intent extends ImageToolIntent> = Omit<
+  ImageToolConfig,
+  "intent" | "path"
+> & {
+  intent: Intent;
+  path: `/image/${Intent}`;
+};
+
+type ImageToolPageProps =
+  | {
+      tool: ImageToolConfigFor<"watermark">;
+      imageWorkbench?: never;
+      imageWatermarkWorkbench: ReactNode;
+    }
+  | {
+      tool: ImageToolConfigFor<Exclude<ImageToolIntent, "watermark">>;
+      imageWorkbench: ReactNode;
+      imageWatermarkWorkbench?: never;
+    };
+
+export function ImageToolPage(props: ImageToolPageProps) {
+  const { tool } = props;
   const relatedTools = relatedImageTools(tool.intent);
+  const workbench =
+    tool.intent === "watermark" ? props.imageWatermarkWorkbench : props.imageWorkbench;
 
   return (
     <main>
@@ -20,7 +43,7 @@ export function ImageToolPage({ tool }: { tool: ImageToolConfig }) {
         </div>
       </section>
 
-      <ImageWorkbench key={tool.intent} intent={tool.intent} />
+      {workbench}
 
       <section className="principles-section tool-steps" aria-labelledby="steps-title">
         <div className="section-heading">

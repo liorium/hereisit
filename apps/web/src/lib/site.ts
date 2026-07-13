@@ -3,13 +3,13 @@ export const SITE_URL = "https://hereisit.pages.dev";
 
 export const HOME_TITLE = "HereIsIt — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축·크기 조절·형식 변환과 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환·스캔 PDF 용량 줄이기를 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환·이미지 워터마크와 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환·스캔 PDF 용량 줄이기를 업로드 없이 내 기기에서 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
   "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
 export const PDF_COMPRESS_SCANNED_WARNING =
   "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
 
-export type ImageToolIntent = "compress" | "resize" | "convert";
+export type ImageToolIntent = "compress" | "resize" | "convert" | "watermark";
 
 export interface ToolStep {
   title: string;
@@ -91,6 +91,31 @@ export const imageTools = {
       { title: "결과 저장", description: "변환이 끝난 파일만 기기에 안전하게 저장해요." },
     ],
     heicNote: "HEIC 변환은 Safari 17 이상에서 지원해요.",
+  },
+  watermark: {
+    intent: "watermark",
+    path: "/image/watermark",
+    navLabel: "이미지 워터마크",
+    eyebrow: "IMAGE WATERMARK",
+    title: "이미지에 워터마크 넣기",
+    description: "사진과 이미지에 문구 또는 로고를 넣으세요. 파일은 서버로 전송되지 않습니다.",
+    defaultSummary:
+      "기본값은 ‘© HereIsIt’ 문구를 오른쪽 아래에 짧은 변의 12% 크기, 3% 여백, 55% 불투명도, #111827 색상으로 넣고 원본 형식(품질 90)으로 저장해요.",
+    steps: [
+      {
+        title: "이미지 선택",
+        description: "워터마크를 넣을 JPG, PNG, WebP 또는 HEIC 이미지를 선택하세요.",
+      },
+      {
+        title: "문구 또는 로고 설정",
+        description: "문구·로고와 위치·크기·여백·불투명도를 원하는 모양으로 정하세요.",
+      },
+      {
+        title: "결과 저장",
+        description: "기본 원본 형식과 품질 90으로 만든 결과를 확인한 뒤 기기에 저장해요.",
+      },
+    ],
+    heicNote: "HEIC 워터마크는 Safari 17 이상에서 지원해요.",
   },
 } as const satisfies Record<ImageToolIntent, ImageToolConfig>;
 

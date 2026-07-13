@@ -13,6 +13,7 @@ const pdfjsPackageRoot = path.join(
 const pdfjsOutputRoot = path.join(outputRoot, "pdfjs", PDFJS_VERSION);
 
 const IMAGE_WORKER_MARKER = "hereisit-image-worker";
+const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
 const PDF_WORKER_MARKER = "hereisit-pdf-worker";
 const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
 const PDF_TO_IMAGES_WORKER_MARKER = "hereisit-pdf-to-images-worker";
@@ -44,6 +45,13 @@ const toolPages = [
     routeClass: "image",
     title: "이미지 형식 변환",
     description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
+  },
+  {
+    file: "image/watermark.html",
+    path: "/image/watermark",
+    routeClass: "image-watermark",
+    title: "이미지에 워터마크 넣기",
+    description: "사진과 이미지에 문구 또는 로고를 넣으세요.",
   },
   {
     file: "pdf/merge.html",
@@ -253,6 +261,10 @@ assert.ok(
   "The static export must include the image Worker bundle.",
 );
 assert.ok(
+  scriptSources.some((source) => source.includes(IMAGE_WATERMARK_WORKER_MARKER)),
+  "The static export must include the image watermark Worker bundle.",
+);
+assert.ok(
   scriptSources.some((source) => source.includes(PDF_WORKER_MARKER)),
   "The static export must include the PDF Worker bundle.",
 );
@@ -289,6 +301,9 @@ const routeClosures = toolPages.map((tool, index) => {
   return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
 });
 const imageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "image");
+const imageWatermarkClosures = routeClosures.filter(
+  ({ tool }) => tool.routeClass === "image-watermark",
+);
 const pdfEditingClosures = routeClosures.filter(({ tool }) => tool.routeClass === "editing");
 const toImageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "pdf-to-images");
 const compressionClosures = routeClosures.filter(
@@ -296,6 +311,19 @@ const compressionClosures = routeClosures.filter(
 );
 
 assert.ok(imageClosures.length > 0, "The export inventory must classify image routes.");
+assert.equal(
+  imageClosures.length,
+  3,
+  "The export inventory must classify three established image routes.",
+);
+assert.equal(
+  imageWatermarkClosures.length,
+  1,
+  "The export inventory must classify one image watermark route.",
+);
+const imageRoutePaths = [...imageClosures, ...imageWatermarkClosures].map(({ tool }) => tool.path);
+assert.equal(imageRoutePaths.length, 4, "The export inventory must include four image routes.");
+assert.equal(new Set(imageRoutePaths).size, 4, "Every exported image route path must be unique.");
 assert.ok(pdfEditingClosures.length > 0, "The export inventory must classify PDF editing routes.");
 assert.equal(
   toImageClosures.length,
@@ -309,6 +337,7 @@ assert.equal(
 );
 assert.equal(
   imageClosures.length +
+    imageWatermarkClosures.length +
     pdfEditingClosures.length +
     toImageClosures.length +
     compressionClosures.length,
@@ -318,6 +347,11 @@ assert.equal(
 
 for (const { closure } of imageClosures) {
   assertClosureHas(closure, IMAGE_WORKER_MARKER, "An image route is missing its Worker.");
+  assertClosureLacks(
+    closure,
+    IMAGE_WATERMARK_WORKER_MARKER,
+    "An established image route loaded the image watermark Worker.",
+  );
   assertClosureLacks(closure, PDF_WORKER_MARKER, "An image route loaded a PDF Worker.");
   assertClosureLacks(
     closure,
@@ -337,6 +371,36 @@ for (const { closure } of imageClosures) {
   assertClosureLacks(closure, PDFJS_MARKER, "An image route loaded PDF.js.");
 }
 
+for (const { closure } of imageWatermarkClosures) {
+  assertClosureHas(
+    closure,
+    IMAGE_WATERMARK_WORKER_MARKER,
+    "The image watermark route is missing its Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    IMAGE_WORKER_MARKER,
+    "The image watermark route loaded the established image Worker.",
+  );
+  assertClosureLacks(closure, PDF_WORKER_MARKER, "The image watermark route loaded a PDF Worker.");
+  assertClosureLacks(
+    closure,
+    PDF_INSPECTION_WORKER_MARKER,
+    "The image watermark route loaded the PDF inspection Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_TO_IMAGES_WORKER_MARKER,
+    "The image watermark route loaded the PDF-to-images Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_COMPRESS_SCANNED_WORKER_MARKER,
+    "The image watermark route loaded the scanned PDF compression Worker.",
+  );
+  assertClosureLacks(closure, PDFJS_MARKER, "The image watermark route loaded PDF.js.");
+}
+
 for (const { closure } of pdfEditingClosures) {
   assertClosureHas(closure, PDF_WORKER_MARKER, "A PDF editing route is missing its Worker.");
   assertClosureHas(
@@ -345,6 +409,11 @@ for (const { closure } of pdfEditingClosures) {
     "A PDF editing route is missing its inspection Worker.",
   );
   assertClosureLacks(closure, IMAGE_WORKER_MARKER, "A PDF editing route loaded the image Worker.");
+  assertClosureLacks(
+    closure,
+    IMAGE_WATERMARK_WORKER_MARKER,
+    "A PDF editing route loaded the image watermark Worker.",
+  );
   assertClosureLacks(
     closure,
     PDF_TO_IMAGES_WORKER_MARKER,
@@ -382,6 +451,11 @@ for (const { closure } of toImageClosures) {
   );
   assertClosureLacks(
     closure,
+    IMAGE_WATERMARK_WORKER_MARKER,
+    "The PDF-to-images route loaded the image watermark Worker.",
+  );
+  assertClosureLacks(
+    closure,
     PDF_COMPRESS_SCANNED_WORKER_MARKER,
     "The PDF-to-images route loaded the scanned PDF compression Worker.",
   );
@@ -408,6 +482,11 @@ for (const { closure } of compressionClosures) {
     closure,
     IMAGE_WORKER_MARKER,
     "The scanned PDF compression route loaded the image Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    IMAGE_WATERMARK_WORKER_MARKER,
+    "The scanned PDF compression route loaded the image watermark Worker.",
   );
   assertClosureLacks(
     closure,
