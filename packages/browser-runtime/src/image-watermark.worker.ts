@@ -29,6 +29,7 @@ const INVALID_SPEC_MESSAGE = "이미지 워터마크 요청이 올바르지 않�
 const CONCURRENT_RUN_MESSAGE = "이미지 워터마크 작업기가 이미 다른 요청을 처리하고 있어요.";
 const CONCURRENT_LOGO_MESSAGE = "이미지 워터마크 작업 중에는 로고를 바꿀 수 없어요.";
 const LOGO_REQUIRED_MESSAGE = "사용할 로고 이미지를 다시 선택해 주세요.";
+const CANCELLED_MESSAGE = "이미지 워터마크 작업을 중단했어요.";
 const WORKER_CRASH_MESSAGE = "이미지 워터마크 작업을 완료하지 못했어요.";
 const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
   ArrayBuffer.prototype,
@@ -436,8 +437,14 @@ scope.onmessage = (message: MessageEvent<unknown>) => {
       const jobId = request.jobId;
       if (!isSafeId(jobId) || !hasExactKeys(request, ["protocol", "type", "jobId"])) return;
       const job = activeJob;
-      if (job?.jobId !== jobId) return;
+      if (job?.jobId !== jobId || job.controller.signal.aborted) return;
       job.controller.abort();
+      safePost({
+        protocol: WORKER_PROTOCOL_VERSION,
+        type: "failed",
+        jobId,
+        error: { code: "CANCELLED", message: CANCELLED_MESSAGE, retryable: false },
+      });
       return;
     }
 

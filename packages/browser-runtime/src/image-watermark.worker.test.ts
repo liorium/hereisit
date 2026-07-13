@@ -187,6 +187,22 @@ function terminalPosts(scope: StubWorkerScope, jobId: string): ScopePost[] {
   });
 }
 
+function cancelledTerminalPost(jobId: string): ScopePost {
+  return {
+    event: {
+      protocol: 1,
+      type: "failed",
+      jobId,
+      error: {
+        code: "CANCELLED",
+        message: "이미지 워터마크 작업을 중단했어요.",
+        retryable: false,
+      },
+    },
+    transfer: [],
+  };
+}
+
 function logoTerminalPosts(scope: StubWorkerScope, assetId: string): ScopePost[] {
   return scope.posts.filter(({ event }) => {
     if (typeof event !== "object" || event === null) return false;
@@ -706,7 +722,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     expect(terminalPosts(scope, "job-2")).toHaveLength(1);
   });
 
-  it("aborts only the active matching job and suppresses stale progress and completion", async () => {
+  it("aborts only the active matching job, settles cancellation once, and suppresses late work", async () => {
     const pending = deferred<ImageWatermarkResult>();
     pipelineMocks.process.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
@@ -718,12 +734,15 @@ describe("image-watermark Worker terminal lifecycle", () => {
     expect(signal.aborted).toBe(false);
     scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
     expect(signal.aborted).toBe(true);
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
+    scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
 
     report("finalizing", 1);
     pending.resolve(result());
     await flushWorker();
 
-    expect(terminalPosts(scope, "job-1")).toHaveLength(0);
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
     expect(scope.posts.some(({ event }) => eventType(event) === "progress")).toBe(false);
   });
 
@@ -734,6 +753,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     scope.dispatch(runRequest("job-1"));
 
     scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
     scope.dispatch(runRequest("job-2"));
 
     expect(pipelineMocks.process).toHaveBeenCalledOnce();
@@ -751,7 +771,21 @@ describe("image-watermark Worker terminal lifecycle", () => {
 
     pending.resolve(result());
     await flushWorker();
-    expect(terminalPosts(scope, "job-1")).toHaveLength(0);
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
+  });
+
+  it("suppresses a late rejection after cancellation without a second terminal", async () => {
+    const pending = deferred<ImageWatermarkResult>();
+    pipelineMocks.process.mockReturnValueOnce(pending.promise);
+    const scope = await loadWorker();
+    scope.dispatch(runRequest("job-1"));
+
+    scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
+    pending.reject(new Error("PRIVATE_LATE_FAILURE"));
+    await flushWorker();
+
+    expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
+    expect(pipelineMocks.toErrorPayload).not.toHaveBeenCalled();
   });
 
   it("keeps stale callbacks from adding progress or a second terminal event", async () => {
