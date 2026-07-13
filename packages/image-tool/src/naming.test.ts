@@ -12,6 +12,15 @@ describe("suggestOutputName", () => {
     );
   });
 
+  it("removes C1 and bidirectional format controls without exposing edge whitespace", () => {
+    expect(
+      suggestOutputName(
+        "\u202e report\u0085\u009f\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069.png",
+        "png",
+      ),
+    ).toBe("report-hereisit.png");
+  });
+
   it("uses a safe fallback for a dot-only name", () => {
     expect(suggestOutputName("...", "png")).toBe("image-hereisit.png");
   });

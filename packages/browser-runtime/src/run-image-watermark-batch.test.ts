@@ -1,3 +1,4 @@
+import { suggestWatermarkedImageName } from "@hereisit/image-tool";
 import type {
   ImageWatermarkBatchItem,
   ImageWatermarkBatchItemResult,
@@ -714,6 +715,32 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     expect(messageId(run, "jobId").length).toBeLessThanOrEqual(128);
     emitComplete(worker, run);
     await expect(handle.result).resolves.toMatchObject([{ itemId, status: "fulfilled" }]);
+  });
+
+  it("accepts a generated result name after sanitizing source C1 and bidi controls", async () => {
+    installSupportedRuntime();
+    const sourceName =
+      "\u202e report\u0085\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069.png";
+    const source = fakeFile({ name: sourceName });
+    const handle = runImageWatermarkBatch([item("controlled-name", source.file)], {
+      concurrency: 1,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+    worker.emit(readyEvent());
+    const run = await waitForMessage(worker, "run");
+    const result = imageResult();
+    result.suggestedName = suggestWatermarkedImageName(sourceName, "png");
+
+    emitComplete(worker, run, result);
+
+    await expect(handle.result).resolves.toMatchObject([
+      {
+        itemId: "controlled-name",
+        status: "fulfilled",
+        value: { suggestedName: "report-watermarked-hereisit.png" },
+      },
+    ]);
   });
 
   it("replaces a slot that sends a malformed pre-read event", async () => {

@@ -98,6 +98,15 @@ describe("suggestWatermarkedImageName", () => {
     );
   });
 
+  it("removes C1 and bidirectional format controls from generated result names", () => {
+    expect(
+      suggestWatermarkedImageName(
+        "\u202e report\u0085\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069.png",
+        "png",
+      ),
+    ).toBe("report-watermarked-hereisit.png");
+  });
+
   it("uses a safe fallback for a dot-only name", () => {
     expect(suggestWatermarkedImageName("...", "png")).toBe("image-watermarked-hereisit.png");
   });
