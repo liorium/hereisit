@@ -1,11 +1,12 @@
 # Cloudflare Pages deployment
 
 HereIsIt is deployed as a static Next.js export through Cloudflare Pages Git integration. Image
-processing, PDF page organization, rasterized text watermarking, and PDF-page-to-image rendering remain in
-the browser; Pages serves only versioned static assets. Scan-oriented PDF compression also stays local: it
-rebuilds each page as JPEG and is intentionally destructive, while structure-preserving general PDF
-compression is not provided. The PDF raster paths use self-hosted PDF.js 6.1.200 parser Worker, CMap, and
-standard-font files, with no CDN, WASM, upload, or server fallback.
+processing, image text/logo watermarking, PDF page organization, rasterized PDF text watermarking, and
+PDF-page-to-image rendering remain in the browser; Pages serves only versioned static assets.
+Scan-oriented PDF compression also stays local: it rebuilds each page as JPEG and is intentionally
+destructive, while structure-preserving general PDF compression is not provided. The PDF raster paths use
+self-hosted PDF.js 6.1.200 parser Worker, CMap, and standard-font files, with no CDN, WASM, upload, or
+server fallback.
 
 The compressor's fixed presets are balanced 150DPI/JPEG quality 72/white and minimum 96DPI/JPEG quality
 55/white. It accepts one 1-byte–50MiB PDF with 1–100 pages and offers a result only when the final PDF is
@@ -35,27 +36,31 @@ pnpm cloudflare:preview
 The preview is available at http://127.0.0.1:3000 and serves apps/web/out through the same
 Wrangler Pages runtime used for deployment. Local preview does not require a Cloudflare login.
 
-After the preview starts, both tracked PDF raster smokes can target it explicitly:
+After the preview starts, all three tracked release smokes can target it explicitly:
 
 ~~~bash
+node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without an argument, each command targets https://hereisit.pages.dev. The compression smoke checks the
-route and same-origin assets, then proves balanced 150DPI/JPEG quality 72, minimum 96DPI/JPEG quality 55,
-the exact 1% smaller-only guarantee, output geometry/rotation/metadata/image dimensions, explicit-only
-saves, and no-reduction guidance. The PDF-to-image smoke checks its route and the pinned
-parser Worker, one packed CMap, and one standard font; verifies the current security headers; then performs
-one rotated-page PNG/96DPI direct download and one two-page default JPG/150DPI ordered ZIP. It also rejects
-redirects, cross-origin, write-method, request-body, failed-request, page-error, and private sentinel
-console/request activity.
+Without an argument, each command targets https://hereisit.pages.dev. The image-watermark smoke creates a
+local 320×180 PNG, verifies the default text settings and security headers, proves that processing starts
+no download or upload, then explicitly saves the exact PNG result. The compression smoke checks the route
+and same-origin assets, then proves balanced 150DPI/JPEG quality 72, minimum 96DPI/JPEG quality 55, the
+exact 1% smaller-only guarantee, output geometry/rotation/metadata/image dimensions, explicit-only saves,
+and no-reduction guidance. The PDF-to-image smoke checks its route and the pinned parser Worker, one packed
+CMap, and one standard font; verifies the current security headers; then performs one rotated-page
+PNG/96DPI direct download and one two-page default JPG/150DPI ordered ZIP. The smokes reject redirects,
+cross-origin, write-method, request-body, failed-request, and page-error activity; the PDF smokes also
+reject private sentinel console/request activity.
 
 The release-verification script uses the separate non-interactive `preview:test` command on port 4173;
 do not confuse it with the developer-facing `cloudflare:preview` default on port 3000:
 
 ~~~bash
 pnpm --filter @hereisit/web preview:test
+node scripts/smoke-image-watermark.mjs http://127.0.0.1:4173
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:4173
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:4173
 ~~~
@@ -102,10 +107,13 @@ GitHub Actions deploy workflow, or server runtime is required.
 - The generated pages.dev URL loads over HTTPS.
 - The response includes the security headers from apps/web/public/_headers.
 - A sample image converts to WebP and downloads as a ZIP.
+- `/image/watermark` returns HTTP 200 and loads its dedicated Worker without any established image or PDF
+  Worker bundle. A local 320×180 PNG receives the default `© HereIsIt` bottom-right watermark without an
+  upload or automatic download, then saves as `source-watermarked-hereisit.png` only on request. A
+  JPG/PNG/WebP logo can also be selected once, reused across a multi-image batch, and saved only on request.
 - Two sample PDFs merge in order, a PDF splits into a ZIP, and JPG/PNG images download as one PDF.
 - A three-page PDF can be reordered, quarter-turned, and reduced to selected pages in one organized PDF.
-- A text watermark can be placed locally and the downloaded result opens as a PDF with the same page
-  count.
+- A PDF text watermark can be placed locally and the downloaded result opens with the same page count.
 - `/pdf/to-image` and the versioned PDF.js parser Worker, packed CMaps, and standard fonts return HTTP 200
   from the same origin with the current CSP and other security headers.
 - `/pdf/compress` returns HTTP 200 and loads only its inspection/compression Workers plus pinned,
@@ -123,10 +131,11 @@ GitHub Actions deploy workflow, or server runtime is required.
 After these pass, add a custom domain from the Pages project Custom domains screen if desired.
 Cloudflare provisions the TLS certificate automatically after DNS validation.
 
-For a production release, run both tracked smokes only after the current GitHub CI and Cloudflare Pages
-checks have succeeded for the exact release commit:
+For a production release, run all three tracked smokes only after the current GitHub CI and Cloudflare
+Pages checks have succeeded for the exact release commit:
 
 ~~~bash
+node scripts/smoke-image-watermark.mjs
 node scripts/smoke-pdf-compress.mjs https://hereisit.pages.dev
 node scripts/smoke-pdf-to-images.mjs https://hereisit.pages.dev
 ~~~

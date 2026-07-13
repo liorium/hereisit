@@ -1,9 +1,9 @@
 # HereIsIt
 
 HereIsIt is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
-resize, crop, conversion, and compression plus PDF merge, split, page extraction, page organization,
-text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster compression, and
-JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
+resize, crop, conversion, compression, and text/logo watermarking plus PDF merge, split, page extraction,
+page organization, text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster
+compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
 
 ## Development
 
@@ -23,9 +23,10 @@ Core verification runs formatting/lint checks, TypeScript, unit tests, and a pro
 pnpm verify
 ~~~
 
-The browser suite additionally verifies image and PDF conversion, PDF-page rasterization, page
-organization, text watermarking, downloaded artifacts, keyboard and mobile layouts, Worker loading, and
-that conversion makes no external or write requests:
+The browser suite additionally verifies image and PDF conversion, real image text/logo watermark results,
+all nine keyboard-accessible anchors, cancellation and settings invalidation, explicit single/ZIP saving,
+PDF-page rasterization, page organization, PDF text watermarking, downloaded artifacts, mobile layouts,
+Worker isolation, and that processing makes no external, write, or request-body traffic:
 
 ~~~bash
 pnpm exec playwright install chromium
@@ -44,9 +45,10 @@ pnpm cloudflare:preview
 
 The static site is written to apps/web/out.
 
-With that preview running on its default port, exercise both tracked PDF raster smokes:
+With that preview running on its default port, exercise the image-watermark and PDF raster smokes:
 
 ~~~bash
+node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
@@ -65,10 +67,21 @@ checklist.
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
   cannot meet the target are marked as already optimized and are not added to downloads.
 - CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
-- Up to 100 files, 50MB per file, and 250MB total input per batch.
-- Up to 50 megapixels per input and 25 megapixels per output.
-- Up to 100MB per result and 500MB of retained results per batch.
+- `image.pipeline@1` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
+- `image.pipeline@1` allows up to 50 megapixels per input and 25 megapixels per output.
+- `image.pipeline@1` allows up to 100MiB per result and 500MiB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
+- `image.watermark@1` adds one text string or one reusable JPG/PNG/WebP logo at any of nine anchors
+  (top/middle/bottom × left/center/right) without changing the source's displayed dimensions.
+  Source-format output is resolved from inspected bytes: JPG stays JPG, PNG stays lossless PNG, WebP stays
+  WebP, and a supported HEIC/HEIF source becomes JPG. JPG uses a white matte while PNG/WebP retain alpha.
+  Every result is newly canvas-encoded with metadata removed, so color profiles and byte size can change;
+  there is no size-reduction guarantee and no automatic download.
+- Image-watermark batches accept 1–100 sources of 1 byte–50MiB each and 250MiB combined. A source is
+  limited to 16,384px per side and 25,000,000 displayed pixels. The optional logo is 1 byte–10MiB,
+  8,192px per side, and 16,000,000 pixels. Results are limited to 100MiB each and 500MiB retained per
+  batch. Processing uses at most two Workers (one when device memory is unknown or at most 4GiB) with a
+  180-second watchdog for Worker setup and each active item.
 - PDF jobs accept up to 100MB total input and 500 pages; page-by-page split creates at most 200 files.
 - `pdf.to-images@1` accepts one PDF up to 50MiB and at most 500 source pages. It converts all pages by
   default to JPG quality 85 at 150DPI; 96, 150, and 300DPI plus JPG quality 40–95 or PNG are available.

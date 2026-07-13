@@ -25,6 +25,23 @@ The source-relative `smaller-only` goal is a hard postcondition. The runtime ada
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
 
+`image.watermark@1` is a separate contract and Worker path. It adds one validated text string or one
+JPG/PNG/WebP logo at a top/middle/bottom × left/center/right anchor, preserving the source's displayed
+dimensions and orientation. Text size is relative to the shorter side; logo width is relative to source
+width; both fit inside the selected relative margin. The output choice is JPG, PNG, WebP, or `source`.
+`source` is resolved from structurally inspected bytes: JPG stays JPG, PNG stays lossless PNG, WebP stays
+WebP, and a decodable HEIC/HEIF source becomes white-matted JPG. It never trusts a filename or MIME hint
+to select the encoder. Text is one safe, normalized 1–80-code-point line sized at 4–30%; logo width is
+5–50%; margin is 0–10%; opacity is 5–100%; and lossy quality is 40–95. Every JPG uses a white matte,
+while PNG and WebP retain alpha.
+
+Every image-watermark result is reconstructed through an output-sized `OffscreenCanvas`. This removes
+EXIF, GPS, camera, and container metadata and may normalize color profiles. It is a new encode rather than
+a byte-preserving edit, so its size may increase even when `source` is selected; this contract has no
+smaller-only postcondition. The Worker draws the auto-oriented source once and the selected watermark
+once. A result is exposed in tab-owned memory and saved only after an explicit single-result or batch-ZIP
+action.
+
 The `pdf.merge@1`, `pdf.split@1`, `pdf.images-to-pdf@1`, `pdf.organize@1`, and `pdf.watermark@1` tools
 copy or embed content in a dedicated one-job Worker. The organizer creates a new document from a validated
 page plan: order controls output order, quarter-turns are added to the source rotation, and omitted pages
@@ -66,8 +83,8 @@ pixel dimensions are rounded up separately; the new page normalizes rotation to 
 whole document first, then renders, encodes, embeds, and cleans one page before starting the next. It
 retains no public intermediate image or partial PDF.
 
-The watermark tool renders the validated text once with a bounded `OffscreenCanvas`, embeds that raster
-PNG, and reuses it as a centered or tiled overlay on every page or the selected pages.
+The `pdf.watermark@1` tool renders the validated text once with a bounded `OffscreenCanvas`, embeds that
+raster PNG, and reuses it as a centered or tiled overlay on every page or the selected pages.
 PDF pages are not rasterized, but
 the watermark itself is an image rather than searchable or selectable text. Placement uses each page's
 visible CropBox offset, and compensates for the page rotation so the chosen angle stays visually
@@ -81,11 +98,22 @@ and never offers a larger result. Only other PDF edits can make an output larger
 
 ## Resource policy
 
-Image dimensions are parsed from PNG, JPEG, and WebP structure before decode. The runtime then keeps a
-defensive post-decode check, limits automatic concurrency to two Workers (one on low-memory devices),
-and enforces per-file, pixel, output, batch-input, and retained-result budgets. Worker creation errors,
-message decode failures, and a three-minute job watchdog settle into structured failures instead of
-leaving a batch pending.
+`image.pipeline@1` dimensions are parsed from PNG, JPEG, and WebP structure before decode. Its runtime
+then keeps a defensive post-decode check, limits automatic concurrency to two Workers (one on low-memory
+devices), and enforces per-file, pixel, output, batch-input, and retained-result budgets. Worker creation
+errors, message decode failures, and a three-minute job watchdog settle into structured failures instead
+of leaving a batch pending.
+
+The image-watermark path accepts 1–100 source files of 1 byte–50MiB each and at most 250MiB combined.
+Each source is limited to 16,384px per side and 25,000,000 displayed pixels. Its optional logo is one
+1-byte–10MiB JPG, PNG, or WebP limited to 8,192px per side and 16,000,000 pixels; animated sources and
+logos are rejected instead of flattened. Results are limited to 100MiB each and 500MiB retained per
+batch. It uses at most two dedicated Workers, falling back to one when reported device memory is unknown
+or at most 4GiB, with a 180-second watchdog for each startup/logo-configuration phase and active item.
+A setup timeout fails terminally; other repeated setup faults are bounded to one replacement before the
+batch is rejected. The runner reads the logo once, copies and decodes it once per active Worker, reuses
+that bitmap across the Worker's jobs, and closes it when the Worker is replaced, cancelled, fails, or
+finishes. The runner zeroes its retained logo-byte copy and any untransferred setup copy on terminal paths.
 
 PDF inputs are structurally checked before parsing and bounded by file size, page count, decoded stream
 bytes, object and cross-reference counts, filter depth, output size, and a three-minute watchdog. PNGs
@@ -116,16 +144,26 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
+- Image-watermark source/logo bytes move only as transferred local buffers between the tab and its
+  dedicated Workers; no decoder receives an input URL and no upload, CDN, WebAssembly, or server fallback
+  exists.
+- Image-watermark filenames, previews, results, and object URLs are likewise excluded from network and
+  analytics payloads and remain in tab/Worker-owned memory.
+- Image-watermark object URLs are revoked on replacement, rerun, reset, and unmount, and no save begins
+  until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
 
 ## Release proof
 
-After serving `apps/web/out` through the local Pages runtime, the tracked browser smokes prove both PDF
-raster paths without uploading the fixtures:
+After serving `apps/web/out` through the local Pages runtime, the tracked browser smokes prove the image
+watermark and both PDF raster paths without uploading fixtures:
 
 ~~~bash
+node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without a base URL, both scripts target the production Pages origin.
+Without a base URL, all three scripts target the production Pages origin.
+The image-watermark smoke also proves the security headers, approved defaults, synthetic 320×180 PNG
+result, explicit-only save, same dimensions and PNG signature, and absence of external or write requests.
