@@ -3,6 +3,8 @@ import { z } from "zod";
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;
 export const IMAGE_TOOL_VERSION = 1 as const;
+export const IMAGE_WATERMARK_TOOL_ID = "image.watermark" as const;
+export const IMAGE_WATERMARK_TOOL_VERSION = 1 as const;
 export const PDF_MERGE_TOOL_ID = "pdf.merge" as const;
 export const PDF_SPLIT_TOOL_ID = "pdf.split" as const;
 export const PDF_IMAGES_TO_PDF_TOOL_ID = "pdf.images-to-pdf" as const;
@@ -28,6 +30,18 @@ function isSafeWatermarkText(value: string): boolean {
     );
   });
 }
+
+const safeWatermarkTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => Array.from(value).length <= 80, {
+    message: "워터마크는 80자를 초과할 수 없습니다.",
+  })
+  .refine(isSafeWatermarkText, {
+    message: "워터마크에는 제어 문자를 사용할 수 없습니다.",
+  })
+  .transform((value) => value.normalize("NFC"));
 
 export const imageSizeGoalSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("allow-growth") }),
@@ -117,10 +131,72 @@ export const imagePipelineSpecSchema = z.object({
   metadata: z.literal("strip"),
 });
 
+export const imageWatermarkSpecSchema = z
+  .object({
+    version: z.literal(1),
+    watermark: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("text"),
+          text: safeWatermarkTextSchema,
+          color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+          sizePercent: z.number().int().min(4).max(30),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("logo"),
+          widthPercent: z.number().int().min(5).max(50),
+        })
+        .strict(),
+    ]),
+    position: z.enum([
+      "top-left",
+      "top-center",
+      "top-right",
+      "middle-left",
+      "center",
+      "middle-right",
+      "bottom-left",
+      "bottom-center",
+      "bottom-right",
+    ]),
+    marginPercent: z.number().int().min(0).max(10),
+    opacity: z.number().min(0.05).max(1),
+    output: z.discriminatedUnion("format", [
+      z
+        .object({
+          format: z.literal("source"),
+          quality: z.number().int().min(40).max(95),
+        })
+        .strict(),
+      z
+        .object({
+          format: z.literal("jpeg"),
+          quality: z.number().int().min(40).max(95),
+          matte: z.literal("#ffffff"),
+        })
+        .strict(),
+      z
+        .object({
+          format: z.literal("webp"),
+          quality: z.number().int().min(40).max(95),
+        })
+        .strict(),
+      z.object({ format: z.literal("png") }).strict(),
+    ]),
+    autoOrient: z.literal(true),
+    metadata: z.literal("strip"),
+  })
+  .strict();
+
 export type ResizeSpec = z.input<typeof resizeSpecSchema>;
 export type ImageOutput = z.input<typeof imageOutputSchema>;
 export type ImagePipelineSpecV1 = z.input<typeof imagePipelineSpecSchema>;
 export type ParsedImagePipelineSpecV1 = z.output<typeof imagePipelineSpecSchema>;
+export type ImageWatermarkSpecV1 = z.input<typeof imageWatermarkSpecSchema>;
+export type ParsedImageWatermarkSpecV1 = z.output<typeof imageWatermarkSpecSchema>;
+export type ImageWatermarkPosition = ImageWatermarkSpecV1["position"];
 
 export type ImagePhase = "validating" | "decoding" | "transforming" | "encoding" | "finalizing";
 
@@ -246,6 +322,150 @@ export interface BatchHandle {
   cancel(): void;
 }
 
+export interface ImageWatermarkInput {
+  name: string;
+  mimeHint: string;
+  byteLength: number;
+  bytes: ArrayBuffer;
+}
+
+export type ImageWatermarkLogoInput = ImageWatermarkInput;
+
+export type ImageWatermarkPhase =
+  | "validating"
+  | "decoding"
+  | "compositing"
+  | "encoding"
+  | "finalizing";
+
+export type ImageWatermarkWarning = "SOURCE_FORMAT_CONVERTED" | "COLOR_PROFILE_NORMALIZED";
+
+export interface ImageWatermarkResult {
+  bytes: ArrayBuffer;
+  suggestedName: string;
+  mime: "image/jpeg" | "image/png" | "image/webp";
+  width: number;
+  height: number;
+  sourceByteLength: number;
+  byteLength: number;
+  format: "jpeg" | "png" | "webp";
+  warnings: ImageWatermarkWarning[];
+  timing: {
+    inspectMs: number;
+    decodeMs: number;
+    compositeMs: number;
+    encodeMs: number;
+    totalMs: number;
+  };
+}
+
+export type ImageWatermarkErrorCode =
+  | "INVALID_SPEC"
+  | "UNSUPPORTED_INPUT"
+  | "ANIMATED_INPUT"
+  | "CORRUPT_INPUT"
+  | "DIMENSION_LIMIT"
+  | "MEMORY_LIMIT"
+  | "DECODE_FAILED"
+  | "ENCODE_FAILED"
+  | "LOGO_REQUIRED"
+  | "CANCELLED"
+  | "WORKER_CRASH";
+
+export interface ImageWatermarkErrorPayload {
+  code: ImageWatermarkErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export type ImageWatermarkWorkerRequest =
+  | {
+      protocol: 1;
+      type: "configure-logo";
+      assetId: string;
+      tool: typeof IMAGE_WATERMARK_TOOL_ID;
+      toolVersion: typeof IMAGE_WATERMARK_TOOL_VERSION;
+      input: ImageWatermarkLogoInput;
+    }
+  | {
+      protocol: 1;
+      type: "run";
+      jobId: string;
+      tool: typeof IMAGE_WATERMARK_TOOL_ID;
+      toolVersion: typeof IMAGE_WATERMARK_TOOL_VERSION;
+      input: ImageWatermarkInput;
+      spec: ImageWatermarkSpecV1;
+      logoAssetId?: string;
+    }
+  | {
+      protocol: 1;
+      type: "cancel";
+      jobId: string;
+    };
+
+export type ImageWatermarkWorkerEvent =
+  | {
+      protocol: 1;
+      type: "ready";
+      capabilities: {
+        decode: readonly string[];
+        encode: readonly string[];
+        offscreenCanvas: boolean;
+      };
+    }
+  | {
+      protocol: 1;
+      type: "logo-ready";
+      assetId: string;
+    }
+  | {
+      protocol: 1;
+      type: "logo-failed";
+      assetId: string;
+      error: ImageWatermarkErrorPayload;
+    }
+  | {
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+      phase: ImageWatermarkPhase;
+      fraction: number;
+    }
+  | {
+      protocol: 1;
+      type: "complete";
+      jobId: string;
+      result: ImageWatermarkResult;
+    }
+  | {
+      protocol: 1;
+      type: "failed";
+      jobId: string;
+      error: ImageWatermarkErrorPayload;
+    };
+
+export interface ImageWatermarkBatchItem {
+  itemId: string;
+  file: File;
+  spec: ImageWatermarkSpecV1;
+}
+
+export type ImageWatermarkBatchItemResult =
+  | { itemId: string; status: "fulfilled"; value: ImageWatermarkResult }
+  | { itemId: string; status: "rejected"; error: ImageWatermarkErrorPayload }
+  | { itemId: string; status: "cancelled" };
+
+export type ImageWatermarkRuntimeEvent =
+  | { type: "item-progress"; itemId: string; phase: ImageWatermarkPhase; fraction: number }
+  | { type: "item-complete"; itemId: string; result: ImageWatermarkBatchItemResult }
+  | { type: "batch-progress"; completed: number; total: number };
+
+export interface ImageWatermarkBatchHandle {
+  result: Promise<readonly ImageWatermarkBatchItemResult[]>;
+  cancel(): void;
+}
+
 export interface ToolPreset {
   id: string;
   name: string;
@@ -284,15 +504,7 @@ export const pdfOrganizePageSchema = z.object({
 });
 
 export const pdfWatermarkSchema = z.object({
-  text: z
-    .string()
-    .trim()
-    .min(1)
-    .max(80)
-    .refine(isSafeWatermarkText, {
-      message: "워터마크에는 제어 문자를 사용할 수 없습니다.",
-    })
-    .transform((value) => value.normalize("NFC")),
+  text: safeWatermarkTextSchema,
   placement: z.enum(["center", "tile"]),
   fontSize: z.number().int().min(12).max(96),
   opacity: z.number().min(0.05).max(0.8),

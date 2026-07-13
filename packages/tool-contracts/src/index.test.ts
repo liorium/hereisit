@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  IMAGE_WATERMARK_TOOL_ID,
+  IMAGE_WATERMARK_TOOL_VERSION,
   imagePipelineSpecSchema,
+  imageWatermarkSpecSchema,
   PDF_COMPRESS_SCANNED_TOOL_ID,
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   PDF_TO_IMAGES_TOOL_ID,
@@ -15,6 +18,22 @@ const basePdfToImagesSpec = {
   selection: { mode: "every-page" as const },
   output: { format: "jpeg" as const, quality: 85, background: "#ffffff" as const },
   dpi: 150 as const,
+};
+
+const baseImageWatermarkSpec = {
+  version: 1 as const,
+  watermark: {
+    kind: "text" as const,
+    text: "HereIsIt",
+    color: "#111827",
+    sizePercent: 12,
+  },
+  position: "bottom-right" as const,
+  marginPercent: 3,
+  opacity: 0.55,
+  output: { format: "source" as const, quality: 90 },
+  autoOrient: true as const,
+  metadata: "strip" as const,
 };
 
 describe("imagePipelineSpecSchema", () => {
@@ -407,5 +426,155 @@ describe("pdfPipelineSpecSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("imageWatermarkSpecSchema", () => {
+  it("publishes the independent identity and trims safe text", () => {
+    expect(IMAGE_WATERMARK_TOOL_ID).toBe("image.watermark");
+    expect(IMAGE_WATERMARK_TOOL_VERSION).toBe(1);
+    expect(
+      imageWatermarkSpecSchema.parse({
+        version: 1,
+        watermark: { kind: "text", text: "  © HereIsIt  ", color: "#111827", sizePercent: 12 },
+        position: "bottom-right",
+        marginPercent: 3,
+        opacity: 0.55,
+        output: { format: "source", quality: 90 },
+        autoOrient: true,
+        metadata: "strip",
+      }),
+    ).toMatchObject({ watermark: { text: "© HereIsIt" } });
+  });
+
+  it.each([
+    "top-left",
+    "top-center",
+    "top-right",
+    "middle-left",
+    "center",
+    "middle-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+  ])("accepts the %s position", (position) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, position }).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["text", { kind: "text", text: "© HereIsIt", color: "#111827", sizePercent: 12 }],
+    ["logo", { kind: "logo", widthPercent: 25 }],
+  ])("accepts the %s watermark branch", (_case, watermark) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, watermark }).success,
+    ).toBe(true);
+  });
+
+  it("accepts text at the 80-code-point ceiling", () => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, text: "🙂".repeat(80) },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["source", { format: "source", quality: 90 }],
+    ["JPEG", { format: "jpeg", quality: 90, matte: "#ffffff" }],
+    ["WebP", { format: "webp", quality: 90 }],
+    ["PNG", { format: "png" }],
+  ])("accepts the %s output branch", (_case, output) => {
+    expect(imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, output }).success).toBe(
+      true,
+    );
+  });
+
+  it.each([0, 2])("rejects version %s", (version) => {
+    expect(imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, version }).success).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ["empty text", ""],
+    ["81-code-point text", "🙂".repeat(81)],
+    ["newlines", "Here\nIsIt"],
+    ["bidirectional override characters", "Here\u202eIsIt"],
+  ])("rejects %s", (_case, text) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, text },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each(["#fff", "111827", "#gggggg"])("rejects invalid text color %s", (color) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, color },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([3, 31])("rejects text size %s", (sizePercent) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, sizePercent },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([4, 51])("rejects logo width %s", (widthPercent) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { kind: "logo", widthPercent },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([-1, 11])("rejects margin %s", (marginPercent) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, marginPercent }).success,
+    ).toBe(false);
+  });
+
+  it.each([0.049, 1.001])("rejects opacity %s", (opacity) => {
+    expect(imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, opacity }).success).toBe(
+      false,
+    );
+  });
+
+  it.each([39, 96])("rejects output quality %s", (quality) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        output: { format: "source", quality },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects extra output fields", () => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        output: { format: "png", quality: 80 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["caller-controlled orientation", { autoOrient: false }],
+    ["caller-controlled metadata", { metadata: "preserve" }],
+  ])("rejects %s", (_case, override) => {
+    expect(
+      imageWatermarkSpecSchema.safeParse({ ...baseImageWatermarkSpec, ...override }).success,
+    ).toBe(false);
   });
 });
