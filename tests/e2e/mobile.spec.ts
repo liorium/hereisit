@@ -254,6 +254,7 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page
     pageErrors += 1;
   });
 
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
   await page.locator("input[type=file]").setInputFiles({
     name: "mobile.pdf",
     mimeType: "application/pdf",
@@ -373,7 +374,9 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
   const pdf = Buffer.from(await document.save());
 
   await page.goto("/pdf/split");
-  await page.locator("input[type=file]").setInputFiles({
+  const splitInput = page.locator("input[type=file]");
+  await expect(splitInput).toBeEnabled({ timeout: 60_000 });
+  await splitInput.setInputFiles({
     name: "sample.pdf",
     mimeType: "application/pdf",
     buffer: pdf,
@@ -416,7 +419,9 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
   document.addPage([300, 100]);
 
   await page.goto("/pdf/organize");
-  await page.locator("input[type=file]").setInputFiles({
+  const organizeInput = page.locator("input[type=file]");
+  await expect(organizeInput).toBeEnabled({ timeout: 60_000 });
+  await organizeInput.setInputFiles({
     name: "organize.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(await document.save()),
@@ -448,7 +453,9 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   document.addPage([300, 400]);
 
   await page.goto("/pdf/watermark");
-  await page.locator("input[type=file]").setInputFiles({
+  const watermarkInput = page.locator("input[type=file]");
+  await expect(watermarkInput).toBeEnabled({ timeout: 60_000 });
+  await watermarkInput.setInputFiles({
     name: "mobile.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(await document.save()),
@@ -495,7 +502,9 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
 
 test("puts settings before the preview with touch-safe controls", async ({ page }) => {
   await page.goto("/image/resize");
-  await page.locator("input[type=file]").setInputFiles({
+  const resizeInput = page.locator("input[type=file]");
+  await expect(resizeInput).toBeEnabled({ timeout: 60_000 });
+  await resizeInput.setInputFiles({
     name: "sample.png",
     mimeType: "image/png",
     buffer: onePixelPng,
