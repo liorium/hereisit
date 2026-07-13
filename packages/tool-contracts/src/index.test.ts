@@ -481,6 +481,19 @@ describe("imageWatermarkSpecSchema", () => {
     ).toBe(true);
   });
 
+  it("rejects text that exceeds 80 code points after NFC normalization", () => {
+    const expandingText = "\u0344".repeat(80);
+
+    expect(Array.from(expandingText).length).toBe(80);
+    expect(Array.from(expandingText.normalize("NFC")).length).toBe(160);
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: { ...baseImageWatermarkSpec.watermark, text: expandingText },
+      }).success,
+    ).toBe(false);
+  });
+
   it.each([
     ["source", { format: "source", quality: 90 }],
     ["JPEG", { format: "jpeg", quality: 90, matte: "#ffffff" }],

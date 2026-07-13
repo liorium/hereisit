@@ -35,13 +35,13 @@ const safeWatermarkTextSchema = z
   .string()
   .trim()
   .min(1)
+  .transform((value) => value.normalize("NFC"))
   .refine((value) => Array.from(value).length <= 80, {
     message: "워터마크는 80자를 초과할 수 없습니다.",
   })
   .refine(isSafeWatermarkText, {
     message: "워터마크에는 제어 문자를 사용할 수 없습니다.",
-  })
-  .transform((value) => value.normalize("NFC"));
+  });
 
 export const imageSizeGoalSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("allow-growth") }),
