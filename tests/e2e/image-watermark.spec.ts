@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 
+const LOCAL_PAGES_ORIGIN = "http://127.0.0.1:4173";
+const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
+
 async function createSolidPng(
   page: Page,
   width: number,
@@ -67,6 +70,43 @@ async function waitForCompleted(page: Page, count: number): Promise<void> {
   ).toBeVisible({ timeout: 20_000 });
 }
 
+async function scanLoadedJavaScriptMarkers(
+  page: Page,
+  requestUrls: readonly string[],
+  markers: readonly string[],
+): Promise<Set<string>> {
+  if (requestUrls.length === 0) throw new Error("Loaded JavaScript isolation scan failed");
+  const found = new Set<string>();
+  for (const requestUrl of requestUrls) {
+    try {
+      const requested = new URL(requestUrl);
+      if (requested.origin !== LOCAL_PAGES_ORIGIN || !requested.pathname.endsWith(".js")) {
+        throw new Error("Unexpected JavaScript response identity");
+      }
+      const response = await page.context().request.get(requestUrl, {
+        headers: { "Accept-Encoding": "identity" },
+        maxRedirects: 0,
+      });
+      if (
+        response.status() !== 200 ||
+        response.url() !== requestUrl ||
+        new URL(response.url()).origin !== LOCAL_PAGES_ORIGIN ||
+        ![undefined, "identity"].includes(response.headers()["content-encoding"])
+      ) {
+        throw new Error("Unexpected JavaScript refetch response");
+      }
+      const body = await response.text();
+      if (body.length === 0) throw new Error("Unexpected empty JavaScript response");
+      for (const marker of markers) {
+        if (body.includes(marker)) found.add(marker);
+      }
+    } catch {
+      throw new Error("Loaded JavaScript isolation scan failed");
+    }
+  }
+  return found;
+}
+
 async function samplePixels(
   page: Page,
   bytes: Uint8Array,
@@ -90,35 +130,43 @@ async function samplePixels(
   );
 }
 
+function expectPixelNear(
+  actual: readonly number[] | undefined,
+  expected: readonly number[],
+  tolerance = 12,
+): void {
+  expect(actual).toHaveLength(expected.length);
+  for (const [index, expectedChannel] of expected.entries()) {
+    expect(Math.abs((actual?.[index] ?? Number.NaN) - expectedChannel)).toBeLessThanOrEqual(
+      tolerance,
+    );
+  }
+}
+
 test("text watermark uses the approved defaults and saves only on request", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
   });
-  await page.goto("/image/watermark");
-
-  const origin = new URL(page.url()).origin;
   const requestViolations: string[] = [];
-  const failedRequests: string[] = [];
+  let failedRequests = 0;
   const pageErrors: string[] = [];
   let downloads = 0;
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (
-      url.origin !== origin ||
-      !["GET", "HEAD"].includes(request.method()) ||
-      request.postData() !== null
-    ) {
-      requestViolations.push(`${request.method()} ${request.url()}`);
-    }
+    if (url.origin !== LOCAL_PAGES_ORIGIN) requestViolations.push("cross-origin");
+    if (!["GET", "HEAD"].includes(request.method())) requestViolations.push("write-method");
+    if (request.postData() !== null) requestViolations.push("request-body");
   });
-  page.on("requestfailed", (request) => {
-    failedRequests.push(request.failure()?.errorText ?? request.url());
+  page.on("requestfailed", () => {
+    failedRequests += 1;
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("download", () => {
     downloads += 1;
   });
+
+  await page.goto("/image/watermark");
 
   const source = await createSolidPng(page, 320, 180, "#f5f5f4");
   await page.locator('input[type="file"][multiple]').setInputFiles({
@@ -162,8 +210,38 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   expect(pngDimensions(output)).toEqual({ width: 320, height: 180 });
   expect(downloads).toBe(1);
   expect(requestViolations).toEqual([]);
-  expect(failedRequests).toEqual([]);
+  expect(failedRequests).toBe(0);
   expect(pageErrors).toEqual([]);
+});
+
+test("loads only the dedicated image watermark Worker marker", async ({ page }) => {
+  const loadedJavaScriptUrls = new Set<string>();
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.endsWith(".js")) loadedJavaScriptUrls.add(response.url());
+  });
+
+  await page.goto("/image/watermark");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "이미지에 워터마크 넣기" }),
+  ).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  expect(loadedJavaScriptUrls.size).toBeGreaterThan(0);
+
+  const forbiddenMarkers = [
+    "hereisit-image-worker",
+    "hereisit-pdf-worker",
+    "hereisit-pdf-inspection-worker",
+    "hereisit-pdf-to-images-worker",
+    "hereisit-pdf-compress-scanned-worker",
+  ] as const;
+  const markers = await scanLoadedJavaScriptMarkers(
+    page,
+    [...loadedJavaScriptUrls],
+    [IMAGE_WATERMARK_WORKER_MARKER, ...forbiddenMarkers],
+  );
+  expect(markers.has(IMAGE_WATERMARK_WORKER_MARKER)).toBe(true);
+  for (const marker of forbiddenMarkers) expect(markers.has(marker)).toBe(false);
 });
 
 test("places a real logo at the top-left and preserves pixels outside it", async ({ page }) => {
@@ -207,12 +285,14 @@ test("places a real logo at the top-left and preserves pixels outside it", async
   expect(path).not.toBeNull();
   const output = new Uint8Array(await readFile(path as string));
   expect(pngDimensions(output)).toEqual({ width: 320, height: 180 });
-  const [inside, outside] = await samplePixels(page, output, [
+  const [insideA, insideB, outsideA, outsideB] = await samplePixels(page, output, [
     { x: 10, y: 10 },
+    { x: 40, y: 20 },
     { x: 120, y: 100 },
+    { x: 300, y: 170 },
   ]);
-  expect(inside).toEqual([255, 0, 0, 255]);
-  expect(outside).toEqual([255, 255, 255, 255]);
+  for (const inside of [insideA, insideB]) expectPixelNear(inside, [255, 0, 0, 255]);
+  for (const outside of [outsideA, outsideB]) expectPixelNear(outside, [255, 255, 255, 255]);
 });
 
 test("accepts a structurally valid logo with an empty MIME hint", async ({ page }) => {
@@ -250,13 +330,9 @@ test("creates a collision-safe ZIP for duplicate source names only on request", 
   const requestViolations: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (
-      url.origin !== origin ||
-      !["GET", "HEAD"].includes(request.method()) ||
-      request.postData() !== null
-    ) {
-      requestViolations.push(`${request.method()} ${request.url()}`);
-    }
+    if (url.origin !== origin) requestViolations.push("cross-origin");
+    if (!["GET", "HEAD"].includes(request.method())) requestViolations.push("write-method");
+    if (request.postData() !== null) requestViolations.push("request-body");
   });
   let downloads = 0;
   page.on("download", () => {

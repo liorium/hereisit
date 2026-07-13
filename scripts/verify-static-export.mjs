@@ -106,6 +106,8 @@ const toolPages = [
   },
 ];
 
+assert.equal(toolPages.length, 11, "The static export must define exactly 11 tool pages.");
+
 async function collectJavaScript(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
@@ -225,6 +227,30 @@ const [html, headers, sitemap, robots, ...toolHtmlPages] = await Promise.all([
   readFile(path.join(outputRoot, "robots.txt"), "utf8"),
   ...toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 ]);
+const exportedToolPagePaths = (
+  await Promise.all(
+    ["image", "pdf"].map(async (category) =>
+      (
+        await collectRelativeFiles(path.join(outputRoot, category))
+      )
+        .filter((relativePath) => relativePath.endsWith(".html"))
+        .map((relativePath) => {
+          const withoutExtension = relativePath.slice(0, -".html".length);
+          const routeSuffix = withoutExtension.endsWith("/index")
+            ? withoutExtension.slice(0, -"/index".length)
+            : withoutExtension;
+          return `/${category}/${routeSuffix}`;
+        }),
+    ),
+  )
+)
+  .flat()
+  .sort();
+assert.deepEqual(
+  exportedToolPagePaths,
+  toolPages.map((tool) => tool.path).sort(),
+  "The static export tool-page inventory must exactly match the 11 registered routes.",
+);
 assert.match(html, /파일 작업/);
 assert.match(html, /href="\/image\/compress"/);
 assert.match(html, /href="\/pdf\/merge"/);
@@ -295,6 +321,7 @@ assertSameRelativeFiles(sourceCMaps, exportedCMaps, "PDF.js CMap");
 assertSameRelativeFiles(sourceStandardFonts, exportedStandardFonts, "PDF.js standard-font");
 
 const javaScriptInventory = await createJavaScriptInventory();
+const homeClosure = collectRouteClosure(html, javaScriptInventory);
 const routeClosures = toolPages.map((tool, index) => {
   const pageHtml = toolHtmlPages[index];
   assert.ok(pageHtml !== undefined, `The ${tool.path} route must have exported HTML.`);
@@ -308,6 +335,12 @@ const pdfEditingClosures = routeClosures.filter(({ tool }) => tool.routeClass ==
 const toImageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "pdf-to-images");
 const compressionClosures = routeClosures.filter(
   ({ tool }) => tool.routeClass === "pdf-compress-scanned",
+);
+
+assertClosureLacks(
+  homeClosure,
+  IMAGE_WATERMARK_WORKER_MARKER,
+  "The home route loaded the image watermark Worker.",
 );
 
 assert.ok(imageClosures.length > 0, "The export inventory must classify image routes.");

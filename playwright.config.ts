@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const isCI = Boolean(process.env.CI);
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: This local-only flag does not affect Turbo task outputs.
 const includeWebKit = isCI || process.env.PLAYWRIGHT_WEBKIT === "1";
+const imageWatermarkSpec = /image-watermark\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -30,7 +31,7 @@ export default defineConfig({
     {
       name: "mobile-chromium",
       use: { ...devices["iPhone 15"], browserName: "chromium" },
-      testMatch: /mobile\.spec\.ts/,
+      testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
     },
     ...(includeWebKit
       ? [
@@ -42,7 +43,7 @@ export default defineConfig({
           {
             name: "mobile-webkit",
             use: { ...devices["iPhone 15"] },
-            testMatch: /mobile\.spec\.ts/,
+            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
           },
         ]
       : []),
