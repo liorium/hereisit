@@ -5,6 +5,21 @@ import { unzipSync } from "fflate";
 const LOCAL_PAGES_ORIGIN = "http://127.0.0.1:4173";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
 
+type SourceFilePayload = {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly buffer: Buffer;
+};
+
+async function setSourceFiles(
+  page: Page,
+  files: SourceFilePayload | readonly SourceFilePayload[],
+): Promise<void> {
+  const input = page.locator('input[type="file"][multiple]');
+  await expect(input).toBeEnabled();
+  await input.setInputFiles(files);
+}
+
 async function createSolidPng(
   page: Page,
   width: number,
@@ -169,7 +184,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   await page.goto("/image/watermark");
 
   const source = await createSolidPng(page, 320, 180, "#f5f5f4");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "source.png",
     mimeType: "image/png",
     buffer: source,
@@ -258,7 +273,7 @@ test("places a real logo at the top-left and preserves pixels outside it", async
     downloads += 1;
   });
 
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "white.png",
     mimeType: "image/png",
     buffer: source,
@@ -300,7 +315,7 @@ test("accepts a structurally valid logo with an empty MIME hint", async ({ page 
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 120, 80, "#ffffff");
   const logo = await createSolidPng(page, 32, 16, "#ff0000");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "source.png",
     mimeType: "image/png",
     buffer: source,
@@ -341,7 +356,7 @@ test("creates a collision-safe ZIP for duplicate source names only on request", 
   });
   const first = await createSolidPng(page, 80, 50, "#ffffff");
   const second = await createSolidPng(page, 80, 50, "#dbeafe");
-  await page.locator('input[type="file"][multiple]').setInputFiles([
+  await setSourceFiles(page, [
     { name: "duplicate.png", mimeType: "image/png", buffer: first },
     { name: "duplicate.png", mimeType: "image/png", buffer: second },
   ]);
@@ -395,7 +410,7 @@ test("releases an archive URL when ZIP download initiation throws", async ({ pag
   });
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 80, 50, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles([
+  await setSourceFiles(page, [
     { name: "first.png", mimeType: "image/png", buffer: source },
     { name: "second.png", mimeType: "image/png", buffer: source },
   ]);
@@ -438,7 +453,7 @@ test("releases completed archive URLs on invalidation and rerun", async ({ page 
   });
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 80, 50, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles([
+  await setSourceFiles(page, [
     { name: "first.png", mimeType: "image/png", buffer: source },
     { name: "second.png", mimeType: "image/png", buffer: source },
   ]);
@@ -504,7 +519,7 @@ test("shows corrections for missing, oversize, and animated logos", async ({ pag
   });
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 120, 80, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "source.png",
     mimeType: "image/png",
     buffer: source,
@@ -555,7 +570,7 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
   const source = await createSolidPng(page, 160, 100, "#ffffff");
   const firstLogo = await createSolidPng(page, 64, 32, "#ff0000");
   const secondLogo = await createSolidPng(page, 64, 32, "#0000ff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "source.png",
     mimeType: "image/png",
     buffer: source,
@@ -680,7 +695,7 @@ test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ p
   });
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 320, 180, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "source.png",
     mimeType: "image/png",
     buffer: source,
@@ -753,7 +768,7 @@ for (const shareOutcome of ["resolve", "reject"] as const) {
       downloads += 1;
     });
     const source = await createSolidPng(page, 100, 60, "#ffffff");
-    await page.locator('input[type="file"][multiple]').setInputFiles({
+    await setSourceFiles(page, {
       name: "share.png",
       mimeType: "image/png",
       buffer: source,
@@ -838,7 +853,7 @@ test("reports an unsupported runtime before reading a selected file", async ({ p
 test("moves through all nine watermark positions with the keyboard", async ({ page }) => {
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 40, 30, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "keyboard.png",
     mimeType: "image/png",
     buffer: source,
@@ -858,7 +873,7 @@ test("moves through all nine watermark positions with the keyboard", async ({ pa
 test("keeps text length and mode-specific size controls inside the contract", async ({ page }) => {
   await page.goto("/image/watermark");
   const source = await createSolidPng(page, 40, 30, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "contract.png",
     mimeType: "image/png",
     buffer: source,
@@ -889,7 +904,7 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await expect(page.getByRole("slider", { name: /문구 크기/ })).toHaveValue("30");
 
   await page.getByRole("button", { name: "처음부터" }).click();
-  await page.locator('input[type="file"][multiple]').setInputFiles({
+  await setSourceFiles(page, {
     name: "reset.png",
     mimeType: "image/png",
     buffer: source,
