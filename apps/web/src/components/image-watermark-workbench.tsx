@@ -93,10 +93,10 @@ function isAcceptedLogo(file: File): boolean {
 }
 
 function validWatermarkText(value: string): boolean {
-  const normalized = value.normalize("NFC");
+  const normalized = value.trim().normalize("NFC");
   const characters = Array.from(normalized);
   return (
-    normalized.trim().length > 0 &&
+    normalized.length > 0 &&
     characters.length <= 80 &&
     characters.every((character) => {
       const code = character.codePointAt(0) ?? 0;
@@ -203,6 +203,7 @@ export function ImageWatermarkWorkbench() {
   const activeGenerationRef = useRef(0);
   const itemsRef = useRef(items);
   const ownedUrlsRef = useRef(new Set<string>());
+  const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const busy = processing || archiving;
 
   const commitItems = useCallback((update: (current: WorkItem[]) => WorkItem[]) => {
@@ -222,6 +223,14 @@ export function ImageWatermarkWorkbench() {
     URL.revokeObjectURL(url);
   }, []);
 
+  const releaseArchiveUrls = useCallback(() => {
+    for (const [url, timeoutId] of archiveLeasesRef.current) {
+      clearTimeout(timeoutId);
+      revokeOwnedUrl(url);
+    }
+    archiveLeasesRef.current.clear();
+  }, [revokeOwnedUrl]);
+
   useEffect(() => {
     setHydrated(true);
     setRuntimeSupported(supportsBrowserImageWatermarkRuntime());
@@ -240,6 +249,8 @@ export function ImageWatermarkWorkbench() {
     () => () => {
       activeGenerationRef.current += 1;
       batchRef.current?.cancel();
+      for (const timeoutId of archiveLeasesRef.current.values()) clearTimeout(timeoutId);
+      archiveLeasesRef.current.clear();
       for (const url of ownedUrlsRef.current) URL.revokeObjectURL(url);
       ownedUrlsRef.current.clear();
     },
@@ -249,6 +260,7 @@ export function ImageWatermarkWorkbench() {
   const invalidateResults = useCallback(
     (nextMessage = "설정이 바뀌었어요. 새 설정으로 다시 처리해 주세요.") => {
       activeGenerationRef.current += 1;
+      releaseArchiveUrls();
       let changed = false;
       for (const item of itemsRef.current) {
         if (item.resultUrl !== undefined) {
@@ -261,11 +273,12 @@ export function ImageWatermarkWorkbench() {
       commitItems((current) => current.map((item) => resetItem(item)));
       setMessage(nextMessage);
     },
-    [commitItems, revokeOwnedUrl],
+    [commitItems, releaseArchiveUrls, revokeOwnedUrl],
   );
 
   const addFiles = useCallback(
     (fileList: FileList | readonly File[]) => {
+      if (!hydrated || !runtimeSupported || busy) return;
       const candidates = Array.from(fileList);
       const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
       let remainingBytes = Math.max(0, MAX_TOTAL_INPUT_BYTES - currentBytes);
@@ -308,7 +321,7 @@ export function ImageWatermarkWorkbench() {
         );
       }
     },
-    [commitItems, createOwnedUrl, invalidateResults],
+    [busy, commitItems, createOwnedUrl, hydrated, invalidateResults, runtimeSupported],
   );
 
   const selected = useMemo(
@@ -383,6 +396,7 @@ export function ImageWatermarkWorkbench() {
 
   const startProcessing = async () => {
     if (!canRun) return;
+    releaseArchiveUrls();
     const sourceItems = itemsRef.current.map((item) => ({ id: item.id, file: item.file }));
     const generation = activeGenerationRef.current + 1;
     activeGenerationRef.current = generation;
@@ -532,7 +546,11 @@ export function ImageWatermarkWorkbench() {
       const url = createOwnedUrl(archive);
       try {
         downloadUrl(url, "hereisit-watermarked-images.zip");
-        setTimeout(() => revokeOwnedUrl(url), 10_000);
+        const timeoutId = setTimeout(() => {
+          if (!archiveLeasesRef.current.delete(url)) return;
+          revokeOwnedUrl(url);
+        }, 10_000);
+        archiveLeasesRef.current.set(url, timeoutId);
       } catch (error) {
         revokeOwnedUrl(url);
         throw error;
@@ -586,6 +604,7 @@ export function ImageWatermarkWorkbench() {
     activeGenerationRef.current += 1;
     batchRef.current?.cancel();
     batchRef.current = undefined;
+    releaseArchiveUrls();
     for (const url of ownedUrlsRef.current) URL.revokeObjectURL(url);
     ownedUrlsRef.current.clear();
     itemsRef.current = [];

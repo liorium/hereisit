@@ -215,6 +215,33 @@ test("places a real logo at the top-left and preserves pixels outside it", async
   expect(outside).toEqual([255, 255, 255, 255]);
 });
 
+test("accepts a structurally valid logo with an empty MIME hint", async ({ page }) => {
+  await page.goto("/image/watermark");
+  const source = await createSolidPng(page, 120, 80, "#ffffff");
+  const logo = await createSolidPng(page, 32, 16, "#ff0000");
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "source.png",
+    mimeType: "image/png",
+    buffer: source,
+  });
+  await page.getByRole("radio", { name: "로고 이미지", exact: true }).check();
+  const logoInput = page.locator('input[type="file"]:not([multiple])');
+  const selectedLogoType = await logoInput.evaluate((element, bytes) => {
+    const input = element as HTMLInputElement;
+    const transfer = new DataTransfer();
+    const file = new File([Uint8Array.from(bytes)], "logo.png", { type: "" });
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return file.type;
+  }, Array.from(logo));
+  expect(selectedLogoType).toBe("");
+
+  await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
+  await waitForCompleted(page, 1);
+  await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toBeVisible();
+});
+
 test("creates a collision-safe ZIP for duplicate source names only on request", async ({
   page,
 }) => {
@@ -306,6 +333,86 @@ test("releases an archive URL when ZIP download initiation throws", async ({ pag
       ),
     )
     .toBe(true);
+});
+
+test("releases completed archive URLs on invalidation and rerun", async ({ page }) => {
+  await page.addInitScript(() => {
+    const trackedWindow = window as Window & {
+      __archiveUrls?: string[];
+      __revokedArchiveUrls?: string[];
+    };
+    trackedWindow.__archiveUrls = [];
+    trackedWindow.__revokedArchiveUrls = [];
+    const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+    const nativeRevokeObjectUrl = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = (object) => {
+      const url = nativeCreateObjectUrl(object);
+      if (object instanceof Blob && object.type === "application/zip") {
+        trackedWindow.__archiveUrls?.push(url);
+      }
+      return url;
+    };
+    URL.revokeObjectURL = (url) => {
+      if (trackedWindow.__archiveUrls?.includes(url)) {
+        trackedWindow.__revokedArchiveUrls?.push(url);
+      }
+      nativeRevokeObjectUrl(url);
+    };
+  });
+  await page.goto("/image/watermark");
+  const source = await createSolidPng(page, 80, 50, "#ffffff");
+  await page.locator('input[type="file"][multiple]').setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: source },
+    { name: "second.png", mimeType: "image/png", buffer: source },
+  ]);
+  const run = page.getByRole("button", { name: "2개 이미지에 워터마크 넣기 →" });
+  const saveArchive = page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" });
+
+  await run.click();
+  await waitForCompleted(page, 2);
+  await Promise.all([page.waitForEvent("download"), saveArchive.click()]);
+  const firstArchiveUrl = await page.evaluate(() =>
+    (window as Window & { __archiveUrls?: string[] }).__archiveUrls?.at(-1),
+  );
+  expect(firstArchiveUrl).toBeTruthy();
+
+  const opacity = page.getByRole("slider", { name: /불투명도/ });
+  await opacity.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (url) =>
+          (window as Window & { __revokedArchiveUrls?: string[] }).__revokedArchiveUrls?.includes(
+            url,
+          ) ?? false,
+        firstArchiveUrl as string,
+      ),
+    )
+    .toBe(true);
+
+  await run.click();
+  await waitForCompleted(page, 2);
+  await Promise.all([page.waitForEvent("download"), saveArchive.click()]);
+  const secondArchiveUrl = await page.evaluate(() =>
+    (window as Window & { __archiveUrls?: string[] }).__archiveUrls?.at(-1),
+  );
+  expect(secondArchiveUrl).toBeTruthy();
+  expect(secondArchiveUrl).not.toBe(firstArchiveUrl);
+
+  await run.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (url) =>
+          (window as Window & { __revokedArchiveUrls?: string[] }).__revokedArchiveUrls?.includes(
+            url,
+          ) ?? false,
+        secondArchiveUrl as string,
+      ),
+    )
+    .toBe(true);
+  await waitForCompleted(page, 2);
 });
 
 test("shows corrections for missing, oversize, and animated logos", async ({ page }) => {
@@ -604,28 +711,51 @@ test("reports an unsupported runtime before reading a selected file", async ({ p
   await page.addInitScript(() => {
     Object.defineProperty(window, "OffscreenCanvas", { configurable: true, value: undefined });
     const original = File.prototype.arrayBuffer;
-    const trackedWindow = window as Window & { __watermarkFileReads?: number };
+    const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+    const trackedWindow = window as Window & {
+      __watermarkFileReads?: number;
+      __watermarkObjectUrls?: number;
+    };
     trackedWindow.__watermarkFileReads = 0;
+    trackedWindow.__watermarkObjectUrls = 0;
     File.prototype.arrayBuffer = function arrayBuffer() {
       trackedWindow.__watermarkFileReads = (trackedWindow.__watermarkFileReads ?? 0) + 1;
       return original.call(this);
+    };
+    URL.createObjectURL = (object) => {
+      trackedWindow.__watermarkObjectUrls = (trackedWindow.__watermarkObjectUrls ?? 0) + 1;
+      return nativeCreateObjectUrl(object);
     };
   });
   await page.goto("/image/watermark");
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
   const source = await createSolidPng(page, 40, 30, "#ffffff");
-  await page.locator('input[type="file"][multiple]').setInputFiles({
-    name: "unread.png",
-    mimeType: "image/png",
-    buffer: source,
-  });
+  const dataTransfer = await page.evaluateHandle(
+    ({ bytes }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([Uint8Array.from(bytes)], "unread.png", { type: "image/png" }));
+      return transfer;
+    },
+    { bytes: Array.from(source) },
+  );
+  await page
+    .getByRole("heading", { name: "워터마크를 넣을 이미지를 선택하세요" })
+    .locator("../..")
+    .dispatchEvent("drop", { dataTransfer });
+  await dataTransfer.dispose();
   await expect(page.getByText(/최신 Safari, Chrome, Firefox 또는 Edge/).first()).toBeVisible();
   expect(
     await page.evaluate(
       () => (window as Window & { __watermarkFileReads?: number }).__watermarkFileReads,
     ),
   ).toBe(0);
-  await expect(page.getByRole("button", { name: /이미지에 워터마크 넣기/ })).toBeDisabled();
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __watermarkObjectUrls?: number }).__watermarkObjectUrls,
+    ),
+  ).toBe(0);
+  await expect(page.locator('img[alt="unread.png 미리보기"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /이미지에 워터마크 넣기/ })).toHaveCount(0);
 });
 
 test("moves through all nine watermark positions with the keyboard", async ({ page }) => {
@@ -664,6 +794,8 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await expect(run).toBeEnabled();
   await textInput.fill("😀".repeat(81));
   await expect(run).toBeDisabled();
+  await textInput.fill(`  ${"😀".repeat(80)}  `);
+  await expect(run).toBeEnabled();
 
   await textInput.fill("© HereIsIt");
   const textSize = page.getByRole("slider", { name: /문구 크기/ });

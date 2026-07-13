@@ -322,7 +322,10 @@ function captureLogo(value: unknown): { logo?: CapturedFile; error?: ImageWaterm
   if (logo === undefined) return { error: INVALID_SPEC_ERROR };
   if (logo.size < 1 || logo.size > MAX_LOGO_BYTES) return { error: MEMORY_LIMIT_ERROR };
   const normalizedMime = logo.mimeHint.trim().toLowerCase();
+  const hasSupportedFallbackExtension =
+    normalizedMime === "" && /\.(?:jpe?g|png|webp)$/i.test(logo.name);
   if (
+    !hasSupportedFallbackExtension &&
     normalizedMime !== "image/jpeg" &&
     normalizedMime !== "image/png" &&
     normalizedMime !== "image/webp"

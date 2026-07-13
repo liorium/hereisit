@@ -482,10 +482,13 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(StubWorker.instances).toHaveLength(0);
   });
 
-  it("rejects an unsupported logo MIME before construction or reads", async () => {
+  it.each([
+    { label: "an unsupported MIME", name: "logo.svg", type: "image/svg+xml" },
+    { label: "an empty MIME with an unsupported extension", name: "logo.svg", type: "" },
+  ])("rejects $label before construction or reads", async ({ name, type }) => {
     installSupportedRuntime();
     const source = fakeFile();
-    const logo = fakeFile({ name: "logo.svg", type: "image/svg+xml" });
+    const logo = fakeFile({ name, type });
     const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
       logoFile: logo.file,
     });
@@ -496,6 +499,28 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(source.arrayBuffer).not.toHaveBeenCalled();
     expect(logo.arrayBuffer).not.toHaveBeenCalled();
     expect(StubWorker.instances).toHaveLength(0);
+  });
+
+  it("accepts a supported logo extension when the MIME hint is empty", async () => {
+    installSupportedRuntime();
+    const source = fakeFile();
+    const logo = fakeFile({ name: "logo.png", type: "" });
+    const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
+      concurrency: 1,
+      logoFile: logo.file,
+    });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("Expected a Worker.");
+
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
+    worker.emit(readyEvent());
+    const configuration = await waitForMessage(worker, "configure-logo");
+    expect((configuration.message as { input: { mimeHint: string } }).input.mimeHint).toBe("");
+    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(source.arrayBuffer).not.toHaveBeenCalled();
+
+    handle.cancel();
+    await handle.result;
   });
 
   it("rejects an unsupported runtime before Worker construction or reading", async () => {
