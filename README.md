@@ -5,6 +5,19 @@ resize, crop, conversion, compression, and text/logo watermarking plus PDF merge
 page organization, text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster
 compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
 
+## Discovery and local state
+
+The home page searches the local tool catalog and can inspect a selected file's bounded signature prefix
+to recommend compatible tools without uploading it or starting processing. `/tools` provides the complete
+searchable and filterable catalog. Favorites and recent tools store only versioned tool IDs in this
+browser, with an in-memory fallback when local storage is unavailable; file contents and filenames are
+never preference data.
+
+Every available processor has a catalog-driven detail page. `file` shells expose a focused file work
+area, while `workspace` shells expose editing controls such as PDF page organization. Each route imports
+only its own workbench, shows the local-execution disclosure, and links to exactly three catalog-owned next
+actions.
+
 ## Development
 
 Requirements:
@@ -16,6 +29,8 @@ Requirements:
 pnpm install --frozen-lockfile
 pnpm dev
 ~~~
+
+The developer server is available at http://127.0.0.1:3000.
 
 Core verification runs formatting/lint checks, TypeScript, unit tests, and a production build:
 
@@ -53,15 +68,17 @@ pnpm cloudflare:preview
 
 The static site is written to apps/web/out.
 
-With that preview running on its default port, exercise the image-watermark and PDF raster smokes:
+With that preview running on its default port, exercise all four tracked release smokes:
 
 ~~~bash
+node scripts/smoke-navigation.mjs http://127.0.0.1:3000
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Omitting the base URL targets the production Pages origin.
+Omitting the base URL targets the production Pages origin. `pnpm smoke:navigation` is the shorthand for
+the production navigation smoke.
 
 ## Deployment
 

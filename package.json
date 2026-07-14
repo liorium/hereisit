@@ -21,6 +21,7 @@
     "test:e2e:ui": "playwright test --ui",
     "verify:all": "pnpm verify && pnpm test:e2e",
     "verify:export": "node scripts/verify-static-export.mjs && node scripts/verify-discovery-imports.mjs && node scripts/verify-discovery-bundles.mjs",
+    "smoke:navigation": "node scripts/smoke-navigation.mjs",
     "cloudflare:preview": "pnpm --filter @hereisit/web start",
     "cloudflare:whoami": "wrangler whoami",
     "cloudflare:login": "wrangler login"
