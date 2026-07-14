@@ -1,0 +1,375 @@
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
+
+export type ToolBundleProfile =
+  | "image"
+  | "image-watermark"
+  | "pdf-editing"
+  | "pdf-to-images"
+  | "pdf-compress-scanned";
+
+export interface SourceFileLimits {
+  minFiles: number;
+  maxFiles: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  constrainedMaxTotalBytes?: number;
+}
+
+export interface ToolNotice {
+  tone: "support" | "warning";
+  text: string;
+}
+
+export interface ToolStep {
+  title: string;
+  description: string;
+}
+
+export type ImageToolIntent = "compress" | "resize" | "convert" | "watermark";
+export type PdfToolIntent =
+  | "merge"
+  | "split"
+  | "organize"
+  | "watermark"
+  | "to-image"
+  | "image-to-pdf"
+  | "compress";
+export type PdfEditingIntent = Exclude<PdfToolIntent, "compress" | "to-image">;
+export type PdfToolIntentClass = "editing" | "pdf-to-images" | "pdf-compress-scanned";
+
+export function isPdfEditingIntent(intent: PdfToolIntent): intent is PdfEditingIntent {
+  return intent !== "compress" && intent !== "to-image";
+}
+
+export interface ToolImplementationConfig {
+  family: "image" | "pdf";
+  bundleProfile: ToolBundleProfile;
+  intent: string;
+  intentClass?: PdfToolIntentClass;
+  sourceFileLimits: SourceFileLimits;
+  eyebrow: string;
+  defaultSummary: string;
+  notices: readonly ToolNotice[];
+  legacyNavLabel: string;
+  legacySteps: readonly [ToolStep, ToolStep, ToolStep];
+}
+
+export type ToolImplementationConfigMap = Readonly<
+  Record<AvailableToolId, ToolImplementationConfig>
+>;
+
+const MEBIBYTE = 1024 * 1024;
+
+const imageSourceFileLimits = {
+  minFiles: 1,
+  maxFiles: 100,
+  maxFileBytes: 50 * MEBIBYTE,
+  maxTotalBytes: 250 * MEBIBYTE,
+} as const;
+
+const pdfEditingSourceFileLimits = {
+  minFiles: 1,
+  maxFiles: 1,
+  maxFileBytes: 50 * MEBIBYTE,
+  maxTotalBytes: 100 * MEBIBYTE,
+  constrainedMaxTotalBytes: 60 * MEBIBYTE,
+} as const;
+
+const pdfSingleFileSourceLimits = {
+  minFiles: 1,
+  maxFiles: 1,
+  maxFileBytes: 50 * MEBIBYTE,
+  maxTotalBytes: 50 * MEBIBYTE,
+} as const;
+
+function defineToolImplementationConfig<
+  const T extends Record<AvailableToolId, ToolImplementationConfig>,
+>(entries: T): Readonly<T> {
+  return Object.freeze(entries);
+}
+
+export const toolImplementationConfig = defineToolImplementationConfig({
+  "image.compress": {
+    family: "image",
+    bundleProfile: "image",
+    intent: "compress",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE COMPRESSOR",
+    defaultSummary:
+      "기본값은 WebP로 변환해 원본보다 작게 만들고, 초고해상도만 최대 5000px로 조정해요.",
+    notices: [{ tone: "support", text: "HEIC 압축은 Safari 17 이상에서 지원해요." }],
+    legacyNavLabel: "용량 줄이기",
+    legacySteps: [
+      { title: "이미지 선택", description: "압축할 이미지를 한 장 또는 여러 장 선택하세요." },
+      {
+        title: "용량 줄이기",
+        description: "기기 안에서 품질을 조정해 원본보다 작은 결과를 찾아요.",
+      },
+      {
+        title: "결과 저장",
+        description: "기본 WebP 결과 한 장은 바로 저장하고 여러 장은 ZIP으로 받아요.",
+      },
+    ],
+  },
+  "image.resize": {
+    family: "image",
+    bundleProfile: "image",
+    intent: "resize",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE RESIZER",
+    defaultSummary: "기본값은 비율을 유지해 긴 변을 최대 1920px로 줄이고 WebP로 저장해요.",
+    notices: [],
+    legacyNavLabel: "크기 조절",
+    legacySteps: [
+      { title: "이미지 선택", description: "크기를 바꿀 사진을 기기에서 선택하세요." },
+      {
+        title: "크기 설정",
+        description: "최대 크기 또는 정사각형 프리셋을 고르고 결과를 확인하세요.",
+      },
+      {
+        title: "결과 저장",
+        description: "원본은 그대로 두고 기본 WebP 결과를 새 파일로 저장해요.",
+      },
+    ],
+  },
+  "image.convert": {
+    family: "image",
+    bundleProfile: "image",
+    intent: "convert",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE CONVERTER",
+    defaultSummary: "기본값은 이미지 크기를 유지하면서 가벼운 WebP 파일로 변환해요.",
+    notices: [{ tone: "support", text: "HEIC 변환은 Safari 17 이상에서 지원해요." }],
+    legacyNavLabel: "형식 변환",
+    legacySteps: [
+      {
+        title: "이미지 선택",
+        description: "형식을 바꿀 이미지를 한 번에 최대 100장 선택하세요.",
+      },
+      {
+        title: "출력 형식 선택",
+        description: "JPG, PNG 또는 WebP 중 필요한 형식과 품질을 골라요.",
+      },
+      { title: "결과 저장", description: "변환이 끝난 파일만 기기에 안전하게 저장해요." },
+    ],
+  },
+  "image.watermark": {
+    family: "image",
+    bundleProfile: "image-watermark",
+    intent: "watermark",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE WATERMARK",
+    defaultSummary:
+      "기본값은 ‘© HereIsIt’ 문구를 오른쪽 아래에 짧은 변의 12% 크기, 3% 여백, 55% 불투명도, #111827 색상으로 넣고 원본 형식(품질 90)으로 저장해요.",
+    notices: [{ tone: "support", text: "HEIC 워터마크는 Safari 17 이상에서 지원해요." }],
+    legacyNavLabel: "이미지 워터마크",
+    legacySteps: [
+      {
+        title: "이미지 선택",
+        description: "워터마크를 넣을 JPG, PNG, WebP 또는 HEIC 이미지를 선택하세요.",
+      },
+      {
+        title: "문구 또는 로고 설정",
+        description: "문구·로고와 위치·크기·여백·불투명도를 원하는 모양으로 정하세요.",
+      },
+      {
+        title: "결과 저장",
+        description: "기본 원본 형식과 품질 90으로 만든 결과를 확인한 뒤 기기에 저장해요.",
+      },
+    ],
+  },
+  "pdf.merge": {
+    family: "pdf",
+    bundleProfile: "pdf-editing",
+    intent: "merge",
+    intentClass: "editing",
+    sourceFileLimits: {
+      ...pdfEditingSourceFileLimits,
+      minFiles: 2,
+      maxFiles: 20,
+    },
+    eyebrow: "PDF MERGER",
+    defaultSummary: "선택한 순서대로 페이지를 이미지로 바꾸지 않고 하나의 PDF로 합쳐요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+      },
+    ],
+    legacyNavLabel: "PDF 합치기",
+    legacySteps: [
+      { title: "PDF 선택", description: "합칠 PDF를 2개 이상 선택하세요." },
+      { title: "순서 정리", description: "위·아래 버튼으로 합쳐질 파일 순서를 정하세요." },
+      { title: "하나로 저장", description: "모든 페이지를 담은 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  "pdf.split": {
+    family: "pdf",
+    bundleProfile: "pdf-editing",
+    intent: "split",
+    intentClass: "editing",
+    sourceFileLimits: pdfEditingSourceFileLimits,
+    eyebrow: "PDF SPLITTER",
+    defaultSummary: "기본값은 각 페이지를 별도 PDF로 나누고 하나의 ZIP으로 저장해요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+      },
+    ],
+    legacyNavLabel: "페이지 분할",
+    legacySteps: [
+      { title: "PDF 선택", description: "나눌 PDF 한 개를 선택하세요." },
+      { title: "방식 선택", description: "페이지별 분리 또는 필요한 페이지 추출을 골라요." },
+      { title: "결과 저장", description: "분할 ZIP이나 추출된 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  "pdf.organize": {
+    family: "pdf",
+    bundleProfile: "pdf-editing",
+    intent: "organize",
+    intentClass: "editing",
+    sourceFileLimits: pdfEditingSourceFileLimits,
+    eyebrow: "PDF ORGANIZER",
+    defaultSummary:
+      "페이지 번호 목록을 기기 안에서 확인한 뒤 순서·회전·삭제 계획대로 새 PDF를 만들어요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+      },
+    ],
+    legacyNavLabel: "페이지 정리",
+    legacySteps: [
+      { title: "PDF 선택", description: "정리할 PDF 한 개를 선택하세요." },
+      {
+        title: "페이지 정리",
+        description: "페이지를 위아래로 옮기고 90도씩 회전하거나 결과에서 빼세요.",
+      },
+      { title: "새 PDF 저장", description: "정리 계획을 적용한 새 PDF를 기기에 저장해요." },
+    ],
+  },
+  "pdf.watermark": {
+    family: "pdf",
+    bundleProfile: "pdf-editing",
+    intent: "watermark",
+    intentClass: "editing",
+    sourceFileLimits: pdfEditingSourceFileLimits,
+    eyebrow: "PDF WATERMARK",
+    defaultSummary:
+      "기본값은 모든 페이지에 ‘대외비’를 18% 불투명도로 가운데에 넣고, 적용 페이지·문구·배치·크기·각도·색상을 바꿀 수 있어요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요. 기존 전자서명도 새 PDF에서 무효화됩니다.",
+      },
+    ],
+    legacyNavLabel: "워터마크",
+    legacySteps: [
+      { title: "PDF 선택", description: "워터마크를 넣을 PDF 한 개를 선택하세요." },
+      {
+        title: "페이지와 모양 설정",
+        description: "적용 페이지·문구·배치·글자 크기·불투명도·각도·색상을 정하세요.",
+      },
+      {
+        title: "새 PDF 저장",
+        description: "선택한 페이지에 워터마크를 넣은 새 PDF를 기기에 저장해요.",
+      },
+    ],
+  },
+  "pdf.image-to-pdf": {
+    family: "pdf",
+    bundleProfile: "pdf-editing",
+    intent: "image-to-pdf",
+    intentClass: "editing",
+    sourceFileLimits: {
+      ...pdfEditingSourceFileLimits,
+      maxFiles: 100,
+    },
+    eyebrow: "IMAGE TO PDF",
+    defaultSummary:
+      "이미지 한 장을 PDF 한 페이지로 넣고 원본 비율과 순서를 유지하며 촬영 위치 정보는 제외해요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.",
+      },
+    ],
+    legacyNavLabel: "이미지→PDF",
+    legacySteps: [
+      { title: "이미지 선택", description: "JPG 또는 PNG 이미지를 최대 100장 선택하세요." },
+      { title: "순서·페이지 설정", description: "페이지 순서와 A4 또는 이미지 맞춤을 골라요." },
+      { title: "PDF 저장", description: "모든 이미지를 담은 PDF 한 개를 기기에 저장해요." },
+    ],
+  },
+  "pdf.to-image": {
+    family: "pdf",
+    bundleProfile: "pdf-to-images",
+    intent: "to-image",
+    intentClass: "pdf-to-images",
+    sourceFileLimits: pdfSingleFileSourceLimits,
+    eyebrow: "PDF TO IMAGE",
+    defaultSummary:
+      "기본값은 모든 페이지를 150DPI JPG(품질 85)로 만들고, 한 장은 이미지로 여러 장은 ZIP으로 저장해요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "결과는 래스터 이미지라 텍스트를 검색하거나 선택할 수 없고, 주석·양식 모양은 평면화되며 색상 프로필이 달라질 수 있어요.",
+      },
+    ],
+    legacyNavLabel: "PDF→이미지",
+    legacySteps: [
+      { title: "PDF 선택", description: "변환할 PDF 한 개를 기기에서 선택하세요." },
+      {
+        title: "변환 설정",
+        description: "페이지·JPG/PNG·해상도와 JPG 품질을 정하세요.",
+      },
+      { title: "이미지 저장", description: "한 장은 이미지로, 여러 장은 ZIP으로 저장해요." },
+    ],
+  },
+  "pdf.compress-scanned": {
+    family: "pdf",
+    bundleProfile: "pdf-compress-scanned",
+    intent: "compress",
+    intentClass: "pdf-compress-scanned",
+    sourceFileLimits: pdfSingleFileSourceLimits,
+    eyebrow: "PDF COMPRESSOR",
+    defaultSummary:
+      "기본값은 모든 페이지를 추천 150DPI로 다시 만들고, 원본보다 1% 이상 작을 때만 새 PDF를 제공해요.",
+    notices: [
+      {
+        tone: "warning",
+        text: "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.",
+      },
+    ],
+    legacyNavLabel: "PDF 용량 줄이기",
+    legacySteps: [
+      { title: "PDF 선택", description: "용량을 줄일 PDF 한 개를 선택하세요." },
+      {
+        title: "압축 수준 선택",
+        description: "균형 150DPI 또는 최소 용량 96DPI를 골라요.",
+      },
+      {
+        title: "새 PDF 저장",
+        description: "원본보다 최소 1% 작을 때만 새 PDF를 저장해요.",
+      },
+    ],
+  },
+} as const satisfies Record<AvailableToolId, ToolImplementationConfig>);
+
+export function getToolImplementation<const Id extends AvailableToolId>(
+  id: Id,
+): (typeof toolImplementationConfig)[Id] {
+  const implementation = toolImplementationConfig[id];
+  if (implementation === undefined) throw new Error(`Missing tool implementation: ${id}`);
+  return implementation;
+}
+
+const pdfCompressScannedWarning = toolImplementationConfig["pdf.compress-scanned"].notices.find(
+  ({ tone }) => tone === "warning",
+);
+if (pdfCompressScannedWarning === undefined) {
+  throw new Error("Missing scanned PDF compression warning");
+}
+
+export const PDF_COMPRESS_SCANNED_WARNING = pdfCompressScannedWarning.text;

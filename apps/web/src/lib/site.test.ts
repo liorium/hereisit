@@ -1,3 +1,8 @@
+import {
+  type AvailableToolId,
+  availableToolEntries,
+  getAvailableToolById,
+} from "@hereisit/tool-registry/catalog";
 import { describe, expect, it } from "vitest";
 import {
   imageToolList,
@@ -7,6 +12,35 @@ import {
   pdfTools,
   relatedImageTools,
 } from "./site";
+import {
+  getToolImplementation,
+  type ToolImplementationConfig,
+  toolImplementationConfig,
+} from "./tool-implementations";
+
+const completeToolImplementationConfig = toolImplementationConfig satisfies Record<
+  AvailableToolId,
+  ToolImplementationConfig
+>;
+
+describe("tool identity ownership", () => {
+  it("defines implementation data for every available catalog tool", () => {
+    expect(Object.keys(completeToolImplementationConfig).sort()).toEqual(
+      availableToolEntries.map((tool) => tool.id).sort(),
+    );
+
+    for (const tool of availableToolEntries) {
+      const limits = getToolImplementation(tool.id).sourceFileLimits;
+      expect(tool.launcherInput?.minFiles ?? 0).toBe(limits.minFiles);
+      expect(tool.launcherInput?.maxFiles ?? 0).toBe(limits.maxFiles);
+    }
+  });
+
+  it("derives legacy tool identity from the catalog", () => {
+    expect(imageTools.compress.path).toBe(getAvailableToolById("image.compress").route);
+    expect(pdfTools.merge.description).toBe(getAvailableToolById("pdf.merge").shortDescription);
+  });
+});
 
 describe("image tool registry", () => {
   it("registers the image watermark route and approved defaults", () => {

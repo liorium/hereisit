@@ -1,17 +1,18 @@
+import type { AvailableToolEntry } from "@hereisit/tool-registry/catalog";
 import type { Metadata } from "next";
-import { type ImageToolConfig, type PdfToolConfig, SITE_NAME, SITE_URL } from "./site";
+import { SITE_NAME, SITE_URL } from "./site-identity";
 
-export function createToolMetadata(tool: ImageToolConfig | PdfToolConfig): Metadata {
-  const canonical = new URL(tool.path, SITE_URL).toString();
-  const socialTitle = `${tool.title} | ${SITE_NAME}`;
+export function createToolMetadata(tool: AvailableToolEntry): Metadata {
+  const canonical = new URL(tool.route, SITE_URL).toString();
+  const socialTitle = `${tool.name} | ${SITE_NAME}`;
 
   return {
-    title: tool.title,
-    description: tool.description,
+    title: tool.name,
+    description: tool.shortDescription,
     alternates: { canonical },
     openGraph: {
       title: socialTitle,
-      description: tool.description,
+      description: tool.shortDescription,
       url: canonical,
       siteName: SITE_NAME,
       type: "website",
@@ -20,9 +21,7 @@ export function createToolMetadata(tool: ImageToolConfig | PdfToolConfig): Metad
     twitter: {
       card: "summary",
       title: socialTitle,
-      description: tool.description,
+      description: tool.shortDescription,
     },
   };
 }
-
-export const createImageToolMetadata = createToolMetadata;
