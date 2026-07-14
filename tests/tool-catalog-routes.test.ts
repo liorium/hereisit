@@ -27,13 +27,15 @@ it("derives static-export tool pages and bundle profiles from authored data", as
     "utf8",
   );
 
-  expect(source).toContain(
-    'import { availableToolEntries } from "../packages/tool-registry/src/tool-catalog.ts";',
+  expect(source).toMatch(
+    /import\s*\{[^}]*availableToolEntries[^}]*plannedToolEntries[^}]*\}\s*from "\.\.\/packages\/tool-registry\/src\/tool-catalog\.ts";/,
   );
   expect(source).toContain(
     'import { toolImplementationConfig } from "../apps/web/src/lib/tool-implementations.ts";',
   );
   expect(source).toContain("bundleProfile: toolImplementationConfig[tool.id].bundleProfile");
+  expect(source).toContain("const plannedRouteFiles = plannedToolEntries.map");
+  expect(source).toContain("file: routeHtmlFile(tool.route)");
   expect(source).not.toMatch(/const toolPages\s*=\s*\[/);
   expect(source).not.toMatch(/toolPages\.length\s*,\s*11/);
 });

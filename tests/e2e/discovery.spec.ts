@@ -1,3 +1,4 @@
+import { availableToolEntries } from "@hereisit/tool-registry/catalog";
 import { expect, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
 
@@ -41,6 +42,297 @@ test.beforeEach(async ({ page }) => {
       ]),
     );
   });
+});
+
+test("restores the complete tools catalog state from a shareable URL", async ({ page }) => {
+  await page.goto("/tools?q=png&domain=image&purpose=convert&planned=1");
+
+  await expect(page.getByRole("heading", { level: 1, name: "모든 도구" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("png");
+  await expect(
+    page
+      .getByRole("tablist", { name: "도구 분야" })
+      .getByRole("tab", { name: "이미지", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("group", { name: "작업 목적" }).getByRole("button", { name: "변환" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("checkbox", { name: "준비 중인 도구 포함" })).toBeChecked();
+  await expect(page.locator('link[rel="canonical"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://hereisit.pages.dev/tools",
+  );
+});
+
+test("uses replace for catalog typing and pushed history for explicit filters", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const trackedWindow = window as Window & {
+      __hereisitHistoryCalls?: { push: number; replace: number };
+    };
+    trackedWindow.__hereisitHistoryCalls = { push: 0, replace: 0 };
+    const originalPushState = window.history.pushState.bind(window.history);
+    const originalReplaceState = window.history.replaceState.bind(window.history);
+    window.history.pushState = (...args) => {
+      if (trackedWindow.__hereisitHistoryCalls) trackedWindow.__hereisitHistoryCalls.push += 1;
+      return originalPushState(...args);
+    };
+    window.history.replaceState = (...args) => {
+      if (trackedWindow.__hereisitHistoryCalls) trackedWindow.__hereisitHistoryCalls.replace += 1;
+      return originalReplaceState(...args);
+    };
+  });
+  await page.goto("/tools");
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & {
+      __hereisitHistoryCalls?: { push: number; replace: number };
+    };
+    trackedWindow.__hereisitHistoryCalls = { push: 0, replace: 0 };
+  });
+
+  const input = page.getByRole("combobox", { name: "도구 검색" });
+  await input.fill("png");
+  await expect(page).toHaveURL(/\/tools\?q=png$/);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __hereisitHistoryCalls?: { push: number; replace: number };
+            }
+          ).__hereisitHistoryCalls,
+      ),
+    )
+    .toMatchObject({ push: 0, replace: 1 });
+
+  await page
+    .getByRole("tablist", { name: "도구 분야" })
+    .getByRole("tab", { name: "이미지", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/tools\?q=png&domain=image$/);
+  await page
+    .getByRole("group", { name: "작업 목적" })
+    .getByRole("button", { name: "변환" })
+    .click();
+  await expect(page).toHaveURL(/\/tools\?q=png&domain=image&purpose=convert$/);
+  await page.getByRole("checkbox", { name: "준비 중인 도구 포함" }).click();
+  await expect(page).toHaveURL(/\/tools\?q=png&domain=image&purpose=convert&planned=1$/);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __hereisitHistoryCalls?: { push: number; replace: number };
+            }
+          ).__hereisitHistoryCalls?.push,
+      ),
+    )
+    .toBe(3);
+
+  await page.goBack();
+  await expect(page.getByRole("checkbox", { name: "준비 중인 도구 포함" })).not.toBeChecked();
+  await expect(input).toHaveValue("png");
+  await page.goBack();
+  await expect(
+    page.getByRole("group", { name: "작업 목적" }).getByRole("button", { name: "전체" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page
+      .getByRole("tablist", { name: "도구 분야" })
+      .getByRole("tab", { name: "이미지", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  await page.goForward();
+  await expect(
+    page.getByRole("group", { name: "작업 목적" }).getByRole("button", { name: "변환" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(input).toHaveValue("png");
+});
+
+test("recovers invalid catalog values and resets an empty AND-filtered result", async ({
+  page,
+}) => {
+  await page.goto("/tools?q=%20%EB%B3%91%ED%95%A9%20&domain=bogus&purpose=convert&planned=true");
+
+  await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("병합");
+  await expect(
+    page
+      .getByRole("tablist", { name: "도구 분야" })
+      .getByRole("tab", { name: "전체·추천", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("group", { name: "작업 목적" }).getByRole("button", { name: "변환" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("checkbox", { name: "준비 중인 도구 포함" })).not.toBeChecked();
+  await expect(page.getByText("검색 결과 0개", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("available-tool-grid")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "모든 필터 초기화" }).click();
+  await expect(page).toHaveURL(/\/tools$/);
+  await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
+  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(11);
+  await expect(page.getByText("검색 결과 11개", { exact: true })).toBeVisible();
+});
+
+test("keeps planned catalog results in a separate inert region", async ({ page }) => {
+  await page.goto("/tools?domain=media&purpose=optimize&planned=1");
+
+  const availableRegion = page.getByRole("region", { name: "사용 가능한 도구" });
+  const plannedRegion = page.getByRole("region", { name: "준비 중인 도구" });
+  await expect(availableRegion.locator("article")).toHaveCount(0);
+  await expect(plannedRegion).toBeVisible();
+  await expect(plannedRegion.locator("article")).toHaveCount(1);
+  await expect(plannedRegion.getByRole("heading", { name: "동영상 용량 줄이기" })).toBeVisible();
+  await expect(plannedRegion.getByText("준비 중", { exact: true })).toBeVisible();
+  await expect(plannedRegion.locator("a, button")).toHaveCount(0);
+
+  await page.getByRole("checkbox", { name: "준비 중인 도구 포함" }).click();
+  await expect(page).toHaveURL(/\/tools\?domain=media&purpose=optimize$/);
+  await expect(page.getByRole("region", { name: "준비 중인 도구" })).toHaveCount(0);
+});
+
+test("wraps catalog domain and purpose controls without horizontal overflow", async ({ page }) => {
+  await page.goto("/tools");
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+
+  const columnCount = () =>
+    tablist.evaluate(
+      (element) => getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+    );
+  expect(await columnCount()).toBe(8);
+  await page.setViewportSize({ width: 900, height: 900 });
+  expect(await columnCount()).toBe(4);
+  expect(
+    await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    })),
+  ).toMatchObject({ clientWidth: 900, scrollWidth: 900 });
+  await page.setViewportSize({ width: 340, height: 900 });
+  expect(await columnCount()).toBe(2);
+  expect(
+    await page
+      .getByRole("group", { name: "작업 목적" })
+      .evaluate(
+        (element) =>
+          new Set(
+            Array.from(element.children, (child) =>
+              Math.round((child as HTMLElement).getBoundingClientRect().top),
+            ),
+          ).size,
+      ),
+  ).toBeGreaterThan(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+});
+
+test("shows newest-first personal tools and updates favorites with ID-only storage", async ({
+  page,
+}) => {
+  await page.goto("/my-tools");
+
+  await expect(page.getByRole("heading", { level: 1, name: "내 도구" })).toBeVisible();
+  const recentRegion = page.getByRole("region", { name: "최근 사용한 도구" });
+  await expect(recentRegion.locator("article")).toHaveCount(5);
+  await expect(recentRegion.locator("article").first()).toContainText("PDF 워터마크 넣기");
+
+  await recentRegion
+    .locator("article")
+    .first()
+    .getByRole("button", { name: "즐겨찾기 추가" })
+    .click();
+  const favoriteRegion = page.getByRole("region", { name: "즐겨찾는 도구" });
+  await expect(favoriteRegion.locator("article")).toHaveCount(1);
+  await expect(favoriteRegion.locator("article").first()).toContainText("PDF 워터마크 넣기");
+
+  const stored = await page.evaluate(() => ({
+    favorites: JSON.parse(window.localStorage.getItem("hereisit.favorite-tools.v1") ?? "null"),
+    recent: JSON.parse(window.localStorage.getItem("hereisit.recent-tools.v1") ?? "null"),
+  }));
+  expect(stored).toEqual({
+    favorites: ["pdf.watermark"],
+    recent: ["pdf.watermark", "pdf.organize", "image.watermark", "pdf.split", "pdf.merge"],
+  });
+  expect([...stored.favorites, ...stored.recent]).toHaveLength(6);
+  expect([...stored.favorites, ...stored.recent].every((value) => typeof value === "string")).toBe(
+    true,
+  );
+
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://hereisit.pages.dev/my-tools",
+  );
+});
+
+test("keeps an empty personal page useful when browser storage is denied", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage denied", "SecurityError");
+      },
+    });
+  });
+  await page.goto("/my-tools");
+
+  await expect(page.getByRole("status")).toContainText("이 탭에서만 목록을 기억해요");
+  await expect(page.getByRole("status")).toContainText("도구 검색과 파일 처리는 그대로");
+  await expect(page.getByRole("heading", { name: "아직 모아 둔 도구가 없어요." })).toBeVisible();
+  const emptyState = page.getByRole("region", { name: "아직 모아 둔 도구가 없어요." });
+  expect(await emptyState.getByRole("link").count()).toBeGreaterThan(1);
+  await expect(emptyState.getByRole("link", { name: "모든 도구 보기" })).toHaveAttribute(
+    "href",
+    "/tools",
+  );
+  await expect(page.getByRole("button", { name: "검색", exact: true })).toBeVisible();
+
+  await emptyState.getByRole("link", { name: "이미지 용량 줄이기" }).click();
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+});
+
+test("presents workflows as honest preparation-only examples", async ({ page }) => {
+  await page.goto("/workflows");
+
+  const content = page.getByRole("region", { name: "워크플로" });
+  await expect(content.getByRole("heading", { level: 1, name: "워크플로" })).toBeVisible();
+  await expect(content.getByText(/파일을 직접 내려받고 다음 도구에서 다시 선택/)).toBeVisible();
+  await expect(content.getByText(/명시적인 로컬 연결.*앞으로 제공/)).toBeVisible();
+
+  const examples = content.locator('[data-testid="workflow-example"]');
+  expect(await examples.count()).toBeGreaterThan(1);
+  const availableRoutes = new Set(availableToolEntries.map((tool) => tool.route));
+  for (const example of await examples.all()) {
+    await expect(example.getByText("준비 중", { exact: true })).toBeVisible();
+    expect(await example.locator("a").count()).toBeGreaterThan(0);
+    for (const link of await example.locator("a").all()) {
+      expect(availableRoutes.has((await link.getAttribute("href")) ?? "")).toBe(true);
+    }
+    await expect(
+      example.locator("button, form, input, select, textarea, [role=button]"),
+    ).toHaveCount(0);
+    await expect(example.locator("[disabled]")).toHaveCount(0);
+  }
+  await expect(content.getByText(/바로 실행|한 번에 완료|자동으로 처리/)).toHaveCount(0);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://hereisit.pages.dev/workflows",
+  );
+});
+
+test("publishes only the indexable discovery route in the sitemap", async ({ request }) => {
+  const response = await request.get("/sitemap.xml");
+  expect(response.ok()).toBe(true);
+  const sitemap = await response.text();
+  expect(sitemap).toContain("<loc>https://hereisit.pages.dev/tools</loc>");
+  expect(sitemap).not.toContain("/my-tools");
+  expect(sitemap).not.toContain("/workflows");
+  expect(sitemap).not.toContain("/media/video-compress");
 });
 
 test("shows a processor-free discovery home with search, file launch, and attached tabs", async ({

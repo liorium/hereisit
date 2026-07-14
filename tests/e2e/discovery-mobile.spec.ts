@@ -10,6 +10,36 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("keeps catalog filters and two-column cards inside the mobile viewport", async ({ page }) => {
+  await page.goto("/tools?planned=1");
+
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  await expect(tablist.getByRole("tab")).toHaveCount(8);
+  expect(
+    await tablist.evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+    ),
+  ).toHaveLength(2);
+
+  const cards = page.getByTestId("available-tool-grid").locator("article");
+  expect(await cards.count()).toBeGreaterThan(1);
+  const firstCard = await cards.nth(0).boundingBox();
+  const secondCard = await cards.nth(1).boundingBox();
+  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+  expect(
+    await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    })),
+  ).toMatchObject({ clientWidth: 393, scrollWidth: 393 });
+
+  await page.setViewportSize({ width: 340, height: 844 });
+  const narrowFirst = await cards.nth(0).boundingBox();
+  const narrowSecond = await cards.nth(1).boundingBox();
+  expect((narrowSecond?.y ?? 0) - (narrowFirst?.y ?? 0)).toBeGreaterThan(20);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+});
+
 test("keeps the home launcher, two-column tabs, and cards inside the mobile viewport", async ({
   page,
 }) => {

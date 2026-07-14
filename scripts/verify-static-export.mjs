@@ -3,7 +3,10 @@ import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toolImplementationConfig } from "../apps/web/src/lib/tool-implementations.ts";
-import { availableToolEntries } from "../packages/tool-registry/src/tool-catalog.ts";
+import {
+  availableToolEntries,
+  plannedToolEntries,
+} from "../packages/tool-registry/src/tool-catalog.ts";
 
 const PDFJS_VERSION = "6.1.200";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,12 +29,25 @@ const REMOTE_URL_PATTERN = /https?:\/\/[^"'`\s<>()\\]+/gi;
 const PDFJS_REMOTE_ASSET_PATTERN =
   /(?:pdfjs(?:-dist)?|pdf\.js|pdf\.worker(?:\.min)?\.mjs|\/cmaps\/|\/standard_fonts\/)/i;
 
+function routeHtmlFile(route) {
+  return `${route.replace(/^\/+|\/+$/g, "")}.html`;
+}
+
 const toolPages = availableToolEntries.map((tool) => ({
-  file: `${tool.route.slice(1)}.html`,
+  file: routeHtmlFile(tool.route),
   path: tool.route,
   title: tool.name,
   description: tool.shortDescription,
   bundleProfile: toolImplementationConfig[tool.id].bundleProfile,
+}));
+const discoveryPages = [
+  { file: routeHtmlFile("/tools"), path: "/tools", indexable: true },
+  { file: routeHtmlFile("/my-tools"), path: "/my-tools", indexable: false },
+  { file: routeHtmlFile("/workflows"), path: "/workflows", indexable: false },
+];
+const plannedRouteFiles = plannedToolEntries.map((tool) => ({
+  file: routeHtmlFile(`/${tool.id.replaceAll(".", "/")}`),
+  path: `/${tool.id.replaceAll(".", "/")}`,
 }));
 
 const ALL_PROCESSING_MARKERS = [
@@ -164,16 +180,22 @@ await Promise.all([
   access(path.join(outputRoot, "sitemap.xml")),
   access(path.join(outputRoot, "robots.txt")),
   access(path.join(pdfjsOutputRoot, "pdf.worker.min.mjs")),
+  ...discoveryPages.map((page) => access(path.join(outputRoot, page.file))),
   ...toolPages.map((tool) => access(path.join(outputRoot, tool.file))),
 ]);
 
-const [html, headers, sitemap, robots, ...toolHtmlPages] = await Promise.all([
+const [html, headers, sitemap, robots] = await Promise.all([
   readFile(path.join(outputRoot, "index.html"), "utf8"),
   readFile(path.join(outputRoot, "_headers"), "utf8"),
   readFile(path.join(outputRoot, "sitemap.xml"), "utf8"),
   readFile(path.join(outputRoot, "robots.txt"), "utf8"),
-  ...toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 ]);
+const discoveryHtmlPages = await Promise.all(
+  discoveryPages.map((page) => readFile(path.join(outputRoot, page.file), "utf8")),
+);
+const toolHtmlPages = await Promise.all(
+  toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
+);
 assert.match(html, /파일 작업/);
 assert.match(html, /href="\/image\/compress"/);
 assert.match(html, /href="\/pdf\/merge"/);
@@ -189,9 +211,45 @@ for (const [index, tool] of toolPages.entries()) {
   assert.ok(sitemap.includes(`<loc>https://hereisit.pages.dev${tool.path}</loc>`));
 }
 
+for (const [index, page] of discoveryPages.entries()) {
+  const pageHtml = discoveryHtmlPages[index];
+  assert.ok(pageHtml, `Missing exported HTML for ${page.path}`);
+  assert.ok(
+    pageHtml.includes(`rel="canonical" href="https://hereisit.pages.dev${page.path}"`),
+    `${page.path} must have one fixed canonical URL.`,
+  );
+  if (page.indexable) {
+    assert.ok(
+      sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      `${page.path} must be present in the sitemap.`,
+    );
+  } else {
+    assert.ok(
+      pageHtml.includes('name="robots" content="noindex, follow"'),
+      `${page.path} must be noindex,follow.`,
+    );
+    assert.ok(
+      !sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      `${page.path} must stay out of the sitemap.`,
+    );
+  }
+}
+assert.match(
+  sitemap,
+  /<loc>https:\/\/hereisit\.pages\.dev\/tools<\/loc>\s*<changefreq>weekly<\/changefreq>\s*<priority>0\.8<\/priority>/,
+);
+
+for (const plannedRoute of plannedRouteFiles) {
+  await assert.rejects(access(path.join(outputRoot, plannedRoute.file)), { code: "ENOENT" });
+  assert.ok(
+    !sitemap.includes(`<loc>https://hereisit.pages.dev${plannedRoute.path}</loc>`),
+    `${plannedRoute.path} must not be published before it is available.`,
+  );
+}
+
 assert.match(robots, /Sitemap: https:\/\/hereisit\.pages\.dev\/sitemap\.xml/);
 
-const exportedHtml = [html, ...toolHtmlPages].join("\n");
+const exportedHtml = [html, ...discoveryHtmlPages, ...toolHtmlPages].join("\n");
 const assetPaths = Array.from(
   new Set(
     Array.from(
@@ -245,6 +303,11 @@ assertSameRelativeFiles(sourceStandardFonts, exportedStandardFonts, "PDF.js stan
 
 const javaScriptInventory = await createJavaScriptInventory();
 const homeClosure = collectRouteClosure(html, javaScriptInventory);
+const discoveryClosures = discoveryPages.map((page, index) => {
+  const pageHtml = discoveryHtmlPages[index];
+  assert.ok(pageHtml !== undefined, `The ${page.path} route must have exported HTML.`);
+  return { page, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
+});
 const routeClosures = toolPages.map((tool, index) => {
   const pageHtml = toolHtmlPages[index];
   assert.ok(pageHtml !== undefined, `The ${tool.path} route must have exported HTML.`);
@@ -256,6 +319,12 @@ assertClosureLacks(
   IMAGE_WATERMARK_WORKER_MARKER,
   "The home route loaded the image watermark Worker.",
 );
+
+for (const { page, closure } of discoveryClosures) {
+  for (const marker of ALL_PROCESSING_MARKERS) {
+    assertClosureLacks(closure, marker, `${page.path} unexpectedly loaded ${marker}.`);
+  }
+}
 
 for (const { tool, closure } of routeClosures) {
   const required = bundleProfileMarkers[tool.bundleProfile];
