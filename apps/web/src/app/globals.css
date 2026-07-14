@@ -30,6 +30,10 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+main {
+  min-width: 0;
+}
+
 button,
 input,
 select {

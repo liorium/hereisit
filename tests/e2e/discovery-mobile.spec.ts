@@ -10,6 +10,42 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("keeps the home launcher, two-column tabs, and cards inside the mobile viewport", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
+  const tabs = page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab");
+  await expect(tabs).toHaveCount(8);
+  const columns = await page
+    .getByRole("tablist", { name: "도구 분야" })
+    .evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+    );
+  expect(columns).toHaveLength(2);
+  expect(
+    await tabs.evaluateAll(
+      (elements) =>
+        new Set(elements.map((element) => Math.round(element.getBoundingClientRect().top))).size,
+    ),
+  ).toBe(4);
+
+  const panel = page.getByRole("tabpanel");
+  await expect(panel).toBeAttached();
+  const cards = panel.locator("article");
+  expect(await cards.count()).toBeGreaterThan(1);
+  const firstCard = await cards.nth(0).boundingBox();
+  const secondCard = await cards.nth(1).boundingBox();
+  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});
+
 test("opens one modal mobile drawer with trapped focus and inert background", async ({ page }) => {
   await page.goto("/");
 

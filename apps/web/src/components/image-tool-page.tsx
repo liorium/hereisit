@@ -1,7 +1,9 @@
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import type { ReactNode } from "react";
 import { type ImageToolConfig, type ImageToolIntent, relatedImageTools } from "../lib/site";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
+import { ToolVisitTracker } from "./tool-visit-tracker";
 
 type ImageToolConfigFor<Intent extends ImageToolIntent> = Omit<
   ImageToolConfig,
@@ -14,23 +16,26 @@ type ImageToolConfigFor<Intent extends ImageToolIntent> = Omit<
 type ImageToolPageProps =
   | {
       tool: ImageToolConfigFor<"watermark">;
+      toolId: AvailableToolId;
       imageWorkbench?: never;
       imageWatermarkWorkbench: ReactNode;
     }
   | {
       tool: ImageToolConfigFor<Exclude<ImageToolIntent, "watermark">>;
+      toolId: AvailableToolId;
       imageWorkbench: ReactNode;
       imageWatermarkWorkbench?: never;
     };
 
 export function ImageToolPage(props: ImageToolPageProps) {
-  const { tool } = props;
+  const { tool, toolId } = props;
   const relatedTools = relatedImageTools(tool.intent);
   const workbench =
     tool.intent === "watermark" ? props.imageWatermarkWorkbench : props.imageWorkbench;
 
   return (
     <main>
+      <ToolVisitTracker toolId={toolId} />
       <SiteHeader activePath={tool.path} />
 
       <section className="tool-hero" aria-labelledby="tool-title">

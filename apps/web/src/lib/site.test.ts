@@ -14,6 +14,7 @@ import {
 } from "./site";
 import {
   getToolImplementation,
+  type ToolBundleProfile,
   type ToolImplementationConfig,
   toolImplementationConfig,
 } from "./tool-implementations";
@@ -34,6 +35,40 @@ describe("tool identity ownership", () => {
       expect(tool.launcherInput?.minFiles ?? 0).toBe(limits.minFiles);
       expect(tool.launcherInput?.maxFiles ?? 0).toBe(limits.maxFiles);
     }
+  });
+
+  it("maps every available ID to one explicit intent and workbench profile", () => {
+    const expected = {
+      "image.compress": { intent: "compress", bundleProfile: "image" },
+      "image.resize": { intent: "resize", bundleProfile: "image" },
+      "image.convert": { intent: "convert", bundleProfile: "image" },
+      "image.watermark": { intent: "watermark", bundleProfile: "image-watermark" },
+      "pdf.merge": { intent: "merge", bundleProfile: "pdf-editing" },
+      "pdf.split": { intent: "split", bundleProfile: "pdf-editing" },
+      "pdf.organize": { intent: "organize", bundleProfile: "pdf-editing" },
+      "pdf.watermark": { intent: "watermark", bundleProfile: "pdf-editing" },
+      "pdf.image-to-pdf": { intent: "image-to-pdf", bundleProfile: "pdf-editing" },
+      "pdf.to-image": { intent: "to-image", bundleProfile: "pdf-to-images" },
+      "pdf.compress-scanned": {
+        intent: "compress",
+        bundleProfile: "pdf-compress-scanned",
+      },
+    } satisfies Record<AvailableToolId, { intent: string; bundleProfile: ToolBundleProfile }>;
+
+    expect(
+      Object.fromEntries(
+        availableToolEntries.map(({ id }) => {
+          const implementation = getToolImplementation(id);
+          return [
+            id,
+            {
+              intent: implementation.intent,
+              bundleProfile: implementation.bundleProfile,
+            },
+          ];
+        }),
+      ),
+    ).toEqual(expected);
   });
 
   it("derives legacy tool identity from the catalog", () => {

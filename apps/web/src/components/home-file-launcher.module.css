@@ -1,0 +1,239 @@
+.section {
+  width: min(1280px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 34px 0 66px;
+}
+
+.heading {
+  max-width: 760px;
+  margin-bottom: 24px;
+}
+
+.heading h2 {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.06;
+  letter-spacing: -0.055em;
+}
+
+.heading > p:last-child {
+  margin: 16px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.dropzone {
+  min-width: 0;
+  min-height: 220px;
+  padding: 34px 24px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  border: 2px dashed color-mix(in srgb, var(--blue) 50%, var(--line));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 80%, var(--paper));
+  text-align: center;
+}
+
+.dropzone[data-dragging="true"] {
+  border-style: solid;
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, var(--panel));
+}
+
+.dropzone > strong {
+  font-size: 22px;
+  letter-spacing: -0.035em;
+}
+
+.dropzone > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.selectButton {
+  min-width: 124px;
+  min-height: 48px;
+  padding: 0 18px;
+  margin-top: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.status,
+.correction {
+  margin: 14px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.status {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.correction {
+  padding: 12px 14px;
+  border-left: 3px solid var(--red);
+  background: color-mix(in srgb, var(--red) 5%, var(--panel));
+  color: var(--red);
+}
+
+.results {
+  margin-top: 24px;
+  display: grid;
+  gap: 18px;
+}
+
+.group {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.groupHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.groupHeading h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.groupHeading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.recommendations {
+  display: grid;
+  gap: 10px;
+}
+
+.recommendation {
+  min-width: 0;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.recommendation > div {
+  min-width: 0;
+}
+
+.recommendation p {
+  margin: 5px 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.recommendation small {
+  color: var(--green);
+  font-weight: 750;
+}
+
+.recommendation small[data-readiness="too-many"] {
+  color: var(--red);
+}
+
+.recommendation button,
+.secondaryActions button,
+.secondaryActions a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.recommendation button {
+  flex: none;
+}
+
+.recommendation button:disabled {
+  border-color: var(--line);
+  background: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.secondaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.secondaryActions button,
+.secondaryActions a {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.errorSummary {
+  margin-top: 16px;
+  padding: 14px;
+  border: 2px solid var(--red);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--red);
+  font-weight: 800;
+}
+
+@media (max-width: 800px) {
+  .section {
+    width: min(100% - 32px, 640px);
+    padding: 24px 0 52px;
+  }
+
+  .dropzone {
+    min-height: 190px;
+    padding: 26px 16px;
+  }
+
+  .recommendation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recommendation button {
+    width: 100%;
+  }
+}

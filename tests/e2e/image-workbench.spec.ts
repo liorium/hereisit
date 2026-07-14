@@ -39,10 +39,10 @@ async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
 }
 
 test("processes and downloads an image without external uploads", async ({ page }) => {
-  const response = await page.goto("/");
+  const response = await page.goto("/image/convert");
   expect(response?.headers()["content-security-policy"]).toContain("connect-src 'self'");
-  await expect(page.getByRole("heading", { name: "파일 작업, 여기서 끝." })).toBeVisible();
-  const uploadButton = page.getByRole("button", { name: "이미지 선택" });
+  await expect(page.getByRole("heading", { name: "이미지 형식 변환" })).toBeVisible();
+  const uploadButton = page.getByRole("button", { name: "변환할 이미지 선택" });
   const fileInput = page.locator("input[type=file]");
   await expect(uploadButton).toBeEnabled();
   await expect(fileInput).toBeEnabled();
@@ -81,7 +81,7 @@ test("processes and downloads an image without external uploads", async ({ page 
   });
 
   await expect(page.getByText("sample.png")).toBeVisible();
-  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
 
   await expect(
     page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
@@ -99,7 +99,7 @@ test("processes and downloads an image without external uploads", async ({ page 
 
   await page.getByLabel("출력 형식").selectOption("png");
   await expect(saveButton).toBeHidden();
-  await expect(page.getByRole("button", { name: "1개 이미지 변환 →" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1개 이미지 형식 변환 →" })).toBeVisible();
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -112,23 +112,23 @@ test("processes and downloads an image without external uploads", async ({ page 
 });
 
 test("reaches the upload action through the real tab order", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/image/convert");
   const homeLink = page.getByRole("link", { name: "HereIsIt 홈" });
-  const uploadButton = page.getByRole("button", { name: "이미지 선택" });
+  const uploadButton = page.getByRole("button", { name: "변환할 이미지 선택" });
   await expect(uploadButton).toBeEnabled();
 
   await page.keyboard.press("Tab");
   await expect(homeLink).toBeFocused();
-  for (const name of ["이미지", "PDF"]) {
+  let reachedUpload = false;
+  for (let index = 0; index < 12 && !reachedUpload; index += 1) {
     await page.keyboard.press("Tab");
-    await expect(page.getByRole("link", { name, exact: true })).toBeFocused();
+    reachedUpload = await uploadButton.evaluate((element) => document.activeElement === element);
   }
-  await page.keyboard.press("Tab");
-  await expect(uploadButton).toBeFocused();
+  expect(reachedUpload).toBe(true);
 });
 
 test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/image/compress");
   const input = await createPhotoLikeJpeg(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "photo.jpg",
@@ -137,7 +137,7 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
   });
 
   await page.getByRole("button", { name: /용량만 줄이기/ }).click();
-  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   await expect(
     page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
@@ -155,7 +155,7 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
 });
 
 test("does not produce a larger result in the size-only flow", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/image/compress");
   const fileInput = page.locator("input[type=file]");
   await fileInput.setInputFiles({
     name: "tiny.png",
@@ -171,7 +171,7 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   await expect(page.locator("input[type=range]")).toHaveValue("82");
   await page.getByLabel("출력 형식").selectOption("png");
 
-  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   await expect(
     page.getByRole("status").getByText("이미 충분히 작아 더 줄이지 못했어요.", {
       exact: true,
@@ -202,13 +202,13 @@ test("uses the device share sheet for one result when files are supported", asyn
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/image/convert");
   await page.locator("input[type=file]").setInputFiles({
     name: "share.png",
     mimeType: "image/png",
     buffer: onePixelPng,
   });
-  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
   await expect(
     page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
   ).toBeVisible({
@@ -230,7 +230,7 @@ test("uses the device share sheet for one result when files are supported", asyn
 });
 
 test("accepts a real HEIC file without uploading it", async ({ page, browserName }) => {
-  await page.goto("/");
+  await page.goto("/image/convert");
   const origin = new URL(page.url()).origin;
   const unexpectedRequests: string[] = [];
   page.on("request", (request) => {
@@ -251,7 +251,7 @@ test("accepts a real HEIC file without uploading it", async ({ page, browserName
     buffer: heic,
   });
   await expect(page.getByText("rainbow-451x461.HEIC")).toBeVisible();
-  await page.getByRole("button", { name: "1개 이미지 변환 →" }).click();
+  await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
 
   const completed = page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." });
   const unsupported = page.getByRole("alert").filter({ hasText: "HEIC 디코딩을 지원하지 않아요" });

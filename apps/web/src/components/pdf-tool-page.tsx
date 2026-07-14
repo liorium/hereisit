@@ -1,13 +1,24 @@
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import type { ReactNode } from "react";
 import { type PdfToolConfig, relatedPdfTools } from "../lib/site";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
+import { ToolVisitTracker } from "./tool-visit-tracker";
 
-export function PdfToolPage({ tool, workbench }: { tool: PdfToolConfig; workbench: ReactNode }) {
+export function PdfToolPage({
+  tool,
+  toolId,
+  workbench,
+}: {
+  tool: PdfToolConfig;
+  toolId: AvailableToolId;
+  workbench: ReactNode;
+}) {
   const relatedTools = relatedPdfTools(tool.intent);
 
   return (
     <main>
+      <ToolVisitTracker toolId={toolId} />
       <SiteHeader activePath={tool.path} />
 
       <section className="tool-hero" aria-labelledby="tool-title">
