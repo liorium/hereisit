@@ -178,6 +178,55 @@ test("recovers invalid catalog values and resets an empty AND-filtered result", 
   await expect(page.getByText("검색 결과 11개", { exact: true })).toBeVisible();
 });
 
+test("resets through client navigation without losing memory-only favorites", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage denied", "SecurityError");
+      },
+    });
+  });
+  const documentRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.isNavigationRequest()) documentRequests.push(request.url());
+  });
+  await page.goto("/tools");
+
+  const compressCard = page
+    .getByTestId("available-tool-grid")
+    .locator("article")
+    .filter({ hasText: "이미지 용량 줄이기" });
+  await compressCard.getByRole("button", { name: "즐겨찾기 추가" }).click();
+  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const documentToken = await page.evaluate(() => {
+    const token = crypto.randomUUID();
+    (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken = token;
+    return token;
+  });
+
+  await page.getByRole("combobox", { name: "도구 검색" }).fill("no-such-hereisit-tool");
+  await expect(page.getByText("검색 결과 0개", { exact: true })).toBeVisible();
+  documentRequests.length = 0;
+  await page.getByRole("button", { name: "모든 필터 초기화" }).click();
+
+  await expect(page).toHaveURL(/\/tools$/);
+  await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
+  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken,
+    ),
+  ).toBe(documentToken);
+  expect(documentRequests).toEqual([]);
+});
+
 test("keeps planned catalog results in a separate inert region", async ({ page }) => {
   await page.goto("/tools?domain=media&purpose=optimize&planned=1");
 

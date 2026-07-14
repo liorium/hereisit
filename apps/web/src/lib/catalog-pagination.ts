@@ -1,9 +1,22 @@
 export const CATALOG_PAGE_SIZE = 24;
 
+export interface CatalogPagination {
+  filterKey: string;
+  visibleCount: number;
+}
+
+export type CatalogPaginationAction =
+  | Readonly<{ type: "filter-changed"; filterKey: string }>
+  | Readonly<{ type: "reveal-more"; filterKey: string; total: number }>;
+
 export interface ResolvedCatalogPage<T> {
   items: readonly T[];
   total: number;
   hasMore: boolean;
+}
+
+export function createCatalogPagination(filterKey: string): CatalogPagination {
+  return Object.freeze({ filterKey, visibleCount: CATALOG_PAGE_SIZE });
 }
 
 export function resolveCatalogPage<T>(
@@ -26,4 +39,21 @@ export function resolveNextCatalogVisibleCount<T>(
   const total = resolveTools().length;
   const current = Math.max(0, Math.floor(visibleCount));
   return Math.min(total, current + CATALOG_PAGE_SIZE);
+}
+
+export function transitionCatalogPagination(
+  pagination: CatalogPagination,
+  action: CatalogPaginationAction,
+): CatalogPagination {
+  const synchronized =
+    pagination.filterKey === action.filterKey
+      ? pagination
+      : createCatalogPagination(action.filterKey);
+  if (action.type === "filter-changed") return synchronized;
+
+  const total = Math.max(0, Math.floor(action.total));
+  return Object.freeze({
+    filterKey: action.filterKey,
+    visibleCount: Math.min(total, synchronized.visibleCount + CATALOG_PAGE_SIZE),
+  });
 }

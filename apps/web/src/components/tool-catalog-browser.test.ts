@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   CATALOG_PAGE_SIZE,
+  createCatalogPagination,
   resolveCatalogPage,
   resolveNextCatalogVisibleCount,
+  transitionCatalogPagination,
 } from "../lib/catalog-pagination";
 
 describe("catalog pagination", () => {
@@ -25,5 +27,27 @@ describe("catalog pagination", () => {
     const final = resolveCatalogPage(resolveTools, finalCount);
     expect(final.items).toHaveLength(49);
     expect(final.hasMore).toBe(false);
+  });
+
+  it("creates a fresh twenty-four-tool page for every A to B to A filter transition", () => {
+    let pagination = createCatalogPagination("filter-a");
+    pagination = transitionCatalogPagination(pagination, {
+      type: "reveal-more",
+      filterKey: "filter-a",
+      total: 49,
+    });
+    expect(pagination).toEqual({ filterKey: "filter-a", visibleCount: 48 });
+
+    pagination = transitionCatalogPagination(pagination, {
+      type: "filter-changed",
+      filterKey: "filter-b",
+    });
+    expect(pagination).toEqual({ filterKey: "filter-b", visibleCount: CATALOG_PAGE_SIZE });
+
+    pagination = transitionCatalogPagination(pagination, {
+      type: "filter-changed",
+      filterKey: "filter-a",
+    });
+    expect(pagination).toEqual({ filterKey: "filter-a", visibleCount: CATALOG_PAGE_SIZE });
   });
 });

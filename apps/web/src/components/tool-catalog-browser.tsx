@@ -17,9 +17,9 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import {
-  CATALOG_PAGE_SIZE,
+  createCatalogPagination,
   resolveCatalogPage,
-  resolveNextCatalogVisibleCount,
+  transitionCatalogPagination,
 } from "../lib/catalog-pagination";
 import { CatalogSearch } from "./catalog-search";
 import { ToolCard } from "./tool-card";
@@ -40,17 +40,63 @@ function PlannedToolCard({ tool }: { tool: PlannedToolEntry }): ReactNode {
   );
 }
 
+function AvailableCatalogResults({
+  filterKey,
+  tools,
+}: {
+  filterKey: string;
+  tools: ReturnType<typeof selectAvailableTools>;
+}): ReactNode {
+  const [pagination, setPagination] = useState(() => createCatalogPagination(filterKey));
+  const synchronizedPagination = transitionCatalogPagination(pagination, {
+    type: "filter-changed",
+    filterKey,
+  });
+  if (synchronizedPagination !== pagination) setPagination(synchronizedPagination);
+  const page = resolveCatalogPage(() => tools, synchronizedPagination.visibleCount);
+
+  return (
+    <section aria-labelledby="available-tools-title" className={styles.results}>
+      <div className={styles.resultHeading}>
+        <h2 id="available-tools-title">사용 가능한 도구</h2>
+        <span>{tools.length}개</span>
+      </div>
+      {page.items.length > 0 ? (
+        <div className={styles.cards} data-testid="available-tool-grid">
+          {page.items.map((tool) => (
+            <ToolCard key={tool.id} tool={tool} />
+          ))}
+        </div>
+      ) : (
+        <p className={styles.noAvailable}>조건에 맞는 사용 가능한 도구가 없어요.</p>
+      )}
+
+      {page.hasMore ? (
+        <button
+          className={styles.moreButton}
+          onClick={() =>
+            setPagination((current) =>
+              transitionCatalogPagination(current, {
+                type: "reveal-more",
+                filterKey,
+                total: tools.length,
+              }),
+            )
+          }
+          type="button"
+        >
+          더 보기
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 export function ToolCatalogBrowser(): ReactNode {
   const router = useRouter();
   const searchParams = useSearchParams();
   const state = useMemo(() => parseCatalogUrlState(searchParams), [searchParams]);
   const filterKey = serializeCatalogUrlState(state);
-  const [pagination, setPagination] = useState(() => ({
-    filterKey,
-    visibleCount: CATALOG_PAGE_SIZE,
-  }));
-  const visibleCount =
-    pagination.filterKey === filterKey ? pagination.visibleCount : CATALOG_PAGE_SIZE;
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const availableTools = useMemo(
     () =>
@@ -71,7 +117,6 @@ export function ToolCatalogBrowser(): ReactNode {
       }),
     [state.domain, state.includePlanned, state.purpose, state.query],
   );
-  const availablePage = resolveCatalogPage(() => availableTools, visibleCount);
   const selectedDomainIndex = domainFilterDefinitions.findIndex(({ id }) => id === state.domain);
   const selectedDomain = domainFilterDefinitions[selectedDomainIndex] ?? domainFilterDefinitions[0];
   const selectedTabId = `catalog-domain-tab-${selectedDomain?.id ?? "all"}`;
@@ -83,6 +128,10 @@ export function ToolCatalogBrowser(): ReactNode {
 
   function pushState(nextState: CatalogUrlState): void {
     router.push(catalogHref(nextState), { scroll: false });
+  }
+
+  function resetState(): void {
+    window.history.pushState(null, "", "/tools");
   }
 
   function selectDomain(domain: DiscoveryDomainId): void {
@@ -202,43 +251,7 @@ export function ToolCatalogBrowser(): ReactNode {
           <span>준비 중인 도구 포함</span>
         </label>
 
-        <section aria-labelledby="available-tools-title" className={styles.results}>
-          <div className={styles.resultHeading}>
-            <h2 id="available-tools-title">사용 가능한 도구</h2>
-            <span>{availableTools.length}개</span>
-          </div>
-          {availablePage.items.length > 0 ? (
-            <div className={styles.cards} data-testid="available-tool-grid">
-              {availablePage.items.map((tool) => (
-                <ToolCard key={tool.id} tool={tool} />
-              ))}
-            </div>
-          ) : (
-            <p className={styles.noAvailable}>조건에 맞는 사용 가능한 도구가 없어요.</p>
-          )}
-
-          {availablePage.hasMore ? (
-            <button
-              className={styles.moreButton}
-              onClick={() =>
-                setPagination((current) => {
-                  const currentCount =
-                    current.filterKey === filterKey ? current.visibleCount : CATALOG_PAGE_SIZE;
-                  return {
-                    filterKey,
-                    visibleCount: resolveNextCatalogVisibleCount(
-                      () => availableTools,
-                      currentCount,
-                    ),
-                  };
-                })
-              }
-              type="button"
-            >
-              더 보기
-            </button>
-          ) : null}
-        </section>
+        <AvailableCatalogResults filterKey={filterKey} tools={availableTools} />
 
         {state.includePlanned ? (
           <section aria-labelledby="planned-tools-title" className={styles.plannedResults}>
@@ -262,7 +275,7 @@ export function ToolCatalogBrowser(): ReactNode {
           <div className={styles.empty}>
             <strong>조건에 맞는 도구를 찾지 못했어요.</strong>
             <p>검색어나 필터를 지우고 전체 도구를 다시 살펴보세요.</p>
-            <button onClick={() => window.location.assign("/tools")} type="button">
+            <button onClick={resetState} type="button">
               모든 필터 초기화
             </button>
           </div>
