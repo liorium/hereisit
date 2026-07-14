@@ -629,6 +629,7 @@ test("compresses a known scan with the default preset and downloads only after o
   const source = await createScannedPdf(page, 2);
   await uploadPdf(page, `${privacySentinel}.pdf`, source, 2);
   await expect(page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(2);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
@@ -646,6 +647,7 @@ test("compresses a known scan with the default preset and downloads only after o
       exact: true,
     }),
   ).toBeVisible();
+  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(3);
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });

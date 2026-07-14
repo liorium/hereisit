@@ -27,10 +27,7 @@ const completeToolImplementationConfig = toolImplementationConfig satisfies Reco
 
 describe("tool identity ownership", () => {
   it("uses client navigation without prefetch for catalog-owned related tool cards", () => {
-    const relatedLinkOwners = [
-      new URL("../components/tool-card.tsx", import.meta.url),
-      new URL("../components/pdf-tool-page.tsx", import.meta.url),
-    ];
+    const relatedLinkOwners = [new URL("../components/tool-card.tsx", import.meta.url)];
 
     for (const relatedLinkOwner of relatedLinkOwners) {
       const source = readFileSync(relatedLinkOwner, "utf8");

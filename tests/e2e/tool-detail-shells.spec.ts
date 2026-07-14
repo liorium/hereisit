@@ -102,3 +102,60 @@ test("renders the PDF organizer in the catalog-driven workspace shell", async ({
   await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toBeVisible();
 });
+
+const remainingPdfShells = [
+  {
+    path: "/pdf/merge",
+    title: "PDF 합치기",
+    notice:
+      "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+    related: ["/pdf/split", "/pdf/organize", "/pdf/image-to-pdf"],
+  },
+  {
+    path: "/pdf/split",
+    title: "PDF 페이지 분할",
+    notice:
+      "암호로 잠긴 PDF는 지원하지 않아요. 기존 전자서명은 새 PDF에서 무효화되고, 북마크·양식은 유지되지 않을 수 있어요.",
+    related: ["/pdf/merge", "/pdf/organize", "/pdf/to-image"],
+  },
+  {
+    path: "/pdf/watermark",
+    title: "PDF 워터마크 넣기",
+    notice:
+      "워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요. 기존 전자서명도 새 PDF에서 무효화됩니다.",
+    related: ["/pdf/organize", "/pdf/merge", "/image/watermark"],
+  },
+  {
+    path: "/pdf/image-to-pdf",
+    title: "이미지를 PDF로 변환",
+    notice: "광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.",
+    related: ["/pdf/to-image", "/pdf/merge", "/image/convert"],
+  },
+  {
+    path: "/pdf/to-image",
+    title: "PDF를 JPG·PNG로 변환",
+    notice:
+      "결과는 래스터 이미지라 텍스트를 검색하거나 선택할 수 없고, 주석·양식 모양은 평면화되며 색상 프로필이 달라질 수 있어요.",
+    related: ["/pdf/image-to-pdf", "/pdf/split", "/image/convert"],
+  },
+  {
+    path: "/pdf/compress",
+    title: "스캔 PDF 용량 줄이기",
+    notice:
+      "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.",
+    related: ["/pdf/merge", "/pdf/split", "/pdf/to-image"],
+  },
+] as const;
+
+for (const tool of remainingPdfShells) {
+  test(`renders ${tool.path} in its catalog-driven file shell`, async ({ page }) => {
+    await page.goto(tool.path);
+
+    await expectCatalogShell(page, tool.title, "파일 작업 영역");
+    const shellHeader = page
+      .getByRole("heading", { level: 1, name: tool.title })
+      .locator("xpath=ancestor::header");
+    await expect(shellHeader.getByText(tool.notice, { exact: true })).toBeVisible();
+    await expectRelatedLinks(page, tool.related);
+  });
+}

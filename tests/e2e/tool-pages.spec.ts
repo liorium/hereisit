@@ -151,7 +151,7 @@ test("publishes dedicated routes in the sitemap", async ({ request }) => {
   }
 });
 
-test("publishes and links the scanned PDF compression tool", async ({ page }) => {
+test("publishes the scanned PDF compression tool", async ({ page }) => {
   await page.goto("/tools");
   await revealCatalogTool(page, pdfCompressionTool.path);
   await expect(page.getByRole("link", { name: pdfCompressionTool.title }).first()).toHaveAttribute(
@@ -174,12 +174,9 @@ test("publishes and links the scanned PDF compression tool", async ({ page }) =>
     "href",
     "https://hereisit.pages.dev/pdf/compress",
   );
-
-  await page.goto("/pdf/merge");
-  await expect(page.locator(`.related-tool-card[href="${pdfCompressionTool.path}"]`)).toBeVisible();
 });
 
-test("publishes and links the PDF to image tool", async ({ page }) => {
+test("publishes the PDF to image tool", async ({ page }) => {
   await page.goto("/tools");
   await revealCatalogTool(page, pdfToImageTool.path);
   await expect(page.getByRole("link", { name: pdfToImageTool.title }).first()).toHaveAttribute(
@@ -195,9 +192,6 @@ test("publishes and links the PDF to image tool", async ({ page }) => {
     "href",
     new RegExp(`${pdfToImageTool.path.replaceAll("/", "\\/")}\\/?$`),
   );
-
-  await page.goto("/pdf/merge");
-  await expect(page.locator(`.related-tool-card[href="${pdfToImageTool.path}"]`)).toBeVisible();
 });
 
 test("publishes every available catalog route from the complete tools page", async ({ page }) => {
