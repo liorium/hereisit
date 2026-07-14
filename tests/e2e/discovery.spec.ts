@@ -94,6 +94,13 @@ test("searches only local catalog metadata with bounded keyboard suggestions", a
   await expect(search.getByRole("listbox")).toHaveCount(0);
 
   await input.fill("PDF");
+  await page.waitForTimeout(100);
+  await input.fill("PDF ");
+  await expect(input).toHaveValue("PDF ");
+  await page.waitForTimeout(100);
+  expect(await search.getByRole("status").textContent()).toBe("");
+  await page.waitForTimeout(100);
+
   const listbox = search.getByRole("listbox", { name: "도구 검색 결과" });
   await expect(listbox).toBeVisible();
   expect(await listbox.getByRole("option").count()).toBeLessThanOrEqual(5);

@@ -32,6 +32,27 @@ export interface CatalogSearchProps {
 
 const EMPTY_RESULTS: readonly AvailableToolEntry[] = Object.freeze([]);
 
+function clearAnnouncementTimer(timerRef: { current: number | null }): void {
+  if (timerRef.current === null) return;
+  window.clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+function restartAnnouncementTimer(
+  timerRef: { current: number | null },
+  rawQuery: string,
+  resultCount: number,
+  announce: (message: string) => void,
+): void {
+  clearAnnouncementTimer(timerRef);
+  announce("");
+  if (normalizeCatalogSearch(rawQuery) === "") return;
+  timerRef.current = window.setTimeout(() => {
+    announce(`검색 결과 ${resultCount}개`);
+    timerRef.current = null;
+  }, 150);
+}
+
 function optionId(idPrefix: string, tool: AvailableToolEntry): string {
   return `${idPrefix}-option-${tool.id.replaceAll(".", "-")}`;
 }
@@ -67,25 +88,9 @@ export function CatalogSearch({
   const inputId = `${idPrefix}-input`;
 
   useEffect(() => {
-    if (announcementTimerRef.current !== null) {
-      window.clearTimeout(announcementTimerRef.current);
-      announcementTimerRef.current = null;
-    }
-    setLiveMessage("");
-    if (normalizedQuery === "") return;
-
-    announcementTimerRef.current = window.setTimeout(() => {
-      setLiveMessage(`검색 결과 ${results.length}개`);
-      announcementTimerRef.current = null;
-    }, 150);
-
-    return () => {
-      if (announcementTimerRef.current !== null) {
-        window.clearTimeout(announcementTimerRef.current);
-        announcementTimerRef.current = null;
-      }
-    };
-  }, [normalizedQuery, results.length]);
+    restartAnnouncementTimer(announcementTimerRef, currentQuery, results.length, setLiveMessage);
+    return () => clearAnnouncementTimer(announcementTimerRef);
+  }, [currentQuery, results.length]);
 
   function closeSuggestions(): void {
     setSuggestionsOpen(false);
@@ -94,9 +99,14 @@ export function CatalogSearch({
 
   function updateQuery(event: ChangeEvent<HTMLInputElement>): void {
     const nextQuery = event.currentTarget.value;
+    restartAnnouncementTimer(
+      announcementTimerRef,
+      nextQuery,
+      Math.min(5, searchAvailableTools(nextQuery).length),
+      setLiveMessage,
+    );
     if (query === undefined) setLocalQuery(nextQuery);
     onQueryChange?.(nextQuery);
-    setLiveMessage("");
     setActiveToolId(null);
     setSuggestionsOpen(normalizeCatalogSearch(nextQuery) !== "");
   }
