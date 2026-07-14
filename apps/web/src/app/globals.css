@@ -300,8 +300,7 @@ select:focus-visible,
   color: var(--ink);
 }
 
-.home-tools-section,
-.related-tools-section {
+.home-tools-section {
   width: min(1280px, calc(100% - 48px));
   margin: 0 auto;
 }
@@ -314,15 +313,13 @@ select:focus-visible,
   padding-top: 70px;
 }
 
-.home-tools-grid,
-.related-tools-grid {
+.home-tools-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
-.home-tool-card,
-.related-tool-card {
+.home-tool-card {
   min-width: 0;
   min-height: 250px;
   padding: 26px;
@@ -339,22 +336,19 @@ select:focus-visible,
     box-shadow 160ms ease;
 }
 
-.home-tool-card:hover,
-.related-tool-card:hover {
+.home-tool-card:hover {
   transform: translateY(-3px);
   border-color: var(--ink);
   box-shadow: 7px 7px 0 var(--yellow);
 }
 
-.home-tool-card strong,
-.related-tool-card strong {
+.home-tool-card strong {
   margin-top: 58px;
   font-size: 24px;
   letter-spacing: -0.045em;
 }
 
-.home-tool-card p,
-.related-tool-card p {
+.home-tool-card p {
   margin: 12px 0 0;
   color: var(--muted);
   font-size: 14px;
@@ -399,9 +393,7 @@ select:focus-visible,
   line-height: 1.7;
 }
 
-.tool-summary,
-.tool-note,
-.tool-warning {
+.tool-summary {
   max-width: 760px;
   margin: 18px 0 0;
   padding: 12px 14px;
@@ -411,48 +403,12 @@ select:focus-visible,
   line-height: 1.6;
 }
 
-.tool-note {
-  border-left-color: var(--green);
-  color: var(--green);
-  font-weight: 750;
-}
-
-.tool-warning {
-  border-left-color: var(--red);
-  color: var(--red);
-  font-weight: 700;
-}
-
-.tool-steps {
-  padding-top: 100px;
-  padding-bottom: 100px;
-}
-
-.related-tools-section {
-  padding: 0 0 120px;
-}
-
-.related-tools-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.related-tool-card {
-  min-height: 210px;
-}
-
-.related-tools-grid .related-tool-card > span {
-  color: var(--blue);
-  font-size: 11px;
-  font-weight: 850;
-}
-
 @media (max-width: 800px) {
   .site-header,
   .hero-section,
   .principles-section,
   .home-tools-section,
   .tool-hero,
-  .related-tools-section,
   .site-footer {
     width: min(100% - 32px, 640px);
   }
@@ -525,19 +481,16 @@ select:focus-visible,
     padding: 76px 0 4px;
   }
 
-  .home-tools-grid,
-  .related-tools-grid {
+  .home-tools-grid {
     grid-template-columns: 1fr;
   }
 
-  .home-tool-card,
-  .related-tool-card {
+  .home-tool-card {
     min-height: 210px;
     padding: 22px;
   }
 
-  .home-tool-card strong,
-  .related-tool-card strong {
+  .home-tool-card strong {
     margin-top: 38px;
     font-size: 22px;
   }
@@ -560,19 +513,8 @@ select:focus-visible,
     font-size: 16px;
   }
 
-  .tool-summary,
-  .tool-note,
-  .tool-warning {
+  .tool-summary {
     font-size: 12px;
-  }
-
-  .tool-steps {
-    padding-top: 76px;
-    padding-bottom: 76px;
-  }
-
-  .related-tools-section {
-    padding-bottom: 86px;
   }
 
   .section-heading {

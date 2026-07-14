@@ -13,11 +13,7 @@ import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-co
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
-import {
-  getToolImplementation,
-  PDF_COMPRESS_SCANNED_WARNING,
-  type SourceFileLimits,
-} from "../lib/tool-implementations";
+import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
 
@@ -25,6 +21,12 @@ const MAX_PAGE_COUNT = 100;
 const INITIAL_MESSAGE = "파일을 선택하면 페이지를 확인할게요.";
 const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
 const PAGE_LIMIT_MESSAGE = "PDF는 1페이지부터 100페이지까지 압축할 수 있어요.";
+const PDF_COMPRESS_SCANNED_WARNING = getToolImplementation("pdf.compress-scanned").notices.find(
+  ({ tone }) => tone === "warning",
+)?.text;
+if (PDF_COMPRESS_SCANNED_WARNING === undefined) {
+  throw new Error("Missing scanned PDF warning");
+}
 
 type Preset = PdfCompressScannedSpecV1["preset"];
 type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResult, "bytes">;
