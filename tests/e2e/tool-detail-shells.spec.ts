@@ -45,6 +45,33 @@ test("renders the image compressor in the catalog-driven file shell", async ({ p
   await expectRelatedLinks(page, ["/image/resize", "/image/convert", "/image/watermark"]);
 });
 
+test("renders image resize in the catalog-driven file shell", async ({ page }) => {
+  await page.goto("/image/resize");
+
+  await expectCatalogShell(page, "이미지 크기 조절", "파일 작업 영역");
+  await expectRelatedLinks(page, ["/image/compress", "/image/convert", "/image/watermark"]);
+});
+
+test("renders image conversion in the catalog-driven file shell", async ({ page }) => {
+  await page.goto("/image/convert");
+
+  await expectCatalogShell(page, "이미지 형식 변환", "파일 작업 영역");
+  await expect(
+    page.getByText("HEIC 변환은 Safari 17 이상에서 지원해요.", { exact: true }),
+  ).toBeVisible();
+  await expectRelatedLinks(page, ["/image/compress", "/image/resize", "/pdf/image-to-pdf"]);
+});
+
+test("renders image watermarking in the catalog-driven file shell", async ({ page }) => {
+  await page.goto("/image/watermark");
+
+  await expectCatalogShell(page, "이미지에 워터마크 넣기", "파일 작업 영역");
+  await expect(
+    page.getByText("HEIC 워터마크는 Safari 17 이상에서 지원해요.", { exact: true }),
+  ).toBeVisible();
+  await expectRelatedLinks(page, ["/image/compress", "/image/resize", "/pdf/watermark"]);
+});
+
 test("renders the PDF organizer in the catalog-driven workspace shell", async ({ page }) => {
   const document = await PDFDocument.create();
   document.addPage([100, 200]);

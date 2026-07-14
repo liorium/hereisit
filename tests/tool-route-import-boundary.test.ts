@@ -11,11 +11,26 @@ const workbenchModuleNames = new Set([
   "pdf-compress-workbench",
 ]);
 
-const representativeRoutes = [
+const migratedRoutes = [
   {
     route: "/image/compress",
     sourcePath: "apps/web/src/app/image/compress/page.tsx",
     expectedWorkbench: "image-workbench",
+  },
+  {
+    route: "/image/resize",
+    sourcePath: "apps/web/src/app/image/resize/page.tsx",
+    expectedWorkbench: "image-workbench",
+  },
+  {
+    route: "/image/convert",
+    sourcePath: "apps/web/src/app/image/convert/page.tsx",
+    expectedWorkbench: "image-workbench",
+  },
+  {
+    route: "/image/watermark",
+    sourcePath: "apps/web/src/app/image/watermark/page.tsx",
+    expectedWorkbench: "image-watermark-workbench",
   },
   {
     route: "/pdf/organize",
@@ -24,7 +39,7 @@ const representativeRoutes = [
   },
 ] as const;
 
-function getWorkbenchImports(sourcePath: string): string[] {
+function getDirectImportModuleNames(sourcePath: string): string[] {
   const absolutePath = resolve(process.cwd(), sourcePath);
   const sourceText = readFileSync(absolutePath, "utf8");
   const sourceFile = ts.createSourceFile(
@@ -41,14 +56,29 @@ function getWorkbenchImports(sourcePath: string): string[] {
     }
     const moduleSpecifier = statement.moduleSpecifier.text;
     const moduleName = moduleSpecifier.split("/").at(-1);
-    return moduleName !== undefined && workbenchModuleNames.has(moduleName) ? [moduleName] : [];
+    return moduleName === undefined ? [] : [moduleName];
   });
 }
 
-describe("representative tool route import boundaries", () => {
-  for (const { route, sourcePath, expectedWorkbench } of representativeRoutes) {
+function getWorkbenchImports(sourcePath: string): string[] {
+  return getDirectImportModuleNames(sourcePath).filter((moduleName) =>
+    workbenchModuleNames.has(moduleName),
+  );
+}
+
+describe("migrated tool route import boundaries", () => {
+  for (const { route, sourcePath, expectedWorkbench } of migratedRoutes) {
     it(`${route} directly imports only its own workbench`, () => {
       expect(getWorkbenchImports(sourcePath)).toEqual([expectedWorkbench]);
+    });
+
+    it(`${route} directly imports the catalog detail shell`, () => {
+      const imports = getDirectImportModuleNames(sourcePath);
+
+      expect(imports).toContain("tool-detail-page");
+      expect(imports).not.toContain("image-tool-page");
+      expect(imports).not.toContain("pdf-tool-page");
+      expect(imports).not.toContain("pdf-editing-tool-page");
     });
   }
 });

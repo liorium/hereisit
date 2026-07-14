@@ -36,8 +36,12 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
       <SiteHeader activePath={tool.route} />
       <main className={styles.page}>
         <nav aria-label="현재 위치" className={styles.breadcrumbs}>
-          <Link href="/">홈</Link>
-          <Link href={`/tools?domain=${primaryDomain}`}>모든 도구</Link>
+          <Link href="/" prefetch={false}>
+            홈
+          </Link>
+          <Link href={`/tools?domain=${primaryDomain}`} prefetch={false}>
+            모든 도구
+          </Link>
           <span aria-current="page">{tool.name}</span>
         </nav>
 

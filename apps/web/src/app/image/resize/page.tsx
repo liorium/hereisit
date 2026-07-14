@@ -1,21 +1,19 @@
 import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
-import { ImageToolPage } from "../../../components/image-tool-page";
 import { ImageWorkbench } from "../../../components/image-workbench";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
 import { createToolMetadata } from "../../../lib/metadata";
-import { imageTools } from "../../../lib/site";
+import { getToolImplementation } from "../../../lib/tool-implementations";
 
 const toolId = "image.resize" satisfies AvailableToolId;
-const catalogTool = getAvailableToolById(toolId);
-const tool = imageTools.resize;
+const implementation = getToolImplementation(toolId);
 
-export const metadata = createToolMetadata(catalogTool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function ResizeImagePage() {
   return (
-    <ImageToolPage
-      tool={tool}
+    <ToolDetailPage
       toolId={toolId}
-      imageWorkbench={<ImageWorkbench intent={tool.intent} toolId={toolId} />}
+      workbench={<ImageWorkbench intent={implementation.intent} toolId={toolId} />}
     />
   );
 }

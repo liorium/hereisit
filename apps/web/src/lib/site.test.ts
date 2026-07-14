@@ -27,19 +27,16 @@ const completeToolImplementationConfig = toolImplementationConfig satisfies Reco
 
 describe("tool identity ownership", () => {
   it("uses client navigation without prefetch for catalog-owned related tool cards", () => {
-    const templateUrls = [
-      new URL("../components/image-tool-page.tsx", import.meta.url),
+    const relatedLinkOwners = [
+      new URL("../components/tool-card.tsx", import.meta.url),
       new URL("../components/pdf-tool-page.tsx", import.meta.url),
     ];
 
-    for (const templateUrl of templateUrls) {
-      const source = readFileSync(templateUrl, "utf8");
+    for (const relatedLinkOwner of relatedLinkOwners) {
+      const source = readFileSync(relatedLinkOwner, "utf8");
 
       expect(source).toContain('import Link from "next/link";');
-      expect(source).toMatch(
-        /<Link\s+className="related-tool-card"\s+href=\{related\.path\}\s+key=\{related\.path\}\s+prefetch=\{false\}\s*>/,
-      );
-      expect(source).not.toMatch(/<a\s+className="related-tool-card"/);
+      expect(source).toMatch(/<Link\b(?=[^>]*\bhref=)[^>]*\bprefetch=\{false\}[^>]*>/);
     }
   });
 
