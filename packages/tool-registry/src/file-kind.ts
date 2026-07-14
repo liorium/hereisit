@@ -19,7 +19,7 @@ function ascii(value: Uint8Array, offset: number, length: number): string {
 }
 
 function hasPdfHeader(value: Uint8Array): boolean {
-  const limit = Math.min(1024, value.byteLength - 4);
+  const limit = Math.min(1023, value.byteLength - 5);
   for (let offset = 0; offset <= limit; offset += 1) {
     if (hasBytes(value, offset, [0x25, 0x50, 0x44, 0x46, 0x2d])) return true;
   }

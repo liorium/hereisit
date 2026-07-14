@@ -39,10 +39,17 @@ describe("detectFileKindPrefix", () => {
   });
 
   it("finds a PDF header within the first 1,024 bytes", () => {
-    const prefix = new Uint8Array(1_024);
-    prefix.set(encoder.encode("%PDF-1.7\n"), 1_015);
+    const prefix = new Uint8Array(1_028);
+    prefix.set(encoder.encode("%PDF-"), 1_023);
 
     expect(detectFileKindPrefix(prefix)).toBe("application/pdf");
+  });
+
+  it("rejects a PDF header starting at offset 1,024", () => {
+    const prefix = new Uint8Array(1_029);
+    prefix.set(encoder.encode("%PDF-"), 1_024);
+
+    expect(detectFileKindPrefix(prefix)).toBeUndefined();
   });
 
   it.each([
@@ -104,6 +111,13 @@ describe("detectFileKindPrefix", () => {
 
   it("rejects a prefix larger than the bounded contract", () => {
     expect(detectFileKindPrefix(new Uint8Array(MAX_FILE_KIND_PREFIX_BYTES + 1))).toBeUndefined();
+  });
+
+  it("accepts structural evidence at the exact prefix bound", () => {
+    const prefix = new Uint8Array(MAX_FILE_KIND_PREFIX_BYTES);
+    prefix.set([0xff, 0xd8, 0xff]);
+
+    expect(detectFileKindPrefix(prefix)).toBe("image/jpeg");
   });
 });
 
