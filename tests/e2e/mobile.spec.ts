@@ -435,6 +435,7 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     page.getByRole("button", { name: "2페이지 아래로 이동" }),
     page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }),
     page.getByRole("button", { name: "2페이지 삭제" }),
+    page.getByRole("button", { name: "페이지 순서 초기화" }),
     page.getByRole("button", { name: "3페이지 정리하기 →" }),
   ];
   for (const control of controls) {
@@ -442,6 +443,33 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
+
+  await page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "페이지 순서 초기화" }).click();
+  await page.getByRole("button", { name: "3페이지 정리하기 →" }).click();
+  await expect(page.getByText("3페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+
+  const save = page.getByRole("button", { name: "PDF 저장·공유 ↓" });
+  await expect(save).toBeVisible();
+  const saveBox = await save.boundingBox();
+  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const actionBar = save.locator("..").locator("..");
+  expect(await actionBar.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
+
+  const viewportHeight = page.viewportSize()?.height ?? 0;
+  const workArea = page.getByRole("region", { name: "편집 작업 공간" });
+  await workArea.evaluate((element) => {
+    document.documentElement.style.scrollBehavior = "auto";
+    const bounds = element.getBoundingClientRect();
+    window.scrollTo(0, window.scrollY + bounds.top + 16);
+  });
+  const stickyBox = await actionBar.boundingBox();
+  expect(stickyBox).not.toBeNull();
+  expect(
+    Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
+  ).toBeLessThanOrEqual(2);
 
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
