@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./catalog": "./src/tool-catalog.ts"
+    "./catalog": "./src/tool-catalog.ts",
+    "./discovery": "./src/tool-discovery.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
