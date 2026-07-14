@@ -55,6 +55,15 @@ describe("pending tool selection", () => {
     expect(consumePendingToolSelection("image.compress", 61_001)).toEqual({ state: "empty" });
   });
 
+  it("reports a target mismatch before direct expiry and consumes the selection", () => {
+    replacePendingToolSelection("image.compress", [detectedFile()], 1_000);
+
+    expect(consumePendingToolSelection("image.resize", 61_000)).toEqual({
+      state: "target-mismatch",
+    });
+    expect(consumePendingToolSelection("image.compress", 61_001)).toEqual({ state: "empty" });
+  });
+
   it("proactively clears file references at exactly 60 seconds and leaves one expiry result", async () => {
     vi.useFakeTimers();
     replacePendingToolSelection("image.compress", [detectedFile()], 1_000);
@@ -62,6 +71,18 @@ describe("pending tool selection", () => {
     await vi.advanceTimersByTimeAsync(PENDING_TOOL_SELECTION_TTL_MS);
 
     expect(consumePendingToolSelection("image.compress", 61_000)).toEqual({ state: "expired" });
+    expect(consumePendingToolSelection("image.compress", 61_001)).toEqual({ state: "empty" });
+  });
+
+  it("reports a target mismatch for a proactive-expiry tombstone and consumes it", async () => {
+    vi.useFakeTimers();
+    replacePendingToolSelection("image.compress", [detectedFile()], 1_000);
+
+    await vi.advanceTimersByTimeAsync(PENDING_TOOL_SELECTION_TTL_MS);
+
+    expect(consumePendingToolSelection("image.resize", 61_000)).toEqual({
+      state: "target-mismatch",
+    });
     expect(consumePendingToolSelection("image.compress", 61_001)).toEqual({ state: "empty" });
   });
 

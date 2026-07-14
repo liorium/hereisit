@@ -46,20 +46,21 @@ export function consumePendingToolSelection(
   now = performance.now(),
 ): PendingToolSelectionResult {
   const current = pending;
+  const expiredTarget = expiredTargetToolId;
   pending = null;
+  expiredTargetToolId = null;
   clearExpiryTimer();
 
   if (current === null) {
-    if (expiredTargetToolId === null) return { state: "empty" };
-    expiredTargetToolId = null;
+    if (expiredTarget === null) return { state: "empty" };
+    if (expiredTarget !== targetToolId) return { state: "target-mismatch" };
     return { state: "expired" };
   }
 
-  expiredTargetToolId = null;
+  if (current.targetToolId !== targetToolId) return { state: "target-mismatch" };
   if (now - current.createdAtMonotonicMs >= PENDING_TOOL_SELECTION_TTL_MS) {
     return { state: "expired" };
   }
-  if (current.targetToolId !== targetToolId) return { state: "target-mismatch" };
   return { state: "consumed", items: current.items };
 }
 
