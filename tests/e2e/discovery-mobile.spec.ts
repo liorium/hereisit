@@ -1,4 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+
+async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 16): Promise<void> {
+  for (let index = 0; index < maximumTabs; index += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -160,4 +168,43 @@ test("supports touch selection from local drawer search", async ({ page }) => {
   await expect(option).toBeVisible();
   await option.tap();
   await expect(page).toHaveURL(/\/image\/watermark\/?$/);
+});
+
+test("supports a keyboard-only mobile menu with exact focus return", async ({ page }) => {
+  await page.goto("/");
+
+  const trigger = page.getByRole("button", { name: "메뉴 열기", exact: true });
+  await pressTabUntilFocused(page, trigger);
+  await page.keyboard.press("Enter");
+  const drawer = page.getByRole("dialog", { name: "전체 메뉴" });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "메뉴 닫기", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test("keeps enlarged mobile text readable without horizontal overflow", async ({ page }) => {
+  await page.goto("/");
+  await page.addStyleTag({
+    content: `
+      html {
+        -webkit-text-size-adjust: 200% !important;
+        text-size-adjust: 200% !important;
+      }
+    `,
+  });
+
+  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    textSizeAdjust:
+      getComputedStyle(document.documentElement).getPropertyValue("text-size-adjust") ||
+      getComputedStyle(document.documentElement).getPropertyValue("-webkit-text-size-adjust"),
+  }));
+  expect(layout.textSizeAdjust).toBe("200%");
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });

@@ -69,9 +69,11 @@ const onePixelPng = Buffer.from(
 
 async function revealCatalogTool(page: Page, route: string): Promise<Locator> {
   const link = page.locator(`[data-testid="available-tool-grid"] a[href="${route}"]`);
+  await expect(page.getByTestId("available-tool-grid")).toBeVisible();
   while ((await link.count()) === 0) {
     const moreButton = page.getByRole("button", { name: "더 보기" });
-    await expect(moreButton).toBeVisible();
+    await expect(link.or(moreButton).first()).toBeVisible();
+    if ((await link.count()) > 0) break;
     await moreButton.click();
   }
   return link;

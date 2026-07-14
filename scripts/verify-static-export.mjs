@@ -59,6 +59,30 @@ const ALL_PROCESSING_MARKERS = [
   PDF_COMPRESS_SCANNED_WORKER_MARKER,
   PDFJS_MARKER,
 ];
+const DISCOVERY_PROCESSING_MARKERS = [
+  ...ALL_PROCESSING_MARKERS,
+  "ImageWorkbench",
+  "ImageWatermarkWorkbench",
+  "PdfWorkbench",
+  "PdfCompressWorkbench",
+  "PdfToImageWorkbench",
+  "pdfjs-dist",
+  "@hereisit/browser-runtime",
+  "@hereisit/image-tool",
+  "@hereisit/pdf-tool",
+  "@hereisit/tool-contracts",
+  "@cantoo/pdf-lib",
+  "fflate",
+  "/codec/",
+  ".codec.",
+  "-codec-",
+  "/editor/",
+  ".editor.",
+  "-editor-",
+  "/wasm/",
+  ".wasm",
+  "-wasm-",
+];
 const bundleProfileMarkers = {
   image: [IMAGE_WORKER_MARKER],
   "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
@@ -314,14 +338,12 @@ const routeClosures = toolPages.map((tool, index) => {
   return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
 });
 
-assertClosureLacks(
-  homeClosure,
-  IMAGE_WATERMARK_WORKER_MARKER,
-  "The home route loaded the image watermark Worker.",
-);
+for (const marker of DISCOVERY_PROCESSING_MARKERS) {
+  assertClosureLacks(homeClosure, marker, `The home route loaded ${marker}.`);
+}
 
 for (const { page, closure } of discoveryClosures) {
-  for (const marker of ALL_PROCESSING_MARKERS) {
+  for (const marker of DISCOVERY_PROCESSING_MARKERS) {
     assertClosureLacks(closure, marker, `${page.path} unexpectedly loaded ${marker}.`);
   }
 }

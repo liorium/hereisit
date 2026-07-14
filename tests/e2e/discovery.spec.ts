@@ -1,5 +1,5 @@
 import { availableToolEntries } from "@hereisit/tool-registry/catalog";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
 
 const onePixelPng = Buffer.from(
@@ -27,6 +27,14 @@ const homeTabs = [
   "웹·개발",
   "생활·계산",
 ] as const;
+
+async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 32): Promise<void> {
+  for (let index = 0; index < maximumTabs; index += 1) {
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -106,7 +114,17 @@ test("uses replace for catalog typing and pushed history for explicit filters", 
           ).__hereisitHistoryCalls,
       ),
     )
-    .toMatchObject({ push: 0, replace: 1 });
+    .toMatchObject({ push: 0 });
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __hereisitHistoryCalls?: { push: number; replace: number };
+          }
+        ).__hereisitHistoryCalls?.replace,
+    ),
+  ).toBeGreaterThanOrEqual(1);
 
   await page
     .getByRole("tablist", { name: "도구 분야" })
@@ -463,15 +481,102 @@ test("keeps domain tabs roving, attached, bounded, and responsive", async ({ pag
 
   const cards = panel.locator("article");
   expect(await cards.count()).toBeGreaterThan(1);
-  const firstCard = await cards.nth(0).boundingBox();
-  const secondCard = await cards.nth(1).boundingBox();
-  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+  const [firstCardTop, secondCardTop] = await cards.evaluateAll((elements) =>
+    elements.slice(0, 2).map((element) => element.getBoundingClientRect().top),
+  );
+  expect(Math.abs((firstCardTop ?? 0) - (secondCardTop ?? 0))).toBeLessThan(2);
   expect(
     await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
     })),
   ).toMatchObject({ clientWidth: 900, scrollWidth: 900 });
+});
+
+test("supports keyboard-only menu, search, and domain tabs with exact focus return", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const menuTrigger = page.getByRole("button", { name: "모든 도구", exact: true });
+  await pressTabUntilFocused(page, menuTrigger);
+  await page.keyboard.press("Enter");
+  const mega = page.getByTestId("desktop-mega");
+  await expect(mega).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(mega.getByRole("link", { name: "이미지", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(mega).toBeHidden();
+  await expect(menuTrigger).toBeFocused();
+
+  const searchTrigger = page.getByRole("button", { name: "검색", exact: true });
+  await pressTabUntilFocused(page, searchTrigger);
+  await page.keyboard.press("Enter");
+  const searchInput = page
+    .getByTestId("desktop-search")
+    .getByRole("combobox", { name: "도구 검색" });
+  await expect(searchInput).toBeFocused();
+  await page.keyboard.type("병합");
+  await expect(page.getByRole("listbox", { name: "도구 검색 결과" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(searchTrigger).toBeFocused();
+
+  const tabs = page.getByRole("tablist", { name: "도구 분야" });
+  const allTab = tabs.getByRole("tab", { name: "전체·추천", exact: true });
+  const imageTab = tabs.getByRole("tab", { name: "이미지", exact: true });
+  await pressTabUntilFocused(page, allTab);
+  await page.keyboard.press("ArrowRight");
+  await expect(imageTab).toBeFocused();
+  await expect(imageTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tabpanel")).toHaveAttribute(
+    "aria-labelledby",
+    await imageTab.getAttribute("id"),
+  );
+});
+
+test("honors reduced motion and avoids overflow at 200 percent zoom", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  const motion = await page
+    .getByTestId("home-tool-grid")
+    .locator("article")
+    .first()
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        animationDuration: style.animationDuration,
+        scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+        transitionDuration: style.transitionDuration,
+      };
+    });
+  const maximumDurationSeconds = (value: string) =>
+    Math.max(
+      ...value
+        .split(",")
+        .map((duration) => duration.trim())
+        .map((duration) =>
+          duration.endsWith("ms")
+            ? Number.parseFloat(duration) / 1_000
+            : Number.parseFloat(duration),
+        ),
+    );
+  expect(maximumDurationSeconds(motion.animationDuration)).toBeLessThanOrEqual(0.000_01);
+  expect(maximumDurationSeconds(motion.transitionDuration)).toBeLessThanOrEqual(0.000_01);
+  expect(motion.scrollBehavior).toBe("auto");
+
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    zoom: getComputedStyle(document.documentElement).zoom,
+  }));
+  expect(layout.zoom).toBe("2");
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
 test("detects mixed files incrementally without network or private-data side effects", async ({
@@ -578,6 +683,65 @@ test("detects mixed files incrementally without network or private-data side eff
   }
   expect(afterSelection.objectUrls).toEqual([]);
   await expect(launcher.locator("img, canvas")).toHaveCount(0);
+  await privacy.assertClean(0, false);
+});
+
+test("keeps sentinel data private through explicit handoff", async ({ page }) => {
+  const sentinelFilename = "PRIVATE_HANDOFF_FILENAME_SENTINEL.pdf";
+  const sentinelBytes = "PRIVATE_HANDOFF_BYTES_SENTINEL";
+  const detectedKind = "application/pdf";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, sentinelBytes, detectedKind],
+  });
+  await page.goto("/");
+  await privacy.clear();
+
+  const launcher = page.locator('section[aria-labelledby="file-launcher-title"]');
+  await page.locator("#home-file-input").setInputFiles({
+    name: sentinelFilename,
+    mimeType: detectedKind,
+    buffer: Buffer.from(`%PDF-1.7\n% ${sentinelBytes}\n%%EOF`),
+  });
+
+  await expect(launcher.getByRole("status")).toHaveText("1개 파일 형식 확인 완료");
+  await expect(page.getByRole("heading", { name: "PDF 문서" })).toBeVisible();
+  expect(await privacy.read()).toEqual({
+    requestCount: 0,
+    externalRequests: [],
+    writeRequests: [],
+    consoleMessages: [],
+    storageWrites: [],
+    objectUrls: [],
+  });
+  await expect(launcher.locator("img, canvas, [data-thumbnail]")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
+  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
+  await expect(page.getByText(sentinelFilename, { exact: true })).toBeVisible();
+  const afterHandoff = await privacy.read();
+  expect(afterHandoff.externalRequests).toEqual([]);
+  expect(afterHandoff.writeRequests).toEqual([]);
+  expect(afterHandoff.objectUrls).toEqual([]);
+  await expect(
+    page.getByRole("region", { name: "선택한 파일" }).locator("img, canvas, [data-thumbnail]"),
+  ).toHaveCount(0);
+  expect(page.url()).not.toContain(sentinelFilename);
+  expect(page.url()).not.toContain(sentinelBytes);
+  expect(page.url()).not.toContain(detectedKind);
+  expect(
+    await page
+      .locator("[data-analytics], [data-error], [data-thumbnail]")
+      .evaluateAll(
+        (elements, privateValues) =>
+          elements.some((element) =>
+            [
+              element.textContent ?? "",
+              ...Array.from(element.attributes, ({ value }) => value),
+            ].some((value) => privateValues.some((privateValue) => value.includes(privateValue))),
+          ),
+        [sentinelFilename, sentinelBytes, detectedKind],
+      ),
+  ).toBe(false);
   await privacy.assertClean(0, false);
 });
 
@@ -733,6 +897,158 @@ test("hands a chosen file to the canonical destination without auto-processing",
   await expect(page.getByText("handoff.png", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
   await expect(page.getByText(/이미지 변환을 완료했어요/)).toHaveCount(0);
+});
+
+test("revalidates a detected file at the destination boundary", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#home-file-input").setInputFiles({
+    name: "revalidate-at-destination.bin",
+    mimeType: "application/octet-stream",
+    buffer: onePixelPng,
+  });
+
+  await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
+  await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByText("revalidate-at-destination.bin", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/0개를 추가했어요\. 1개는 형식/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+});
+
+test("consumes a handoff only once during client navigation", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#home-file-input").setInputFiles({
+    name: "one-use-handoff.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
+  await expect(page.getByText("one-use-handoff.png", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "HereIsIt 홈" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.goBack();
+
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByText("one-use-handoff.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
+});
+
+test("shows the ordinary selector after a handed-off destination reload", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#home-file-input").setInputFiles({
+    name: "reload-clears-handoff.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
+  await expect(page.getByText("reload-clears-handoff.png", { exact: true })).toBeVisible();
+  await page.reload();
+
+  await expect(page.getByText("reload-clears-handoff.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
+});
+
+test("asks for reselect when a controlled clock expires the pending handoff", async ({ page }) => {
+  await page.addInitScript(() => {
+    const trackedWindow = window as Window & {
+      __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
+      __hereisitEnableImageRuntime?: () => void;
+    };
+    const nativeNow = performance.now.bind(performance);
+    const nativeOffscreenCanvas = globalThis.OffscreenCanvas;
+    let offset = 0;
+    trackedWindow.__hereisitAdvanceHandoffClock = (milliseconds) => {
+      offset += milliseconds;
+    };
+    trackedWindow.__hereisitEnableImageRuntime = () => {
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: nativeOffscreenCanvas ?? class TestOffscreenCanvas {},
+      });
+    };
+    Object.defineProperty(performance, "now", {
+      configurable: true,
+      value: () => nativeNow() + offset,
+    });
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+  await page.goto("/");
+  await page.locator("#home-file-input").setInputFiles({
+    name: "expires-locally.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
+  await page.getByRole("link", { name: "워크플로", exact: true }).click();
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & {
+      __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
+      __hereisitEnableImageRuntime?: () => void;
+    };
+    trackedWindow.__hereisitAdvanceHandoffClock?.(60_000);
+    trackedWindow.__hereisitEnableImageRuntime?.();
+  });
+  await page.getByRole("button", { name: "검색", exact: true }).click();
+  const search = page.getByTestId("desktop-search");
+  await search.getByRole("combobox", { name: "도구 검색" }).fill("이미지 용량 줄이기");
+  await search.getByRole("option", { name: /이미지 용량 줄이기/ }).click();
+
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toBeVisible();
+  await expect(page.getByText("expires-locally.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+});
+
+test("asks for reselect when a pending handoff reaches a different tool", async ({ page }) => {
+  await page.addInitScript(() => {
+    const trackedWindow = window as Window & { __hereisitEnableImageRuntime?: () => void };
+    const nativeOffscreenCanvas = globalThis.OffscreenCanvas;
+    trackedWindow.__hereisitEnableImageRuntime = () => {
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        configurable: true,
+        value: nativeOffscreenCanvas ?? class TestOffscreenCanvas {},
+      });
+    };
+    Object.defineProperty(globalThis, "OffscreenCanvas", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+  await page.goto("/");
+  await page.locator("#home-file-input").setInputFiles({
+    name: "target-mismatch.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
+  await expect(page).toHaveURL(/\/image\/compress\/?$/);
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
+  await page.getByRole("link", { name: "워크플로", exact: true }).click();
+  await page.evaluate(() => {
+    (
+      window as Window & { __hereisitEnableImageRuntime?: () => void }
+    ).__hereisitEnableImageRuntime?.();
+  });
+  await page.getByRole("button", { name: "검색", exact: true }).click();
+  const search = page.getByTestId("desktop-search");
+  await search.getByRole("combobox", { name: "도구 검색" }).fill("PDF 합치기");
+  await search.getByRole("option", { name: /PDF 합치기/ }).click();
+
+  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toBeVisible();
+  await expect(page.getByText("target-mismatch.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 파일 선택" })).toBeEnabled();
 });
 
 test("hands a needs-more recommendation through destination validation", async ({ page }) => {

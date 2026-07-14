@@ -309,13 +309,16 @@ test("rejects a wide console container before enumerating it in the privacy harn
   await page.evaluate(() => {
     const trackedWindow = window as Window & { __hereisitWideOwnKeysCalls?: number };
     trackedWindow.__hereisitWideOwnKeysCalls = 0;
-    const wideArray = new Proxy(new Array(100_001), {
-      ownKeys(target) {
-        trackedWindow.__hereisitWideOwnKeysCalls =
-          (trackedWindow.__hereisitWideOwnKeysCalls ?? 0) + 1;
-        return Reflect.ownKeys(target);
+    const wideArray = new Proxy(
+      Array.from({ length: 100_001 }, () => null),
+      {
+        ownKeys(target) {
+          trackedWindow.__hereisitWideOwnKeysCalls =
+            (trackedWindow.__hereisitWideOwnKeysCalls ?? 0) + 1;
+          return Reflect.ownKeys(target);
+        },
       },
-    });
+    );
     console.log({ nested: wideArray });
   });
 
@@ -353,6 +356,184 @@ test("records a rejected console handle cleanup in the privacy harness", async (
     detectionError = error;
   }
   expect(String(detectionError)).toContain("console-cleanup-failed");
+});
+
+test("observes deliberate privacy probes without exposing their raw values", async ({ page }) => {
+  const sentinelFilename = "PRIVATE_OBSERVER_FILENAME_SENTINEL.pdf";
+  const sentinelValue = "PRIVATE_OBSERVER_VALUE_SENTINEL";
+  const privacy = await installPrivacyObserver(page, {
+    fulfillProbePathPrefix: "/privacy-observer-",
+    origin: "http://localhost:4173",
+    sentinels: [sentinelFilename, sentinelValue],
+  });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  const probeResults = await page.evaluate(
+    async ({ filename, value }) => {
+      console.log({ filename, value });
+      window.localStorage.setItem(filename, value);
+      const objectUrl = URL.createObjectURL(new File([value], filename));
+      URL.revokeObjectURL(objectUrl);
+
+      const fetchResponse = await fetch("/privacy-observer-fetch-probe", {
+        method: "POST",
+        body: value,
+      });
+      const xhrStatus = await new Promise<number>((resolve) => {
+        const request = new XMLHttpRequest();
+        request.addEventListener("loadend", () => resolve(request.status), { once: true });
+        request.open("PUT", "/privacy-observer-xhr-probe");
+        request.send(value);
+      });
+      const beaconAccepted = navigator.sendBeacon("/privacy-observer-beacon-probe", value);
+      const externalResponse = await fetch("/privacy-observer-external-probe");
+      return {
+        beaconAccepted,
+        externalStatus: externalResponse.status,
+        fetchStatus: fetchResponse.status,
+        xhrStatus,
+      };
+    },
+    { filename: sentinelFilename, value: sentinelValue },
+  );
+  expect(probeResults).toEqual({
+    beaconAccepted: true,
+    externalStatus: 204,
+    fetchStatus: 204,
+    xhrStatus: 204,
+  });
+
+  await expect
+    .poll(async () => (await privacy.read()).writeRequests.length)
+    .toBeGreaterThanOrEqual(3);
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toContain("GET cross-origin");
+  expect(observation.writeRequests).toHaveLength(3);
+  expect(
+    observation.writeRequests.filter((request) => request === "POST cross-origin"),
+  ).toHaveLength(2);
+  expect(
+    observation.writeRequests.filter((request) => request === "PUT cross-origin"),
+  ).toHaveLength(1);
+  expect(observation.consoleMessages).toContain("log");
+  expect(observation.storageWrites).toContain("localStorage:set");
+  expect(observation.objectUrls).toContain("blob-url-created");
+
+  const diagnostics = JSON.stringify(observation);
+  for (const privateValue of [
+    sentinelFilename,
+    sentinelValue,
+    "privacy-observer-fetch-probe",
+    "privacy-observer-xhr-probe",
+    "privacy-observer-beacon-probe",
+    "blob:",
+  ]) {
+    expect(diagnostics).not.toContain(privateValue);
+  }
+
+  await page.evaluate((key) => window.localStorage.removeItem(key), sentinelFilename);
+  expect(
+    await page.evaluate((key) => window.localStorage.getItem(key), sentinelFilename),
+  ).toBeNull();
+  await privacy.clear();
+  expect(await privacy.read()).toEqual({
+    requestCount: 0,
+    externalRequests: [],
+    writeRequests: [],
+    consoleMessages: [],
+    storageWrites: [],
+    objectUrls: [],
+  });
+  await privacy.assertClean(0, false);
+});
+
+test("assertClean rejects a deliberate network violation and detaches its hooks", async ({
+  page,
+}) => {
+  const privacy = await installPrivacyObserver(page, { origin: "http://localhost:4173" });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate(() => fetch("/privacy-observer-assert-probe"));
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  expect(String(detectionError)).toContain("cross-origin");
+
+  const observedBeforeCleanupCheck = (await privacy.read()).requestCount;
+  await page.evaluate(() => fetch("/privacy-observer-after-cleanup"));
+  await page.waitForTimeout(50);
+  expect((await privacy.read()).requestCount).toBe(observedBeforeCleanupCheck);
+});
+
+test("detects an encoded history sentinel without exposing it in diagnostics", async ({ page }) => {
+  const sentinel = "PRIVATE ENCODED HISTORY SENTINEL";
+  const privacy = await installPrivacyObserver(page, { sentinels: [sentinel] });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate((privateValue) => {
+    history.pushState({ privateValue }, "", "/pdf/compress?malformed=%E0%A4%A");
+    history.replaceState(
+      { privateValue: encodeURIComponent(privateValue) },
+      "",
+      `/pdf/compress?private=${encodeURIComponent(privateValue)}`,
+    );
+  }, sentinel);
+
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  const diagnostics = String(detectionError);
+  expect(diagnostics).toContain("history-url");
+  expect(diagnostics).toContain("history-state");
+  expect(diagnostics).not.toContain(sentinel);
+  expect(diagnostics).not.toContain(encodeURIComponent(sentinel));
+});
+
+test("bounds a wide history state before enumerating its values", async ({ page }) => {
+  const privacy = await installPrivacyObserver(page);
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & { __hereisitHistoryOwnKeysCalls?: number };
+    trackedWindow.__hereisitHistoryOwnKeysCalls = 0;
+    const wideArray = new Proxy(new Array(100_001), {
+      ownKeys(target) {
+        trackedWindow.__hereisitHistoryOwnKeysCalls =
+          (trackedWindow.__hereisitHistoryOwnKeysCalls ?? 0) + 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+    try {
+      history.pushState({ nested: wideArray }, "", "/pdf/compress?wide-history-state=1");
+    } catch {
+      // Proxies are intentionally not structured-cloneable; the observer must bound first.
+    }
+  });
+
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  expect(String(detectionError)).toContain("history-state-inspection-failed");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __hereisitHistoryOwnKeysCalls?: number })
+          .__hereisitHistoryOwnKeysCalls,
+    ),
+  ).toBe(0);
 });
 
 test("publishes the isolated compression shell with exact default copy and preset", async ({
@@ -433,6 +614,7 @@ test("compresses a known scan with the default preset and downloads only after o
   browserName,
   page,
 }) => {
+  test.setTimeout(90_000);
   await forceDownloadFallback(page);
   await installObjectUrlCounters(page);
   const privacySentinel = "PRIVATE_SCAN_SENTINEL";
