@@ -1,4 +1,5 @@
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { type PdfToolConfig, relatedPdfTools } from "../lib/site";
 import { SiteFooter } from "./site-footer";
@@ -56,11 +57,16 @@ export function PdfToolPage({
         </div>
         <div className="related-tools-grid">
           {relatedTools.map((related) => (
-            <a className="related-tool-card" href={related.path} key={related.path}>
+            <Link
+              className="related-tool-card"
+              href={related.path}
+              key={related.path}
+              prefetch={false}
+            >
               <span>{related.navLabel}</span>
               <strong>{related.title}</strong>
               <p>{related.defaultSummary}</p>
-            </a>
+            </Link>
           ))}
         </div>
       </section>
