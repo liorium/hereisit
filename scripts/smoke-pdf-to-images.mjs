@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { degrees, PDFDocument, rgb } from "@cantoo/pdf-lib";
 import { chromium } from "@playwright/test";
 import { unzipSync } from "fflate";
+import {
+  assertWebShareUnused,
+  installAvailableWebShareTripwire,
+} from "./support/result-download.mjs";
 
 const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
 const ROUTE_PATH = "/pdf/to-image";
@@ -128,8 +132,12 @@ async function runDirectPngSmoke(page) {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
+  await page
+    .getByRole("status")
+    .getByText("다운로드를 시작했어요.", { exact: true })
+    .waitFor({ state: "visible" });
   assert.ok(
     download.suggestedFilename() === "report-page-002.png",
     "The direct PNG download name was incorrect.",
@@ -154,8 +162,12 @@ async function runDefaultJpegZipSmoke(page) {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
   ]);
+  await page
+    .getByRole("status")
+    .getByText("ZIP 다운로드를 시작했어요.", { exact: true })
+    .waitFor({ state: "visible" });
   assert.ok(
     download.suggestedFilename() === "report-images-hereisit.zip",
     "The multi-page ZIP download name was incorrect.",
@@ -180,6 +192,7 @@ let context;
 
 try {
   context = await browser.newContext({ acceptDownloads: true });
+  await context.addInitScript(installAvailableWebShareTripwire);
   for (const assetPath of REQUIRED_ASSET_PATHS) {
     const expectedUrl = `${baseUrl}${assetPath}`;
     const response = await context.request.get(expectedUrl, { maxRedirects: 0 });
@@ -223,6 +236,7 @@ try {
 
   await runDirectPngSmoke(page);
   await runDefaultJpegZipSmoke(page);
+  await assertWebShareUnused(page);
 
   assert.deepEqual(violations, []);
   assert.equal(failedRequests, 0);

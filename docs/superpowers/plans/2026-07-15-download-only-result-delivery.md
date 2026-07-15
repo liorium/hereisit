@@ -27,6 +27,7 @@
 
 - `tests/e2e/support/result-download.ts` — installs Web Share tripwires, reads aggregate call counts, and controls deterministic download-activation failures without recording file data.
 - `tests/result-download-policy.test.ts` — permanently rejects Web Share code and share-oriented result copy in the five workbench sources.
+- `scripts/support/result-download.mjs` — shares the release-smoke Web Share tripwire and zero-call assertion without recording file data.
 
 ### Modify
 
@@ -1133,6 +1134,7 @@ git commit -m "fix: download PDF image results directly"
 **Files:**
 
 - Create: `tests/result-download-policy.test.ts`
+- Create: `scripts/support/result-download.mjs`
 - Modify: `tests/e2e/mobile.spec.ts`
 - Modify: `scripts/smoke-image-watermark.mjs`
 - Modify: `scripts/smoke-pdf-compress.mjs`

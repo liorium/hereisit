@@ -1,6 +1,6 @@
 # Download-Only Result Delivery Design
 
-**Status:** Revised for written review on 2026-07-15
+**Status:** Approved on 2026-07-15
 **Approved direction:** Remove result sharing and make every result action download-only
 
 ## Summary

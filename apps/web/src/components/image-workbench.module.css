@@ -421,6 +421,17 @@
   letter-spacing: 0.08em;
 }
 
+.previewTopline span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewTopline span:last-child {
+  flex: 0 0 auto;
+}
+
 .previewStage {
   min-height: 410px;
   flex: 1;

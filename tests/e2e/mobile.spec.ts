@@ -32,6 +32,28 @@ async function expectFunctionalTextFloor(
   ).toEqual([]);
 }
 
+const RESPONSIVE_RESULT_WIDTHS = [320, 390, 600, 601, 800, 801, 1280] as const;
+
+async function expectResponsiveResultActions(
+  page: import("@playwright/test").Page,
+  actions: readonly Locator[],
+): Promise<void> {
+  for (const width of RESPONSIVE_RESULT_WIDTHS) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const action of actions) {
+      await expect(action).toBeVisible();
+      const box = await action.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    const layout = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  }
+}
+
 async function holdTerminalWorkerEvents(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(() => {
     const NativeWorker = window.Worker;
@@ -224,9 +246,37 @@ test("keeps image compression preset text readable after selection", async ({ pa
   ]);
 });
 
+test("keeps general image result actions touch-safe at every responsive boundary", async ({
+  page,
+}) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "이 이미지 다운로드 ↓" }),
+    page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }),
+  ]);
+  expect(downloads).toBe(0);
+});
+
 test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and touch-safe", async ({
   page,
 }) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   await page.goto("/pdf/compress");
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
   await expect(
@@ -390,6 +440,9 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
+  expect(downloads).toBe(0);
 });
 
 test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
@@ -548,6 +601,9 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
       locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
     },
   ]);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }),
+  ]);
   const observation = await privacy.read();
   expect(observation.externalRequests).toEqual([]);
   expect(observation.writeRequests).toEqual([]);
@@ -648,6 +704,10 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
 });
 
 test("keeps PDF organizer controls touch-safe without horizontal overflow", async ({ page }) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   const document = await PDFDocument.create();
   document.addPage([100, 200]);
   document.addPage([200, 100]);
@@ -747,6 +807,9 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
+  expect(downloads).toBe(0);
 });
 
 test("runs the watermark Worker with touch-safe controls on an iPhone", async ({ page }) => {
@@ -1000,6 +1063,10 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
       label: "watermark source limitation",
       locator: page.getByText("원본 파일은 메인 화면에서 디코드하지 않아요.", { exact: true }),
     },
+  ]);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "선택 파일 다운로드 ↓" }),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }),
   ]);
   const observation = await privacy.read();
   expect(observation.externalRequests).toEqual([]);

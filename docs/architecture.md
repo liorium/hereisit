@@ -75,8 +75,8 @@ Every image-watermark result is reconstructed through an output-sized `Offscreen
 EXIF, GPS, camera, and container metadata and may normalize color profiles. It is a new encode rather than
 a byte-preserving edit, so its size may increase even when `source` is selected; this contract has no
 smaller-only postcondition. The Worker draws the auto-oriented source once and the selected watermark
-once. A result is exposed in tab-owned memory and saved only after an explicit single-result or batch-ZIP
-action.
+once. A result is exposed in tab-owned memory and downloaded only after an explicit single-result or
+batch-ZIP action.
 
 The `pdf.merge@1`, `pdf.split@1`, `pdf.images-to-pdf@1`, `pdf.organize@1`, and `pdf.watermark@1` tools
 copy or embed content in a dedicated one-job Worker. The organizer creates a new document from a validated
@@ -180,6 +180,7 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
+- Generated image, PDF, and ZIP results never use Web Share; an explicit download-labelled action activates the tab-owned Blob URL.
 - Image-watermark source/logo bytes move only as transferred local buffers between the tab and its
   dedicated Workers. Source and logo `File` objects never receive object URLs and are never decoded by the
   main-thread UI; filename, size, and Worker-validated dimensions are shown as metadata instead. No remote
@@ -187,7 +188,7 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - Only Worker-validated, newly encoded image results and generated ZIP archives receive image-watermark
   object URLs. They are excluded from network and analytics payloads and remain in tab-owned memory.
 - Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
-  archive failure, and archive timeout. No save begins until the user explicitly requests one.
+  archive failure, and archive timeout. No download begins until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
 
 ## Release proof
@@ -207,4 +208,5 @@ the six release routes, canonical security headers, approved header/search behav
 launcher, the complete and planned catalog states, non-indexed personal/workflow pages, representative
 file/workspace shells, exact next actions, and read-only same-origin browser traffic.
 The image-watermark smoke also proves the security headers, approved defaults, synthetic 320×180 PNG
-result, explicit-only save, same dimensions and PNG signature, and absence of external or write requests.
+result, explicit-only download, same dimensions and PNG signature, and absence of external or write
+requests.
