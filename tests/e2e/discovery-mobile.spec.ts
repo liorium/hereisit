@@ -187,24 +187,48 @@ test("supports a keyboard-only mobile menu with exact focus return", async ({ pa
 
 test("keeps enlarged mobile text readable without horizontal overflow", async ({ page }) => {
   await page.goto("/");
-  await page.addStyleTag({
-    content: `
-      html {
-        -webkit-text-size-adjust: 200% !important;
-        text-size-adjust: 200% !important;
+  const fileSelect = page.getByRole("button", { name: "파일 선택" });
+  await expect(fileSelect).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
+  const baselineFontSize = await fileSelect.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  const enlargedElementCount = await page.evaluate(() => {
+    const renderedTextElements = Array.from(document.body.querySelectorAll("*"))
+      .filter((element) =>
+        Array.from(element.childNodes).some(
+          (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
+        ),
+      )
+      .map((element) => ({
+        element,
+        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
+        style: getComputedStyle(element),
+      }))
+      .filter(
+        ({ fontSize, style }) =>
+          Number.isFinite(fontSize) &&
+          fontSize > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden",
+      );
+
+    for (const { element, fontSize } of renderedTextElements) {
+      if (element instanceof HTMLElement) {
+        element.style.setProperty("font-size", `${fontSize * 2}px`, "important");
       }
-    `,
+    }
+    return renderedTextElements.length;
   });
 
-  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
-  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
-    textSizeAdjust:
-      getComputedStyle(document.documentElement).getPropertyValue("text-size-adjust") ||
-      getComputedStyle(document.documentElement).getPropertyValue("-webkit-text-size-adjust"),
   }));
-  expect(layout.textSizeAdjust).toBe("200%");
+  const enlargedFontSize = await fileSelect.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  expect(enlargedElementCount).toBeGreaterThan(0);
+  expect(enlargedFontSize).toBeCloseTo(baselineFontSize * 2, 5);
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
