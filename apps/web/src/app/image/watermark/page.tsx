@@ -1,12 +1,12 @@
-import { ImageToolPage } from "../../../components/image-tool-page";
+import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
 import { ImageWatermarkWorkbench } from "../../../components/image-watermark-workbench";
-import { createImageToolMetadata } from "../../../lib/metadata";
-import { imageTools } from "../../../lib/site";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
+import { createToolMetadata } from "../../../lib/metadata";
 
-const tool = imageTools.watermark;
+const toolId = "image.watermark" satisfies AvailableToolId;
 
-export const metadata = createImageToolMetadata(tool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function WatermarkImagePage() {
-  return <ImageToolPage tool={tool} imageWatermarkWorkbench={<ImageWatermarkWorkbench />} />;
+  return <ToolDetailPage toolId={toolId} workbench={<ImageWatermarkWorkbench toolId={toolId} />} />;
 }

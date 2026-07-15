@@ -9,6 +9,7 @@ import type {
   ImagePipelineSpecV1,
 } from "@hereisit/tool-contracts";
 import { findImagePreset, imagePresets } from "@hereisit/tool-registry";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -26,6 +27,8 @@ import {
   formatSavings,
   isAbortError,
 } from "../lib/files";
+import { getToolImplementation } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
 const ACCEPTED_TYPES = new Set([
@@ -35,10 +38,6 @@ const ACCEPTED_TYPES = new Set([
   "image/heic",
   "image/heif",
 ]);
-const MAX_FILES = 100;
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
-const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
-
 export type ImageWorkbenchIntent = "general" | "compress" | "resize" | "convert";
 
 const INTENT_CONFIG: Record<
@@ -194,7 +193,22 @@ function isAcceptedFile(file: File): boolean {
   );
 }
 
-export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbenchIntent }) {
+export function ImageWorkbench({
+  intent,
+  toolId,
+}: {
+  intent: Exclude<ImageWorkbenchIntent, "general">;
+  toolId: AvailableToolId;
+}) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "image" ||
+    implementation.family !== "image" ||
+    implementation.intent !== intent
+  ) {
+    throw new Error(`ImageWorkbench tool mismatch: ${toolId}/${intent}`);
+  }
+  const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const intentCopy = INTENT_CONFIG[intent];
   const [initialPreset] = useState(() => resolveInitialPreset(intent));
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -263,8 +277,8 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
     (fileList: FileList | readonly File[]) => {
       const candidates = Array.from(fileList);
       const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
-      let remainingBytes = Math.max(0, MAX_TOTAL_INPUT_BYTES - currentBytes);
-      const available = Math.max(0, MAX_FILES - itemsRef.current.length);
+      let remainingBytes = Math.max(0, maxTotalBytes - currentBytes);
+      const available = Math.max(0, maxFiles - itemsRef.current.length);
       const accepted: File[] = [];
 
       for (const file of candidates) {
@@ -272,7 +286,7 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
           accepted.length >= available ||
           !isAcceptedFile(file) ||
           file.size < 1 ||
-          file.size > MAX_FILE_BYTES ||
+          file.size > maxFileBytes ||
           file.size > remainingBytes
         ) {
           continue;
@@ -302,8 +316,15 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
         );
       }
     },
-    [commitItems, createOwnedUrl],
+    [commitItems, createOwnedUrl, maxFileBytes, maxFiles, maxTotalBytes],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: addFiles,
+    onReselectRequired: setMessage,
+  });
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -509,7 +530,7 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
   };
 
   const startProcessing = async () => {
-    if (itemsRef.current.length === 0 || busy || !runtimeSupported) return;
+    if (itemsRef.current.length < minFiles || busy || !runtimeSupported) return;
     const sourceItems = itemsRef.current;
     const runId = activeRunRef.current + 1;
     activeRunRef.current = runId;

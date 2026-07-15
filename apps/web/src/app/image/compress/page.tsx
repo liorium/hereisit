@@ -1,12 +1,19 @@
-import { ImageToolPage } from "../../../components/image-tool-page";
+import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
 import { ImageWorkbench } from "../../../components/image-workbench";
-import { createImageToolMetadata } from "../../../lib/metadata";
-import { imageTools } from "../../../lib/site";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
+import { createToolMetadata } from "../../../lib/metadata";
+import { getToolImplementation } from "../../../lib/tool-implementations";
 
-const tool = imageTools.compress;
+const toolId = "image.compress" satisfies AvailableToolId;
+const implementation = getToolImplementation(toolId);
 
-export const metadata = createImageToolMetadata(tool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function CompressImagePage() {
-  return <ImageToolPage tool={tool} imageWorkbench={<ImageWorkbench intent={tool.intent} />} />;
+  return (
+    <ToolDetailPage
+      toolId={toolId}
+      workbench={<ImageWorkbench intent={implementation.intent} toolId={toolId} />}
+    />
+  );
 }

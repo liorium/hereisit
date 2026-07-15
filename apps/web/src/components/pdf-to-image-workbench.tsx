@@ -15,11 +15,13 @@ import {
   planPdfToImagesRasterization,
 } from "@hereisit/pdf-tool";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const UNSUPPORTED_BROWSER_MESSAGE =
   "이 브라우저에서는 PDF를 이미지로 변환할 수 없어요. 최신 Safari, Chrome, Firefox 또는 Edge를 사용해 주세요.";
 
@@ -56,7 +58,17 @@ function progressLabel(progress: PdfToImagesProgress | undefined): string {
   return "결과 마무리 중";
 }
 
-export function PdfToImageWorkbench() {
+export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "pdf-to-images" ||
+    implementation.family !== "pdf" ||
+    implementation.intent !== "to-image"
+  ) {
+    throw new Error(`PdfToImageWorkbench tool mismatch: ${toolId}`);
+  }
+  const sourceFileLimits: SourceFileLimits = implementation.sourceFileLimits;
+  const { minFiles, maxFiles, maxFileBytes } = sourceFileLimits;
   const [file, setFile] = useState<File>();
   const [inspection, setInspection] = useState<PdfInspectionResult>();
   const [hydrated, setHydrated] = useState(false);
@@ -222,7 +234,7 @@ export function PdfToImageWorkbench() {
       }
 
       const candidates = Array.from(fileList);
-      if (candidates.length !== 1) {
+      if (candidates.length < minFiles || candidates.length > maxFiles) {
         setMessage("PDF 파일 한 개만 선택해 주세요.");
         return;
       }
@@ -235,7 +247,7 @@ export function PdfToImageWorkbench() {
       if (
         !Number.isSafeInteger(nextFile.size) ||
         nextFile.size < 1 ||
-        nextFile.size > MAX_FILE_BYTES
+        nextFile.size > maxFileBytes
       ) {
         setMessage("PDF 파일은 1바이트 이상 50MB 이하여야 해요.");
         return;
@@ -243,8 +255,15 @@ export function PdfToImageWorkbench() {
 
       void inspectSelectedFile(nextFile);
     },
-    [inspectSelectedFile, runtimeSupported],
+    [inspectSelectedFile, maxFileBytes, maxFiles, minFiles, runtimeSupported],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: chooseFile,
+    onReselectRequired: setMessage,
+  });
 
   const reset = () => {
     invalidateActiveWork();

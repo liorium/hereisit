@@ -13,6 +13,7 @@ import type {
   ImageWatermarkRuntimeEvent,
   ImageWatermarkSpecV1,
 } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -29,13 +30,12 @@ import {
   formatDuration,
   isAbortError,
 } from "../lib/files";
+import { getToolImplementation } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
 const SOURCE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const LOGO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_FILES = 100;
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
-const MAX_TOTAL_INPUT_BYTES = 250 * 1024 * 1024;
 const MAX_LOGO_BYTES = 10 * 1024 * 1024;
 
 const POSITIONS: readonly { value: ImageWatermarkPosition; label: string }[] = [
@@ -175,7 +175,16 @@ function buildSpec(options: {
   };
 }
 
-export function ImageWatermarkWorkbench() {
+export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "image-watermark" ||
+    implementation.family !== "image" ||
+    implementation.intent !== "watermark"
+  ) {
+    throw new Error(`ImageWatermarkWorkbench tool mismatch: ${toolId}`);
+  }
+  const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [logo, setLogo] = useState<LogoSelection>();
@@ -284,8 +293,8 @@ export function ImageWatermarkWorkbench() {
       if (!hydrated || !runtimeSupported || busy) return;
       const candidates = Array.from(fileList);
       const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
-      let remainingBytes = Math.max(0, MAX_TOTAL_INPUT_BYTES - currentBytes);
-      const available = Math.max(0, MAX_FILES - itemsRef.current.length);
+      let remainingBytes = Math.max(0, maxTotalBytes - currentBytes);
+      const available = Math.max(0, maxFiles - itemsRef.current.length);
       const accepted: File[] = [];
 
       for (const file of candidates) {
@@ -293,7 +302,7 @@ export function ImageWatermarkWorkbench() {
           accepted.length >= available ||
           !isAcceptedSource(file) ||
           file.size < 1 ||
-          file.size > MAX_FILE_BYTES ||
+          file.size > maxFileBytes ||
           file.size > remainingBytes
         ) {
           continue;
@@ -323,8 +332,24 @@ export function ImageWatermarkWorkbench() {
         );
       }
     },
-    [busy, commitItems, hydrated, invalidateResults, runtimeSupported],
+    [
+      busy,
+      commitItems,
+      hydrated,
+      invalidateResults,
+      maxFileBytes,
+      maxFiles,
+      maxTotalBytes,
+      runtimeSupported,
+    ],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: addFiles,
+    onReselectRequired: setMessage,
+  });
 
   const selected = useMemo(
     () => items.find((item) => item.id === selectedId) ?? items[0],
@@ -339,7 +364,7 @@ export function ImageWatermarkWorkbench() {
   const canRun =
     hydrated &&
     runtimeSupported &&
-    items.length > 0 &&
+    items.length >= minFiles &&
     !busy &&
     (mode === "text" ? textIsValid : logoIsValid);
 

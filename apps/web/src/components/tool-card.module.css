@@ -1,0 +1,140 @@
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.card[data-context="related"] {
+  background: color-mix(in srgb, var(--panel) 90%, var(--paper));
+}
+
+.link {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 24px 8px 24px 24px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.name,
+.description,
+.execution {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.name {
+  padding-right: 4px;
+  font-size: clamp(18px, 2vw, 23px);
+  font-weight: 850;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+}
+
+.description {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.execution {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.favoriteButton {
+  min-width: 44px;
+  min-height: 44px;
+  margin: 14px 14px 0 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.favoriteButton[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--yellow) 70%, var(--ink));
+  background: var(--yellow);
+}
+
+.favoriteIcon {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.favoriteLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.link:focus-visible,
+.favoriteButton:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid color-mix(in srgb, var(--blue) 58%, transparent);
+  outline-offset: -3px;
+}
+
+@media (hover: hover) {
+  .card:hover {
+    border-color: var(--ink);
+    box-shadow: 5px 5px 0 var(--yellow);
+    transform: translate(-2px, -2px);
+  }
+
+  .favoriteButton:hover {
+    border-color: var(--ink);
+    transform: scale(1.04);
+  }
+}
+
+@media (max-width: 420px) {
+  .link {
+    padding: 20px 4px 20px 20px;
+  }
+
+  .favoriteButton {
+    margin: 10px 10px 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .favoriteButton {
+    transition: none;
+  }
+
+  .card:hover,
+  .favoriteButton:hover {
+    transform: none;
+  }
+}

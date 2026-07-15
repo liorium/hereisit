@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./catalog": "./src/tool-catalog.ts",
+    "./discovery": "./src/tool-discovery.ts",
+    "./file-kind": "./src/file-kind.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

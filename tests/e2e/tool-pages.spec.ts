@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { availableToolEntries, plannedToolEntries } from "@hereisit/tool-registry/catalog";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 const tools = [
   {
@@ -66,9 +67,22 @@ const onePixelPng = Buffer.from(
   "base64",
 );
 
+async function revealCatalogTool(page: Page, route: string): Promise<Locator> {
+  const link = page.locator(`[data-testid="available-tool-grid"] a[href="${route}"]`);
+  await expect(page.getByTestId("available-tool-grid")).toBeVisible();
+  while ((await link.count()) === 0) {
+    const moreButton = page.getByRole("button", { name: "더 보기" });
+    await expect(link.or(moreButton).first()).toBeVisible();
+    if ((await link.count()) > 0) break;
+    await moreButton.click();
+  }
+  return link;
+}
+
 test("links to dedicated image tools and initializes each intent", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/tools");
   for (const tool of tools) {
+    await revealCatalogTool(page, tool.path);
     await expect(page.getByRole("link", { name: tool.title }).first()).toHaveAttribute(
       "href",
       tool.path,
@@ -101,8 +115,9 @@ test("publishes every image route with unique metadata", async ({ page }) => {
   expect(new Set(imageRoutes.map((tool) => tool.path)).size).toBe(4);
   expect(new Set(imageRoutes.map((tool) => tool.title)).size).toBe(4);
 
-  await page.goto("/");
+  await page.goto("/tools");
   for (const tool of imageRoutes) {
+    await revealCatalogTool(page, tool.path);
     await expect(page.getByRole("link", { name: tool.title }).first()).toHaveAttribute(
       "href",
       tool.path,
@@ -129,13 +144,16 @@ test("publishes dedicated routes in the sitemap", async ({ request }) => {
   const response = await request.get("/sitemap.xml");
   expect(response.ok()).toBe(true);
   const sitemap = await response.text();
-  for (const tool of imageRoutes) expect(sitemap).toContain(tool.path);
-  expect(sitemap).toContain(pdfToImageTool.path);
-  expect(sitemap).toContain(pdfCompressionTool.path);
+  expect(sitemap).toContain("/tools");
+  for (const tool of availableToolEntries) expect(sitemap).toContain(tool.route);
+  for (const tool of plannedToolEntries) {
+    expect(sitemap).not.toContain(`/${tool.id.replaceAll(".", "/")}`);
+  }
 });
 
-test("publishes and links the scanned PDF compression tool", async ({ page }) => {
-  await page.goto("/");
+test("publishes the scanned PDF compression tool", async ({ page }) => {
+  await page.goto("/tools");
+  await revealCatalogTool(page, pdfCompressionTool.path);
   await expect(page.getByRole("link", { name: pdfCompressionTool.title }).first()).toHaveAttribute(
     "href",
     pdfCompressionTool.path,
@@ -156,13 +174,11 @@ test("publishes and links the scanned PDF compression tool", async ({ page }) =>
     "href",
     "https://hereisit.pages.dev/pdf/compress",
   );
-
-  await page.goto("/pdf/merge");
-  await expect(page.locator(`.related-tool-card[href="${pdfCompressionTool.path}"]`)).toBeVisible();
 });
 
-test("publishes and links the PDF to image tool", async ({ page }) => {
-  await page.goto("/");
+test("publishes the PDF to image tool", async ({ page }) => {
+  await page.goto("/tools");
+  await revealCatalogTool(page, pdfToImageTool.path);
   await expect(page.getByRole("link", { name: pdfToImageTool.title }).first()).toHaveAttribute(
     "href",
     pdfToImageTool.path,
@@ -176,7 +192,24 @@ test("publishes and links the PDF to image tool", async ({ page }) => {
     "href",
     new RegExp(`${pdfToImageTool.path.replaceAll("/", "\\/")}\\/?$`),
   );
+});
 
-  await page.goto("/pdf/merge");
-  await expect(page.locator(`.related-tool-card[href="${pdfToImageTool.path}"]`)).toBeVisible();
+test("publishes every available catalog route from the complete tools page", async ({ page }) => {
+  await page.goto("/tools");
+  for (const tool of availableToolEntries) {
+    await expect(await revealCatalogTool(page, tool.route)).toBeVisible();
+  }
+  for (const tool of plannedToolEntries) {
+    await expect(page.getByText(tool.name, { exact: true })).toHaveCount(0);
+  }
+
+  for (const tool of availableToolEntries) {
+    const response = await page.goto(tool.route);
+    expect(response?.ok()).toBe(true);
+    await expect(page.getByRole("heading", { level: 1, name: tool.name })).toBeVisible();
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+      "href",
+      `https://hereisit.pages.dev${tool.route}`,
+    );
+  }
 });

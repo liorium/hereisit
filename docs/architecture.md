@@ -18,6 +18,42 @@ Every tool has a stable ID, an integer version, validated inputs, a declared exe
 resource limits, structured progress, and structured errors. Executable functions never cross a Worker
 or network boundary.
 
+### Catalog, discovery, and detail ownership
+
+`packages/tool-registry` owns user-facing identity and discovery metadata: availability, canonical route,
+search aliases, domains, purposes, launcher input, output kinds, experience, execution, contract version,
+rank, and the ordered three related tool IDs. The keyed `toolImplementationConfig` in the web app owns
+runtime-facing intent, bundle profile, source limits, eyebrow, summary, and notices. Its keys match every
+available catalog ID exactly; discovery code does not duplicate implementation data and implementation
+code does not redefine catalog identity.
+
+The discovery routes `/`, `/tools`, `/my-tools`, and `/workflows` may import catalog/discovery UI but no
+processor, codec, Worker, browser runtime, image tool, PDF tool, or tool-contract implementation. The
+export verifier enforces that processor-free import boundary. Each processor route directly imports only
+its assigned workbench and passes that route-owned node to the shared detail shell; there is no central
+workbench switch or dynamic processor registry. The shell selects `파일 작업 영역` for `file` tools and
+`편집 작업 공간` for `workspace` tools, renders the browser-execution disclosure, and reads its exactly
+three next actions from the catalog. The current inventory is ten `file` tools and one `workspace` tool
+(`/pdf/organize`); there is no placeholder `quick` route or generic quick shell.
+
+Home file recommendation reads at most the first 64 KiB of each selected file, accepts at most 100 files,
+and schedules at most two prefix reads concurrently. Every prefix lease is released after detection. A
+chosen recommendation transfers the selected `File` references through module-scoped memory only: the
+handoff is bound to one target tool ID, consumed once, and expires after exactly 60 seconds. Expiry,
+target mismatch, consumption, and reload clear the file references; the handoff is never written to
+`localStorage` or `sessionStorage`.
+
+Favorites and recent tools persist only validated available tool IDs under
+`hereisit.favorite-tools.v1` and `hereisit.recent-tools.v1`. Each list is de-duplicated and capped at 12.
+Malformed or unreadable browser storage starts with empty in-memory preferences. If a later write is
+denied, the normalized changed IDs remain available in memory while persistence switches to `memory`, so
+discovery remains usable without persisting filenames or file contents as preference data.
+
+Discovery JavaScript is checked after every production export. Each discovery route may own at most
+76,800 gzip bytes and the discovery-shared layer at most 122,880 gzip bytes. Relative to the checked-in
+baseline, each route and the shared layer may grow by only the smaller of 10% or 10 KiB. These size gates
+run alongside the processor-marker and route-import isolation checks.
+
 The initial `image.pipeline@1` tool guarantees one decode and one raster draw per item. Quality-based
 output performs one encode; target-byte mode may encode repeatedly against the already-rendered canvas.
 
@@ -156,15 +192,19 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 ## Release proof
 
-After serving `apps/web/out` through the local Pages runtime, the tracked browser smokes prove the image
-watermark and both PDF raster paths without uploading fixtures:
+After serving `apps/web/out` through the local Pages runtime, four tracked browser smokes prove scalable
+navigation, image watermarking, and both PDF raster paths without uploading fixtures:
 
 ~~~bash
+node scripts/smoke-navigation.mjs http://127.0.0.1:3000
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without a base URL, all three scripts target the production Pages origin.
+Without a base URL, all four scripts target the production Pages origin. The navigation smoke verifies
+the six release routes, canonical security headers, approved header/search behavior, home tabs and local
+launcher, the complete and planned catalog states, non-indexed personal/workflow pages, representative
+file/workspace shells, exact next actions, and read-only same-origin browser traffic.
 The image-watermark smoke also proves the security headers, approved defaults, synthetic 320×180 PNG
 result, explicit-only save, same dimensions and PNG signature, and absence of external or write requests.

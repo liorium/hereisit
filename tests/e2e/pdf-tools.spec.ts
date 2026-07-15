@@ -393,9 +393,9 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
   }
 
   await page.goto("/pdf/split");
-  const pdfCategoryLink = page.getByRole("link", { name: "PDF", exact: true });
-  await expect(pdfCategoryLink).toHaveAttribute("data-active", "true");
-  await expect(pdfCategoryLink).not.toHaveAttribute("aria-current");
+  const toolsMenuButton = page.getByRole("button", { name: "모든 도구", exact: true });
+  await expect(toolsMenuButton).toHaveAttribute("data-active", "true");
+  await expect(toolsMenuButton).not.toHaveAttribute("aria-current");
 
   const response = await request.get("/sitemap.xml");
   const sitemap = await response.text();

@@ -10,16 +10,23 @@ import {
 } from "@hereisit/browser-runtime/pdf-compress-scanned";
 import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
-import { PDF_COMPRESS_SCANNED_WARNING } from "../lib/site";
+import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PAGE_COUNT = 100;
 const INITIAL_MESSAGE = "파일을 선택하면 페이지를 확인할게요.";
 const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
 const PAGE_LIMIT_MESSAGE = "PDF는 1페이지부터 100페이지까지 압축할 수 있어요.";
+const PDF_COMPRESS_SCANNED_WARNING = getToolImplementation("pdf.compress-scanned").notices.find(
+  ({ tone }) => tone === "warning",
+)?.text;
+if (PDF_COMPRESS_SCANNED_WARNING === undefined) {
+  throw new Error("Missing scanned PDF warning");
+}
 
 type Preset = PdfCompressScannedSpecV1["preset"];
 type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResult, "bytes">;
@@ -47,7 +54,17 @@ function progressLabel(progress: PdfCompressScannedProgress | undefined): string
   return "결과 마무리 중";
 }
 
-export function PdfCompressWorkbench() {
+export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "pdf-compress-scanned" ||
+    implementation.family !== "pdf" ||
+    implementation.intent !== "compress"
+  ) {
+    throw new Error(`PdfCompressWorkbench tool mismatch: ${toolId}`);
+  }
+  const sourceFileLimits: SourceFileLimits = implementation.sourceFileLimits;
+  const { minFiles, maxFiles, maxFileBytes } = sourceFileLimits;
   const [file, setFile] = useState<File>();
   const [inspection, setInspection] = useState<PdfInspectionResult>();
   const [hydrated, setHydrated] = useState(false);
@@ -170,7 +187,7 @@ export function PdfCompressWorkbench() {
       }
 
       const candidates = Array.from(fileList);
-      if (candidates.length !== 1) {
+      if (candidates.length < minFiles || candidates.length > maxFiles) {
         setMessage("PDF 파일 한 개만 선택해 주세요.");
         return;
       }
@@ -183,7 +200,7 @@ export function PdfCompressWorkbench() {
       if (
         !Number.isSafeInteger(nextFile.size) ||
         nextFile.size < 1 ||
-        nextFile.size > MAX_FILE_BYTES
+        nextFile.size > maxFileBytes
       ) {
         setMessage("PDF 파일은 1바이트 이상 50MB 이하여야 해요.");
         return;
@@ -191,8 +208,15 @@ export function PdfCompressWorkbench() {
 
       void inspectSelectedFile(nextFile);
     },
-    [inspectSelectedFile, runtimeSupported],
+    [inspectSelectedFile, maxFileBytes, maxFiles, minFiles, runtimeSupported],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: chooseFile,
+    onReselectRequired: setMessage,
+  });
 
   const reset = () => {
     invalidateActiveWork();
