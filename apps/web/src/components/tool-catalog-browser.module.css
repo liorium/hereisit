@@ -27,6 +27,26 @@
   line-height: 1.7;
 }
 
+.hero h1,
+.fallback h1,
+.panelHeading h2,
+.resultHeading h2,
+.plannedCard h3 {
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: keep-all;
+}
+
+.hero > div > p:last-child,
+.panelHeading p,
+.plannedCard p,
+.noAvailable,
+.empty p {
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  word-break: keep-all;
+}
+
 .search {
   min-width: 0;
   padding-bottom: 5px;
@@ -205,7 +225,6 @@
 
 .plannedCard h3 {
   margin: 42px 0 10px;
-  overflow-wrap: anywhere;
   font-size: 22px;
   letter-spacing: -0.04em;
 }

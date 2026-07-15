@@ -14,6 +14,13 @@
   font-size: clamp(54px, 7vw, 92px);
   line-height: 0.95;
   letter-spacing: -0.07em;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: keep-all;
+}
+
+.closingPhrase {
+  white-space: nowrap;
 }
 
 .heroCopy > p:last-child {
@@ -22,6 +29,9 @@
   color: var(--muted);
   font-size: 18px;
   line-height: 1.7;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  word-break: keep-all;
 }
 
 .search {
