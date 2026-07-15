@@ -947,9 +947,15 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
   await expect(page.getByText("1개 이미지 워터마크 처리를 완료했어요.")).toBeVisible({
     timeout: 20_000,
   });
-  const save = page.getByRole("button", { name: "결과 저장·공유 ↓" });
-  await save.scrollIntoViewIfNeeded();
-  await expect(save).toBeInViewport();
+  const resultDownload = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  const selectedDownload = page.getByRole("button", { name: "선택 파일 다운로드 ↓" });
+  await resultDownload.scrollIntoViewIfNeeded();
+  await expect(resultDownload).toBeInViewport();
+  for (const target of [resultDownload, selectedDownload]) {
+    const box = await target.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
   const watermarkSettings = page.getByLabel("워터마크 설정");
   await expectFunctionalTextFloor([
     {

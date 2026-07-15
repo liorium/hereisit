@@ -204,7 +204,7 @@
 .headerActions button,
 .secondaryButton,
 .cancelButton {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
