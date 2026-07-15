@@ -503,7 +503,7 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
 
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
-  const save = page.getByRole("button", { name: "이미지 저장·공유 ↓" });
+  const save = page.getByRole("button", { name: "이미지 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);

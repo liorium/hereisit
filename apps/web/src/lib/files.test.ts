@@ -1,12 +1,6 @@
 import { unzipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createZipArchive,
-  downloadUrl,
-  formatDuration,
-  formatSavings,
-  isAbortError,
-} from "./files";
+import { createZipArchive, downloadUrl, formatDuration, formatSavings } from "./files";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,8 +79,5 @@ describe("result metrics", () => {
     expect(formatSavings(1000, 1100)).toBe("10% 증가");
     expect(formatDuration(850)).toBe("850ms");
     expect(formatDuration(1250)).toBe("1.3초");
-    expect(isAbortError({ name: "AbortError" })).toBe(true);
-    expect(isAbortError(new Error("other"))).toBe(false);
-    expect(isAbortError(null)).toBe(false);
   });
 });

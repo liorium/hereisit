@@ -22,10 +22,6 @@ export function formatDuration(milliseconds: number): string {
   return `${Math.round(milliseconds / 1000)}초`;
 }
 
-export function isAbortError(error: unknown): boolean {
-  return (error as { name?: unknown } | null)?.name === "AbortError";
-}
-
 export function downloadUrl(url: string, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;

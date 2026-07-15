@@ -2,6 +2,12 @@ import { readFile } from "node:fs/promises";
 import { degrees, PDFDocument, rgb } from "@cantoo/pdf-lib";
 import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
+import {
+  expectWebShareUnused,
+  installAvailableWebShare,
+  installDownloadActivationController,
+  setDownloadActivationBlocked,
+} from "./support/result-download";
 
 const PDF_TO_IMAGES_ROUTE = "/pdf/to-image";
 const PDF_INSPECTION_TIMEOUT_MS = 60_000;
@@ -151,13 +157,6 @@ function pngDimensions(bytes: Uint8Array): { width: number; height: number } {
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
-async function forceDownloadFallback(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
-  });
-}
-
 async function observePrivateConversion(page: Page) {
   const origin = new URL(page.url()).origin;
   const violations: string[] = [];
@@ -192,38 +191,6 @@ async function observePrivateConversion(page: Page) {
       if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
     },
   };
-}
-
-async function installPendingShare(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const controlledWindow = window as Window & {
-      __hereisitResolveShare?: () => void;
-      __hereisitRejectShare?: () => void;
-    };
-    sessionStorage.setItem("__hereisitDownloadClicks", "0");
-    Object.defineProperty(navigator, "canShare", {
-      configurable: true,
-      value: () => true,
-    });
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () =>
-        new Promise<void>((resolve, reject) => {
-          controlledWindow.__hereisitResolveShare = resolve;
-          controlledWindow.__hereisitRejectShare = () => reject(new Error("share failed"));
-        }),
-    });
-
-    const originalClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function click() {
-      if (this.download.length > 0) {
-        const count = Number(sessionStorage.getItem("__hereisitDownloadClicks") ?? "0");
-        sessionStorage.setItem("__hereisitDownloadClicks", String(count + 1));
-        return;
-      }
-      originalClick.call(this);
-    };
-  });
 }
 
 async function installObjectUrlCounters(page: Page): Promise<void> {
@@ -281,7 +248,7 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
   browserName,
   page,
 }) => {
-  await forceDownloadFallback(page);
+  await installAvailableWebShare(page);
   await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   let downloadCount = 0;
@@ -308,7 +275,7 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename() === "report-images-hereisit.zip").toBe(true);
   const archive = unzipSync(await downloadedBytes(await download.path()));
@@ -323,13 +290,14 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
     expect(image?.[1]).toBe(0xd8);
     expect(jpegDimensions(image as Uint8Array)).toEqual({ width: 1275, height: 1650 });
   }
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
   privacy.assertClean(browserName !== "firefox");
 });
 
 test("keeps explicitly selected pages in source selection order inside the ZIP", async ({
   page,
 }) => {
-  await forceDownloadFallback(page);
   await openReadyPdfToImages(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
@@ -352,7 +320,7 @@ test("keeps explicitly selected pages in source selection order inside the ZIP",
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
   ]);
   const archive = unzipSync(await downloadedBytes(await download.path()));
   expect(Object.keys(archive)).toEqual(["report-page-002.jpg", "report-page-001.jpg"]);
@@ -363,7 +331,6 @@ test("renders a page containing multiple embedded image XObjects", async ({
   page,
 }) => {
   const pdf = await createMultiImagePdf(page);
-  await forceDownloadFallback(page);
   await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   await page.locator("input[type=file]").setInputFiles({
@@ -381,7 +348,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("report-page-001.png");
   const imageBytes = await downloadedBytes(await download.path());
@@ -419,7 +386,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
 });
 
 test("converts only a rotated second page to a direct 96DPI PNG", async ({ browserName, page }) => {
-  await forceDownloadFallback(page);
+  await installAvailableWebShare(page);
   await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
   let downloadCount = 0;
@@ -468,11 +435,38 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename() === "report-page-002.png").toBe(true);
   const image = await downloadedBytes(await download.path());
   expect(pngDimensions(image)).toEqual({ width: 1056, height: 816 });
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
+  privacy.assertClean(browserName !== "firefox");
+});
+
+test("keeps a prepared PDF image result retryable when download activation fails", async ({
+  browserName,
+  page,
+}) => {
+  await installDownloadActivationController(page);
+  const privacy = await prepareSinglePageResult(page);
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "이미지 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible();
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("report-page-001.jpg");
+  const image = await downloadedBytes(await download.path());
+  expect(image[0]).toBe(0xff);
+  expect(image[1]).toBe(0xd8);
+  expect(jpegDimensions(image)).toEqual({ width: 150, height: 150 });
   privacy.assertClean(browserName !== "firefox");
 });
 
@@ -580,7 +574,7 @@ test("cancels before a result or download is offered", async ({ page }) => {
   await settleRenderedState(page);
   await expect(page.getByText("이미지 변환을 중단했어요.").first()).toBeVisible();
   await expect(page.getByText(/이미지 \d+개.*준비 완료/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /저장·공유|ZIP으로 받기/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /이미지 다운로드|ZIP 다운로드/ })).toHaveCount(0);
   expect(downloadCount).toBe(0);
   privacy.assertClean(false);
 });
@@ -590,18 +584,26 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   page,
 }) => {
   await installObjectUrlCounters(page);
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   const privacy = await prepareSinglePageResult(page);
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("group", { name: "해상도" }).getByRole("radio", { name: "96DPI" }).check();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
+  expect(downloads).toBe(0);
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 1 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 2 });
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible();
+  expect(downloads).toBe(0);
 
   await page.locator("input[type=file]").setInputFiles({
     name: "replacement.pdf",
@@ -612,11 +614,14 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
+  expect(downloads).toBe(0);
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 3 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "새 작업" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 4 });
+  expect(downloads).toBe(0);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
@@ -627,6 +632,7 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   });
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 4 });
+  expect(downloads).toBe(0);
 
   await page.evaluate(() => {
     const nextWindow = window as Window & {
@@ -638,6 +644,7 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   });
   await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 5 });
+  expect(downloads).toBe(0);
   privacy.assertClean(browserName !== "firefox");
 });
 
@@ -750,60 +757,4 @@ test("loads only each raster route's inspection and dedicated Worker markers", a
     page.off("request", onRequest);
     page.off("response", onResponse);
   }
-});
-
-test("ignores a fulfilled share after reset invalidates its result URL", async ({
-  browserName,
-  page,
-}) => {
-  await installPendingShare(page);
-  const privacy = await prepareSinglePageResult(page);
-
-  await page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitResolveShare?: () => void })
-            .__hereisitResolveShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitResolveShare?: () => void }).__hereisitResolveShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByRole("status")).toHaveText("파일을 선택하면 페이지를 확인할게요.");
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
-  privacy.assertClean(browserName !== "firefox");
-});
-
-test("does not download a revoked result when a pending share rejects after reset", async ({
-  browserName,
-  page,
-}) => {
-  await installPendingShare(page);
-  const privacy = await prepareSinglePageResult(page);
-
-  await page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitRejectShare?: () => void })
-            .__hereisitRejectShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitRejectShare?: () => void }).__hereisitRejectShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByRole("status")).toHaveText("파일을 선택하면 페이지를 확인할게요.");
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
-  privacy.assertClean(browserName !== "firefox");
 });

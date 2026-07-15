@@ -17,7 +17,7 @@ import {
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
@@ -85,16 +85,12 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const [progress, setProgress] = useState<PdfToImagesProgress>();
   const [result, setResult] = useState<PdfToImagesResult>();
   const [resultUrl, setResultUrl] = useState<string>();
-  const [saving, setSaving] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfToImagesJobHandle | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
-  const saveOperationRef = useRef(0);
-  const savingRef = useRef(false);
   const busy = inspecting || processing;
 
   const parsedPageRange = useMemo(
@@ -136,7 +132,6 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
   }, [dpi, format, inspection, parsedPageRange, quality, selectionMode]);
 
   const revokeResultUrl = useCallback(() => {
-    resultBlobRef.current = undefined;
     if (resultUrlRef.current !== undefined) {
       URL.revokeObjectURL(resultUrlRef.current);
       resultUrlRef.current = undefined;
@@ -157,9 +152,6 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     inspectionHandleRef.current = undefined;
     jobHandleRef.current?.cancel();
     jobHandleRef.current = undefined;
-    saveOperationRef.current += 1;
-    savingRef.current = false;
-    setSaving(false);
     setInspecting(false);
     setProcessing(false);
     clearResult();
@@ -174,11 +166,8 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
   useEffect(
     () => () => {
       runRef.current += 1;
-      saveOperationRef.current += 1;
-      savingRef.current = false;
       inspectionHandleRef.current?.cancel();
       jobHandleRef.current?.cancel();
-      resultBlobRef.current = undefined;
       if (resultUrlRef.current !== undefined) URL.revokeObjectURL(resultUrlRef.current);
     },
     [],
@@ -315,7 +304,6 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
       if (outcome.status === "fulfilled") {
         const blob = new Blob([outcome.value.bytes], { type: outcome.value.mime });
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResultUrl(url);
         setResult({ ...outcome.value, bytes: new ArrayBuffer(0) });
@@ -356,60 +344,16 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
-    const blob = resultBlobRef.current;
-    if (
-      result === undefined ||
-      resultUrl === undefined ||
-      blob === undefined ||
-      savingRef.current
-    ) {
-      return;
-    }
-
-    const runId = runRef.current;
-    const saveOperation = saveOperationRef.current + 1;
-    saveOperationRef.current = saveOperation;
-    savingRef.current = true;
-    setSaving(true);
-    const isCurrentSave = () =>
-      saveOperationRef.current === saveOperation &&
-      runRef.current === runId &&
-      resultBlobRef.current === blob &&
-      resultUrlRef.current === resultUrl;
-
+  const downloadResult = () => {
+    const currentUrl = resultUrlRef.current;
+    if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
     try {
-      let shareData: ShareData | undefined;
-      let canShare = false;
-      if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-        const sharedFile = new File([blob], result.suggestedName, { type: result.mime });
-        shareData = { files: [sharedFile] };
-        try {
-          canShare = navigator.canShare(shareData);
-        } catch {
-          canShare = false;
-        }
-      }
-
-      if (canShare && shareData !== undefined) {
-        try {
-          await navigator.share(shareData);
-          if (!isCurrentSave()) return;
-          setMessage("결과를 공유 메뉴로 보냈어요.");
-          return;
-        } catch (error) {
-          if (!isCurrentSave() || isAbortError(error)) return;
-        }
-      }
-
-      if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
-      if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
-    } finally {
-      if (saveOperationRef.current === saveOperation) {
-        savingRef.current = false;
-        setSaving(false);
-      }
+      setMessage(
+        result.outputFileCount === 1 ? "다운로드를 시작했어요." : "ZIP 다운로드를 시작했어요.",
+      );
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
   };
 
@@ -778,15 +722,8 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
                   >
                     같은 설정으로 다시 실행
                   </button>
-                  <button
-                    className={styles.runButton}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void saveResult()}
-                  >
-                    {result.outputFileCount === 1
-                      ? "이미지 저장·공유 ↓"
-                      : `결과 ${result.outputFileCount}개 ZIP으로 받기 ↓`}
+                  <button className={styles.runButton} type="button" onClick={downloadResult}>
+                    {result.outputFileCount === 1 ? "이미지 다운로드 ↓" : "ZIP 다운로드 ↓"}
                   </button>
                 </>
               ) : (
