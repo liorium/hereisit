@@ -992,6 +992,7 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
+  await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
     const trackedWindow = window as Window & {
       __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
@@ -1037,6 +1038,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
+  await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
     (
       window as Window & { __hereisitEnableImageRuntime?: () => void }
