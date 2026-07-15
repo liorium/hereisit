@@ -332,50 +332,38 @@ test("supports a keyboard-only mobile menu with exact focus return", async ({ pa
   await expect(trigger).toBeFocused();
 });
 
-test("keeps enlarged mobile text readable without horizontal overflow", async ({ page }) => {
+test("keeps 200 percent root text enlargement reachable without document overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
-  const fileSelect = page.getByRole("button", { name: "파일 선택" });
-  await expect(fileSelect).toBeVisible();
-  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
-  const baselineFontSize = await fileSelect.evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).fontSize),
-  );
-  const enlargedElementCount = await page.evaluate(() => {
-    const renderedTextElements = Array.from(document.body.querySelectorAll("*"))
-      .filter((element) =>
-        Array.from(element.childNodes).some(
-          (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
-        ),
-      )
-      .map((element) => ({
-        element,
-        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
-        style: getComputedStyle(element),
-      }))
-      .filter(
-        ({ fontSize, style }) =>
-          Number.isFinite(fontSize) &&
-          fontSize > 0 &&
-          style.display !== "none" &&
-          style.visibility !== "hidden",
+  await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+
+  expect(
+    await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+    ),
+  ).toBe(32);
+  const select = page.getByRole("button", { name: "파일 선택" });
+  const tabs = page.getByRole("tablist", { name: "도구 분야" });
+  await select.scrollIntoViewIfNeeded();
+  await expect(select).toBeInViewport();
+  await tabs.scrollIntoViewIfNeeded();
+  await expect(tabs).toBeInViewport();
+  await expectNoDocumentOverflow(page);
+});
+
+test("keeps key routes bounded across compact widths and the 601 pixel boundary", async ({
+  page,
+}) => {
+  const routes = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/pdf/organize"];
+  for (const width of [320, 360, 390, 430, 600, 601]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const route of routes) {
+      await page.goto(route);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width + 1,
       );
-
-    for (const { element, fontSize } of renderedTextElements) {
-      if (element instanceof HTMLElement) {
-        element.style.setProperty("font-size", `${fontSize * 2}px`, "important");
-      }
     }
-    return renderedTextElements.length;
-  });
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  const enlargedFontSize = await fileSelect.evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).fontSize),
-  );
-  expect(enlargedElementCount).toBeGreaterThan(0);
-  expect(enlargedFontSize).toBeCloseTo(baselineFontSize * 2, 5);
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  }
 });

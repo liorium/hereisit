@@ -1,5 +1,6 @@
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { expect, test } from "@playwright/test";
+import { installPrivacyObserver } from "./support/privacy-observer";
 
 const PDF_COMPRESSION_WARNING =
   "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
@@ -8,6 +9,92 @@ const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function holdTerminalWorkerEvents(page: import("@playwright/test").Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    const releaseCallbacks: Array<() => void> = [];
+    let released = false;
+    class HeldTerminalWorker {
+      private readonly native: Worker;
+      private readonly pending: MessageEvent<unknown>[] = [];
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        this.native = new NativeWorker(scriptURL, options);
+        this.native.onmessage = (event) => {
+          const type = (event.data as { type?: unknown } | null)?.type;
+          if ((type === "complete" || type === "failed") && !released) this.pending.push(event);
+          else this.onmessage?.(event);
+        };
+        this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+        this.native.onerror = (event) => this.onerror?.(event);
+        releaseCallbacks.push(() => {
+          for (const event of this.pending.splice(0)) this.onmessage?.(event);
+        });
+      }
+
+      postMessage(message: unknown, transfer?: Transferable[]): void {
+        if (transfer === undefined) this.native.postMessage(message);
+        else this.native.postMessage(message, transfer);
+      }
+
+      terminate(): void {
+        this.native.terminate();
+      }
+    }
+    Object.defineProperty(window, "Worker", { configurable: true, value: HeldTerminalWorker });
+    (window as Window & { __releaseHeldWorkerEvents?: () => void }).__releaseHeldWorkerEvents =
+      () => {
+        released = true;
+        for (const release of releaseCallbacks) release();
+      };
+  });
+}
+
+async function createMobilePng(page: import("@playwright/test").Page): Promise<Buffer> {
+  const bytes = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("2D canvas unavailable");
+    context.fillStyle = "#f5f5f4";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((value) => {
+        if (value === null) reject(new Error("PNG encoding failed"));
+        else resolve(value);
+      }, "image/png");
+    });
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  return Buffer.from(bytes);
+}
+
+function crc32(bytes: Uint8Array): number {
+  let checksum = 0xffffffff;
+  for (const byte of bytes) {
+    checksum ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      checksum = (checksum >>> 1) ^ (checksum & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (checksum ^ 0xffffffff) >>> 0;
+}
+
+function addPngTextChunk(png: Buffer, text: string): Buffer {
+  const type = Buffer.from("tEXt");
+  const data = Buffer.from(`Comment\0${text}`);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(Buffer.concat([type, data])));
+  const chunk = Buffer.concat([length, type, data, checksum]);
+  return Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]);
+}
 
 async function createMobileScannedPdf(page: import("@playwright/test").Page): Promise<Buffer> {
   const jpegBase64 = await page.evaluate(async () => {
@@ -247,38 +334,25 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
-test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page }) => {
+test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
+  browserName,
+  page,
+}) => {
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
 
+  const sentinelFilename = "PRIVATE_MOBILE_PDF_SENTINEL.pdf";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, "PRIVATE_MOBILE_PDF_BYTES"],
+  });
   await page.goto("/pdf/to-image");
-  const origin = new URL(page.url()).origin;
-  const requestViolations: string[] = [];
-  let parserWorkerRequests = 0;
-  let failedRequests = 0;
-  let pageErrors = 0;
-  await page.context().route("**/*", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    if (url.origin !== origin) requestViolations.push("cross-origin");
-    if (!["GET", "HEAD"].includes(request.method())) requestViolations.push("write-method");
-    if (request.postData() !== null) requestViolations.push("request-body");
-    if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
-    await route.continue();
-  });
-  page.context().on("requestfailed", () => {
-    failedRequests += 1;
-  });
-  page.on("pageerror", () => {
-    pageErrors += 1;
-  });
-
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
+  await privacy.clear();
   await page.locator("input[type=file]").setInputFiles({
-    name: "mobile.pdf",
+    name: sentinelFilename,
     mimeType: "application/pdf",
-    buffer: pdf,
+    buffer: Buffer.concat([pdf, Buffer.from("\n% PRIVATE_MOBILE_PDF_BYTES")]),
   });
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
 
@@ -381,10 +455,39 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-  expect(requestViolations).toEqual([]);
-  expect(parserWorkerRequests).toBeGreaterThan(0);
-  expect(failedRequests).toBe(0);
-  expect(pageErrors).toBe(0);
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toEqual([]);
+  expect(observation.writeRequests).toEqual([]);
+  expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
+    [],
+  );
+  await privacy.assertClean(0, browserName !== "firefox");
+});
+
+test("keeps representative image and PDF error feedback reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "not-an-image.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+  const imageStatus = page.getByRole("status").filter({ hasText: "형식·파일당 50MB" });
+  await imageStatus.scrollIntoViewIfNeeded();
+  await expect(imageStatus).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+
+  await page.goto("/pdf/organize");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "broken.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("not a pdf"),
+  });
+  const pdfStatus = page.getByRole("status").filter({ hasText: /확인할 수 없|다시 시도/ });
+  await pdfStatus.scrollIntoViewIfNeeded();
+  await expect(pdfStatus).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("keeps PDF settings and controls touch-safe", async ({ page }) => {
@@ -607,12 +710,21 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
 test("keeps image watermark controls ordered, reachable, and inside an iPhone viewport", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await holdTerminalWorkerEvents(page);
+  const sentinelFilename = "PRIVATE_MOBILE_IMAGE_SENTINEL.png";
+  const sentinelBytes = "PRIVATE_MOBILE_IMAGE_BYTES";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, sentinelBytes],
+  });
   await page.goto("/image/watermark");
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await privacy.clear();
+  const source = addPngTextChunk(await createMobilePng(page), sentinelBytes);
   await page.locator('input[type="file"][multiple]').setInputFiles({
-    name: "mobile.png",
+    name: sentinelFilename,
     mimeType: "image/png",
-    buffer: onePixelPng,
+    buffer: source,
   });
 
   const files = page.getByLabel("선택한 이미지");
@@ -655,4 +767,28 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+
+  await run.click();
+  const cancel = page.getByRole("button", { name: "작업 중단" });
+  await expect(cancel).toBeVisible();
+  await cancel.scrollIntoViewIfNeeded();
+  await expect(cancel).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+  await page.evaluate(() => {
+    (window as Window & { __releaseHeldWorkerEvents?: () => void }).__releaseHeldWorkerEvents?.();
+  });
+  await expect(page.getByText("1개 이미지 워터마크 처리를 완료했어요.")).toBeVisible({
+    timeout: 20_000,
+  });
+  const save = page.getByRole("button", { name: "결과 저장·공유 ↓" });
+  await save.scrollIntoViewIfNeeded();
+  await expect(save).toBeInViewport();
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toEqual([]);
+  expect(observation.writeRequests).toEqual([]);
+  expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
+    [],
+  );
+  await privacy.assertClean(0, false);
 });

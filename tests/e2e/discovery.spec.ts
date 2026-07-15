@@ -569,6 +569,7 @@ test("honors reduced motion and avoids overflow at 200 percent zoom", async ({ p
 test("detects mixed files incrementally without network or private-data side effects", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const sentinelFilename = "PRIVATE_HOME_FILENAME_SENTINEL.png";
   const sentinelBytes = "PRIVATE_HOME_BYTES_SENTINEL";
   await page.addInitScript(() => {
@@ -616,6 +617,9 @@ test("detects mixed files incrementally without network or private-data side eff
   ]);
 
   await expect(launcher.getByRole("status")).toHaveText("0/2개 형식 확인 중");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect
     .poll(() =>
       page.evaluate(
@@ -636,6 +640,9 @@ test("detects mixed files incrementally without network or private-data side eff
     ).__hereisitReleasePrefixRead?.();
   });
   await expect(launcher.getByRole("status")).toHaveText("1/2개 형식 확인 중");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.evaluate(() => {
     (
       window as Window & {
@@ -645,6 +652,9 @@ test("detects mixed files incrementally without network or private-data side eff
   });
 
   await expect(launcher.getByRole("status")).toHaveText("2개 파일 형식 확인 완료");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "PDF 문서" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
@@ -794,6 +804,7 @@ test("invalidates an older detection generation when the selection changes", asy
 });
 
 test("keeps an unknown-format correction beside the chooser", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
   const launcher = page.locator('section[aria-labelledby="file-launcher-title"]');
   await page.locator("#home-file-input").setInputFiles({
@@ -802,9 +813,13 @@ test("keeps an unknown-format correction beside the chooser", async ({ page }) =
     buffer: Buffer.from([0x00, 0x01, 0x02, 0x03]),
   });
 
-  await expect(launcher.getByText(/지원하는 파일 형식을 찾지 못했어요/)).toBeVisible();
+  const correction = launcher.getByText(/지원하는 파일 형식을 찾지 못했어요/);
+  await expect(correction).toBeVisible();
   await expect(launcher.getByText(/1개 파일의 형식은 확인하지 못했어요/)).toBeVisible();
   await expect(launcher.getByRole("button", { name: /도구 선택/ })).toHaveCount(0);
+  await correction.scrollIntoViewIfNeeded();
+  await expect(correction).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("rejects 101 launcher files before reading any bytes", async ({ page }) => {
