@@ -1303,6 +1303,86 @@
   }
 }
 
+@media (max-width: 600px) {
+  .shell {
+    width: calc(100% - 24px);
+  }
+
+  .emptyDropzone {
+    min-height: 278px;
+    padding: 18px 16px 46px;
+    gap: 12px;
+    box-shadow: 5px 5px 0 var(--yellow);
+  }
+
+  .emptyDropzone::before {
+    display: none;
+  }
+
+  .dropIcon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .dropIcon span {
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
+  }
+
+  .emptyDropzone h2 {
+    font-size: 24px;
+  }
+
+  .emptyDropzone h2 + p {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .dropActions {
+    gap: 8px;
+  }
+
+  .primaryButton {
+    min-height: 48px;
+  }
+
+  .emptyStatus {
+    min-height: 18px;
+  }
+
+  .localBadge {
+    bottom: 12px;
+  }
+
+  .workbenchHeader {
+    min-height: 72px;
+    padding: 14px;
+  }
+
+  .workbenchHeader h2 {
+    font-size: 24px;
+  }
+
+  .headerActions button {
+    font-size: 12px;
+  }
+
+  .pasteHint,
+  .emptyStatus,
+  .previewMemoryNotice span,
+  .qualityField strong,
+  .formatWarning,
+  .sizeGoalField strong,
+  .sizeGoalField small,
+  .privacyCopy,
+  .privacyNotice strong,
+  .actionBar span {
+    font-size: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .emptyDropzone,
   .rowProgress,

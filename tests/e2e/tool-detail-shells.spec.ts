@@ -22,15 +22,21 @@ async function expectCatalogShell(
   title: string,
   workAreaLabel: "파일 작업 영역" | "편집 작업 공간",
 ): Promise<void> {
-  await expect(page.getByRole("navigation", { name: "현재 위치" })).toBeVisible();
+  const breadcrumb = page.getByRole("navigation", { name: "현재 위치" });
+  await expect(breadcrumb).toBeVisible();
+  for (const link of await breadcrumb.getByRole("link").all()) {
+    const box = await link.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
   const heading = page.getByRole("heading", { level: 1, name: title });
   await expect(heading).toBeVisible();
   await expect(heading.locator("..").getByRole("button", { name: /즐겨찾기/ })).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "처리 방식" }).getByText("이 기기에서 처리", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  const disclosure = page.getByRole("region", { name: "처리 방식" });
+  await expect(disclosure.getByText("이 기기에서 처리", { exact: true })).toBeVisible();
+  await expect(disclosure).toContainText("파일은 업로드되지 않으며 저장은 직접 선택해요.");
+  expect(
+    await disclosure.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(12);
   await expect(page.getByRole("region", { name: workAreaLabel })).toBeVisible();
 
   for (const copy of oldStepsCopy) {

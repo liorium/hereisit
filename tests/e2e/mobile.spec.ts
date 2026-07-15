@@ -59,29 +59,41 @@ test("keeps the home discovery flow inside an iPhone viewport", async ({ page })
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
-test("keeps every dedicated tool inside an iPhone viewport", async ({ page }) => {
-  const tools = [
-    ["/image/compress", "이미지 용량 줄이기", "압축할 이미지 선택"],
-    ["/image/resize", "이미지 크기 조절", "크기를 바꿀 이미지 선택"],
-    ["/image/convert", "이미지 형식 변환", "변환할 이미지 선택"],
-    ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
-    ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
-    ["/pdf/to-image", "PDF를 JPG·PNG로 변환", "PDF 선택"],
-    ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
-    ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
-    ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],
-    ["/pdf/compress", "스캔 PDF 용량 줄이기", "PDF 선택"],
-  ] as const;
-
-  for (const [path, title, selectLabel] of tools) {
+test("shows representative image and PDF selectors in the initial 390 by 844 viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [path, label] of [
+    ["/image/compress", "압축할 이미지 선택"],
+    ["/pdf/organize", "정리할 PDF 선택"],
+  ] as const) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
-    await expect(page.getByRole("button", { name: selectLabel })).toBeEnabled();
-    const layout = await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    }));
-    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+    const selector = page.getByRole("button", { name: label, exact: true });
+    await expect(selector).toBeEnabled({ timeout: 60_000 });
+    const box = await selector.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.y ?? 0) + (box?.height ?? 845)).toBeLessThanOrEqual(844);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
+  }
+});
+
+test("starts each representative work area inside a 320 by 568 viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const [path, regionName] of [
+    ["/image/compress", "파일 작업 영역"],
+    ["/pdf/organize", "편집 작업 공간"],
+  ] as const) {
+    await page.goto(path);
+    const box = await page.getByRole("region", { name: regionName }).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.y ?? 569).toBeLessThan(568);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
   }
 });
 

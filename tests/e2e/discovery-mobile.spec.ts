@@ -243,6 +243,12 @@ test("opens one modal mobile drawer with trapped focus and inert background", as
 
   const domainGrid = drawer.getByTestId("mobile-domain-grid");
   await expect(domainGrid.getByRole("link")).toHaveCount(7);
+  const brandBox = await page.getByRole("link", { name: "HereIsIt 홈" }).boundingBox();
+  expect(brandBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  for (const link of await domainGrid.getByRole("link").all()) {
+    const box = await link.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
   const columns = await domainGrid.evaluate((element) =>
     getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
   );

@@ -433,6 +433,18 @@
   }
 }
 
+@media (max-width: 600px) {
+  .brand,
+  .drawerDomainGrid a {
+    min-height: 44px;
+  }
+
+  .drawerDestinations span,
+  .drawerFooter {
+    font-size: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mega,
   .searchPanel,
