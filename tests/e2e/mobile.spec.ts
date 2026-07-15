@@ -380,7 +380,7 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
       exact: true,
     }),
   ).toBeVisible();
-  const save = page.getByRole("button", { name: "PDF 저장·공유 ↓" });
+  const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);

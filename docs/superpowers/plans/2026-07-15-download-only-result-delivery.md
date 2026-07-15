@@ -912,7 +912,7 @@ test("keeps a compressed PDF result retryable when download activation fails", a
   expect(download.suggestedFilename()).toBe("scan-compressed-hereisit.pdf");
   expectCompletePdfEnvelope(await downloadedBytes(await download.path()));
   await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
-  privacy.assertClean(browserName !== "firefox");
+  await privacy.assertClean(1, browserName !== "firefox");
 });
 ```
 

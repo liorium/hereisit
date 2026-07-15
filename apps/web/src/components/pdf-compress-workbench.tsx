@@ -12,7 +12,7 @@ import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
@@ -80,16 +80,12 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfCompressScannedJobHandle | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
-  const saveOperationRef = useRef(0);
-  const savingRef = useRef(false);
   const busy = inspecting || processing;
   const visibleMessage = hydrated && !runtimeSupported ? UNSUPPORTED_BROWSER_MESSAGE : message;
 
   const clearResult = useCallback((updateState = true) => {
-    resultBlobRef.current = undefined;
     const resultUrl = resultUrlRef.current;
     resultUrlRef.current = undefined;
     if (resultUrl !== undefined) URL.revokeObjectURL(resultUrl);
@@ -107,8 +103,6 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       inspectionHandleRef.current = undefined;
       jobHandleRef.current?.cancel();
       jobHandleRef.current = undefined;
-      saveOperationRef.current += 1;
-      savingRef.current = false;
       clearResult(updateState);
       if (updateState) {
         setInspecting(false);
@@ -268,7 +262,6 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         const { bytes, ...resultMetadata } = outcome.value;
         const blob = new Blob([bytes], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResult(resultMetadata);
         setProgress({ phase: "finalizing", fraction: 1 });
@@ -318,57 +311,14 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
-    const blob = resultBlobRef.current;
+  const downloadResult = () => {
     const resultUrl = resultUrlRef.current;
-    if (
-      result === undefined ||
-      resultUrl === undefined ||
-      blob === undefined ||
-      savingRef.current
-    ) {
-      return;
-    }
-
-    const runId = runRef.current;
-    const saveOperation = saveOperationRef.current + 1;
-    saveOperationRef.current = saveOperation;
-    savingRef.current = true;
-    const isCurrentSave = () =>
-      saveOperationRef.current === saveOperation &&
-      runRef.current === runId &&
-      resultBlobRef.current === blob &&
-      resultUrlRef.current === resultUrl;
-
+    if (result === undefined || resultUrl === undefined) return;
     try {
-      let shareData: ShareData | undefined;
-      let canShare = false;
-      if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-        const sharedFile = new File([blob], result.suggestedName, { type: "application/pdf" });
-        shareData = { files: [sharedFile] };
-        try {
-          canShare = navigator.canShare(shareData);
-        } catch {
-          canShare = false;
-        }
-      }
-
-      if (canShare && shareData !== undefined) {
-        try {
-          await navigator.share(shareData);
-          if (!isCurrentSave()) return;
-          setMessage("결과를 공유 메뉴로 보냈어요.");
-          return;
-        } catch (error) {
-          if (!isCurrentSave() || isAbortError(error)) return;
-        }
-      }
-
-      if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
-      if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
-    } finally {
-      if (saveOperationRef.current === saveOperation) savingRef.current = false;
+      setMessage("다운로드를 시작했어요.");
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
   };
 
@@ -626,12 +576,8 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
                 >
                   같은 설정으로 다시 실행
                 </button>
-                <button
-                  className={styles.runButton}
-                  type="button"
-                  onClick={() => void saveResult()}
-                >
-                  PDF 저장·공유 ↓
+                <button className={styles.runButton} type="button" onClick={downloadResult}>
+                  PDF 다운로드 ↓
                 </button>
               </>
             ) : (
