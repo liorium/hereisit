@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { chromium } from "@playwright/test";
 import {
+  assertNoVisibleShareResultDelivery,
   assertWebShareUnused,
   installAvailableWebShareTripwire,
 } from "./support/result-download.mjs";
@@ -174,10 +175,9 @@ try {
     .waitFor({ state: "visible", timeout: 60_000 });
   assert.equal(downloads, 0, "Completing the watermark started an automatic download.");
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
   await page
     .getByRole("status")
     .getByText("다운로드를 시작했어요.", { exact: true })

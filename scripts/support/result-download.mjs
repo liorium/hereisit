@@ -36,3 +36,24 @@ export async function assertWebShareUnused(page) {
     "Result delivery consulted Web Share.",
   );
 }
+
+export async function assertNoVisibleShareResultDelivery(resultDelivery) {
+  const actionRoles = ["button", "link", "menuitem"];
+  const [visibleActionCount, visibleShareActionCount, visibleStatusCopy] = await Promise.all([
+    Promise.all(actionRoles.map((role) => resultDelivery.getByRole(role).count())).then((counts) =>
+      counts.reduce((total, count) => total + count, 0),
+    ),
+    Promise.all(
+      actionRoles.map((role) => resultDelivery.getByRole(role, { name: /공유/ }).count()),
+    ).then((counts) => counts.reduce((total, count) => total + count, 0)),
+    resultDelivery.getByRole("status").allTextContents(),
+  ]);
+
+  assert.ok(visibleActionCount > 0, "Visible result actions were unavailable.");
+  assert.ok(visibleStatusCopy.length > 0, "Visible result status copy was unavailable.");
+  assert.equal(visibleShareActionCount, 0, "A visible result action offered sharing.");
+  assert.ok(
+    visibleStatusCopy.every((copy) => !copy.includes("공유")),
+    "Visible result status copy offered sharing.",
+  );
+}

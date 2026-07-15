@@ -1,6 +1,12 @@
 import { unzipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createZipArchive, downloadUrl, formatDuration, formatSavings } from "./files";
+import {
+  createZipArchive,
+  downloadUrl,
+  formatDuration,
+  formatSavings,
+  resolveIfCurrent,
+} from "./files";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -70,6 +76,28 @@ describe("createZipArchive", () => {
         .map((bytes) => bytes[0])
         .sort(),
     ).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("resolveIfCurrent", () => {
+  it("ignores a pending value after its generation is invalidated", async () => {
+    let finishPending: ((value: string) => void) | undefined;
+    const pending = new Promise<string>((resolve) => {
+      finishPending = resolve;
+    });
+    let currentGeneration = 4;
+
+    const settled = resolveIfCurrent(pending, currentGeneration, () => currentGeneration);
+    currentGeneration += 1;
+    finishPending?.("stale archive");
+
+    await expect(settled).resolves.toBeUndefined();
+  });
+
+  it("returns a pending value for the current generation", async () => {
+    await expect(resolveIfCurrent(Promise.resolve("current archive"), 7, () => 7)).resolves.toBe(
+      "current archive",
+    );
   });
 });
 

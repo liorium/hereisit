@@ -25,6 +25,7 @@ import {
   formatBytes,
   formatDuration,
   formatSavings,
+  resolveIfCurrent,
 } from "../lib/files";
 import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
@@ -670,14 +671,18 @@ export function ImageWorkbench({
     setArchiving(true);
     setMessage("ZIP 파일을 만들고 있어요.");
     try {
-      let archive: Blob;
+      let archive: Blob | undefined;
       try {
-        archive = await createZipArchive(
-          completedItems.flatMap((item) =>
-            item.result === undefined
-              ? []
-              : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
+        archive = await resolveIfCurrent(
+          createZipArchive(
+            completedItems.flatMap((item) =>
+              item.result === undefined
+                ? []
+                : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
+            ),
           ),
+          runId,
+          () => activeRunRef.current,
         );
       } catch {
         if (activeRunRef.current === runId) {
@@ -685,7 +690,7 @@ export function ImageWorkbench({
         }
         return;
       }
-      if (activeRunRef.current !== runId) return;
+      if (archive === undefined) return;
       let url: string | undefined;
       try {
         const createdUrl = createOwnedUrl(archive);

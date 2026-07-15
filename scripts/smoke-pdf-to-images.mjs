@@ -4,6 +4,7 @@ import { degrees, PDFDocument, rgb } from "@cantoo/pdf-lib";
 import { chromium } from "@playwright/test";
 import { unzipSync } from "fflate";
 import {
+  assertNoVisibleShareResultDelivery,
   assertWebShareUnused,
   installAvailableWebShareTripwire,
 } from "./support/result-download.mjs";
@@ -130,10 +131,9 @@ async function runDirectPngSmoke(page) {
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await page.getByText("이미지 1개 준비 완료").waitFor({ timeout: 60_000 });
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "이미지 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
   await page
     .getByRole("status")
     .getByText("다운로드를 시작했어요.", { exact: true })
@@ -160,10 +160,9 @@ async function runDefaultJpegZipSmoke(page) {
   await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
   await page.getByText("이미지 2개 ZIP 준비 완료").waitFor({ timeout: 60_000 });
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "ZIP 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
   await page
     .getByRole("status")
     .getByText("ZIP 다운로드를 시작했어요.", { exact: true })

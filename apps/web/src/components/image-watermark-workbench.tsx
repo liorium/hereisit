@@ -536,31 +536,39 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
         ),
       );
       let nameIndex = 0;
-      const archive = await createZipArchive(
-        completedItems.flatMap((item) => {
-          if (item.result === undefined) return [];
-          const name = names[nameIndex] ?? item.result.suggestedName;
-          nameIndex += 1;
-          return [{ name, bytes: item.result.bytes }];
-        }),
-      );
-      if (activeGenerationRef.current !== generation) return;
-      const url = createOwnedUrl(archive);
+      let archive: Blob;
       try {
-        downloadUrl(url, "hereisit-watermarked-images.zip");
-        const timeoutId = setTimeout(() => {
-          if (!archiveLeasesRef.current.delete(url)) return;
-          revokeOwnedUrl(url);
-        }, 10_000);
-        archiveLeasesRef.current.set(url, timeoutId);
-      } catch (error) {
-        revokeOwnedUrl(url);
-        throw error;
+        archive = await createZipArchive(
+          completedItems.flatMap((item) => {
+            if (item.result === undefined) return [];
+            const name = names[nameIndex] ?? item.result.suggestedName;
+            nameIndex += 1;
+            return [{ name, bytes: item.result.bytes }];
+          }),
+        );
+      } catch {
+        if (activeGenerationRef.current === generation) {
+          setMessage("ZIP 파일을 만들지 못했어요. 개별 결과를 다운로드해 주세요.");
+        }
+        return;
       }
-      setMessage("ZIP 다운로드를 시작했어요.");
-    } catch {
-      if (activeGenerationRef.current === generation) {
-        setMessage("ZIP 파일을 만들지 못했어요. 개별 결과를 다운로드해 주세요.");
+      if (activeGenerationRef.current !== generation) return;
+      let url: string | undefined;
+      try {
+        const createdUrl = createOwnedUrl(archive);
+        url = createdUrl;
+        downloadUrl(createdUrl, "hereisit-watermarked-images.zip");
+        const timeoutId = setTimeout(() => {
+          if (!archiveLeasesRef.current.delete(createdUrl)) return;
+          revokeOwnedUrl(createdUrl);
+        }, 10_000);
+        archiveLeasesRef.current.set(createdUrl, timeoutId);
+        setMessage("ZIP 다운로드를 시작했어요.");
+      } catch {
+        revokeOwnedUrl(url);
+        if (activeGenerationRef.current === generation) {
+          setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+        }
       }
     } finally {
       if (activeGenerationRef.current === generation) setArchiving(false);

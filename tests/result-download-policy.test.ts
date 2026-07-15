@@ -13,17 +13,25 @@ const forbiddenResultDeliveryText = [
   "navigator.share",
   "navigator.canShare",
   "ShareData",
-  "저장·공유",
-  "공유 메뉴",
+  "공유",
 ] as const;
 
+function findForbiddenResultDeliveryText(source: string): readonly string[] {
+  return forbiddenResultDeliveryText.filter((forbidden) => source.includes(forbidden));
+}
+
 describe("download-only result delivery policy", () => {
+  it("rejects any Korean share label in result delivery copy", () => {
+    expect(findForbiddenResultDeliveryText("<button>결과 공유</button>")).toContain("공유");
+  });
+
   for (const filename of workbenches) {
     it(`${filename} contains no result-sharing policy`, async () => {
       const source = await readFile(filename, "utf8");
-      for (const forbidden of forbiddenResultDeliveryText) {
-        expect(source, `${filename} contains ${forbidden}`).not.toContain(forbidden);
-      }
+      expect(
+        findForbiddenResultDeliveryText(source),
+        `${filename} contains forbidden text`,
+      ).toEqual([]);
       expect(source).toContain("다운로드");
     });
   }

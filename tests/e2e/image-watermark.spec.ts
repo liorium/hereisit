@@ -544,29 +544,37 @@ test("creates a collision-safe ZIP for duplicate source names only on request", 
   expect(requestViolations).toEqual([]);
 });
 
-test("releases an archive URL when ZIP download initiation throws", async ({ page }) => {
+test("releases a failed archive URL and retries ZIP download initiation", async ({ page }) => {
   await page.addInitScript(() => {
     const trackedWindow = window as Window & {
-      __archiveUrl?: string;
-      __archiveUrlRevoked?: boolean;
+      __archiveUrls?: string[];
+      __blockArchiveDownload?: boolean;
+      __revokedArchiveUrls?: string[];
     };
+    trackedWindow.__archiveUrls = [];
+    trackedWindow.__blockArchiveDownload = false;
+    trackedWindow.__revokedArchiveUrls = [];
     const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
     const nativeRevokeObjectUrl = URL.revokeObjectURL.bind(URL);
     URL.createObjectURL = (object) => {
       const url = nativeCreateObjectUrl(object);
       if (object instanceof Blob && object.type === "application/zip") {
-        trackedWindow.__archiveUrl = url;
-        trackedWindow.__archiveUrlRevoked = false;
+        trackedWindow.__archiveUrls?.push(url);
       }
       return url;
     };
     URL.revokeObjectURL = (url) => {
-      if (url === trackedWindow.__archiveUrl) trackedWindow.__archiveUrlRevoked = true;
+      if (trackedWindow.__archiveUrls?.includes(url)) {
+        trackedWindow.__revokedArchiveUrls?.push(url);
+      }
       nativeRevokeObjectUrl(url);
     };
     const nativeClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function click() {
-      if (this.download === "hereisit-watermarked-images.zip") {
+      if (
+        trackedWindow.__blockArchiveDownload &&
+        this.download === "hereisit-watermarked-images.zip"
+      ) {
         throw new Error("download initiation failed");
       }
       nativeClick.call(this);
@@ -580,17 +588,44 @@ test("releases an archive URL when ZIP download initiation throws", async ({ pag
   ]);
   await page.getByRole("button", { name: "2개 이미지에 워터마크 넣기 →" }).click();
   await waitForCompleted(page, 2);
-  await page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click();
+  const archiveAction = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+  await page.evaluate(() => {
+    (window as Window & { __blockArchiveDownload?: boolean }).__blockArchiveDownload = true;
+  });
+  await archiveAction.click();
   await expect(page.getByRole("status")).toContainText(
-    "ZIP 파일을 만들지 못했어요. 개별 결과를 다운로드해 주세요.",
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
   );
+  await expect(archiveAction).toBeVisible();
+  const failedArchiveUrl = await page.evaluate(() =>
+    (window as Window & { __archiveUrls?: string[] }).__archiveUrls?.at(-1),
+  );
+  expect(failedArchiveUrl).toBeTruthy();
   await expect
     .poll(() =>
       page.evaluate(
-        () => (window as Window & { __archiveUrlRevoked?: boolean }).__archiveUrlRevoked ?? false,
+        (url) =>
+          (window as Window & { __revokedArchiveUrls?: string[] }).__revokedArchiveUrls?.includes(
+            url,
+          ) ?? false,
+        failedArchiveUrl as string,
       ),
     )
     .toBe(true);
+
+  await page.evaluate(() => {
+    (window as Window & { __blockArchiveDownload?: boolean }).__blockArchiveDownload = false;
+  });
+  const [download] = await Promise.all([page.waitForEvent("download"), archiveAction.click()]);
+  expect(download.suggestedFilename()).toBe("hereisit-watermarked-images.zip");
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(path as string)));
+  expect(Object.keys(archive).sort()).toEqual([
+    "first-watermarked-hereisit.png",
+    "second-watermarked-hereisit.png",
+  ]);
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
 });
 
 test("releases completed archive URLs on invalidation and rerun", async ({ page }) => {

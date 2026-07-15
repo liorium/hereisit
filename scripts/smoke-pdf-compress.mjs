@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from "@cantoo/pdf-lib";
 import { chromium } from "@playwright/test";
 import {
+  assertNoVisibleShareResultDelivery,
   assertWebShareUnused,
   installAvailableWebShareTripwire,
 } from "./support/result-download.mjs";
@@ -305,10 +306,9 @@ async function createdObjectUrlCount(page) {
 
 async function downloadResult(page, expectedDownloadCount, downloadCount) {
   assert.equal(downloadCount(), expectedDownloadCount - 1, "A result downloaded automatically.");
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "PDF 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
   await page
     .getByRole("status")
     .getByText("다운로드를 시작했어요.", { exact: true })

@@ -64,6 +64,15 @@ function uniqueArchiveName(requested: string, names: Set<string>): string {
   return candidate;
 }
 
+export async function resolveIfCurrent<T>(
+  pending: Promise<T>,
+  generation: number,
+  getCurrentGeneration: () => number,
+): Promise<T | undefined> {
+  const value = await pending;
+  return getCurrentGeneration() === generation ? value : undefined;
+}
+
 export async function createZipArchive(
   files: readonly { name: string; bytes: ArrayBuffer }[],
 ): Promise<Blob> {
