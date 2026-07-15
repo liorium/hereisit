@@ -1,5 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
+import { unzipSync } from "fflate";
+import {
+  expectWebShareUnused,
+  installAvailableWebShare,
+  installDownloadActivationController,
+  setDownloadActivationBlocked,
+} from "./support/result-download";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -88,8 +95,8 @@ test("processes and downloads an image without external uploads", async ({ page 
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("1×1", { exact: true })).toBeVisible();
 
-  const saveButton = page.getByRole("button", { name: "결과 저장·공유 ↓" });
-  const [download] = await Promise.all([page.waitForEvent("download"), saveButton.click()]);
+  const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
   expect(download.suggestedFilename()).toBe("sample-hereisit.webp");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
@@ -98,7 +105,7 @@ test("processes and downloads an image without external uploads", async ({ page 
   expect(new TextDecoder().decode(output.subarray(8, 12))).toBe("WEBP");
 
   await page.getByLabel("출력 형식").selectOption("png");
-  await expect(saveButton).toBeHidden();
+  await expect(downloadButton).toBeHidden();
   await expect(page.getByRole("button", { name: "1개 이미지 형식 변환 →" })).toBeVisible();
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
@@ -144,7 +151,7 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
@@ -181,26 +188,11 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
 });
 
-test("uses the device share sheet for one result when files are supported", async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", {
-      configurable: true,
-      value: (data: ShareData) => data.files?.length === 1,
-    });
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: async (data: ShareData) => {
-        const file = data.files?.[0];
-        if (file === undefined) throw new Error("Expected one shared file");
-        (
-          window as Window & { sharedResult?: { name: string; type: string; size: number } }
-        ).sharedResult = {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-        };
-      },
-    });
+test("downloads one image without consulting available Web Share APIs", async ({ page }) => {
+  await installAvailableWebShare(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
   });
   await page.goto("/image/convert");
   await page.locator("input[type=file]").setInputFiles({
@@ -211,22 +203,179 @@ test("uses the device share sheet for one result when files are supported", asyn
   await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
   await expect(
     page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
-  ).toBeVisible({
+  ).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("share-hereisit.webp");
+  expect(downloadCount).toBe(1);
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
+  await expect(page.getByRole("button", { name: /공유|저장·공유/ })).toHaveCount(0);
+});
+
+test("keeps an image result retryable when download activation throws", async ({ page }) => {
+  await installDownloadActivationController(page);
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "retry.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible({
     timeout: 20_000,
   });
-  await page.getByRole("button", { name: "결과 저장·공유 ↓" }).click();
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "결과 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("retry-hereisit.webp");
+});
+
+test("downloads a selected image and its batch ZIP without Web Share", async ({ page }) => {
+  await installAvailableWebShare(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "결과를 공유 메뉴로 보냈어요." }),
-  ).toBeVisible();
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
+
+  const [selectedDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "이 이미지 다운로드 ↓" }).click(),
+  ]);
+  expect(selectedDownload.suggestedFilename()).toBe("first-hereisit.webp");
+  const selectedPath = await selectedDownload.path();
+  expect(selectedPath).not.toBeNull();
+  const selectedBytes = new Uint8Array(await readFile(selectedPath as string));
+  expect(new TextDecoder().decode(selectedBytes.subarray(0, 4))).toBe("RIFF");
+  expect(new TextDecoder().decode(selectedBytes.subarray(8, 12))).toBe("WEBP");
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+
+  const [zipDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(zipDownload.suggestedFilename()).toBe("hereisit-images.zip");
+  const zipPath = await zipDownload.path();
+  expect(zipPath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+  expect(Object.keys(archive).sort()).toEqual(["first-hereisit.webp", "second-hereisit.webp"]);
+  expect(downloadCount).toBe(2);
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
+});
+
+test("does not download a pending image ZIP after the workbench unmounts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeQueueMicrotask = globalThis.queueMicrotask.bind(globalThis);
+    const tracked = window as Window & {
+      __heldZipMicrotasks?: VoidFunction[];
+      __holdZipMicrotasks?: boolean;
+      __releaseZipMicrotasks?: () => Promise<void>;
+      __zipMicrotasksToHold?: number;
+      __zipMicrotasksToPassThrough?: number;
+    };
+    tracked.__heldZipMicrotasks = [];
+    globalThis.queueMicrotask = (callback) => {
+      if (!tracked.__holdZipMicrotasks) {
+        nativeQueueMicrotask(callback);
+        return;
+      }
+      if ((tracked.__zipMicrotasksToPassThrough ?? 0) > 0) {
+        tracked.__zipMicrotasksToPassThrough = (tracked.__zipMicrotasksToPassThrough ?? 0) - 1;
+        nativeQueueMicrotask(callback);
+        return;
+      }
+      if ((tracked.__heldZipMicrotasks?.length ?? 0) < (tracked.__zipMicrotasksToHold ?? 0)) {
+        tracked.__heldZipMicrotasks?.push(callback);
+        return;
+      }
+      nativeQueueMicrotask(callback);
+    };
+    tracked.__releaseZipMicrotasks = async () => {
+      for (const callback of tracked.__heldZipMicrotasks ?? []) nativeQueueMicrotask(callback);
+      tracked.__heldZipMicrotasks = [];
+      await new Promise<void>((resolve) => nativeQueueMicrotask(resolve));
+    };
+  });
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  let downloads = 0;
+  const pageErrors: string[] = [];
+  page.on("download", () => {
+    downloads += 1;
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.evaluate(() => {
+    const tracked = window as Window & {
+      __holdZipMicrotasks?: boolean;
+      __zipMicrotasksToHold?: number;
+      __zipMicrotasksToPassThrough?: number;
+    };
+    tracked.__holdZipMicrotasks = true;
+    tracked.__zipMicrotasksToHold = 2;
+    tracked.__zipMicrotasksToPassThrough = 1;
+  });
+  await page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click();
+  const archiveAction = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+  await expect(archiveAction).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText("ZIP 파일을 만들고 있어요.");
+  await archiveAction.evaluate((button: HTMLButtonElement) => button.click());
   await expect
     .poll(() =>
       page.evaluate(
         () =>
-          (window as Window & { sharedResult?: { name: string; type: string; size: number } })
-            .sharedResult,
+          (window as Window & { __heldZipMicrotasks?: VoidFunction[] }).__heldZipMicrotasks
+            ?.length ?? 0,
       ),
     )
-    .toMatchObject({ name: "share-hereisit.webp", type: "image/webp" });
+    .toBe(2);
+  await page.evaluate(() => {
+    (window as Window & { __holdZipMicrotasks?: boolean }).__holdZipMicrotasks = false;
+  });
+  await page.getByRole("link", { name: "HereIsIt 홈" }).click();
+  await page.waitForURL((url) => url.pathname === "/");
+  await expect(page.getByRole("heading", { name: "파일 작업, 여기서 끝." })).toBeVisible();
+  await page.evaluate(async () => {
+    await (
+      window as Window & { __releaseZipMicrotasks?: () => Promise<void> }
+    ).__releaseZipMicrotasks?.();
+  });
+
+  expect(downloads).toBe(0);
+  expect(pageErrors).toEqual([]);
+  await expect(page.getByText("ZIP 다운로드를 시작했어요.", { exact: true })).toHaveCount(0);
 });
 
 test("accepts a real HEIC file without uploading it", async ({ page, browserName }) => {

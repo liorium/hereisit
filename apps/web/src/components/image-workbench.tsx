@@ -25,7 +25,6 @@ import {
   formatBytes,
   formatDuration,
   formatSavings,
-  isAbortError,
 } from "../lib/files";
 import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
@@ -226,6 +225,7 @@ export function ImageWorkbench({
   const activeRunRef = useRef(0);
   const itemsRef = useRef(items);
   const objectUrlsRef = useRef(new Set<string>());
+  const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const busy = processing || archiving;
 
   const commitItems = useCallback((update: (current: WorkItem[]) => WorkItem[]) => {
@@ -244,6 +244,14 @@ export function ImageWorkbench({
     if (url === undefined || !objectUrlsRef.current.delete(url)) return;
     URL.revokeObjectURL(url);
   }, []);
+
+  const releaseArchiveLeases = useCallback(() => {
+    for (const [url, timeoutId] of archiveLeasesRef.current) {
+      clearTimeout(timeoutId);
+      revokeOwnedUrl(url);
+    }
+    archiveLeasesRef.current.clear();
+  }, [revokeOwnedUrl]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -267,6 +275,8 @@ export function ImageWorkbench({
     () => () => {
       activeRunRef.current += 1;
       batchRef.current?.cancel();
+      for (const timeoutId of archiveLeasesRef.current.values()) clearTimeout(timeoutId);
+      archiveLeasesRef.current.clear();
       for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
       objectUrlsRef.current.clear();
     },
@@ -367,6 +377,8 @@ export function ImageWorkbench({
   );
 
   const invalidateResults = () => {
+    releaseArchiveLeases();
+    activeRunRef.current += 1;
     const hasResultOrError = itemsRef.current.some(
       (item) => item.resultUrl !== undefined || item.status !== "ready",
     );
@@ -455,6 +467,8 @@ export function ImageWorkbench({
     if (busy) return;
     const target = itemsRef.current.find((item) => item.id === id);
     if (target === undefined) return;
+    releaseArchiveLeases();
+    activeRunRef.current += 1;
     revokeOwnedUrl(target.previewUrl);
     revokeOwnedUrl(target.resultUrl);
     const next = itemsRef.current.filter((item) => item.id !== id);
@@ -464,6 +478,7 @@ export function ImageWorkbench({
   };
 
   const reset = () => {
+    releaseArchiveLeases();
     activeRunRef.current += 1;
     batchRef.current?.cancel();
     batchRef.current = undefined;
@@ -531,6 +546,7 @@ export function ImageWorkbench({
 
   const startProcessing = async () => {
     if (itemsRef.current.length < minFiles || busy || !runtimeSupported) return;
+    releaseArchiveLeases();
     const sourceItems = itemsRef.current;
     const runId = activeRunRef.current + 1;
     activeRunRef.current = runId;
@@ -630,39 +646,27 @@ export function ImageWorkbench({
     );
   };
 
-  const saveItem = async (item: WorkItem) => {
-    if (item.resultUrl === undefined || item.result === undefined) return;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      shareData = {
-        files: [
-          new File([item.result.bytes], item.result.suggestedName, { type: item.result.mime }),
-        ],
-      };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
+  const downloadItem = (item: WorkItem) => {
+    const current = itemsRef.current.find((candidate) => candidate.id === item.id);
+    if (
+      item.resultUrl === undefined ||
+      item.result === undefined ||
+      current?.resultUrl !== item.resultUrl ||
+      current.result !== item.result
+    ) {
+      return;
     }
-
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error)) return;
-      }
+    try {
+      downloadUrl(item.resultUrl, item.result.suggestedName);
+      setMessage("다운로드를 시작했어요.");
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
-
-    downloadUrl(item.resultUrl, item.result.suggestedName);
-    setMessage("결과 파일을 저장했어요.");
   };
 
   const downloadAll = async () => {
     if (completedItems.length === 0 || archiving) return;
+    const runId = activeRunRef.current;
     setArchiving(true);
     setMessage("ZIP 파일을 만들고 있어요.");
     try {
@@ -673,14 +677,26 @@ export function ImageWorkbench({
             : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
         ),
       );
+      if (activeRunRef.current !== runId) return;
       const url = createOwnedUrl(archive);
-      downloadUrl(url, "hereisit-images.zip");
-      setTimeout(() => revokeOwnedUrl(url), 10_000);
-      setMessage(`${completedItems.length}개 결과를 ZIP으로 만들었어요.`);
+      try {
+        downloadUrl(url, "hereisit-images.zip");
+        const timeoutId = setTimeout(() => {
+          if (!archiveLeasesRef.current.delete(url)) return;
+          revokeOwnedUrl(url);
+        }, 10_000);
+        archiveLeasesRef.current.set(url, timeoutId);
+      } catch (error) {
+        revokeOwnedUrl(url);
+        throw error;
+      }
+      setMessage("ZIP 다운로드를 시작했어요.");
     } catch {
-      setMessage("ZIP 파일을 만들지 못했어요. 개별 파일을 받아 주세요.");
+      if (activeRunRef.current === runId) {
+        setMessage("ZIP 파일을 만들지 못했어요. 개별 파일을 다운로드해 주세요.");
+      }
     } finally {
-      setArchiving(false);
+      if (activeRunRef.current === runId) setArchiving(false);
     }
   };
 
@@ -1025,9 +1041,9 @@ export function ImageWorkbench({
                     <button
                       className={styles.inlineDownload}
                       type="button"
-                      onClick={() => void saveItem(selected)}
+                      onClick={() => downloadItem(selected)}
                     >
-                      이 이미지 저장·공유 ↓
+                      이 이미지 다운로드 ↓
                     </button>
                   )}
                 </>
@@ -1066,17 +1082,15 @@ export function ImageWorkbench({
                     onClick={() => {
                       const onlyItem = completedItems[0];
                       if (completedItems.length === 1 && onlyItem !== undefined) {
-                        void saveItem(onlyItem);
+                        downloadItem(onlyItem);
                       } else {
                         void downloadAll();
                       }
                     }}
                   >
-                    {archiving
-                      ? "ZIP 만드는 중…"
-                      : completedItems.length === 1
-                        ? "결과 저장·공유 ↓"
-                        : `결과 ${completedItems.length}개 ZIP으로 받기 ↓`}
+                    {completedItems.length === 1
+                      ? "결과 다운로드 ↓"
+                      : `결과 ${completedItems.length}개 ZIP 다운로드 ↓`}
                   </button>
                 </>
               ) : (
