@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from "@cantoo/pdf-lib";
 import { chromium } from "@playwright/test";
+import {
+  assertNoVisibleShareResultDelivery,
+  assertWebShareUnused,
+  installAvailableWebShareTripwire,
+} from "./support/result-download.mjs";
 
 const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
 const ROUTE_PATH = "/pdf/compress";
@@ -299,16 +304,19 @@ async function createdObjectUrlCount(page) {
   return page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedUrls") ?? "0"));
 }
 
-async function saveResult(page, expectedDownloadCount, downloadCount) {
+async function downloadResult(page, expectedDownloadCount, downloadCount) {
   assert.equal(downloadCount(), expectedDownloadCount - 1, "A result downloaded automatically.");
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "PDF 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
+  await page
+    .getByRole("status")
+    .getByText("다운로드를 시작했어요.", { exact: true })
+    .waitFor({ state: "visible" });
   assert.equal(
     downloadCount(),
     expectedDownloadCount,
-    "An explicit save did not download exactly once.",
+    "An explicit download did not start exactly once.",
   );
   return readDownload(download);
 }
@@ -352,10 +360,9 @@ let context;
 
 try {
   context = await browser.newContext({ acceptDownloads: true });
+  await context.addInitScript(installAvailableWebShareTripwire);
   await context.addInitScript(() => {
     sessionStorage.setItem("__hereisitCreatedUrls", "0");
-    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     const originalCreateObjectUrl = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (object) => {
       const count = Number(sessionStorage.getItem("__hereisitCreatedUrls") ?? "0");
@@ -430,7 +437,7 @@ try {
   await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
   await page.getByText("압축 PDF 준비 완료").waitFor({ timeout: 60_000 });
   assert.equal(await createdObjectUrlCount(page), 1);
-  const balanced = await saveResult(page, 1, () => downloads);
+  const balanced = await downloadResult(page, 1, () => downloads);
   await assertCompressionResult(source, balanced, { width: 1_275, height: 1_650 });
   assertPageMarkerOrder(await inspectPageMarkerColors(page, balanced));
 
@@ -440,7 +447,7 @@ try {
   await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
   await page.getByText("압축 PDF 준비 완료").waitFor({ timeout: 60_000 });
   assert.equal(await createdObjectUrlCount(page), 2);
-  const minimum = await saveResult(page, 2, () => downloads);
+  const minimum = await downloadResult(page, 2, () => downloads);
   await assertCompressionResult(source, minimum, { width: 816, height: 1_056 });
   assertPageMarkerOrder(await inspectPageMarkerColors(page, minimum));
   assert.ok(minimum.byteLength < balanced.byteLength, "Minimum must be smaller than balanced.");
@@ -449,9 +456,10 @@ try {
   await uploadPdf(page, `${SENTINELS[0]}.pdf`, await createTinyVectorPdf(), 1);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await page.getByText(BALANCED_NO_REDUCTION_MESSAGE).first().waitFor({ timeout: 60_000 });
-  assert.equal(await page.getByRole("button", { name: "PDF 저장·공유 ↓" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "PDF 다운로드 ↓" }).count(), 0);
   assert.equal(await createdObjectUrlCount(page), 2, "No-reduction must not create a result URL.");
   assert.equal(downloads, 2, "The no-reduction result must not download.");
+  await assertWebShareUnused(page);
 
   assert.deepEqual(violations, []);
   assert.equal(consoleMessages, 0, "The page wrote to the console during the smoke.");

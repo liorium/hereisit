@@ -22,18 +22,17 @@ export function formatDuration(milliseconds: number): string {
   return `${Math.round(milliseconds / 1000)}초`;
 }
 
-export function isAbortError(error: unknown): boolean {
-  return (error as { name?: unknown } | null)?.name === "AbortError";
-}
-
 export function downloadUrl(url: string, filename: string): void {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
   anchor.rel = "noopener";
   document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+  }
 }
 
 function safeArchiveName(requested: string): string {
@@ -63,6 +62,15 @@ function uniqueArchiveName(requested: string, names: Set<string>): string {
   }
   names.add(candidate);
   return candidate;
+}
+
+export async function resolveIfCurrent<T>(
+  pending: Promise<T>,
+  generation: number,
+  getCurrentGeneration: () => number,
+): Promise<T | undefined> {
+  const value = await pending;
+  return getCurrentGeneration() === generation ? value : undefined;
 }
 
 export async function createZipArchive(

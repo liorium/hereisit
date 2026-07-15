@@ -22,7 +22,7 @@ import type {
 } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import {
   getToolImplementation,
   isPdfEditingIntent,
@@ -183,7 +183,6 @@ export function PdfWorkbench({
   const handleRef = useRef<PdfJobHandle | undefined>(undefined);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const runRef = useRef(0);
   const busy = processing || inspecting;
 
@@ -206,7 +205,6 @@ export function PdfWorkbench({
   }, [items]);
 
   const revokeResultUrl = useCallback(() => {
-    resultBlobRef.current = undefined;
     if (resultUrlRef.current === undefined) return;
     URL.revokeObjectURL(resultUrlRef.current);
     resultUrlRef.current = undefined;
@@ -523,7 +521,6 @@ export function PdfWorkbench({
       if (outcome.status === "fulfilled") {
         const blob = resultBlob(outcome.value);
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResultUrl(url);
         setResult({ ...outcome.value, bytes: new ArrayBuffer(0) });
@@ -567,31 +564,17 @@ export function PdfWorkbench({
     setMessage("페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
-    const blob = resultBlobRef.current;
-    if (result === undefined || resultUrl === undefined || blob === undefined) return;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      const file = new File([blob], result.suggestedName, { type: result.mime });
-      shareData = { files: [file] };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
+  const downloadResult = () => {
+    const currentUrl = resultUrlRef.current;
+    if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
+    try {
+      downloadUrl(resultUrl, result.suggestedName);
+      setMessage(
+        result.mime === "application/zip" ? "ZIP 다운로드를 시작했어요." : "다운로드를 시작했어요.",
+      );
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error)) return;
-      }
-    }
-    downloadUrl(resultUrl, result.suggestedName);
-    setMessage("결과 파일을 저장했어요.");
   };
 
   const changeSplitMode = (mode: "every-page" | "extract") => {
@@ -1231,14 +1214,8 @@ export function PdfWorkbench({
                       같은 설정으로 다시 실행
                     </button>
                   ) : null}
-                  <button
-                    className={styles.runButton}
-                    type="button"
-                    onClick={() => void saveResult()}
-                  >
-                    {result.mime === "application/zip"
-                      ? `결과 ${result.outputDocumentCount}개 ZIP으로 받기 ↓`
-                      : "PDF 저장·공유 ↓"}
+                  <button className={styles.runButton} type="button" onClick={downloadResult}>
+                    {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
                   </button>
                 </>
               ) : (

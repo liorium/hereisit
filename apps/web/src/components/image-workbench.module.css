@@ -204,7 +204,7 @@
 .headerActions button,
 .secondaryButton,
 .cancelButton {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -421,6 +421,17 @@
   letter-spacing: 0.08em;
 }
 
+.previewTopline span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewTopline span:last-child {
+  flex: 0 0 auto;
+}
+
 .previewStage {
   min-height: 410px;
   flex: 1;
@@ -543,7 +554,7 @@
 }
 
 .inlineDownload {
-  min-height: 38px;
+  min-height: 44px;
   align-self: center;
   margin-top: 10px;
   padding: 0 16px;

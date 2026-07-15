@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { chromium } from "@playwright/test";
+import {
+  assertNoVisibleShareResultDelivery,
+  assertWebShareUnused,
+  installAvailableWebShareTripwire,
+} from "./support/result-download.mjs";
 
 const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
 const ROUTE_PATH = "/image/watermark";
@@ -115,10 +120,7 @@ let context;
 
 try {
   context = await browser.newContext({ acceptDownloads: true });
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-  });
+  await context.addInitScript(installAvailableWebShareTripwire);
 
   const directResponse = await context.request.get(routeUrl, { maxRedirects: 0 });
   assert.equal(directResponse.status(), 200, "The image watermark route did not return 200.");
@@ -173,13 +175,17 @@ try {
     .waitFor({ state: "visible", timeout: 60_000 });
   assert.equal(downloads, 0, "Completing the watermark started an automatic download.");
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
-  ]);
+  const downloadAction = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  await assertNoVisibleShareResultDelivery(downloadAction.locator("..").locator(".."));
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadAction.click()]);
+  await page
+    .getByRole("status")
+    .getByText("다운로드를 시작했어요.", { exact: true })
+    .waitFor({ state: "visible" });
   assert.equal(download.suggestedFilename(), "source-watermarked-hereisit.png");
   assertPng(await readDownload(download));
-  assert.equal(downloads, 1, "The explicit save did not download exactly once.");
+  assert.equal(downloads, 1, "The explicit download did not start exactly once.");
+  await assertWebShareUnused(page);
 
   assert.equal(violations.length, 0, "The page made a prohibited network request.");
   assert.equal(failedRequests, 0, "A page request failed during the smoke.");

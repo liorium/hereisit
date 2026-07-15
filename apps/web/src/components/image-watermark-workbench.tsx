@@ -23,13 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  createZipArchive,
-  downloadUrl,
-  formatBytes,
-  formatDuration,
-  isAbortError,
-} from "../lib/files";
+import { createZipArchive, downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
@@ -504,49 +498,30 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
     );
     setMessage(
       completed > 0
-        ? `작업을 중단했어요. 완료된 결과 ${completed}개는 저장할 수 있어요.`
+        ? `작업을 중단했어요. 완료된 결과 ${completed}개는 다운로드할 수 있어요.`
         : "작업을 중단했어요.",
     );
   };
 
-  const saveItem = async (item: WorkItem) => {
+  const downloadItem = (item: WorkItem) => {
     if (item.result === undefined || item.resultUrl === undefined) return;
     const generation = activeGenerationRef.current;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      shareData = {
-        files: [
-          new File([item.result.bytes], item.result.suggestedName, { type: item.result.mime }),
-        ],
-      };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
-    }
-
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        if (activeGenerationRef.current === generation) setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error) || activeGenerationRef.current !== generation) return;
-      }
-    }
-
     const current = itemsRef.current.find((candidate) => candidate.id === item.id);
     if (
-      activeGenerationRef.current !== generation ||
       current?.resultUrl !== item.resultUrl ||
-      current.result === undefined
+      current.result !== item.result ||
+      activeGenerationRef.current !== generation
     ) {
       return;
     }
-    downloadUrl(item.resultUrl, item.result.suggestedName);
-    setMessage("결과 파일을 저장했어요.");
+    try {
+      downloadUrl(item.resultUrl, item.result.suggestedName);
+      if (activeGenerationRef.current === generation) setMessage("다운로드를 시작했어요.");
+    } catch {
+      if (activeGenerationRef.current === generation) {
+        setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+      }
+    }
   };
 
   const downloadAll = async () => {
@@ -561,31 +536,39 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
         ),
       );
       let nameIndex = 0;
-      const archive = await createZipArchive(
-        completedItems.flatMap((item) => {
-          if (item.result === undefined) return [];
-          const name = names[nameIndex] ?? item.result.suggestedName;
-          nameIndex += 1;
-          return [{ name, bytes: item.result.bytes }];
-        }),
-      );
-      if (activeGenerationRef.current !== generation) return;
-      const url = createOwnedUrl(archive);
+      let archive: Blob;
       try {
-        downloadUrl(url, "hereisit-watermarked-images.zip");
-        const timeoutId = setTimeout(() => {
-          if (!archiveLeasesRef.current.delete(url)) return;
-          revokeOwnedUrl(url);
-        }, 10_000);
-        archiveLeasesRef.current.set(url, timeoutId);
-      } catch (error) {
-        revokeOwnedUrl(url);
-        throw error;
+        archive = await createZipArchive(
+          completedItems.flatMap((item) => {
+            if (item.result === undefined) return [];
+            const name = names[nameIndex] ?? item.result.suggestedName;
+            nameIndex += 1;
+            return [{ name, bytes: item.result.bytes }];
+          }),
+        );
+      } catch {
+        if (activeGenerationRef.current === generation) {
+          setMessage("ZIP 파일을 만들지 못했어요. 개별 결과를 다운로드해 주세요.");
+        }
+        return;
       }
-      setMessage(`${completedItems.length}개 결과를 ZIP으로 만들었어요.`);
-    } catch {
-      if (activeGenerationRef.current === generation) {
-        setMessage("ZIP 파일을 만들지 못했어요. 개별 결과를 저장해 주세요.");
+      if (activeGenerationRef.current !== generation) return;
+      let url: string | undefined;
+      try {
+        const createdUrl = createOwnedUrl(archive);
+        url = createdUrl;
+        downloadUrl(createdUrl, "hereisit-watermarked-images.zip");
+        const timeoutId = setTimeout(() => {
+          if (!archiveLeasesRef.current.delete(createdUrl)) return;
+          revokeOwnedUrl(createdUrl);
+        }, 10_000);
+        archiveLeasesRef.current.set(createdUrl, timeoutId);
+        setMessage("ZIP 다운로드를 시작했어요.");
+      } catch {
+        revokeOwnedUrl(url);
+        if (activeGenerationRef.current === generation) {
+          setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+        }
       }
     } finally {
       if (activeGenerationRef.current === generation) setArchiving(false);
@@ -863,16 +846,16 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
                     <button
                       className={styles.inlineDownload}
                       type="button"
-                      onClick={() => void saveItem(selected)}
+                      onClick={() => downloadItem(selected)}
                     >
-                      선택 파일 받기 ↓
+                      선택 파일 다운로드 ↓
                     </button>
                   </figure>
                 ) : null}
                 {selected?.resultUrl === undefined ? (
                   <div className={styles.previewMemoryNotice}>
                     <strong>설정을 고른 뒤 직접 실행하세요.</strong>
-                    <span>자동 저장하지 않으며 결과는 이 탭 안에만 보관해요.</span>
+                    <span>자동 다운로드하지 않으며 결과는 이 탭 안에만 보관해요.</span>
                   </div>
                 ) : null}
               </div>
@@ -1108,7 +1091,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
               <span>
                 {completedItems.length > 0
                   ? `${completedItems.length}/${items.length}개 결과 준비됨`
-                  : "업로드 없음 · 결과는 명시적으로 저장할 때만 내려받아요."}
+                  : "업로드 없음 · 결과는 다운로드 버튼을 누를 때만 내려받아요."}
               </span>
             </div>
             <div className={styles.actionButtons}>
@@ -1118,7 +1101,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
                 </button>
               ) : (
                 <button
-                  className={styles.runButton}
+                  className={completedItems.length > 0 ? styles.secondaryButton : styles.runButton}
                   type="button"
                   disabled={!canRun}
                   onClick={() => void startProcessing()}
@@ -1128,21 +1111,21 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
               )}
               {completedItems.length === 1 ? (
                 <button
-                  className={styles.secondaryButton}
+                  className={styles.runButton}
                   type="button"
-                  onClick={() => void saveItem(completedItems[0] as WorkItem)}
+                  onClick={() => downloadItem(completedItems[0] as WorkItem)}
                 >
-                  결과 저장·공유 ↓
+                  결과 다운로드 ↓
                 </button>
               ) : null}
               {completedItems.length > 1 ? (
                 <button
-                  className={styles.secondaryButton}
+                  className={styles.runButton}
                   type="button"
                   disabled={archiving}
                   onClick={() => void downloadAll()}
                 >
-                  결과 {completedItems.length}개 ZIP으로 받기 ↓
+                  결과 {completedItems.length}개 ZIP 다운로드 ↓
                 </button>
               ) : null}
             </div>

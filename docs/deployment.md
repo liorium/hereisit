@@ -56,9 +56,9 @@ Without an argument, each command targets https://hereisit.pages.dev. The naviga
 release routes, exact security headers, catalog/header/search behavior, representative detail shells, and
 read-only same-origin traffic. The image-watermark smoke creates a local 320×180 PNG, verifies the default
 text settings and security headers, proves that processing starts no download or upload, then explicitly
-saves the exact PNG result. The compression smoke checks the route and same-origin assets, then proves
+downloads the exact PNG result. The compression smoke checks the route and same-origin assets, then proves
 balanced 150DPI/JPEG quality 72, minimum 96DPI/JPEG quality 55, the exact 1% smaller-only guarantee,
-output geometry/rotation/metadata/image dimensions, explicit-only saves, and no-reduction guidance. The
+output geometry/rotation/metadata/image dimensions, explicit-only downloads, and no-reduction guidance. The
 PDF-to-image smoke checks its route and pinned parser assets, then performs one rotated-page PNG/96DPI
 direct download and one two-page default JPG/150DPI ordered ZIP. The smokes reject redirects,
 cross-origin, write-method, request-body, failed-request, and page-error activity; the PDF smokes also
@@ -140,8 +140,9 @@ GitHub Actions deploy workflow, or server runtime is required.
 - A sample image converts to WebP and downloads as a ZIP.
 - `/image/watermark` returns HTTP 200 and loads its dedicated Worker without any established image or PDF
   Worker bundle. A local 320×180 PNG receives the default `© HereIsIt` bottom-right watermark without an
-  upload or automatic download, then saves as `source-watermarked-hereisit.png` only on request. A
-  JPG/PNG/WebP logo can also be selected once, reused across a multi-image batch, and saved only on request.
+  upload or automatic download, then downloads as `source-watermarked-hereisit.png` only on request. A
+  JPG/PNG/WebP logo can also be selected once, reused across a multi-image batch, and downloaded only on
+  request.
 - Two sample PDFs merge in order, a PDF splits into a ZIP, and JPG/PNG images download as one PDF.
 - A three-page PDF can be reordered, quarter-turned, and reduced to selected pages in one organized PDF.
 - A PDF text watermark can be placed locally and the downloaded result opens with the same page count.
@@ -149,10 +150,10 @@ GitHub Actions deploy workflow, or server runtime is required.
   from the same origin with the current CSP and other security headers.
 - `/pdf/compress` returns HTTP 200 and loads only its inspection/compression Workers plus pinned,
   same-origin PDF.js assets; image, PDF editing, and PDF-to-image Worker bundles remain isolated.
-- A compressible scan produces a balanced 150DPI/JPEG quality 72 PDF only after an explicit save, at least
+- A compressible scan produces a balanced 150DPI/JPEG quality 72 PDF only after an explicit download, at least
   1% smaller than the source, with displayed page geometry preserved and output rotation normalized to 0.
 - The same scan produces a smaller minimum 96DPI/JPEG quality 55 PDF, while a tiny vector PDF shows
-  no-reduction guidance and exposes no save or download.
+  no-reduction guidance and exposes no download action.
 - A two-page PDF with a rotated second page can select page 2 and download a 1056×816 PNG at 96DPI.
 - A two-page 612×792pt PDF downloads an ordered two-entry JPG ZIP whose images are 1275×1650 at the default
   150DPI and quality 85.

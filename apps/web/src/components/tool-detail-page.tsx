@@ -55,7 +55,7 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
           <p className={styles.summary}>{implementation.defaultSummary}</p>
           <section aria-label="처리 방식" className={styles.execution}>
             <strong>이 기기에서 처리</strong>
-            <span>파일은 업로드되지 않으며 저장은 직접 선택해요.</span>
+            <span>파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.</span>
           </section>
           {implementation.notices.map((notice) => (
             <p
