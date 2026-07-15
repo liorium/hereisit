@@ -50,3 +50,30 @@
     font-size: 16px;
   }
 }
+
+@media (max-width: 600px) {
+  .hero {
+    width: calc(100% - 24px);
+    padding: 24px 0 12px;
+    gap: 14px;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(40px, 13vw, 52px);
+    line-height: 0.98;
+  }
+
+  .heroCopy > p:first-child {
+    margin-bottom: 4px;
+  }
+
+  .heroCopy > p:last-child {
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .search {
+    padding-bottom: 0;
+  }
+}

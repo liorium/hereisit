@@ -42,11 +42,35 @@ async function expectNoDocumentOverflow(page: Page): Promise<void> {
   );
 }
 
+async function expectFullyInsideViewport(locator: Locator, viewportHeight: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((box?.y ?? 0) + (box?.height ?? viewportHeight + 1)).toBeLessThanOrEqual(viewportHeight);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
     window.localStorage.setItem("hereisit.recent-tools.v1", "[]");
   });
+});
+
+test("shows the home file selector in the initial 320 by 568 viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+
+  const select = page.getByRole("button", { name: "파일 선택", exact: true });
+  await expect(select).toBeVisible();
+  await expectFullyInsideViewport(select, 568);
+  const box = await select.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(
+    page.getByRole("status").filter({ hasText: "기기 안에서 형식만 확인" }),
+  ).toContainText("기기 안에서 형식만 확인");
+  await expectNoDocumentOverflow(page);
 });
 
 test("keeps catalog filters and compact cards inside the mobile viewport", async ({ page }) => {

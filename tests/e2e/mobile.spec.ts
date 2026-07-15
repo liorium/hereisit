@@ -35,10 +35,16 @@ async function createMobileScannedPdf(page: import("@playwright/test").Page): Pr
 }
 
 test("keeps the home discovery flow inside an iPhone viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "파일 작업, 여기서 끝." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "파일 선택" })).toBeEnabled();
+  const fileSelect = page.getByRole("button", { name: "파일 선택" });
+  await expect(fileSelect).toBeEnabled();
+  const fileSelectBox = await fileSelect.boundingBox();
+  expect(fileSelectBox).not.toBeNull();
+  expect(fileSelectBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((fileSelectBox?.y ?? 0) + (fileSelectBox?.height ?? 569)).toBeLessThanOrEqual(568);
   await expect(page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab")).toHaveCount(8);
   await expect(page.getByRole("tabpanel")).toBeAttached();
 
