@@ -8,6 +8,7 @@ import {
 import { selectHomeTools, serializeCatalogUrlState } from "@hereisit/tool-registry/discovery";
 import Link from "next/link";
 import { type KeyboardEvent, type ReactNode, useMemo, useRef } from "react";
+import { focusAndRevealTab } from "../lib/focus-and-reveal-tab";
 import styles from "./domain-tool-tabs.module.css";
 import { ToolCard } from "./tool-card";
 
@@ -42,7 +43,7 @@ export function DomainToolTabs({
     const definition = domainFilterDefinitions[index];
     if (definition === undefined) return;
     onSelect(definition.id);
-    tabRefs.current[index]?.focus();
+    focusAndRevealTab(tabRefs.current[index] ?? null);
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number): void {

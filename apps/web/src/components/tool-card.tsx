@@ -25,7 +25,7 @@ export function ToolCard({
           {catalogTool.execution === "browser" ? "내 기기에서 처리" : "서버에서 처리"}
         </span>
       </Link>
-      <FavoriteToolButton toolId={catalogTool.id} />
+      <FavoriteToolButton toolId={catalogTool.id} toolName={catalogTool.name} />
     </article>
   );
 }

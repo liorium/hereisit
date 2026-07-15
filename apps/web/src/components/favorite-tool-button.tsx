@@ -6,10 +6,17 @@ import { toolPreferencesStore } from "../lib/tool-preferences";
 import { useToolPreferences } from "../lib/use-tool-preferences";
 import styles from "./tool-card.module.css";
 
-export function FavoriteToolButton({ toolId }: { toolId: AvailableToolId }): ReactNode {
+export function FavoriteToolButton({
+  toolId,
+  toolName,
+}: {
+  toolId: AvailableToolId;
+  toolName: string;
+}): ReactNode {
   const { favorites } = useToolPreferences();
   const isFavorite = favorites.includes(toolId);
-  const label = isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가";
+  const action = isFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가";
+  const label = `${toolName} ${action}`;
 
   function toggleFavorite(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();

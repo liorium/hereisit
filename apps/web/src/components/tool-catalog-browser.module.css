@@ -361,3 +361,108 @@
     background: color-mix(in srgb, var(--line) 38%, var(--panel));
   }
 }
+
+@media (max-width: 600px) {
+  .catalog,
+  .fallback {
+    width: calc(100% - 24px);
+    padding: 24px 0 64px;
+  }
+
+  .hero {
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .hero h1,
+  .fallback h1 {
+    font-size: 42px;
+    line-height: 0.98;
+  }
+
+  .hero > div > p:last-child {
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .tablist {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+  }
+
+  .tablist .tab {
+    flex: 0 0 112px;
+    min-height: 48px;
+    border-radius: 10px 10px 0 0;
+    scroll-snap-align: start;
+  }
+
+  .panel {
+    padding: 14px 12px;
+  }
+
+  .panelHeading {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .panelHeading h2 {
+    font-size: 22px;
+  }
+
+  .panelHeading p {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .purposeControls {
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    overscroll-behavior-inline: contain;
+  }
+
+  .purposeControls button {
+    flex: 0 0 auto;
+  }
+
+  .tablist .tab:focus-visible,
+  .purposeControls button:focus-visible {
+    outline: 3px solid var(--blue-dark);
+    outline-offset: -3px;
+  }
+
+  .tablist .tab[aria-selected="true"]:focus-visible,
+  .purposeControls button[aria-pressed="true"]:focus-visible {
+    outline-color: var(--yellow);
+  }
+
+  .plannedToggle {
+    margin-top: 8px;
+  }
+
+  .results,
+  .plannedResults {
+    padding-top: 16px;
+  }
+
+  .resultHeading {
+    margin-bottom: 10px;
+  }
+
+  .plannedBadge {
+    font-size: 12px;
+  }
+
+  .cards,
+  .plannedCards,
+  .fallbackCards {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+}

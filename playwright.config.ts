@@ -33,6 +33,16 @@ export default defineConfig({
       use: { ...devices["iPhone 15"], browserName: "chromium" },
       testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
     },
+    {
+      name: "mobile-firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        viewport: { width: 390, height: 844 },
+        screen: { width: 390, height: 844 },
+        hasTouch: true,
+      },
+      testMatch: /mobile\.spec\.ts/,
+    },
     ...(includeWebKit
       ? [
           {

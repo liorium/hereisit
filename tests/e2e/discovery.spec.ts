@@ -215,11 +215,15 @@ test("resets through client navigation without losing memory-only favorites", as
     .getByTestId("available-tool-grid")
     .locator("article")
     .filter({ hasText: "이미지 용량 줄이기" });
-  await compressCard.getByRole("button", { name: "즐겨찾기 추가" }).click();
-  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await compressCard
+    .getByRole("button", { name: "이미지 용량 줄이기 즐겨찾기 추가", exact: true })
+    .click();
+  await expect(
+    compressCard.getByRole("button", {
+      name: "이미지 용량 줄이기 즐겨찾기 해제",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
   const documentToken = await page.evaluate(() => {
     const token = crypto.randomUUID();
     (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken = token;
@@ -233,10 +237,12 @@ test("resets through client navigation without losing memory-only favorites", as
 
   await expect(page).toHaveURL(/\/tools$/);
   await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
-  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    compressCard.getByRole("button", {
+      name: "이미지 용량 줄이기 즐겨찾기 해제",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
   expect(
     await page.evaluate(
       () => (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken,
@@ -262,38 +268,19 @@ test("keeps planned catalog results in a separate inert region", async ({ page }
   await expect(page.getByRole("region", { name: "준비 중인 도구" })).toHaveCount(0);
 });
 
-test("wraps catalog domain and purpose controls without horizontal overflow", async ({ page }) => {
+test("keeps desktop catalog controls bounded at desktop and tablet widths", async ({ page }) => {
   await page.goto("/tools");
   const tablist = page.getByRole("tablist", { name: "도구 분야" });
-
   const columnCount = () =>
     tablist.evaluate(
       (element) => getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
     );
+
+  await page.setViewportSize({ width: 1280, height: 900 });
   expect(await columnCount()).toBe(8);
   await page.setViewportSize({ width: 900, height: 900 });
   expect(await columnCount()).toBe(4);
-  expect(
-    await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    })),
-  ).toMatchObject({ clientWidth: 900, scrollWidth: 900 });
-  await page.setViewportSize({ width: 340, height: 900 });
-  expect(await columnCount()).toBe(2);
-  expect(
-    await page
-      .getByRole("group", { name: "작업 목적" })
-      .evaluate(
-        (element) =>
-          new Set(
-            Array.from(element.children, (child) =>
-              Math.round((child as HTMLElement).getBoundingClientRect().top),
-            ),
-          ).size,
-      ),
-  ).toBeGreaterThan(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
 });
 
 test("shows newest-first personal tools and updates favorites with ID-only storage", async ({
@@ -309,7 +296,7 @@ test("shows newest-first personal tools and updates favorites with ID-only stora
   await recentRegion
     .locator("article")
     .first()
-    .getByRole("button", { name: "즐겨찾기 추가" })
+    .getByRole("button", { name: "PDF 워터마크 넣기 즐겨찾기 추가", exact: true })
     .click();
   const favoriteRegion = page.getByRole("region", { name: "즐겨찾는 도구" });
   await expect(favoriteRegion.locator("article")).toHaveCount(1);
@@ -582,6 +569,7 @@ test("honors reduced motion and avoids overflow at 200 percent zoom", async ({ p
 test("detects mixed files incrementally without network or private-data side effects", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const sentinelFilename = "PRIVATE_HOME_FILENAME_SENTINEL.png";
   const sentinelBytes = "PRIVATE_HOME_BYTES_SENTINEL";
   await page.addInitScript(() => {
@@ -629,6 +617,9 @@ test("detects mixed files incrementally without network or private-data side eff
   ]);
 
   await expect(launcher.getByRole("status")).toHaveText("0/2개 형식 확인 중");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect
     .poll(() =>
       page.evaluate(
@@ -649,6 +640,9 @@ test("detects mixed files incrementally without network or private-data side eff
     ).__hereisitReleasePrefixRead?.();
   });
   await expect(launcher.getByRole("status")).toHaveText("1/2개 형식 확인 중");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.evaluate(() => {
     (
       window as Window & {
@@ -658,6 +652,9 @@ test("detects mixed files incrementally without network or private-data side eff
   });
 
   await expect(launcher.getByRole("status")).toHaveText("2개 파일 형식 확인 완료");
+  await launcher.getByRole("status").scrollIntoViewIfNeeded();
+  await expect(launcher.getByRole("status")).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "PDF 문서" })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
@@ -807,6 +804,7 @@ test("invalidates an older detection generation when the selection changes", asy
 });
 
 test("keeps an unknown-format correction beside the chooser", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
   const launcher = page.locator('section[aria-labelledby="file-launcher-title"]');
   await page.locator("#home-file-input").setInputFiles({
@@ -815,9 +813,13 @@ test("keeps an unknown-format correction beside the chooser", async ({ page }) =
     buffer: Buffer.from([0x00, 0x01, 0x02, 0x03]),
   });
 
-  await expect(launcher.getByText(/지원하는 파일 형식을 찾지 못했어요/)).toBeVisible();
+  const correction = launcher.getByText(/지원하는 파일 형식을 찾지 못했어요/);
+  await expect(correction).toBeVisible();
   await expect(launcher.getByText(/1개 파일의 형식은 확인하지 못했어요/)).toBeVisible();
   await expect(launcher.getByRole("button", { name: /도구 선택/ })).toHaveCount(0);
+  await correction.scrollIntoViewIfNeeded();
+  await expect(correction).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("rejects 101 launcher files before reading any bytes", async ({ page }) => {

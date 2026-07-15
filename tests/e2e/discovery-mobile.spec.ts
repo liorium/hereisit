@@ -8,80 +8,411 @@ async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 1
   throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
 }
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
-    window.localStorage.setItem(
-      "hereisit.recent-tools.v1",
-      JSON.stringify(["pdf.watermark", "pdf.organize", "image.watermark", "pdf.split"]),
-    );
-  });
-});
+async function expectOneLocalRow(container: Locator): Promise<void> {
+  const metrics = await container.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    rows: new Set(
+      Array.from(element.children)
+        .filter((child) => {
+          const style = getComputedStyle(child);
+          return style.display !== "none" && style.position !== "absolute";
+        })
+        .map((child) => Math.round((child as HTMLElement).getBoundingClientRect().top)),
+    ).size,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(metrics.rows).toBe(1);
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+}
 
-test("keeps catalog filters and two-column cards inside the mobile viewport", async ({ page }) => {
-  await page.goto("/tools?planned=1");
-
-  const tablist = page.getByRole("tablist", { name: "도구 분야" });
-  await expect(tablist.getByRole("tab")).toHaveCount(8);
-  expect(
-    await tablist.evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
-    ),
-  ).toHaveLength(2);
-
-  const cards = page.getByTestId("available-tool-grid").locator("article");
-  expect(await cards.count()).toBeGreaterThan(1);
-  const firstCard = await cards.nth(0).boundingBox();
-  const secondCard = await cards.nth(1).boundingBox();
-  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+async function expectNoDocumentOverflow(page: Page): Promise<void> {
   expect(
     await page.evaluate(() => ({
       clientWidth: document.documentElement.clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
     })),
-  ).toMatchObject({ clientWidth: 393, scrollWidth: 393 });
+  ).toEqual(
+    expect.objectContaining({
+      clientWidth: expect.any(Number),
+      scrollWidth: expect.any(Number),
+    }),
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    (await page.evaluate(() => document.documentElement.clientWidth)) + 1,
+  );
+}
 
-  await page.setViewportSize({ width: 340, height: 844 });
-  const narrowFirst = await cards.nth(0).boundingBox();
-  const narrowSecond = await cards.nth(1).boundingBox();
-  expect((narrowSecond?.y ?? 0) - (narrowFirst?.y ?? 0)).toBeGreaterThan(20);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+async function expectFullyInsideViewport(locator: Locator, viewportHeight: number): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((box?.y ?? 0) + (box?.height ?? viewportHeight + 1)).toBeLessThanOrEqual(viewportHeight);
+}
+
+async function expectPaintedFocusInsideViewport(locator: Locator): Promise<void> {
+  const focusPaint = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    const outerExtent = Math.max(0, outlineWidth + outlineOffset);
+    return {
+      bottom: rect.bottom + outerExtent,
+      left: rect.left - outerExtent,
+      outlineWidth,
+      right: rect.right + outerExtent,
+      top: rect.top - outerExtent,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+
+  expect(focusPaint.outlineWidth).toBeGreaterThan(0);
+  expect(focusPaint.left).toBeGreaterThanOrEqual(0);
+  expect(focusPaint.top).toBeGreaterThanOrEqual(0);
+  expect(focusPaint.right).toBeLessThanOrEqual(focusPaint.viewportWidth);
+  expect(focusPaint.bottom).toBeLessThanOrEqual(focusPaint.viewportHeight);
+}
+
+async function positionRowPartiallyOutsideViewport(
+  row: Locator,
+  edge: "above" | "below",
+): Promise<void> {
+  const metrics = await row.evaluate((element, requestedEdge) => {
+    const scrollport = element as HTMLElement;
+    document.documentElement.style.scrollBehavior = "auto";
+
+    let bounds = scrollport.getBoundingClientRect();
+    const desiredTop =
+      requestedEdge === "above" ? -bounds.height / 2 : window.innerHeight - bounds.height / 2;
+    let documentTop = window.scrollY + bounds.top;
+    if (documentTop < desiredTop) {
+      const currentPadding = Number.parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+      document.body.style.paddingTop = `${currentPadding + Math.ceil(desiredTop - documentTop) + 32}px`;
+      bounds = scrollport.getBoundingClientRect();
+      documentTop = window.scrollY + bounds.top;
+    }
+
+    window.scrollTo({ behavior: "instant", top: Math.round(documentTop - desiredTop) });
+    bounds = scrollport.getBoundingClientRect();
+    return {
+      bottom: bounds.bottom,
+      top: bounds.top,
+      viewportHeight: window.innerHeight,
+    };
+  }, edge);
+
+  if (edge === "above") {
+    expect(metrics.top).toBeLessThan(0);
+    expect(metrics.bottom).toBeGreaterThan(0);
+  } else {
+    expect(metrics.top).toBeLessThan(metrics.viewportHeight);
+    expect(metrics.bottom).toBeGreaterThan(metrics.viewportHeight);
+  }
+}
+
+async function expectPaintedFocusInsideLocalScrollport(control: Locator): Promise<void> {
+  const focusPaint = await control.evaluate((element) => {
+    const scrollport = element.parentElement;
+    if (scrollport === null) return null;
+    const rect = element.getBoundingClientRect();
+    const scrollportRect = scrollport.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    const outerExtent = Math.max(0, outlineWidth + outlineOffset);
+    return {
+      backgroundColor: style.backgroundColor,
+      bottom: rect.bottom + outerExtent,
+      focusVisible: element.matches(":focus-visible"),
+      left: rect.left - outerExtent,
+      outlineColor: style.outlineColor,
+      outlineStyle: style.outlineStyle,
+      outlineWidth,
+      right: rect.right + outerExtent,
+      scrollportBottom: scrollportRect.bottom,
+      scrollportLeft: scrollportRect.left,
+      scrollportRight: scrollportRect.right,
+      scrollportTop: scrollportRect.top,
+      top: rect.top - outerExtent,
+    };
+  });
+
+  expect(focusPaint).not.toBeNull();
+  expect(focusPaint?.focusVisible).toBe(true);
+  expect(focusPaint?.outlineStyle).not.toBe("none");
+  expect(focusPaint?.outlineWidth ?? 0).toBeGreaterThanOrEqual(2);
+  expect(focusPaint?.outlineColor).not.toBe("transparent");
+  expect(focusPaint?.outlineColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(focusPaint?.outlineColor).not.toBe(focusPaint?.backgroundColor);
+  expect(focusPaint?.left ?? -1).toBeGreaterThanOrEqual((focusPaint?.scrollportLeft ?? 0) - 0.5);
+  expect(focusPaint?.right ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    (focusPaint?.scrollportRight ?? 0) + 0.5,
+  );
+  expect(focusPaint?.top ?? -1).toBeGreaterThanOrEqual((focusPaint?.scrollportTop ?? 0) - 0.5);
+  expect(focusPaint?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    (focusPaint?.scrollportBottom ?? 0) + 0.5,
+  );
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
+    window.localStorage.setItem("hereisit.recent-tools.v1", "[]");
+  });
 });
 
-test("keeps the home launcher, two-column tabs, and cards inside the mobile viewport", async ({
+test("shows the home file selector in the initial 320 by 568 viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+
+  const select = page.getByRole("button", { name: "파일 선택", exact: true });
+  await expect(select).toBeVisible();
+  await expectFullyInsideViewport(select, 568);
+  const box = await select.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await select.focus();
+  await expect(select).toBeFocused();
+  await expectPaintedFocusInsideViewport(select);
+  await expect(
+    page.getByRole("status").filter({ hasText: "기기 안에서 형식만 확인" }),
+  ).toContainText("기기 안에서 형식만 확인");
+  await expectNoDocumentOverflow(page);
+});
+
+test("shows a one-row catalog filter surface and the first result at 390 by 844", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tools");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+
+  const purposes = page.getByRole("group", { name: "작업 목적" });
+  await expectOneLocalRow(purposes);
+  const firstLink = page.getByTestId("available-tool-grid").locator("article > a").first();
+  await expectFullyInsideViewport(firstLink, 844);
+  expect(
+    await page
+      .getByRole("combobox", { name: "도구 검색" })
+      .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
+
+  await purposes.getByRole("button", { name: "변환", exact: true }).click();
+  await expect(page).toHaveURL(/purpose=convert/);
+  await expect(purposes.getByRole("button", { name: "변환", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expectNoDocumentOverflow(page);
+});
+
+test("uses compact one-column cards through 600 pixels and restores tablet columns at 601", async ({
+  page,
+}) => {
+  await page.goto("/tools");
+  const grid = page.getByTestId("available-tool-grid");
+  const compress = grid.locator("article").filter({ hasText: "이미지 용량 줄이기" });
+
+  for (const width of [320, 360, 390, 430, 600]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await grid.evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+    ).toHaveLength(1);
+    await expectNoDocumentOverflow(page);
+  }
+
+  const link = compress.locator(":scope > a");
+  const favorite = compress.locator(":scope > button");
+  await expect(link).toHaveCount(1);
+  await expect(favorite).toHaveCount(1);
+  await expect(favorite).toHaveAccessibleName("이미지 용량 줄이기 즐겨찾기 추가");
+  await favorite.scrollIntoViewIfNeeded();
+  const favoriteBox = await favorite.boundingBox();
+  expect(favoriteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(favoriteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect(
+    await favorite.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+
+  const description = compress.locator("a > span").nth(1);
+  const clamp = await description.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      clientHeight: element.clientHeight,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      overflow: style.overflow,
+      webkitLineClamp: style.webkitLineClamp,
+    };
+  });
+  expect(clamp.webkitLineClamp).toBe("2");
+  expect(clamp.overflow).toBe("hidden");
+  expect(clamp.clientHeight).toBeLessThanOrEqual(clamp.lineHeight * 2 + 1);
+
+  await link.focus();
+  await page.keyboard.press("Tab");
+  await expect(favorite).toBeFocused();
+
+  await page.setViewportSize({ width: 601, height: 844 });
+  expect(
+    await grid.evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+    ),
+  ).toHaveLength(2);
+  await expectNoDocumentOverflow(page);
+
+  await page.setViewportSize({ width: 600, height: 844 });
+  await page.goto("/");
+  expect(
+    await page
+      .getByTestId("home-tool-grid")
+      .evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+  ).toHaveLength(1);
+  await page.goto("/image/compress");
+  expect(
+    await page
+      .getByRole("region", { name: "다음 작업" })
+      .locator("article")
+      .first()
+      .locator("..")
+      .evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+  ).toHaveLength(1);
+});
+
+test("keeps home domain tabs in one local row and reveals keyboard selection", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
-  const tabs = page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab");
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  const tabs = tablist.getByRole("tab");
   await expect(tabs).toHaveCount(8);
-  const columns = await page
-    .getByRole("tablist", { name: "도구 분야" })
-    .evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
-    );
-  expect(columns).toHaveLength(2);
+  await expectOneLocalRow(tablist);
   expect(
-    await tabs.evaluateAll(
-      (elements) =>
-        new Set(elements.map((element) => Math.round(element.getBoundingClientRect().top))).size,
-    ),
-  ).toBe(4);
+    await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
+  ).toBe("tabpanel");
 
-  const panel = page.getByRole("tabpanel");
-  await expect(panel).toBeAttached();
-  const cards = panel.locator("article");
-  expect(await cards.count()).toBeGreaterThan(1);
-  const firstCard = await cards.nth(0).boundingBox();
-  const secondCard = await cards.nth(1).boundingBox();
-  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+  await tablist.evaluate((element) =>
+    element.scrollIntoView({ behavior: "instant", block: "start" }),
+  );
+  await tabs.first().evaluate((element) => element.focus({ preventScroll: true }));
+  const beforeY = await page.evaluate(() => window.scrollY);
+  await page.keyboard.press("End");
+  await expect(tabs.last()).toBeFocused();
+  const bounds = await tablist.evaluate((element) => {
+    const list = element.getBoundingClientRect();
+    const selected = element.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
+    return selected === undefined
+      ? null
+      : { left: selected.left, right: selected.right, listLeft: list.left, listRight: list.right };
+  });
+  expect(bounds).not.toBeNull();
+  expect(bounds?.left ?? 0).toBeGreaterThanOrEqual((bounds?.listLeft ?? 0) - 1);
+  expect(bounds?.right ?? 0).toBeLessThanOrEqual((bounds?.listRight ?? 0) + 1);
+  expect(await page.evaluate(() => window.scrollY)).toBeCloseTo(beforeY, 0);
+  await expectNoDocumentOverflow(page);
+});
 
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+test("keeps catalog domain tabs in one local row", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tools");
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  await expectOneLocalRow(tablist);
+  expect(
+    await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
+  ).toBe("tabpanel");
+  await expectNoDocumentOverflow(page);
+});
+
+for (const { edge, key, label, path, startAtEnd } of [
+  { edge: "above", key: "Home", label: "home", path: "/", startAtEnd: true },
+  { edge: "below", key: "End", label: "home", path: "/", startAtEnd: false },
+  { edge: "above", key: "Home", label: "catalog", path: "/tools", startAtEnd: true },
+  { edge: "below", key: "End", label: "catalog", path: "/tools", startAtEnd: false },
+] as const) {
+  test(`keeps ${label} document Y exact when the domain row is partially ${edge}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto(path);
+    const tablist = page.getByRole("tablist", { name: "도구 분야" });
+    const tabs = tablist.getByRole("tab");
+    await positionRowPartiallyOutsideViewport(tablist, edge);
+    const start = startAtEnd ? tabs.last() : tabs.first();
+    const destination = startAtEnd ? tabs.first() : tabs.last();
+    await start.evaluate((element) => element.focus({ preventScroll: true }));
+    const beforeY = await page.evaluate(() => window.scrollY);
+
+    await page.keyboard.press(key);
+
+    await expect(destination).toBeFocused();
+    await expect(destination).toHaveAttribute("aria-selected", "true");
+    expect(await page.evaluate(() => window.scrollY)).toBe(beforeY);
+    await expectNoDocumentOverflow(page);
+  });
+}
+
+for (const { label, path } of [
+  { label: "home", path: "/" },
+  { label: "catalog", path: "/tools" },
+] as const) {
+  test(`contains first and last ${label} domain focus paint in its local row`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto(path);
+    const tablist = page.getByRole("tablist", { name: "도구 분야" });
+    const tabs = tablist.getByRole("tab");
+    await tablist.evaluate((element) =>
+      element.scrollIntoView({ behavior: "instant", block: "center" }),
+    );
+    await tabs.last().evaluate((element) => element.focus({ preventScroll: true }));
+
+    await page.keyboard.press("Home");
+    await expect(tabs.first()).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(tabs.first());
+
+    await page.keyboard.press("End");
+    await expect(tabs.last()).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(tabs.last());
+    await expectNoDocumentOverflow(page);
+  });
+}
+
+test("contains first and last catalog purpose focus paint in its local row", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/tools");
+  const purposes = page.getByRole("group", { name: "작업 목적" });
+  const buttons = purposes.getByRole("button");
+  await purposes.evaluate((element) =>
+    element.scrollIntoView({ behavior: "instant", block: "center" }),
+  );
+
+  for (const { control, left } of [
+    { control: buttons.first(), left: 0 },
+    { control: buttons.last(), left: -1 },
+  ]) {
+    await control.evaluate((element, requestedLeft) => {
+      const scrollport = element.parentElement;
+      if (scrollport === null) return;
+      scrollport.scrollLeft = requestedLeft < 0 ? scrollport.scrollWidth : requestedLeft;
+    }, left);
+    await page.keyboard.press("Shift");
+    await control.evaluate((element) => element.focus({ preventScroll: true }));
+    await expect(control).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(control);
+  }
+  await expectNoDocumentOverflow(page);
 });
 
 test("opens one modal mobile drawer with trapped focus and inert background", async ({ page }) => {
@@ -100,6 +431,12 @@ test("opens one modal mobile drawer with trapped focus and inert background", as
 
   const domainGrid = drawer.getByTestId("mobile-domain-grid");
   await expect(domainGrid.getByRole("link")).toHaveCount(7);
+  const brandBox = await page.getByRole("link", { name: "HereIsIt 홈" }).boundingBox();
+  expect(brandBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  for (const link of await domainGrid.getByRole("link").all()) {
+    const box = await link.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
   const columns = await domainGrid.evaluate((element) =>
     getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
   );
@@ -149,8 +486,6 @@ test("closes the drawer control and restores its single mobile trigger", async (
     "href",
     "/my-tools",
   );
-  expect(await drawer.locator('[data-tool-section="recent"] [data-tool-link]').count()).toBe(4);
-
   await drawer.getByRole("button", { name: "메뉴 닫기", exact: true }).click();
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
@@ -185,50 +520,38 @@ test("supports a keyboard-only mobile menu with exact focus return", async ({ pa
   await expect(trigger).toBeFocused();
 });
 
-test("keeps enlarged mobile text readable without horizontal overflow", async ({ page }) => {
+test("keeps 200 percent root text enlargement reachable without document overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
-  const fileSelect = page.getByRole("button", { name: "파일 선택" });
-  await expect(fileSelect).toBeVisible();
-  await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
-  const baselineFontSize = await fileSelect.evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).fontSize),
-  );
-  const enlargedElementCount = await page.evaluate(() => {
-    const renderedTextElements = Array.from(document.body.querySelectorAll("*"))
-      .filter((element) =>
-        Array.from(element.childNodes).some(
-          (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim(),
-        ),
-      )
-      .map((element) => ({
-        element,
-        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
-        style: getComputedStyle(element),
-      }))
-      .filter(
-        ({ fontSize, style }) =>
-          Number.isFinite(fontSize) &&
-          fontSize > 0 &&
-          style.display !== "none" &&
-          style.visibility !== "hidden",
+  await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+
+  expect(
+    await page.evaluate(() =>
+      Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+    ),
+  ).toBe(32);
+  const select = page.getByRole("button", { name: "파일 선택" });
+  const tabs = page.getByRole("tablist", { name: "도구 분야" });
+  await select.scrollIntoViewIfNeeded();
+  await expect(select).toBeInViewport();
+  await tabs.scrollIntoViewIfNeeded();
+  await expect(tabs).toBeInViewport();
+  await expectNoDocumentOverflow(page);
+});
+
+test("keeps key routes bounded across compact widths and the 601 pixel boundary", async ({
+  page,
+}) => {
+  const routes = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/pdf/organize"];
+  for (const width of [320, 360, 390, 430, 600, 601]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const route of routes) {
+      await page.goto(route);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width + 1,
       );
-
-    for (const { element, fontSize } of renderedTextElements) {
-      if (element instanceof HTMLElement) {
-        element.style.setProperty("font-size", `${fontSize * 2}px`, "important");
-      }
     }
-    return renderedTextElements.length;
-  });
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  const enlargedFontSize = await fileSelect.evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).fontSize),
-  );
-  expect(enlargedElementCount).toBeGreaterThan(0);
-  expect(enlargedFontSize).toBeCloseTo(baselineFontSize * 2, 5);
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  }
 });

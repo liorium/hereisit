@@ -188,9 +188,9 @@
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 600px) {
   .page {
-    padding-block: 12px 56px;
+    padding-block: 8px 48px;
   }
 
   .breadcrumbs,
@@ -200,15 +200,57 @@
   }
 
   .hero {
-    padding-block: 28px 24px;
+    padding-block: 16px 14px;
+  }
+
+  .eyebrow {
+    margin-bottom: 8px;
   }
 
   .titleRow {
-    align-items: center;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .titleRow h1 {
+    font-size: clamp(1.75rem, 9vw, 2.3rem);
+    line-height: 1.08;
+  }
+
+  .description,
+  .summary {
+    margin-top: 10px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .summary {
+    margin-top: 6px;
+  }
+
+  .execution {
+    margin-top: 14px;
+    padding: 10px 12px;
+    gap: 2px;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+  }
+
+  .warning,
+  .support {
+    margin-top: 10px;
+    padding-left: 24px;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .warning::before,
+  .support::before {
+    font-size: 0.75rem;
   }
 
   .related {
-    margin-top: 48px;
+    margin-top: 40px;
   }
 
   .relatedGrid {
