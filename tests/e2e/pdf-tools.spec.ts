@@ -134,6 +134,43 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
   await expectWebShareUnused(page);
 });
 
+test("downloads a one-page split result as a ZIP", async ({ page }) => {
+  await installAvailableWebShare(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100]),
+  });
+  await page.getByRole("button", { name: "PDF 페이지별로 나누기 →" }).click();
+  await expect(page.getByText("1개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
+  await expect(page.getByRole("button", { name: "ZIP 다운로드 ↓" })).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("report-pages-hereisit.zip");
+  const archive = unzipSync(await downloadedBytes(await download.path()));
+  expect(Object.keys(archive)).toEqual(["report-page-001.pdf"]);
+  const first = archive["report-page-001.pdf"];
+  expect(first).toBeDefined();
+  expect(new TextDecoder().decode((first as Uint8Array).subarray(0, 5))).toBe("%PDF-");
+  const firstDocument = await PDFDocument.load(first as Uint8Array);
+  expect(firstDocument.getPageCount()).toBe(1);
+  expect(firstDocument.getPage(0).getWidth()).toBe(100);
+  expect(downloadCount).toBe(1);
+  await expect(
+    page.getByRole("status").getByText("ZIP 다운로드를 시작했어요.", { exact: true }),
+  ).toBeVisible();
+  await expectWebShareUnused(page);
+});
+
 test("extracts a validated page range into one PDF", async ({ page }) => {
   await page.goto("/pdf/split");
   await page.locator("input[type=file]").setInputFiles({

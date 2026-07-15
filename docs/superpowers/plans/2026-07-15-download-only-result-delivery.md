@@ -830,7 +830,7 @@ const downloadResult = () => {
   try {
     downloadUrl(resultUrl, result.suggestedName);
     setMessage(
-      result.outputDocumentCount > 1
+      result.mime === "application/zip"
         ? "ZIP 다운로드를 시작했어요."
         : "다운로드를 시작했어요.",
     );
@@ -843,7 +843,7 @@ const downloadResult = () => {
 Use `onClick={downloadResult}` and:
 
 ```tsx
-{result.outputDocumentCount > 1 ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
+{result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
 ```
 
 - [ ] **Step 4: Run focused PDF verification and commit**

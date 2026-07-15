@@ -570,7 +570,7 @@ export function PdfWorkbench({
     try {
       downloadUrl(resultUrl, result.suggestedName);
       setMessage(
-        result.outputDocumentCount > 1 ? "ZIP 다운로드를 시작했어요." : "다운로드를 시작했어요.",
+        result.mime === "application/zip" ? "ZIP 다운로드를 시작했어요." : "다운로드를 시작했어요.",
       );
     } catch {
       setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
@@ -1215,7 +1215,7 @@ export function PdfWorkbench({
                     </button>
                   ) : null}
                   <button className={styles.runButton} type="button" onClick={downloadResult}>
-                    {result.outputDocumentCount > 1 ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
+                    {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
                   </button>
                 </>
               ) : (
