@@ -245,6 +245,46 @@ test("keeps an image result retryable when download activation throws", async ({
   expect(download.suggestedFilename()).toBe("retry-hereisit.webp");
 });
 
+test("keeps image ZIP results retryable when download activation throws", async ({ page }) => {
+  await installDownloadActivationController(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click();
+  await expect(
+    page
+      .getByRole("status")
+      .getByText("다운로드를 시작하지 못했어요. 다시 시도해 주세요.", { exact: true }),
+  ).toBeVisible();
+  expect(downloadCount).toBe(0);
+  await expect(page.getByRole("button", { name: "이 이미지 다운로드 ↓" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("hereisit-images.zip");
+  const zipPath = await download.path();
+  expect(zipPath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+  expect(Object.keys(archive).sort()).toEqual(["first-hereisit.webp", "second-hereisit.webp"]);
+  expect(downloadCount).toBe(1);
+});
+
 test("downloads a selected image and its batch ZIP without Web Share", async ({ page }) => {
   await installAvailableWebShare(page);
   let downloadCount = 0;
@@ -262,9 +302,13 @@ test("downloads a selected image and its batch ZIP without Web Share", async ({ 
   ).toBeVisible({ timeout: 20_000 });
   expect(downloadCount).toBe(0);
 
+  const selectedAction = page.getByRole("button", { name: "이 이미지 다운로드 ↓" });
+  const selectedBox = await selectedAction.boundingBox();
+  expect(selectedBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+
   const [selectedDownload] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이 이미지 다운로드 ↓" }).click(),
+    selectedAction.click(),
   ]);
   expect(selectedDownload.suggestedFilename()).toBe("first-hereisit.webp");
   const selectedPath = await selectedDownload.path();

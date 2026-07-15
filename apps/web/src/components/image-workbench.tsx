@@ -670,30 +670,38 @@ export function ImageWorkbench({
     setArchiving(true);
     setMessage("ZIP 파일을 만들고 있어요.");
     try {
-      const archive = await createZipArchive(
-        completedItems.flatMap((item) =>
-          item.result === undefined
-            ? []
-            : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
-        ),
-      );
-      if (activeRunRef.current !== runId) return;
-      const url = createOwnedUrl(archive);
+      let archive: Blob;
       try {
-        downloadUrl(url, "hereisit-images.zip");
-        const timeoutId = setTimeout(() => {
-          if (!archiveLeasesRef.current.delete(url)) return;
-          revokeOwnedUrl(url);
-        }, 10_000);
-        archiveLeasesRef.current.set(url, timeoutId);
-      } catch (error) {
-        revokeOwnedUrl(url);
-        throw error;
+        archive = await createZipArchive(
+          completedItems.flatMap((item) =>
+            item.result === undefined
+              ? []
+              : [{ name: item.result.suggestedName, bytes: item.result.bytes }],
+          ),
+        );
+      } catch {
+        if (activeRunRef.current === runId) {
+          setMessage("ZIP 파일을 만들지 못했어요. 개별 파일을 다운로드해 주세요.");
+        }
+        return;
       }
-      setMessage("ZIP 다운로드를 시작했어요.");
-    } catch {
-      if (activeRunRef.current === runId) {
-        setMessage("ZIP 파일을 만들지 못했어요. 개별 파일을 다운로드해 주세요.");
+      if (activeRunRef.current !== runId) return;
+      let url: string | undefined;
+      try {
+        const createdUrl = createOwnedUrl(archive);
+        url = createdUrl;
+        downloadUrl(createdUrl, "hereisit-images.zip");
+        const timeoutId = setTimeout(() => {
+          if (!archiveLeasesRef.current.delete(createdUrl)) return;
+          revokeOwnedUrl(createdUrl);
+        }, 10_000);
+        archiveLeasesRef.current.set(createdUrl, timeoutId);
+        setMessage("ZIP 다운로드를 시작했어요.");
+      } catch {
+        revokeOwnedUrl(url);
+        if (activeRunRef.current === runId) {
+          setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+        }
       }
     } finally {
       if (activeRunRef.current === runId) setArchiving(false);
