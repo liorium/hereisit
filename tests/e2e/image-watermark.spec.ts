@@ -980,7 +980,9 @@ test("reports an unsupported runtime before reading a selected file", async ({ p
     ),
   ).toBe(0);
   await expect(page.locator('img[alt="unread.png 미리보기"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /이미지에 워터마크 넣기/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^\d+개 이미지에 워터마크 넣기 →$/ })).toHaveCount(
+    0,
+  );
 });
 
 test("moves through all nine watermark positions with the keyboard", async ({ page }) => {

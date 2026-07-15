@@ -49,6 +49,31 @@ async function expectFullyInsideViewport(locator: Locator, viewportHeight: numbe
   expect((box?.y ?? 0) + (box?.height ?? viewportHeight + 1)).toBeLessThanOrEqual(viewportHeight);
 }
 
+async function expectPaintedFocusInsideViewport(locator: Locator): Promise<void> {
+  const focusPaint = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    const outerExtent = Math.max(0, outlineWidth + outlineOffset);
+    return {
+      bottom: rect.bottom + outerExtent,
+      left: rect.left - outerExtent,
+      outlineWidth,
+      right: rect.right + outerExtent,
+      top: rect.top - outerExtent,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+
+  expect(focusPaint.outlineWidth).toBeGreaterThan(0);
+  expect(focusPaint.left).toBeGreaterThanOrEqual(0);
+  expect(focusPaint.top).toBeGreaterThanOrEqual(0);
+  expect(focusPaint.right).toBeLessThanOrEqual(focusPaint.viewportWidth);
+  expect(focusPaint.bottom).toBeLessThanOrEqual(focusPaint.viewportHeight);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
@@ -67,6 +92,9 @@ test("shows the home file selector in the initial 320 by 568 viewport", async ({
   await expectFullyInsideViewport(select, 568);
   const box = await select.boundingBox();
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await select.focus();
+  await expect(select).toBeFocused();
+  await expectPaintedFocusInsideViewport(select);
   await expect(
     page.getByRole("status").filter({ hasText: "기기 안에서 형식만 확인" }),
   ).toContainText("기기 안에서 형식만 확인");

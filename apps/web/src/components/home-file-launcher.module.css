@@ -241,7 +241,7 @@
 @media (max-width: 600px) {
   .section {
     width: calc(100% - 24px);
-    padding: 8px 0 40px;
+    padding: 0 0 40px;
   }
 
   .heading {
