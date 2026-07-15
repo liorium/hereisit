@@ -106,7 +106,7 @@ test("renders the PDF organizer in the catalog-driven workspace shell", async ({
   await page.getByRole("button", { name: "2페이지 정리하기 →" }).click();
 
   await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
 });
 
 const remainingPdfShells = [
