@@ -49,14 +49,14 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("keeps catalog filters and two-column cards inside the mobile viewport", async ({ page }) => {
+test("keeps catalog filters and compact cards inside the mobile viewport", async ({ page }) => {
   await page.goto("/tools?planned=1");
 
   const cards = page.getByTestId("available-tool-grid").locator("article");
   expect(await cards.count()).toBeGreaterThan(1);
   const firstCard = await cards.nth(0).boundingBox();
   const secondCard = await cards.nth(1).boundingBox();
-  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+  expect((secondCard?.y ?? 0) - (firstCard?.y ?? 0)).toBeGreaterThan(20);
   await expectNoDocumentOverflow(page);
 
   await page.setViewportSize({ width: 340, height: 844 });
@@ -64,6 +64,89 @@ test("keeps catalog filters and two-column cards inside the mobile viewport", as
   const narrowSecond = await cards.nth(1).boundingBox();
   expect((narrowSecond?.y ?? 0) - (narrowFirst?.y ?? 0)).toBeGreaterThan(20);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+});
+
+test("uses compact one-column cards through 600 pixels and restores tablet columns at 601", async ({
+  page,
+}) => {
+  await page.goto("/tools");
+  const grid = page.getByTestId("available-tool-grid");
+  const compress = grid.locator("article").filter({ hasText: "이미지 용량 줄이기" });
+
+  for (const width of [320, 360, 390, 430, 600]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await grid.evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+    ).toHaveLength(1);
+    await expectNoDocumentOverflow(page);
+  }
+
+  const link = compress.locator(":scope > a");
+  const favorite = compress.locator(":scope > button");
+  await expect(link).toHaveCount(1);
+  await expect(favorite).toHaveCount(1);
+  await expect(favorite).toHaveAccessibleName("이미지 용량 줄이기 즐겨찾기 추가");
+  await favorite.scrollIntoViewIfNeeded();
+  const favoriteBox = await favorite.boundingBox();
+  expect(favoriteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(favoriteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  expect(
+    await favorite.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+
+  const description = compress.locator("a > span").nth(1);
+  const clamp = await description.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      clientHeight: element.clientHeight,
+      lineHeight: Number.parseFloat(style.lineHeight),
+      overflow: style.overflow,
+      webkitLineClamp: style.webkitLineClamp,
+    };
+  });
+  expect(clamp.webkitLineClamp).toBe("2");
+  expect(clamp.overflow).toBe("hidden");
+  expect(clamp.clientHeight).toBeLessThanOrEqual(clamp.lineHeight * 2 + 1);
+
+  await link.focus();
+  await page.keyboard.press("Tab");
+  await expect(favorite).toBeFocused();
+
+  await page.setViewportSize({ width: 601, height: 844 });
+  expect(
+    await grid.evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+    ),
+  ).toHaveLength(2);
+  await expectNoDocumentOverflow(page);
+
+  await page.setViewportSize({ width: 600, height: 844 });
+  await page.goto("/");
+  expect(
+    await page
+      .getByTestId("home-tool-grid")
+      .evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+  ).toHaveLength(1);
+  await page.goto("/image/compress");
+  expect(
+    await page
+      .getByRole("region", { name: "다음 작업" })
+      .locator("article")
+      .first()
+      .locator("..")
+      .evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
+      ),
+  ).toHaveLength(1);
 });
 
 test("keeps home domain tabs in one local row and reveals keyboard selection", async ({ page }) => {

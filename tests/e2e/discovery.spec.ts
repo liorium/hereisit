@@ -215,11 +215,15 @@ test("resets through client navigation without losing memory-only favorites", as
     .getByTestId("available-tool-grid")
     .locator("article")
     .filter({ hasText: "이미지 용량 줄이기" });
-  await compressCard.getByRole("button", { name: "즐겨찾기 추가" }).click();
-  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await compressCard
+    .getByRole("button", { name: "이미지 용량 줄이기 즐겨찾기 추가", exact: true })
+    .click();
+  await expect(
+    compressCard.getByRole("button", {
+      name: "이미지 용량 줄이기 즐겨찾기 해제",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
   const documentToken = await page.evaluate(() => {
     const token = crypto.randomUUID();
     (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken = token;
@@ -233,10 +237,12 @@ test("resets through client navigation without losing memory-only favorites", as
 
   await expect(page).toHaveURL(/\/tools$/);
   await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
-  await expect(compressCard.getByRole("button", { name: "즐겨찾기 해제" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(
+    compressCard.getByRole("button", {
+      name: "이미지 용량 줄이기 즐겨찾기 해제",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-pressed", "true");
   expect(
     await page.evaluate(
       () => (window as Window & { __hereisitDocumentToken?: string }).__hereisitDocumentToken,
@@ -319,7 +325,7 @@ test("shows newest-first personal tools and updates favorites with ID-only stora
   await recentRegion
     .locator("article")
     .first()
-    .getByRole("button", { name: "즐겨찾기 추가" })
+    .getByRole("button", { name: "PDF 워터마크 넣기 즐겨찾기 추가", exact: true })
     .click();
   const favoriteRegion = page.getByRole("region", { name: "즐겨찾는 도구" });
   await expect(favoriteRegion.locator("article")).toHaveCount(1);

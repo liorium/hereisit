@@ -376,4 +376,11 @@
     border-radius: 10px 10px 0 0;
     scroll-snap-align: start;
   }
+
+  .cards,
+  .plannedCards,
+  .fallbackCards {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
 }

@@ -49,7 +49,7 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
           <p className={styles.eyebrow}>{implementation.eyebrow}</p>
           <div className={styles.titleRow}>
             <h1>{tool.name}</h1>
-            <FavoriteToolButton toolId={toolId} />
+            <FavoriteToolButton toolId={toolId} toolName={tool.name} />
           </div>
           <p className={styles.description}>{tool.shortDescription}</p>
           <p className={styles.summary}>{implementation.defaultSummary}</p>

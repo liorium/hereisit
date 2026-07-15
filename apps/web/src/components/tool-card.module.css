@@ -127,6 +127,44 @@
   }
 }
 
+@media (max-width: 600px) {
+  .card {
+    display: block;
+  }
+
+  .link {
+    min-height: 44px;
+    gap: 6px;
+    padding: 18px 68px 18px 18px;
+  }
+
+  .name,
+  .description {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .name {
+    font-size: 18px;
+    line-height: 1.3;
+  }
+
+  .description {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .card > .favoriteButton {
+    position: absolute;
+    z-index: 2;
+    top: 12px;
+    right: 12px;
+    margin: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card,
   .favoriteButton {
