@@ -1,6 +1,59 @@
 import { unzipSync } from "fflate";
-import { describe, expect, it } from "vitest";
-import { createZipArchive, formatDuration, formatSavings, isAbortError } from "./files";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  createZipArchive,
+  downloadUrl,
+  formatDuration,
+  formatSavings,
+  isAbortError,
+} from "./files";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function installDownloadDocument(click: () => void = vi.fn()) {
+  const anchor = {
+    download: "",
+    href: "",
+    rel: "",
+    click: vi.fn(click),
+    remove: vi.fn(),
+  };
+  const append = vi.fn();
+  vi.stubGlobal("document", {
+    body: { append },
+    createElement: vi.fn(() => anchor),
+  });
+  return { anchor, append };
+}
+
+describe("downloadUrl", () => {
+  it("activates one named download and removes its temporary anchor", () => {
+    const { anchor, append } = installDownloadDocument();
+
+    downloadUrl("blob:result", "result.pdf");
+
+    expect(anchor).toMatchObject({
+      href: "blob:result",
+      download: "result.pdf",
+      rel: "noopener",
+    });
+    expect(append).toHaveBeenCalledOnce();
+    expect(anchor.click).toHaveBeenCalledOnce();
+    expect(anchor.remove).toHaveBeenCalledOnce();
+  });
+
+  it("removes the anchor and rethrows when activation fails", () => {
+    const failure = new Error("download activation failed");
+    const { anchor } = installDownloadDocument(() => {
+      throw failure;
+    });
+
+    expect(() => downloadUrl("blob:result", "result.pdf")).toThrow(failure);
+    expect(anchor.remove).toHaveBeenCalledOnce();
+  });
+});
 
 describe("createZipArchive", () => {
   it("keeps every duplicate name and strips archive paths", async () => {

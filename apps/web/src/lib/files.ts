@@ -32,8 +32,11 @@ export function downloadUrl(url: string, filename: string): void {
   anchor.download = filename;
   anchor.rel = "noopener";
   document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+  }
 }
 
 function safeArchiveName(requested: string): string {
