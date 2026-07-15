@@ -1339,6 +1339,7 @@
 
   .panelTitle {
     height: 44px;
+    min-height: 44px;
   }
 
   .compressionPicker {
@@ -1354,6 +1355,28 @@
     box-shadow: 4px 4px 0 var(--yellow);
   }
 
+  .eyebrow,
+  .panelTitle span,
+  .pagePosition,
+  .pageCopy strong,
+  .pageCopy span,
+  .fileIndex,
+  .fileCopy strong,
+  .fileCopy span,
+  .fileTotal,
+  .settingCard p,
+  .resetPlanButton,
+  .optionGroup legend,
+  .optionGroup label strong,
+  .optionGroup label small,
+  .rangeField > label,
+  .optionGroup .rangeField small,
+  .controlField > label,
+  .segmentGroup legend,
+  .watermarkSettings .controlField > small,
+  .segmentGroup label,
+  .inspectionCard p,
+  .resultCaveats p,
   .status,
   .rasterNotice,
   .privacyNotice p,

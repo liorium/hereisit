@@ -1,5 +1,5 @@
 import { PDFDocument } from "@cantoo/pdf-lib";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
 
 const PDF_COMPRESSION_WARNING =
@@ -9,6 +9,28 @@ const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function expectFunctionalTextFloor(
+  samples: readonly { label: string; locator: Locator }[],
+): Promise<void> {
+  const readings: { label: string; fontSize: number }[] = [];
+  for (const sample of samples) {
+    await expect(sample.locator, sample.label).toBeVisible();
+    readings.push({
+      label: sample.label,
+      fontSize: await sample.locator.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).fontSize),
+      ),
+    });
+  }
+  const belowFloor = readings.filter(({ fontSize }) => fontSize < 12);
+  expect(
+    belowFloor,
+    `Computed functional font sizes: ${readings
+      .map(({ label, fontSize }) => `${label}=${fontSize}px`)
+      .join(", ")}`,
+  ).toEqual([]);
+}
 
 async function holdTerminalWorkerEvents(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(() => {
@@ -184,6 +206,24 @@ test("starts each representative work area inside a 320 by 568 viewport", async 
   }
 });
 
+test("keeps image compression preset text readable after selection", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/image/compress");
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "sample.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
+
+  const preset = page.getByRole("button", { name: /용량만 줄이기/ });
+  await expectFunctionalTextFloor([
+    { label: "compression preset name", locator: preset.locator("strong") },
+    { label: "compression preset description", locator: preset.locator("small") },
+    { label: "compression preset badge", locator: preset.locator("em") },
+  ]);
+});
+
 test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and touch-safe", async ({
   page,
 }) => {
@@ -226,6 +266,24 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   ]);
   expect(sourceBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
   expect(settingsBox?.y ?? 0).toBeLessThan(resultBox?.y ?? 0);
+
+  const sourceStatus = source.getByText("1페이지 · 페이지 수만 압축 준비에 사용해요.", {
+    exact: true,
+  });
+  await expectFunctionalTextFloor([
+    { label: "PDF compression panel state", locator: settings.getByText("LOCAL", { exact: true }) },
+    { label: "PDF compression file order", locator: source.getByText("01", { exact: true }) },
+    { label: "PDF compression file name", locator: source.locator("article strong") },
+    { label: "PDF compression inspection status", locator: sourceStatus },
+    {
+      label: "PDF compression control help",
+      locator: settings.getByText("글자 가독성과 용량의 균형을 맞춰요.", { exact: true }),
+    },
+    {
+      label: "PDF compression action status",
+      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+    },
+  ]);
 
   const run = page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" });
   const runBox = await run.boundingBox();
@@ -455,6 +513,41 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  const selectedPages = settings.getByRole("radio", { name: /지정 페이지/ }).locator("..");
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF to-image option legend",
+      locator: settings.getByText("변환할 페이지", { exact: true }),
+    },
+    { label: "PDF to-image option label", locator: selectedPages.locator("strong") },
+    { label: "PDF to-image option help", locator: selectedPages.locator("small") },
+    {
+      label: "PDF to-image range label",
+      locator: settings.getByText("페이지 범위", { exact: true }),
+    },
+    {
+      label: "PDF to-image range status",
+      locator: settings.getByText("1페이지를 선택했어요.", { exact: true }),
+    },
+    {
+      label: "PDF to-image format legend",
+      locator: settings.getByText("출력 형식", { exact: true }),
+    },
+    {
+      label: "PDF to-image format control",
+      locator: settings.getByRole("radio", { name: "JPG", exact: true }).locator(".."),
+    },
+    {
+      label: "PDF to-image result limitation",
+      locator: result.getByText("텍스트는 더 이상 검색하거나 선택할 수 없어요.", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF to-image action status",
+      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+    },
+  ]);
   const observation = await privacy.read();
   expect(observation.externalRequests).toEqual([]);
   expect(observation.writeRequests).toEqual([]);
@@ -528,6 +621,25 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
   expect(removeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(removeBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
+  const splitSettings = page.getByLabel("PDF 설정");
+  const extractOption = splitSettings.getByRole("radio", { name: /페이지 추출/ }).locator("..");
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF option legend",
+      locator: splitSettings.getByText("나눌 방식", { exact: true }),
+    },
+    { label: "PDF option label", locator: extractOption.locator("strong") },
+    { label: "PDF option help", locator: extractOption.locator("small") },
+    {
+      label: "PDF range control label",
+      locator: splitSettings.getByText("페이지 범위", { exact: true }),
+    },
+    {
+      label: "PDF range control help",
+      locator: range.locator("..").locator("small"),
+    },
+  ]);
+
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
@@ -591,6 +703,44 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
   expect(
     Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
   ).toBeLessThanOrEqual(2);
+
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF organizer reset action",
+      locator: page.getByRole("button", { name: "페이지 순서 초기화" }),
+    },
+    {
+      label: "PDF organizer help",
+      locator: page.getByText("왼쪽 목록을 위아래로 옮기고, 90도씩 돌리거나 결과에서 빼세요.", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer page order",
+      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("01", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer page label",
+      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("원본 1페이지", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer rotation state",
+      locator: page
+        .getByRole("region", { name: "PDF 페이지 순서" })
+        .getByText("회전 0°", {
+          exact: true,
+        })
+        .first(),
+    },
+  ]);
+  const orderPanelTitle = page.getByText("페이지 순서", { exact: true }).locator("..");
+  expect(await orderPanelTitle.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+    44,
+  );
 
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -680,6 +830,22 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
     Number.parseFloat(getComputedStyle(element).fontSize),
   );
   expect(fontSize).toBeGreaterThanOrEqual(16);
+
+  const resizePreset = page.getByRole("button", { name: /웹용 이미지/ });
+  await expectFunctionalTextFloor([
+    { label: "resize preset name", locator: resizePreset.locator("strong") },
+    { label: "resize preset description", locator: resizePreset.locator("small") },
+    { label: "resize preset badge", locator: resizePreset.locator("em") },
+    { label: "resize keep action", locator: page.getByRole("button", { name: "유지" }) },
+    {
+      label: "resize maximum action",
+      locator: page.getByRole("button", { name: "최대 크기" }),
+    },
+    {
+      label: "resize crop action",
+      locator: page.getByRole("button", { name: "정사각 자르기" }),
+    },
+  ]);
 
   const removeButton = page.getByRole("button", { name: "sample.png 제거" });
   const removeBox = await removeButton.boundingBox();
@@ -784,6 +950,51 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
   const save = page.getByRole("button", { name: "결과 저장·공유 ↓" });
   await save.scrollIntoViewIfNeeded();
   await expect(save).toBeInViewport();
+  const watermarkSettings = page.getByLabel("워터마크 설정");
+  await expectFunctionalTextFloor([
+    {
+      label: "watermark mode control",
+      locator: watermarkSettings.getByRole("radio", { name: "문구", exact: true }).locator(".."),
+    },
+    {
+      label: "watermark position control",
+      locator: watermarkSettings
+        .getByRole("radio", { name: "정가운데", exact: true })
+        .locator(".."),
+    },
+    {
+      label: "watermark text field label",
+      locator: watermarkSettings.getByText("워터마크 문구", { exact: true }),
+    },
+    {
+      label: "watermark color field label",
+      locator: watermarkSettings.getByText("문구 색상", { exact: true }),
+    },
+    {
+      label: "watermark range label",
+      locator: watermarkSettings.getByText("문구 크기", { exact: true }),
+    },
+    {
+      label: "watermark range value",
+      locator: watermarkSettings.getByText("12%", { exact: true }),
+    },
+    {
+      label: "watermark output control label",
+      locator: watermarkSettings.getByText("출력 형식", { exact: true }),
+    },
+    {
+      label: "watermark contract state",
+      locator: watermarkSettings.getByText("image.watermark@1", { exact: true }),
+    },
+    {
+      label: "watermark file status",
+      locator: files.locator("small").first(),
+    },
+    {
+      label: "watermark source limitation",
+      locator: page.getByText("원본 파일은 메인 화면에서 디코드하지 않아요.", { exact: true }),
+    },
+  ]);
   const observation = await privacy.read();
   expect(observation.externalRequests).toEqual([]);
   expect(observation.writeRequests).toEqual([]);
