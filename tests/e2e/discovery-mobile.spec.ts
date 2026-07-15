@@ -74,6 +74,87 @@ async function expectPaintedFocusInsideViewport(locator: Locator): Promise<void>
   expect(focusPaint.bottom).toBeLessThanOrEqual(focusPaint.viewportHeight);
 }
 
+async function positionRowPartiallyOutsideViewport(
+  row: Locator,
+  edge: "above" | "below",
+): Promise<void> {
+  const metrics = await row.evaluate((element, requestedEdge) => {
+    const scrollport = element as HTMLElement;
+    document.documentElement.style.scrollBehavior = "auto";
+
+    let bounds = scrollport.getBoundingClientRect();
+    const desiredTop =
+      requestedEdge === "above" ? -bounds.height / 2 : window.innerHeight - bounds.height / 2;
+    let documentTop = window.scrollY + bounds.top;
+    if (documentTop < desiredTop) {
+      const currentPadding = Number.parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+      document.body.style.paddingTop = `${currentPadding + Math.ceil(desiredTop - documentTop) + 32}px`;
+      bounds = scrollport.getBoundingClientRect();
+      documentTop = window.scrollY + bounds.top;
+    }
+
+    window.scrollTo({ behavior: "instant", top: Math.round(documentTop - desiredTop) });
+    bounds = scrollport.getBoundingClientRect();
+    return {
+      bottom: bounds.bottom,
+      top: bounds.top,
+      viewportHeight: window.innerHeight,
+    };
+  }, edge);
+
+  if (edge === "above") {
+    expect(metrics.top).toBeLessThan(0);
+    expect(metrics.bottom).toBeGreaterThan(0);
+  } else {
+    expect(metrics.top).toBeLessThan(metrics.viewportHeight);
+    expect(metrics.bottom).toBeGreaterThan(metrics.viewportHeight);
+  }
+}
+
+async function expectPaintedFocusInsideLocalScrollport(control: Locator): Promise<void> {
+  const focusPaint = await control.evaluate((element) => {
+    const scrollport = element.parentElement;
+    if (scrollport === null) return null;
+    const rect = element.getBoundingClientRect();
+    const scrollportRect = scrollport.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const outlineWidth = Number.parseFloat(style.outlineWidth);
+    const outlineOffset = Number.parseFloat(style.outlineOffset);
+    const outerExtent = Math.max(0, outlineWidth + outlineOffset);
+    return {
+      backgroundColor: style.backgroundColor,
+      bottom: rect.bottom + outerExtent,
+      focusVisible: element.matches(":focus-visible"),
+      left: rect.left - outerExtent,
+      outlineColor: style.outlineColor,
+      outlineStyle: style.outlineStyle,
+      outlineWidth,
+      right: rect.right + outerExtent,
+      scrollportBottom: scrollportRect.bottom,
+      scrollportLeft: scrollportRect.left,
+      scrollportRight: scrollportRect.right,
+      scrollportTop: scrollportRect.top,
+      top: rect.top - outerExtent,
+    };
+  });
+
+  expect(focusPaint).not.toBeNull();
+  expect(focusPaint?.focusVisible).toBe(true);
+  expect(focusPaint?.outlineStyle).not.toBe("none");
+  expect(focusPaint?.outlineWidth ?? 0).toBeGreaterThanOrEqual(2);
+  expect(focusPaint?.outlineColor).not.toBe("transparent");
+  expect(focusPaint?.outlineColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(focusPaint?.outlineColor).not.toBe(focusPaint?.backgroundColor);
+  expect(focusPaint?.left ?? -1).toBeGreaterThanOrEqual((focusPaint?.scrollportLeft ?? 0) - 0.5);
+  expect(focusPaint?.right ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    (focusPaint?.scrollportRight ?? 0) + 0.5,
+  );
+  expect(focusPaint?.top ?? -1).toBeGreaterThanOrEqual((focusPaint?.scrollportTop ?? 0) - 0.5);
+  expect(focusPaint?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+    (focusPaint?.scrollportBottom ?? 0) + 0.5,
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
@@ -252,6 +333,85 @@ test("keeps catalog domain tabs in one local row", async ({ page }) => {
   expect(
     await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
   ).toBe("tabpanel");
+  await expectNoDocumentOverflow(page);
+});
+
+for (const { edge, key, label, path, startAtEnd } of [
+  { edge: "above", key: "Home", label: "home", path: "/", startAtEnd: true },
+  { edge: "below", key: "End", label: "home", path: "/", startAtEnd: false },
+  { edge: "above", key: "Home", label: "catalog", path: "/tools", startAtEnd: true },
+  { edge: "below", key: "End", label: "catalog", path: "/tools", startAtEnd: false },
+] as const) {
+  test(`keeps ${label} document Y exact when the domain row is partially ${edge}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto(path);
+    const tablist = page.getByRole("tablist", { name: "도구 분야" });
+    const tabs = tablist.getByRole("tab");
+    await positionRowPartiallyOutsideViewport(tablist, edge);
+    const start = startAtEnd ? tabs.last() : tabs.first();
+    const destination = startAtEnd ? tabs.first() : tabs.last();
+    await start.evaluate((element) => element.focus({ preventScroll: true }));
+    const beforeY = await page.evaluate(() => window.scrollY);
+
+    await page.keyboard.press(key);
+
+    await expect(destination).toBeFocused();
+    await expect(destination).toHaveAttribute("aria-selected", "true");
+    expect(await page.evaluate(() => window.scrollY)).toBe(beforeY);
+    await expectNoDocumentOverflow(page);
+  });
+}
+
+for (const { label, path } of [
+  { label: "home", path: "/" },
+  { label: "catalog", path: "/tools" },
+] as const) {
+  test(`contains first and last ${label} domain focus paint in its local row`, async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto(path);
+    const tablist = page.getByRole("tablist", { name: "도구 분야" });
+    const tabs = tablist.getByRole("tab");
+    await tablist.evaluate((element) =>
+      element.scrollIntoView({ behavior: "instant", block: "center" }),
+    );
+    await tabs.last().evaluate((element) => element.focus({ preventScroll: true }));
+
+    await page.keyboard.press("Home");
+    await expect(tabs.first()).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(tabs.first());
+
+    await page.keyboard.press("End");
+    await expect(tabs.last()).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(tabs.last());
+    await expectNoDocumentOverflow(page);
+  });
+}
+
+test("contains first and last catalog purpose focus paint in its local row", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/tools");
+  const purposes = page.getByRole("group", { name: "작업 목적" });
+  const buttons = purposes.getByRole("button");
+  await purposes.evaluate((element) =>
+    element.scrollIntoView({ behavior: "instant", block: "center" }),
+  );
+
+  for (const { control, left } of [
+    { control: buttons.first(), left: 0 },
+    { control: buttons.last(), left: -1 },
+  ]) {
+    await control.evaluate((element, requestedLeft) => {
+      const scrollport = element.parentElement;
+      if (scrollport === null) return;
+      scrollport.scrollLeft = requestedLeft < 0 ? scrollport.scrollWidth : requestedLeft;
+    }, left);
+    await page.keyboard.press("Shift");
+    await control.evaluate((element) => element.focus({ preventScroll: true }));
+    await expect(control).toBeFocused();
+    await expectPaintedFocusInsideLocalScrollport(control);
+  }
   await expectNoDocumentOverflow(page);
 });
 

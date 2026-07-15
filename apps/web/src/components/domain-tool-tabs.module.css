@@ -222,6 +222,15 @@
     scroll-snap-align: start;
   }
 
+  .tablist .tab:focus-visible {
+    outline: 3px solid var(--blue-dark);
+    outline-offset: -3px;
+  }
+
+  .tablist .tab[aria-selected="true"]:focus-visible {
+    outline-color: var(--yellow);
+  }
+
   .panel {
     padding: 18px 14px;
     border-radius: 0 0 14px 14px;

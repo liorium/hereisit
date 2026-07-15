@@ -431,6 +431,17 @@
     flex: 0 0 auto;
   }
 
+  .tablist .tab:focus-visible,
+  .purposeControls button:focus-visible {
+    outline: 3px solid var(--blue-dark);
+    outline-offset: -3px;
+  }
+
+  .tablist .tab[aria-selected="true"]:focus-visible,
+  .purposeControls button[aria-pressed="true"]:focus-visible {
+    outline-color: var(--yellow);
+  }
+
   .plannedToggle {
     margin-top: 8px;
   }
