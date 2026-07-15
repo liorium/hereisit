@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
+  expectCardTextClearOfFavorite,
   expectKoreanTextLayout,
   expectNoDocumentOverflow,
   expectUnbrokenPhrase,
@@ -63,5 +64,37 @@ test("keeps catalog and planned-card Korean copy readable in mobile browser engi
     }
     await expect(page.getByTestId("planned-tool-grid").locator("a, button")).toHaveCount(0);
     await expectNoDocumentOverflow(page);
+  }
+});
+
+test("keeps shared-card text clear of favorite controls in mobile browser engines", async ({
+  page,
+}) => {
+  await seedToolPreferences(page, ["image.compress"], ["pdf.watermark"]);
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const path of ["/tools", "/my-tools", "/image/compress"] as const) {
+      await page.goto(path);
+      const card =
+        path === "/tools"
+          ? page.getByTestId("available-tool-grid").locator("article").first()
+          : path === "/my-tools"
+            ? page.getByRole("region", { name: "즐겨찾는 도구" }).locator("article").first()
+            : page.getByRole("region", { name: "다음 작업" }).locator("article").first();
+      await expect(card).toBeVisible();
+      await expectKoreanTextLayout(card.locator(":scope > a > span").nth(0), {
+        forbiddenLastLines,
+        textWrap: "balance",
+      });
+      await expectKoreanTextLayout(card.locator(":scope > a > span").nth(1), {
+        forbiddenLastLines,
+        textWrap: "pretty",
+      });
+      await expectCardTextClearOfFavorite(card, {
+        absoluteFavorite: true,
+        clamped: true,
+      });
+      await expectNoDocumentOverflow(page);
+    }
   }
 });

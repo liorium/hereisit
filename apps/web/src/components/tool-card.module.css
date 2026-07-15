@@ -28,7 +28,12 @@
 }
 
 .name,
-.description,
+.description {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: keep-all;
+}
+
 .execution {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -41,12 +46,14 @@
   font-weight: 850;
   line-height: 1.25;
   letter-spacing: -0.035em;
+  text-wrap: balance;
 }
 
 .description {
   color: var(--muted);
   font-size: 14px;
   line-height: 1.65;
+  text-wrap: pretty;
 }
 
 .execution {
@@ -96,9 +103,12 @@
   border: 0;
 }
 
+.link:focus-visible {
+  position: relative;
+}
+
 .link:focus-visible,
 .favoriteButton:focus-visible {
-  position: relative;
   z-index: 1;
   outline: 3px solid color-mix(in srgb, var(--blue) 58%, transparent);
   outline-offset: -3px;
@@ -117,6 +127,24 @@
   }
 }
 
+@media (max-width: 800px) {
+  .card {
+    display: block;
+  }
+
+  .link {
+    padding-right: 68px;
+  }
+
+  .card > .favoriteButton {
+    position: absolute;
+    z-index: 2;
+    top: 12px;
+    right: 12px;
+    margin: 0;
+  }
+}
+
 @media (max-width: 420px) {
   .link {
     padding: 20px 4px 20px 20px;
@@ -128,10 +156,6 @@
 }
 
 @media (max-width: 600px) {
-  .card {
-    display: block;
-  }
-
   .link {
     min-height: 44px;
     gap: 6px;
@@ -154,14 +178,6 @@
   .description {
     font-size: 14px;
     line-height: 1.5;
-  }
-
-  .card > .favoriteButton {
-    position: absolute;
-    z-index: 2;
-    top: 12px;
-    right: 12px;
-    margin: 0;
   }
 }
 

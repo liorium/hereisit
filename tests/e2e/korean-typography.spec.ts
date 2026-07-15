@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
+  expectCardTextClearOfFavorite,
   expectKoreanTextLayout,
   expectNoDocumentOverflow,
   expectUnbrokenPhrase,
@@ -67,5 +68,79 @@ test("keeps catalog and planned-card Korean copy readable across responsive widt
     await expect(page.getByRole("checkbox", { name: "준비 중인 도구 포함" })).toBeChecked();
     await expect(page.getByTestId("planned-tool-grid").locator("a, button")).toHaveCount(0);
     await expectNoDocumentOverflow(page);
+  }
+});
+
+test("preserves shared-card text space and the 600/800 pixel boundaries", async ({ page }) => {
+  await seedToolPreferences(page);
+  await page.goto("/tools");
+  const card = page
+    .getByTestId("available-tool-grid")
+    .locator("article")
+    .filter({ hasText: "이미지 용량 줄이기" });
+  const link = card.locator(":scope > a");
+  const favorite = card.locator(":scope > button");
+
+  for (const width of [600, 601, 768, 800, 801, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expectKoreanTextLayout(link.locator("span").nth(0), {
+      forbiddenLastLines,
+      textWrap: "balance",
+    });
+    await expectKoreanTextLayout(link.locator("span").nth(1), {
+      forbiddenLastLines,
+      textWrap: "pretty",
+    });
+    await expectCardTextClearOfFavorite(card, {
+      absoluteFavorite: width <= 800,
+      clamped: width <= 600,
+    });
+    await link.focus();
+    await page.keyboard.press("Tab");
+    await expect(favorite).toBeFocused();
+    await expect(favorite).toHaveAccessibleName("이미지 용량 줄이기 즐겨찾기 추가");
+    await expect(favorite).toHaveAttribute("aria-pressed", "false");
+    await expectNoDocumentOverflow(page);
+  }
+});
+
+test("keeps every shared-card surface readable without changing behavior", async ({ page }) => {
+  await seedToolPreferences(page, ["image.compress"], ["pdf.watermark"]);
+  const surfaces = [
+    { path: "/", card: () => page.getByTestId("home-tool-grid").locator("article").first() },
+    {
+      path: "/tools",
+      card: () => page.getByTestId("available-tool-grid").locator("article").first(),
+    },
+    {
+      path: "/my-tools",
+      card: () => page.getByRole("region", { name: "즐겨찾는 도구" }).locator("article").first(),
+    },
+    {
+      path: "/image/compress",
+      card: () => page.getByRole("region", { name: "다음 작업" }).locator("article").first(),
+    },
+  ] as const;
+
+  for (const width of [320, 390, 800, 801, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const surface of surfaces) {
+      await page.goto(surface.path);
+      const card = surface.card();
+      await expect(card).toBeVisible();
+      await expectKoreanTextLayout(card.locator(":scope > a > span").nth(0), {
+        forbiddenLastLines,
+        textWrap: "balance",
+      });
+      await expectKoreanTextLayout(card.locator(":scope > a > span").nth(1), {
+        forbiddenLastLines,
+        textWrap: "pretty",
+      });
+      await expectCardTextClearOfFavorite(card, {
+        absoluteFavorite: width <= 800,
+        clamped: width <= 600,
+      });
+      await expectNoDocumentOverflow(page);
+    }
   }
 });
