@@ -361,3 +361,19 @@
     background: color-mix(in srgb, var(--line) 38%, var(--panel));
   }
 }
+
+@media (max-width: 600px) {
+  .tablist {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+  }
+
+  .tablist .tab {
+    flex: 0 0 112px;
+    min-height: 48px;
+    border-radius: 10px 10px 0 0;
+    scroll-snap-align: start;
+  }
+}

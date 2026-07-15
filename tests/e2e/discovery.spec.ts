@@ -262,7 +262,7 @@ test("keeps planned catalog results in a separate inert region", async ({ page }
   await expect(page.getByRole("region", { name: "준비 중인 도구" })).toHaveCount(0);
 });
 
-test("wraps catalog domain and purpose controls without horizontal overflow", async ({ page }) => {
+test("keeps narrow catalog domain tabs local and wraps purpose controls", async ({ page }) => {
   await page.goto("/tools");
   const tablist = page.getByRole("tablist", { name: "도구 분야" });
 
@@ -280,7 +280,17 @@ test("wraps catalog domain and purpose controls without horizontal overflow", as
     })),
   ).toMatchObject({ clientWidth: 900, scrollWidth: 900 });
   await page.setViewportSize({ width: 340, height: 900 });
-  expect(await columnCount()).toBe(2);
+  const narrowTabMetrics = await tablist.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    rows: new Set(
+      Array.from(element.children, (child) =>
+        Math.round((child as HTMLElement).getBoundingClientRect().top),
+      ),
+    ).size,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(narrowTabMetrics.rows).toBe(1);
+  expect(narrowTabMetrics.scrollWidth).toBeGreaterThan(narrowTabMetrics.clientWidth);
   expect(
     await page
       .getByRole("group", { name: "작업 목적" })

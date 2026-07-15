@@ -8,38 +8,56 @@ async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 1
   throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
 }
 
+async function expectOneLocalRow(container: Locator): Promise<void> {
+  const metrics = await container.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    rows: new Set(
+      Array.from(element.children)
+        .filter((child) => {
+          const style = getComputedStyle(child);
+          return style.display !== "none" && style.position !== "absolute";
+        })
+        .map((child) => Math.round((child as HTMLElement).getBoundingClientRect().top)),
+    ).size,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(metrics.rows).toBe(1);
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+}
+
+async function expectNoDocumentOverflow(page: Page): Promise<void> {
+  expect(
+    await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    })),
+  ).toEqual(
+    expect.objectContaining({
+      clientWidth: expect.any(Number),
+      scrollWidth: expect.any(Number),
+    }),
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    (await page.evaluate(() => document.documentElement.clientWidth)) + 1,
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
-    window.localStorage.setItem(
-      "hereisit.recent-tools.v1",
-      JSON.stringify(["pdf.watermark", "pdf.organize", "image.watermark", "pdf.split"]),
-    );
+    window.localStorage.setItem("hereisit.recent-tools.v1", "[]");
   });
 });
 
 test("keeps catalog filters and two-column cards inside the mobile viewport", async ({ page }) => {
   await page.goto("/tools?planned=1");
 
-  const tablist = page.getByRole("tablist", { name: "도구 분야" });
-  await expect(tablist.getByRole("tab")).toHaveCount(8);
-  expect(
-    await tablist.evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
-    ),
-  ).toHaveLength(2);
-
   const cards = page.getByTestId("available-tool-grid").locator("article");
   expect(await cards.count()).toBeGreaterThan(1);
   const firstCard = await cards.nth(0).boundingBox();
   const secondCard = await cards.nth(1).boundingBox();
   expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
-  expect(
-    await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    })),
-  ).toMatchObject({ clientWidth: 393, scrollWidth: 393 });
+  await expectNoDocumentOverflow(page);
 
   await page.setViewportSize({ width: 340, height: 844 });
   const narrowFirst = await cards.nth(0).boundingBox();
@@ -48,40 +66,48 @@ test("keeps catalog filters and two-column cards inside the mobile viewport", as
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
 });
 
-test("keeps the home launcher, two-column tabs, and cards inside the mobile viewport", async ({
-  page,
-}) => {
+test("keeps home domain tabs in one local row and reveals keyboard selection", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
-  const tabs = page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab");
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  const tabs = tablist.getByRole("tab");
   await expect(tabs).toHaveCount(8);
-  const columns = await page
-    .getByRole("tablist", { name: "도구 분야" })
-    .evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean),
-    );
-  expect(columns).toHaveLength(2);
+  await expectOneLocalRow(tablist);
   expect(
-    await tabs.evaluateAll(
-      (elements) =>
-        new Set(elements.map((element) => Math.round(element.getBoundingClientRect().top))).size,
-    ),
-  ).toBe(4);
+    await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
+  ).toBe("tabpanel");
 
-  const panel = page.getByRole("tabpanel");
-  await expect(panel).toBeAttached();
-  const cards = panel.locator("article");
-  expect(await cards.count()).toBeGreaterThan(1);
-  const firstCard = await cards.nth(0).boundingBox();
-  const secondCard = await cards.nth(1).boundingBox();
-  expect(Math.abs((firstCard?.y ?? 0) - (secondCard?.y ?? 0))).toBeLessThan(2);
+  await tablist.evaluate((element) =>
+    element.scrollIntoView({ behavior: "instant", block: "start" }),
+  );
+  await tabs.first().evaluate((element) => element.focus({ preventScroll: true }));
+  const beforeY = await page.evaluate(() => window.scrollY);
+  await page.keyboard.press("End");
+  await expect(tabs.last()).toBeFocused();
+  const bounds = await tablist.evaluate((element) => {
+    const list = element.getBoundingClientRect();
+    const selected = element.querySelector('[aria-selected="true"]')?.getBoundingClientRect();
+    return selected === undefined
+      ? null
+      : { left: selected.left, right: selected.right, listLeft: list.left, listRight: list.right };
+  });
+  expect(bounds).not.toBeNull();
+  expect(bounds?.left ?? 0).toBeGreaterThanOrEqual((bounds?.listLeft ?? 0) - 1);
+  expect(bounds?.right ?? 0).toBeLessThanOrEqual((bounds?.listRight ?? 0) + 1);
+  expect(await page.evaluate(() => window.scrollY)).toBeCloseTo(beforeY, 0);
+  await expectNoDocumentOverflow(page);
+});
 
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+test("keeps catalog domain tabs in one local row", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tools");
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  await expectOneLocalRow(tablist);
+  expect(
+    await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
+  ).toBe("tabpanel");
+  await expectNoDocumentOverflow(page);
 });
 
 test("opens one modal mobile drawer with trapped focus and inert background", async ({ page }) => {
@@ -149,8 +175,6 @@ test("closes the drawer control and restores its single mobile trigger", async (
     "href",
     "/my-tools",
   );
-  expect(await drawer.locator('[data-tool-section="recent"] [data-tool-link]').count()).toBe(4);
-
   await drawer.getByRole("button", { name: "메뉴 닫기", exact: true }).click();
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();

@@ -21,6 +21,7 @@ import {
   resolveCatalogPage,
   transitionCatalogPagination,
 } from "../lib/catalog-pagination";
+import { focusAndRevealTab } from "../lib/focus-and-reveal-tab";
 import { CatalogSearch } from "./catalog-search";
 import { ToolCard } from "./tool-card";
 import styles from "./tool-catalog-browser.module.css";
@@ -158,7 +159,7 @@ export function ToolCatalogBrowser(): ReactNode {
     if (definition === undefined) return;
     event.preventDefault();
     selectDomain(definition.id);
-    tabRefs.current[nextIndex]?.focus();
+    focusAndRevealTab(tabRefs.current[nextIndex] ?? null);
   }
 
   return (

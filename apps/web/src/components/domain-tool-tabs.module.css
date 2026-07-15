@@ -191,3 +191,39 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+@media (max-width: 600px) {
+  .section {
+    width: calc(100% - 24px);
+    padding: 28px 0 72px;
+  }
+
+  .heading {
+    margin-bottom: 20px;
+  }
+
+  .heading h2 {
+    font-size: 32px;
+    line-height: 1.05;
+  }
+
+  .tablist {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline proximity;
+  }
+
+  .tablist .tab {
+    flex: 0 0 112px;
+    min-height: 48px;
+    border: 1px solid var(--line);
+    border-radius: 10px 10px 0 0;
+    scroll-snap-align: start;
+  }
+
+  .panel {
+    padding: 18px 14px;
+    border-radius: 0 0 14px 14px;
+  }
+}
