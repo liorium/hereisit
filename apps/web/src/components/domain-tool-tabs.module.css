@@ -14,6 +14,9 @@
   font-size: clamp(36px, 5vw, 64px);
   line-height: 1;
   letter-spacing: -0.06em;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: keep-all;
 }
 
 .tablist {
@@ -73,12 +76,18 @@
   margin: 0;
   font-size: 28px;
   letter-spacing: -0.04em;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: keep-all;
 }
 
 .panelHeading p {
   margin: 8px 0 0;
   color: var(--muted);
   line-height: 1.6;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  word-break: keep-all;
 }
 
 .panelHeading > span {
