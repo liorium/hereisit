@@ -73,21 +73,31 @@ test("shows the home file selector in the initial 320 by 568 viewport", async ({
   await expectNoDocumentOverflow(page);
 });
 
-test("keeps catalog filters and compact cards inside the mobile viewport", async ({ page }) => {
-  await page.goto("/tools?planned=1");
+test("shows a one-row catalog filter surface and the first result at 390 by 844", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tools");
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
 
-  const cards = page.getByTestId("available-tool-grid").locator("article");
-  expect(await cards.count()).toBeGreaterThan(1);
-  const firstCard = await cards.nth(0).boundingBox();
-  const secondCard = await cards.nth(1).boundingBox();
-  expect((secondCard?.y ?? 0) - (firstCard?.y ?? 0)).toBeGreaterThan(20);
+  const purposes = page.getByRole("group", { name: "작업 목적" });
+  await expectOneLocalRow(purposes);
+  const firstLink = page.getByTestId("available-tool-grid").locator("article > a").first();
+  await expectFullyInsideViewport(firstLink, 844);
+  expect(
+    await page
+      .getByRole("combobox", { name: "도구 검색" })
+      .evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
+
+  await purposes.getByRole("button", { name: "변환", exact: true }).click();
+  await expect(page).toHaveURL(/purpose=convert/);
+  await expect(purposes.getByRole("button", { name: "변환", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await expectNoDocumentOverflow(page);
-
-  await page.setViewportSize({ width: 340, height: 844 });
-  const narrowFirst = await cards.nth(0).boundingBox();
-  const narrowSecond = await cards.nth(1).boundingBox();
-  expect((narrowSecond?.y ?? 0) - (narrowFirst?.y ?? 0)).toBeGreaterThan(20);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
 });
 
 test("uses compact one-column cards through 600 pixels and restores tablet columns at 601", async ({

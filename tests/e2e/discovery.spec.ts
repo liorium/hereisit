@@ -268,48 +268,19 @@ test("keeps planned catalog results in a separate inert region", async ({ page }
   await expect(page.getByRole("region", { name: "준비 중인 도구" })).toHaveCount(0);
 });
 
-test("keeps narrow catalog domain tabs local and wraps purpose controls", async ({ page }) => {
+test("keeps desktop catalog controls bounded at desktop and tablet widths", async ({ page }) => {
   await page.goto("/tools");
   const tablist = page.getByRole("tablist", { name: "도구 분야" });
-
   const columnCount = () =>
     tablist.evaluate(
       (element) => getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
     );
+
+  await page.setViewportSize({ width: 1280, height: 900 });
   expect(await columnCount()).toBe(8);
   await page.setViewportSize({ width: 900, height: 900 });
   expect(await columnCount()).toBe(4);
-  expect(
-    await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    })),
-  ).toMatchObject({ clientWidth: 900, scrollWidth: 900 });
-  await page.setViewportSize({ width: 340, height: 900 });
-  const narrowTabMetrics = await tablist.evaluate((element) => ({
-    clientWidth: element.clientWidth,
-    rows: new Set(
-      Array.from(element.children, (child) =>
-        Math.round((child as HTMLElement).getBoundingClientRect().top),
-      ),
-    ).size,
-    scrollWidth: element.scrollWidth,
-  }));
-  expect(narrowTabMetrics.rows).toBe(1);
-  expect(narrowTabMetrics.scrollWidth).toBeGreaterThan(narrowTabMetrics.clientWidth);
-  expect(
-    await page
-      .getByRole("group", { name: "작업 목적" })
-      .evaluate(
-        (element) =>
-          new Set(
-            Array.from(element.children, (child) =>
-              Math.round((child as HTMLElement).getBoundingClientRect().top),
-            ),
-          ).size,
-      ),
-  ).toBeGreaterThan(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(340);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
 });
 
 test("shows newest-first personal tools and updates favorites with ID-only storage", async ({
