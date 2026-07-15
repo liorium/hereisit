@@ -34,11 +34,12 @@ export async function expectKoreanTextLayout(
   options: KoreanLayoutOptions,
 ): Promise<void> {
   await expect(locator).toHaveCount(1);
+  await expect(locator).toBeVisible();
   const report = await locator.evaluate((element, expectedWrap) => {
     const root = element as HTMLElement;
     const style = getComputedStyle(root);
     const rootRect = root.getBoundingClientRect();
-    const runs: Array<{ end: number; node: Text; start: number }> = [];
+    const runs: Array<{ end: number; node: Text; parent: HTMLElement; start: number }> = [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let fullText = "";
     let current = walker.nextNode();
@@ -50,21 +51,26 @@ export async function expectKoreanTextLayout(
         if (parentStyle.display !== "none" && parentStyle.visibility !== "hidden") {
           const start = fullText.length;
           fullText += node.data;
-          runs.push({ end: fullText.length, node, start });
+          runs.push({ end: fullText.length, node, parent, start });
         }
       }
       current = walker.nextNode();
     }
 
-    function boundaryAt(offset: number): { node: Text; offset: number } | null {
-      const run = runs.find(({ end, start }) => offset >= start && offset <= end);
+    function boundaryAt(
+      offset: number,
+      edge: "end" | "start",
+    ): { node: Text; offset: number } | null {
+      const run = runs.find(({ end, start }) =>
+        edge === "start" ? offset >= start && offset < end : offset > start && offset <= end,
+      );
       if (run === undefined) return null;
       return { node: run.node, offset: Math.min(offset - run.start, run.node.data.length) };
     }
 
     function rangeFor(start: number, end: number): Range | null {
-      const first = boundaryAt(start);
-      const last = boundaryAt(end);
+      const first = boundaryAt(start, "start");
+      const last = boundaryAt(end, "end");
       if (first === null || last === null) return null;
       const range = document.createRange();
       range.setStart(first.node, first.offset);
@@ -92,14 +98,69 @@ export async function expectKoreanTextLayout(
       return tops;
     }
 
-    function intrinsicWidth(text: string): number {
+    function piecesFor(start: number, end: number): Array<{ parent: HTMLElement; text: string }> {
+      return runs.flatMap((run) => {
+        const pieceStart = Math.max(start, run.start);
+        const pieceEnd = Math.min(end, run.end);
+        if (pieceStart >= pieceEnd) return [];
+        return [
+          {
+            parent: run.parent,
+            text: run.node.data.slice(pieceStart - run.start, pieceEnd - run.start),
+          },
+        ];
+      });
+    }
+
+    function segmentContainer(parent: HTMLElement): HTMLElement {
+      let container = parent;
+      while (container !== root) {
+        const display = getComputedStyle(container).display;
+        if (display !== "inline" && display !== "contents") return container;
+        const ancestor = container.parentElement;
+        if (ancestor === null) break;
+        container = ancestor;
+      }
+      return root;
+    }
+
+    function contentBoxWidth(element: HTMLElement): number {
+      const elementStyle = getComputedStyle(element);
+      const padding =
+        Number.parseFloat(elementStyle.paddingLeft) + Number.parseFloat(elementStyle.paddingRight);
+      return Math.max(0, element.clientWidth - padding);
+    }
+
+    function availableContentWidth(
+      pieces: readonly { parent: HTMLElement; text: string }[],
+    ): number {
+      if (pieces.length === 0) return 0;
+      return Math.min(...pieces.map(({ parent }) => contentBoxWidth(segmentContainer(parent))));
+    }
+
+    function intrinsicWidth(pieces: readonly { parent: HTMLElement; text: string }[]): number {
       const probe = document.createElement("span");
-      probe.textContent = text;
       probe.style.position = "fixed";
       probe.style.visibility = "hidden";
       probe.style.whiteSpace = "nowrap";
-      probe.style.font = style.font;
-      probe.style.letterSpacing = style.letterSpacing;
+      for (const { parent, text } of pieces) {
+        const piece = document.createElement("span");
+        const parentStyle = getComputedStyle(parent);
+        piece.textContent = text;
+        for (const property of [
+          "font",
+          "font-feature-settings",
+          "font-kerning",
+          "font-optical-sizing",
+          "font-variation-settings",
+          "letter-spacing",
+          "text-transform",
+          "word-spacing",
+        ]) {
+          piece.style.setProperty(property, parentStyle.getPropertyValue(property));
+        }
+        probe.append(piece);
+      }
       document.body.append(probe);
       const width = probe.getBoundingClientRect().width;
       probe.remove();
@@ -113,18 +174,21 @@ export async function expectKoreanTextLayout(
       const range = rangeFor(part.index, part.index + part.segment.length);
       if (range === null) continue;
       const lines = lineTops(visibleRects(range));
-      if (lines.length > 1 && intrinsicWidth(part.segment) <= root.clientWidth + 1) {
+      const pieces = piecesFor(part.index, part.index + part.segment.length);
+      if (lines.length > 1 && intrinsicWidth(pieces) <= availableContentWidth(pieces) + 1) {
         splitWords.push(part.segment);
       }
     }
 
     const visualLines: Array<{ text: string; top: number }> = [];
+    let visibleGraphemeCount = 0;
     const graphemes = new Intl.Segmenter("ko", { granularity: "grapheme" }).segment(fullText);
     for (const part of graphemes) {
       const range = rangeFor(part.index, part.index + part.segment.length);
       if (range === null) continue;
       const rect = visibleRects(range)[0];
       if (rect === undefined) continue;
+      visibleGraphemeCount += 1;
       let line = visualLines.find(({ top }) => Math.abs(top - rect.top) <= 1);
       if (line === undefined) {
         line = { text: "", top: rect.top };
@@ -146,6 +210,7 @@ export async function expectKoreanTextLayout(
         style.getPropertyValue("text-wrap"),
         style.getPropertyValue("text-wrap-style"),
       ].join(" "),
+      visibleGraphemeCount,
       wordBreak: style.wordBreak,
     };
   }, options.textWrap);
@@ -153,6 +218,7 @@ export async function expectKoreanTextLayout(
   expect(report.wordBreak).toBe("keep-all");
   expect(report.overflowWrap).toBe("break-word");
   if (report.supportsTextWrap) expect(report.textWrap).toContain(options.textWrap);
+  expect(report.visibleGraphemeCount).toBeGreaterThan(0);
   expect(report.splitWords).toEqual([]);
   expect(options.forbiddenLastLines ?? []).not.toContain(report.lastLine);
   expect(report.scrollWidth).toBeLessThanOrEqual(report.clientWidth + 1);
@@ -204,14 +270,29 @@ export async function expectCardTextClearOfFavorite(
     const textRects = Array.from(link.querySelectorAll("span:nth-child(-n+2)")).flatMap((span) => {
       const range = document.createRange();
       range.selectNodeContents(span);
-      return Array.from(range.getClientRects());
+      const spanRect = span.getBoundingClientRect();
+      return Array.from(range.getClientRects()).flatMap((rect) => {
+        const visibleRect = {
+          bottom: Math.min(rect.bottom, spanRect.bottom),
+          left: Math.max(rect.left, spanRect.left),
+          right: Math.min(rect.right, spanRect.right),
+          top: Math.max(rect.top, spanRect.top),
+        };
+        if (
+          visibleRect.right <= visibleRect.left + 1 ||
+          visibleRect.bottom <= visibleRect.top + 1
+        ) {
+          return [];
+        }
+        return [visibleRect];
+      });
     });
     const intersects = textRects.some(
       (rect) =>
-        rect.right > buttonRect.left + 0.5 &&
-        rect.left < buttonRect.right - 0.5 &&
-        rect.bottom > buttonRect.top + 0.5 &&
-        rect.top < buttonRect.bottom - 0.5,
+        rect.right > buttonRect.left + 1 &&
+        rect.left < buttonRect.right - 1 &&
+        rect.bottom > buttonRect.top + 1 &&
+        rect.top < buttonRect.bottom - 1,
     );
     const center = document.elementFromPoint(
       buttonRect.left + buttonRect.width / 2,
