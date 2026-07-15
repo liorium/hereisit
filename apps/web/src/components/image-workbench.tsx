@@ -255,10 +255,6 @@ export function ImageWorkbench({
   }, [revokeOwnedUrl]);
 
   useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  useEffect(() => {
     setHydrated(true);
     setRuntimeSupported(supportsBrowserImageRuntime());
   }, []);

@@ -45,6 +45,114 @@ async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
+async function installInterleavedCompletionWorker(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type RunRequest = {
+      type: "run";
+      jobId: string;
+      input: { bytes: ArrayBuffer };
+    };
+
+    let firstRun: { request: RunRequest; worker: ControlledImageWorker } | undefined;
+    let runCount = 0;
+
+    const complete = (worker: ControlledImageWorker, request: RunRequest, ordinal: number) => {
+      const bytes = request.input.bytes.slice(0);
+      worker.emit({
+        protocol: 1,
+        type: "complete",
+        jobId: request.jobId,
+        result: {
+          bytes,
+          suggestedName: `result-${ordinal}.png`,
+          mime: "image/png",
+          width: 1,
+          height: 1,
+          byteLength: bytes.byteLength,
+          warnings: [],
+          timing: {
+            inspectMs: 0,
+            decodeMs: 0,
+            transformMs: 0,
+            encodeMs: 0,
+            totalMs: 0,
+            encodeAttempts: 1,
+          },
+        },
+      });
+    };
+
+    class ControlledImageWorker {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      postMessage(message: unknown): void {
+        const request = message as Partial<RunRequest>;
+        if (
+          request.type !== "run" ||
+          typeof request.jobId !== "string" ||
+          !(request.input?.bytes instanceof ArrayBuffer)
+        ) {
+          throw new TypeError("Unexpected image Worker request.");
+        }
+
+        const run = request as RunRequest;
+        runCount += 1;
+        if (runCount === 1) {
+          firstRun = { request: run, worker: this };
+          queueMicrotask(() => {
+            this.emit({
+              protocol: 1,
+              type: "progress",
+              jobId: run.jobId,
+              sequence: 0,
+              phase: "finalizing",
+              fraction: 0.98,
+            });
+          });
+          return;
+        }
+
+        setTimeout(() => complete(this, run, runCount), 0);
+      }
+
+      emit(data: unknown): void {
+        this.onmessage?.({ data } as MessageEvent<unknown>);
+      }
+
+      terminate(): void {}
+    }
+
+    const observer = new MutationObserver(() => {
+      const pending = firstRun;
+      if (
+        pending === undefined ||
+        document.querySelector('[role="progressbar"][aria-valuenow="98"]') === null
+      ) {
+        return;
+      }
+      firstRun = undefined;
+      complete(pending.worker, pending.request, 1);
+    });
+    observer.observe(document, {
+      attributes: true,
+      attributeFilter: ["aria-valuenow"],
+      childList: true,
+      subtree: true,
+    });
+
+    Object.defineProperty(navigator, "deviceMemory", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "Worker", {
+      configurable: true,
+      value: ControlledImageWorker,
+    });
+  });
+}
+
 test("processes and downloads an image without external uploads", async ({ page }) => {
   const response = await page.goto("/image/convert");
   expect(response?.headers()["content-security-policy"]).toContain("connect-src 'self'");
@@ -330,6 +438,29 @@ test("downloads a selected image and its batch ZIP without Web Share", async ({ 
   expect(downloadCount).toBe(2);
   await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
   await expectWebShareUnused(page);
+});
+
+test("preserves every completed result across an interleaved finalizing render", async ({
+  page,
+}) => {
+  await installInterleavedCompletionWorker(page);
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
+
+  await expect(
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByLabel("선택한 이미지").locator("small").filter({ hasText: "→" }),
+  ).toHaveCount(2);
+  await expect(page.getByRole("progressbar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "이 이미지 다운로드 ↓" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" })).toBeVisible();
 });
 
 test("accepts a real HEIC file without uploading it", async ({ page, browserName }) => {
