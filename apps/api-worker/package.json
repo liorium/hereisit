@@ -1,0 +1,28 @@
+{
+  "name": "@hereisit/api-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev -c wrangler.local.jsonc --persist-to .wrangler/state",
+    "build": "wrangler deploy -c wrangler.local.jsonc --dry-run --outdir dist",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "vitest run -c vitest.config.ts",
+    "types": "wrangler types -c wrangler.local.jsonc src/worker-configuration.d.ts --strict-vars=false",
+    "types:check": "wrangler types -c wrangler.local.jsonc src/worker-configuration.d.ts --strict-vars=false --check"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "@hereisit/server-contracts": "workspace:*",
+    "@hereisit/server-job": "workspace:*",
+    "@hereisit/tool-contracts": "workspace:*",
+    "@hereisit/tool-registry": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10",
+    "wrangler": "4.110.0"
+  }
+}

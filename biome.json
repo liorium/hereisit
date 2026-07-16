@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "**",
+      "!!apps/api-worker/src/worker-configuration.d.ts",
       "!!apps/web/public/pdfjs",
       "!!**/.next",
       "!!**/.turbo",

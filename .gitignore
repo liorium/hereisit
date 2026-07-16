@@ -5,6 +5,7 @@ out/
 apps/web/public/pdfjs/
 .wrangler/
 .dev.vars*
+!.dev.vars.example
 coverage/
 .turbo/
 playwright-report/
