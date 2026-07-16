@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE account_usage (
-  day_key TEXT PRIMARY KEY,
+  day_key TEXT PRIMARY KEY NOT NULL,
   reserved_units INTEGER NOT NULL DEFAULT 0 CHECK (reserved_units >= 0),
   settled_units INTEGER NOT NULL DEFAULT 0 CHECK (settled_units >= 0),
   pending_jobs INTEGER NOT NULL DEFAULT 0 CHECK (pending_jobs >= 0),
@@ -32,7 +32,7 @@ CREATE TABLE network_usage (
 );
 
 CREATE TABLE jobs (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   client_request_id TEXT NOT NULL,
   token_hash TEXT NOT NULL,
   session_hash TEXT NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE jobs (
 );
 
 CREATE TABLE usage_ledger (
-  job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+  job_id TEXT PRIMARY KEY NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   session_hash TEXT NOT NULL,
   network_hash TEXT,
   day_key TEXT NOT NULL,
@@ -118,7 +118,7 @@ CREATE TABLE usage_ledger (
 );
 
 CREATE TABLE job_outbox (
-  job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+  job_id TEXT PRIMARY KEY NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   payload TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt_at INTEGER NOT NULL,
@@ -126,7 +126,7 @@ CREATE TABLE job_outbox (
 );
 
 CREATE TABLE maintenance_cursors (
-  task TEXT PRIMARY KEY,
+  task TEXT PRIMARY KEY NOT NULL,
   cursor TEXT,
   updated_at INTEGER NOT NULL
 );
@@ -141,7 +141,7 @@ CREATE TABLE rollout_control (
 INSERT INTO rollout_control (id) VALUES (1);
 
 CREATE TABLE job_quarantine (
-  job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+  job_id TEXT PRIMARY KEY NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
   queue_name TEXT NOT NULL,
   attempt INTEGER NOT NULL,
   error_code TEXT NOT NULL,

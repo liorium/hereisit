@@ -181,7 +181,7 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
   } as Env;
 }
 
-function runTombstoneSqliteProbe(probe: string): void {
+function runMigrationSqliteProbe(probe: string): void {
   const migrationPath = fileURLToPath(
     new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
   );
@@ -758,9 +758,124 @@ describe("Wrangler source-of-truth and generated environment", () => {
     expect(migration).toContain("last_error_code NOT GLOB '*[^A-Z0-9_]*'");
   });
 
+  it("declares every single-column TEXT primary key identity non-null", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(migration).toContain("day_key TEXT PRIMARY KEY NOT NULL");
+    expect(migration.match(/^ {2}id TEXT PRIMARY KEY NOT NULL,$/gm)).toHaveLength(2);
+    expect(
+      migration.match(/job_id TEXT PRIMARY KEY NOT NULL REFERENCES jobs\(id\) ON DELETE CASCADE/g),
+    ).toHaveLength(3);
+    expect(migration).toContain("task TEXT PRIMARY KEY NOT NULL");
+  });
+
+  it("rejects NULL identities for every single-column TEXT primary key in actual SQLite", () => {
+    expect(() =>
+      runMigrationSqliteProbe(`
+        const acceptedNullKeys = [];
+
+        function expectNullPrimaryKeyRejected(label, column, insert) {
+          try {
+            insert();
+            acceptedNullKeys.push(label);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.includes("NOT NULL constraint failed: " + column)) {
+              throw new Error(label + " failed for an unexpected reason: " + message);
+            }
+          }
+        }
+
+        const insertAccount = database.prepare(
+          "INSERT INTO account_usage (day_key, created_at, updated_at) VALUES (?, 0, 0)",
+        );
+        insertAccount.run("2026-07-16");
+        expectNullPrimaryKeyRejected(
+          "account_usage.day_key",
+          "account_usage.day_key",
+          () => insertAccount.run(null),
+        );
+
+        database
+          .prepare(
+            "INSERT INTO anonymous_usage " +
+              "(session_hash, day_key, created_at, updated_at) VALUES (?, ?, 0, 0)",
+          )
+          .run("session-hash", "2026-07-16");
+        const insertJob = database.prepare(
+          "INSERT INTO jobs " +
+            "(id, client_request_id, token_hash, session_hash, day_key, status, phase, " +
+            "contract_id, spec_json, spec_hash, declared_bytes, declared_mime, " +
+            "declared_width, declared_height, input_key, reserved_units, resource_class, " +
+            "queue_epoch, upload_expires_at, created_at, updated_at) " +
+            "VALUES (?, ?, 'token-hash', 'session-hash', '2026-07-16', 'queued', " +
+            "'queued', 'image.optimize@1', '{}', 'spec-hash', 1, 'image/png', 1, 1, ?, " +
+            "1, 'default', 'epoch-1', 1, 0, 0)",
+        );
+        insertJob.run("parent-job", "request-parent", "job-input-parent");
+        expectNullPrimaryKeyRejected(
+          "jobs.id",
+          "jobs.id",
+          () => insertJob.run(null, "request-null", "job-input-null"),
+        );
+
+        const insertLedger = database.prepare(
+          "INSERT INTO usage_ledger " +
+            "(job_id, session_hash, day_key, reserved_units, created_at) " +
+            "VALUES (?, 'session-hash', '2026-07-16', 1, 0)",
+        );
+        insertLedger.run("parent-job");
+        expectNullPrimaryKeyRejected(
+          "usage_ledger.job_id",
+          "usage_ledger.job_id",
+          () => insertLedger.run(null),
+        );
+
+        const insertOutbox = database.prepare(
+          "INSERT INTO job_outbox (job_id, payload, next_attempt_at) VALUES (?, '{}', 0)",
+        );
+        insertOutbox.run("parent-job");
+        expectNullPrimaryKeyRejected(
+          "job_outbox.job_id",
+          "job_outbox.job_id",
+          () => insertOutbox.run(null),
+        );
+
+        const insertCursor = database.prepare(
+          "INSERT INTO maintenance_cursors (task, updated_at) VALUES (?, 0)",
+        );
+        insertCursor.run("cleanup");
+        expectNullPrimaryKeyRejected(
+          "maintenance_cursors.task",
+          "maintenance_cursors.task",
+          () => insertCursor.run(null),
+        );
+
+        const insertQuarantine = database.prepare(
+          "INSERT INTO job_quarantine " +
+            "(job_id, queue_name, attempt, error_code, quarantined_at) " +
+            "VALUES (?, 'image-jobs', 1, 'ENGINE_ERROR', 0)",
+        );
+        insertQuarantine.run("parent-job");
+        expectNullPrimaryKeyRejected(
+          "job_quarantine.job_id",
+          "job_quarantine.job_id",
+          () => insertQuarantine.run(null),
+        );
+
+        if (acceptedNullKeys.length > 0) {
+          throw new Error("Accepted NULL primary keys: " + acceptedNullKeys.join(", "));
+        }
+      `),
+    ).not.toThrow();
+  });
+
   it("accepts canonical tombstone keys and error codes in actual SQLite", () => {
     expect(() =>
-      runTombstoneSqliteProbe(`
+      runMigrationSqliteProbe(`
         insertInput.run("valid-input", "inputs/" + uuid, "DELETE_RETRY");
         insertOutput.run("valid-output", "outputs/" + uuid, "DELETE_RETRY");
         const row = database
@@ -775,7 +890,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
 
   it("rejects malformed tombstone key shapes in actual SQLite", () => {
     expect(() =>
-      runTombstoneSqliteProbe(`
+      runMigrationSqliteProbe(`
       const invalidInputKeys = [
         "inputs/" + "-".repeat(36),
         "inputs/" + uuid + "-",
@@ -800,7 +915,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
 
   it("rejects embedded-NUL tombstone object-key suffixes in actual SQLite", () => {
     expect(() =>
-      runTombstoneSqliteProbe(`
+      runMigrationSqliteProbe(`
         const nul = String.fromCharCode(0);
         expectRejected(
           insertInput,
@@ -818,7 +933,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
 
   it("rejects embedded-NUL tombstone error-code suffixes in actual SQLite", () => {
     expect(() =>
-      runTombstoneSqliteProbe(`
+      runMigrationSqliteProbe(`
         const nul = String.fromCharCode(0);
         expectRejected(
           insertInput,
@@ -831,7 +946,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
 
   it("rejects NULL tombstone identifiers in actual SQLite", () => {
     expect(() =>
-      runTombstoneSqliteProbe(`
+      runMigrationSqliteProbe(`
         expectRejected(
           insertInput,
           [null, "inputs/" + uuid, null],
