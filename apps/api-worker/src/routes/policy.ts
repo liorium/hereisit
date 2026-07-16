@@ -46,7 +46,7 @@ export interface PolicyUsageState {
 
 export interface PolicyStateQuery {
   utcDay: string;
-  nowEpochSeconds: number;
+  nowEpochMilliseconds: number;
   sessionHash: string;
   dailyQuotaHashes: readonly string[];
   pendingHashes: readonly string[];
@@ -343,7 +343,7 @@ export async function routePolicyRequest(
     state = await withTimeout(
       runtime.readState({
         utcDay,
-        nowEpochSeconds: Math.floor(now.valueOf() / 1_000),
+        nowEpochMilliseconds: now.valueOf(),
         sessionHash,
         dailyQuotaHashes: networkHashes.dailyQuotaHashes,
         pendingHashes: networkHashes.pendingHashes,
@@ -395,7 +395,7 @@ export async function readPolicyStateFromD1(
         COALESCE((SELECT circuit_open FROM rollout_control WHERE id = 1), 1) AS circuit_open,
         COALESCE((SELECT reserved_units FROM account_usage WHERE day_key = ?), 0) AS account_reserved,
         COALESCE((SELECT settled_units FROM account_usage WHERE day_key = ?), 0) AS account_settled,
-        COALESCE((SELECT pending_jobs FROM account_usage WHERE day_key = ?), 0) AS account_pending,
+        COALESCE((SELECT SUM(pending_jobs) FROM account_usage), 0) AS account_pending,
         COALESCE((
           SELECT reserved_units FROM anonymous_usage WHERE session_hash = ? AND day_key = ?
         ), 0) AS anonymous_reserved,
@@ -403,7 +403,7 @@ export async function readPolicyStateFromD1(
           SELECT settled_units FROM anonymous_usage WHERE session_hash = ? AND day_key = ?
         ), 0) AS anonymous_settled,
         COALESCE((
-          SELECT active_jobs FROM anonymous_usage WHERE session_hash = ? AND day_key = ?
+          SELECT SUM(active_jobs) FROM anonymous_usage WHERE session_hash = ?
         ), 0) AS anonymous_active,
         COALESCE((
           SELECT SUM(reserved_units) FROM network_usage
@@ -423,13 +423,11 @@ export async function readPolicyStateFromD1(
     .bind(
       query.utcDay,
       query.utcDay,
-      query.utcDay,
       query.sessionHash,
       query.utcDay,
       query.sessionHash,
       query.utcDay,
       query.sessionHash,
-      query.utcDay,
       query.utcDay,
       ...query.dailyQuotaHashes,
       query.utcDay,
@@ -444,6 +442,13 @@ export async function readPolicyStateFromD1(
     row.oldest_queued_at === null
       ? null
       : nonnegativeSafeInteger(row.oldest_queued_at, "oldest queued timestamp");
+  const nowEpochMilliseconds = nonnegativeSafeInteger(
+    query.nowEpochMilliseconds,
+    "current timestamp",
+  );
+  if (oldestQueuedAt !== null && oldestQueuedAt > nowEpochMilliseconds) {
+    throw new RangeError("Oldest queued timestamp cannot be in the future.");
+  }
 
   return {
     circuitClosed: row.circuit_open === 0,
@@ -460,6 +465,6 @@ export async function readPolicyStateFromD1(
     networkSettledToday: nonnegativeSafeInteger(row.network_settled, "network settled units"),
     networkPendingJobs: nonnegativeSafeInteger(row.network_pending, "network pending jobs"),
     oldestQueuedAgeSeconds:
-      oldestQueuedAt === null ? 0 : Math.max(0, query.nowEpochSeconds - oldestQueuedAt),
+      oldestQueuedAt === null ? 0 : Math.floor((nowEpochMilliseconds - oldestQueuedAt) / 1_000),
   };
 }

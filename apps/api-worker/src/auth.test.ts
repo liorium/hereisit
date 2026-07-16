@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash, timingSafeEqual as nodeTimingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   hashAnonymousSessionId,
@@ -374,6 +376,7 @@ describe("rotating network hashes", () => {
 
   it.each([
     { ip: "999.0.0.1", currentSecret, previousSecret, utcDay: "2026-07-16" },
+    { ip: "203.0.113.999", currentSecret, previousSecret, utcDay: "2026-07-16" },
     { ip: "2001:db8::1::2", currentSecret, previousSecret, utcDay: "2026-07-16" },
     { ip: "203.0.113.1", currentSecret: "short", previousSecret, utcDay: "2026-07-16" },
     {
@@ -458,6 +461,27 @@ describe("strict operational configuration", () => {
     ["IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT", "101"],
   ])("rejects a malformed numeric setting %s=%s", async (name, value) => {
     await expect(parseOperationalConfig(makeEnv({ [name]: value }))).rejects.toThrow();
+  });
+
+  it.each(["0", "10000"])("accepts canonical basis-point boundaries at %s", async (value) => {
+    const config = await parseOperationalConfig(
+      makeEnv({
+        MAX_LIVE_MEDIAN_OUTPUT_RATIO_BPS: value,
+        MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS: value,
+      }),
+    );
+
+    expect(config.maximumLiveMedianOutputRatioBasisPoints).toBe(Number(value));
+    expect(config.maximumLiveOriginalRetainedRateBasisPoints).toBe(Number(value));
+  });
+
+  it.each([
+    "MAX_LIVE_MEDIAN_OUTPUT_RATIO_BPS",
+    "MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS",
+  ])("rejects an out-of-range basis-point setting %s", async (name) => {
+    await expect(parseOperationalConfig(makeEnv({ [name]: "10001" }))).rejects.toThrow(
+      /basis points|between 0 and 10000/i,
+    );
   });
 
   it.each([
@@ -661,14 +685,91 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "CHECK ((output_key IS NULL AND output_exists = 0) OR (output_key IS NOT NULL AND output_exists = 1))",
     );
     expect(migration).toContain("CHECK (input_exists = 1 OR output_exists = 1)");
-    expect(migration).toContain("input_key GLOB 'inputs/????????-????-????-????-????????????'");
-    expect(migration).toContain("output_key GLOB 'outputs/????????-????-????-????-????????????'");
+    expect(migration).toContain("substr(input_key, 1, 7) = 'inputs/'");
+    expect(migration).toContain("length(input_key) = 43");
+    expect(migration).toContain("substr(input_key, 16, 1) = '-'");
+    expect(migration).toContain("substr(input_key, 21, 1) = '-'");
+    expect(migration).toContain("substr(input_key, 26, 1) = '-'");
+    expect(migration).toContain("substr(input_key, 31, 1) = '-'");
+    expect(migration).toContain("length(replace(substr(input_key, 8), '-', '')) = 32");
+    expect(migration).toContain("replace(substr(input_key, 8), '-', '') NOT GLOB '*[^0-9a-f]*'");
+    expect(migration).toContain("substr(output_key, 1, 8) = 'outputs/'");
+    expect(migration).toContain("length(output_key) = 44");
+    expect(migration).toContain("substr(output_key, 17, 1) = '-'");
+    expect(migration).toContain("substr(output_key, 22, 1) = '-'");
+    expect(migration).toContain("substr(output_key, 27, 1) = '-'");
+    expect(migration).toContain("substr(output_key, 32, 1) = '-'");
+    expect(migration).toContain("length(replace(substr(output_key, 9), '-', '')) = 32");
+    expect(migration).toContain("replace(substr(output_key, 9), '-', '') NOT GLOB '*[^0-9a-f]*'");
     expect(migration).toContain("CHECK (first_failed_at >= 0)");
     expect(migration).toContain("CHECK (next_attempt_at >= 0)");
     expect(migration).toContain("CHECK (attempt_count >= 0)");
     expect(migration).toContain("length(last_error_code) BETWEEN 1 AND 64");
     expect(migration).toContain("last_error_code = upper(last_error_code)");
     expect(migration).toContain("last_error_code NOT GLOB '*[^A-Z0-9_]*'");
+  });
+
+  it("enforces canonical tombstone object keys in an actual SQLite database", () => {
+    const migrationPath = fileURLToPath(
+      new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
+    );
+    const probe = `
+      const { readFileSync } = require("node:fs");
+      const { DatabaseSync } = require("node:sqlite");
+      const database = new DatabaseSync(":memory:");
+      database.exec(readFileSync(process.argv[1], "utf8"));
+
+      const insertInput = database.prepare(
+        "INSERT INTO artifact_cleanup_tombstones " +
+          "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
+          "next_attempt_at, attempt_count, last_error_code) " +
+          "VALUES (?, ?, NULL, 1, 0, 0, 0, 0, NULL)",
+      );
+      const insertOutput = database.prepare(
+        "INSERT INTO artifact_cleanup_tombstones " +
+          "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
+          "next_attempt_at, attempt_count, last_error_code) " +
+          "VALUES (?, NULL, ?, 0, 1, 0, 0, 0, NULL)",
+      );
+      const uuid = "01234567-89ab-cdef-0123-456789abcdef";
+      insertInput.run("valid-input", "inputs/" + uuid);
+      insertOutput.run("valid-output", "outputs/" + uuid);
+
+      function expectRejected(statement, id, key) {
+        try {
+          statement.run(id, key);
+        } catch {
+          return;
+        }
+        throw new Error("Accepted invalid tombstone key: " + key);
+      }
+
+      const invalidInputKeys = [
+        "inputs/" + "-".repeat(36),
+        "inputs/" + uuid + "-",
+        "inputs/01234567-89ab-cdeg-0123-456789abcdef",
+        "inputz/" + uuid,
+      ];
+      const invalidOutputKeys = [
+        "outputs/" + "-".repeat(36),
+        "outputs/" + uuid + "-",
+        "outputs/01234567-89ab-cdeg-0123-456789abcdef",
+        "outputz/" + uuid,
+      ];
+      invalidInputKeys.forEach((key, index) =>
+        expectRejected(insertInput, "invalid-input-" + index, key),
+      );
+      invalidOutputKeys.forEach((key, index) =>
+        expectRejected(insertOutput, "invalid-output-" + index, key),
+      );
+      database.close();
+    `;
+
+    expect(() =>
+      execFileSync(process.execPath, ["--no-warnings", "-e", probe, migrationPath], {
+        stdio: "pipe",
+      }),
+    ).not.toThrow();
   });
 
   it("keeps generated bindings in sync without inventing future platform resources", () => {

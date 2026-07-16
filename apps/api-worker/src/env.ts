@@ -216,6 +216,14 @@ function parseRolloutPercent(value: string): number {
   return parsed;
 }
 
+function parseBasisPoints(value: string, label: string): number {
+  const parsed = parseUnsignedInteger(value, label);
+  if (parsed > 10_000) {
+    throw new RangeError(`${label} must be between 0 and 10000 basis points.`);
+  }
+  return parsed;
+}
+
 function parseOrigins(
   value: string,
   environment: OperationalConfig["environment"],
@@ -383,7 +391,7 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
       env.MAX_QUEUED_AGE_SECONDS,
       "MAX_QUEUED_AGE_SECONDS",
     ),
-    maximumLiveMedianOutputRatioBasisPoints: parseUnsignedInteger(
+    maximumLiveMedianOutputRatioBasisPoints: parseBasisPoints(
       env.MAX_LIVE_MEDIAN_OUTPUT_RATIO_BPS,
       "MAX_LIVE_MEDIAN_OUTPUT_RATIO_BPS",
     ),
@@ -391,7 +399,7 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
       env.MAX_LIVE_P95_WEIGHTED_UNITS,
       "MAX_LIVE_P95_WEIGHTED_UNITS",
     ),
-    maximumLiveOriginalRetainedRateBasisPoints: parseUnsignedInteger(
+    maximumLiveOriginalRetainedRateBasisPoints: parseBasisPoints(
       env.MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS,
       "MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS",
     ),

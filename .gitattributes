@@ -1,1 +1,2 @@
 *.patch -whitespace
+apps/api-worker/src/worker-configuration.d.ts -whitespace

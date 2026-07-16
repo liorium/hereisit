@@ -2,7 +2,12 @@ import { imageOptimizePolicyResponseSchema } from "@hereisit/tool-contracts/imag
 import { describe, expect, it, vi } from "vitest";
 import { readBoundedJson } from "../bounded-json";
 import { routeRequestWithDependencies } from "../router";
-import { getPolicy, type PolicyRouteRuntime, routePolicyRequest } from "./policy";
+import {
+  getPolicy,
+  type PolicyRouteRuntime,
+  readPolicyStateFromD1,
+  routePolicyRequest,
+} from "./policy";
 
 const currentSecret = Buffer.from(Array.from({ length: 32 }, (_, index) => index)).toString(
   "base64url",
@@ -72,6 +77,71 @@ function availableState(overrides: Record<string, unknown> = {}) {
     networkSettledToday: 0,
     networkPendingJobs: 0,
     oldestQueuedAgeSeconds: 0,
+    ...overrides,
+  };
+}
+
+function policyAggregateRow(overrides: Record<string, unknown> = {}) {
+  return {
+    circuit_open: 0,
+    account_reserved: 0,
+    account_settled: 0,
+    account_pending: 0,
+    anonymous_reserved: 0,
+    anonymous_settled: 0,
+    anonymous_active: 0,
+    network_reserved: 0,
+    network_settled: 0,
+    network_pending: 0,
+    oldest_queued_at: null,
+    ...overrides,
+  };
+}
+
+function makePolicyDatabase(row: ReturnType<typeof policyAggregateRow>) {
+  const capture: {
+    bindings: unknown[];
+    constraint: string | undefined;
+    sql: string;
+  } = {
+    bindings: [],
+    constraint: undefined,
+    sql: "",
+  };
+  const statement = {
+    bind: (...bindings: unknown[]) => {
+      capture.bindings = bindings;
+      return statement;
+    },
+    first: async <T>() => row as T,
+  };
+  const withSession = vi.fn((constraint?: string) => {
+    capture.constraint = constraint;
+    return {
+      prepare: (sql: string) => {
+        capture.sql = sql;
+        return statement;
+      },
+    };
+  });
+  const database = new Proxy({} as D1Database, {
+    get: (_target, property) => {
+      if (property === "withSession") {
+        return withSession;
+      }
+      throw new Error(`Unexpected D1 database property: ${String(property)}`);
+    },
+  });
+  return { capture, database };
+}
+
+function policyStateQuery(overrides: Record<string, unknown> = {}) {
+  return {
+    utcDay: "2026-07-16",
+    nowEpochMilliseconds: fixedNow.valueOf(),
+    sessionHash: "a".repeat(64),
+    dailyQuotaHashes: ["b".repeat(64), "c".repeat(64)],
+    pendingHashes: ["b".repeat(64), "c".repeat(64), "d".repeat(64), "e".repeat(64)],
     ...overrides,
   };
 }
@@ -464,6 +534,113 @@ describe("policy rate limiting and fail-closed ordering", () => {
     expect(stateArguments).not.toContain("jobToken");
     expect(consoleLog).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("passes the exact current epoch milliseconds to the D1 state adapter", async () => {
+    const readState = vi.fn(async (_query: Parameters<PolicyRouteRuntime["readState"]>[0]) =>
+      availableState(),
+    );
+
+    await routePolicyRequest(policyRequest(), makeRuntime({ readState }));
+
+    const query = readState.mock.calls[0]?.[0];
+    expect(query).toMatchObject({
+      utcDay: "2026-07-16",
+      nowEpochMilliseconds: fixedNow.valueOf(),
+    });
+    expect(query).not.toHaveProperty("nowEpochSeconds");
+  });
+});
+
+describe("D1 policy state adapter", () => {
+  it("keeps daily units day-scoped while carrying pending and active jobs across midnight", async () => {
+    const { capture, database } = makePolicyDatabase(
+      policyAggregateRow({
+        account_reserved: 11,
+        account_settled: 12,
+        account_pending: 13,
+        anonymous_reserved: 21,
+        anonymous_settled: 22,
+        anonymous_active: 1,
+        network_reserved: 31,
+        network_settled: 32,
+        network_pending: 33,
+      }),
+    );
+    const query = policyStateQuery();
+
+    const state = await readPolicyStateFromD1(database, query);
+    const compactSql = capture.sql.replace(/\s+/g, " ");
+
+    expect(capture.constraint).toBe("first-primary");
+    expect(compactSql).toContain("SELECT reserved_units FROM account_usage WHERE day_key = ?");
+    expect(compactSql).toContain("SELECT settled_units FROM account_usage WHERE day_key = ?");
+    expect(compactSql).toContain("SELECT SUM(pending_jobs) FROM account_usage");
+    expect(compactSql).not.toContain(
+      "SELECT SUM(pending_jobs) FROM account_usage WHERE day_key = ?",
+    );
+    expect(compactSql).toContain(
+      "SELECT reserved_units FROM anonymous_usage WHERE session_hash = ? AND day_key = ?",
+    );
+    expect(compactSql).toContain(
+      "SELECT settled_units FROM anonymous_usage WHERE session_hash = ? AND day_key = ?",
+    );
+    expect(compactSql).toContain(
+      "SELECT SUM(active_jobs) FROM anonymous_usage WHERE session_hash = ?",
+    );
+    expect(compactSql).not.toContain(
+      "SELECT SUM(active_jobs) FROM anonymous_usage WHERE session_hash = ? AND day_key = ?",
+    );
+    expect(compactSql).toContain(
+      "SELECT SUM(pending_jobs) FROM network_usage WHERE network_hash IN",
+    );
+    expect(capture.bindings).toEqual([
+      query.utcDay,
+      query.utcDay,
+      query.sessionHash,
+      query.utcDay,
+      query.sessionHash,
+      query.utcDay,
+      query.sessionHash,
+      query.utcDay,
+      ...query.dailyQuotaHashes,
+      query.utcDay,
+      ...query.dailyQuotaHashes,
+      ...query.pendingHashes,
+    ]);
+    expect(state).toMatchObject({
+      accountReservedToday: 11,
+      accountSettledToday: 12,
+      accountPendingJobs: 13,
+      anonymousReservedToday: 21,
+      anonymousSettledToday: 22,
+      activeJobs: 1,
+      networkReservedToday: 31,
+      networkSettledToday: 32,
+      networkPendingJobs: 33,
+    });
+  });
+
+  it("converts a 601-second-old millisecond timestamp with floor semantics", async () => {
+    const { database } = makePolicyDatabase(
+      policyAggregateRow({
+        oldest_queued_at: fixedNow.valueOf() - 601_000,
+      }),
+    );
+
+    await expect(readPolicyStateFromD1(database, policyStateQuery())).resolves.toMatchObject({
+      oldestQueuedAgeSeconds: 601,
+    });
+  });
+
+  it("rejects an oldest queued timestamp from the future", async () => {
+    const { database } = makePolicyDatabase(
+      policyAggregateRow({
+        oldest_queued_at: fixedNow.valueOf() + 1,
+      }),
+    );
+
+    await expect(readPolicyStateFromD1(database, policyStateQuery())).rejects.toThrow(/future/i);
   });
 });
 

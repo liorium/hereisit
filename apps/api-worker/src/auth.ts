@@ -154,9 +154,8 @@ function parseIpv4(ip: string): Uint8Array | null {
   if (parts.length !== 4) {
     return null;
   }
-  const bytes = new Uint8Array(4);
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index];
+  const values: number[] = [];
+  for (const part of parts) {
     if (part === undefined || !/^(0|[1-9][0-9]{0,2})$/.test(part)) {
       return null;
     }
@@ -164,9 +163,9 @@ function parseIpv4(ip: string): Uint8Array | null {
     if (value > 255) {
       return null;
     }
-    bytes[index] = value;
+    values.push(value);
   }
-  return bytes;
+  return Uint8Array.from(values);
 }
 
 function parseIpv6(ip: string): Uint8Array | null {

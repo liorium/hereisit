@@ -164,14 +164,26 @@ CREATE TABLE artifact_cleanup_tombstones (
   CHECK (input_exists = 1 OR output_exists = 1),
   CHECK (
     input_key IS NULL OR (
-      input_key GLOB 'inputs/????????-????-????-????-????????????'
-      AND substr(input_key, 8) NOT GLOB '*[^0-9a-f-]*'
+      substr(input_key, 1, 7) = 'inputs/'
+      AND length(input_key) = 43
+      AND substr(input_key, 16, 1) = '-'
+      AND substr(input_key, 21, 1) = '-'
+      AND substr(input_key, 26, 1) = '-'
+      AND substr(input_key, 31, 1) = '-'
+      AND length(replace(substr(input_key, 8), '-', '')) = 32
+      AND replace(substr(input_key, 8), '-', '') NOT GLOB '*[^0-9a-f]*'
     )
   ),
   CHECK (
     output_key IS NULL OR (
-      output_key GLOB 'outputs/????????-????-????-????-????????????'
-      AND substr(output_key, 9) NOT GLOB '*[^0-9a-f-]*'
+      substr(output_key, 1, 8) = 'outputs/'
+      AND length(output_key) = 44
+      AND substr(output_key, 17, 1) = '-'
+      AND substr(output_key, 22, 1) = '-'
+      AND substr(output_key, 27, 1) = '-'
+      AND substr(output_key, 32, 1) = '-'
+      AND length(replace(substr(output_key, 9), '-', '')) = 32
+      AND replace(substr(output_key, 9), '-', '') NOT GLOB '*[^0-9a-f]*'
     )
   ),
   CHECK (
