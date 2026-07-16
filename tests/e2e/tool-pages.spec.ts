@@ -7,6 +7,7 @@ const tools = [
     title: "이미지 용량 줄이기",
     selectLabel: "압축할 이미지 선택",
     preset: /용량만 줄이기/,
+    visiblePresets: [/용량만 줄이기/],
     runLabel: "1개 이미지 용량 줄이기 →",
   },
   {
@@ -14,6 +15,7 @@ const tools = [
     title: "이미지 크기 조절",
     selectLabel: "크기를 바꿀 이미지 선택",
     preset: /웹용 이미지/,
+    visiblePresets: [/웹용 이미지/, /상품 정사각형/, /SNS 정사각형/],
     runLabel: "1개 이미지 크기 조절 →",
   },
   {
@@ -21,6 +23,7 @@ const tools = [
     title: "이미지 형식 변환",
     selectLabel: "변환할 이미지 선택",
     preset: /형식만 바꾸기/,
+    visiblePresets: [/형식만 바꾸기/],
     runLabel: "1개 이미지 형식 변환 →",
   },
 ] as const;
@@ -29,7 +32,7 @@ const imageRoutes = [
   {
     path: "/image/compress",
     title: "이미지 용량 줄이기",
-    description: "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요.",
+    description: "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요.",
   },
   {
     path: "/image/resize",
@@ -103,6 +106,11 @@ test("links to dedicated image tools and initializes each intent", async ({ page
       "aria-pressed",
       "true",
     );
+    const presetGroup = page.getByRole("group", { name: "빠른 프리셋" });
+    await expect(presetGroup.getByRole("button")).toHaveCount(tool.visiblePresets.length);
+    for (const visiblePreset of tool.visiblePresets) {
+      await expect(presetGroup.getByRole("button", { name: visiblePreset })).toBeVisible();
+    }
     await expect(page.getByRole("button", { name: tool.runLabel })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",

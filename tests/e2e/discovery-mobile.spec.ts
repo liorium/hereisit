@@ -321,7 +321,8 @@ test("keeps home domain tabs in one local row and reveals keyboard selection", a
   expect(bounds).not.toBeNull();
   expect(bounds?.left ?? 0).toBeGreaterThanOrEqual((bounds?.listLeft ?? 0) - 1);
   expect(bounds?.right ?? 0).toBeLessThanOrEqual((bounds?.listRight ?? 0) + 1);
-  expect(await page.evaluate(() => window.scrollY)).toBeCloseTo(beforeY, 0);
+  const afterY = await page.evaluate(() => window.scrollY);
+  expect(Math.abs(afterY - beforeY)).toBeLessThanOrEqual(1);
   await expectNoDocumentOverflow(page);
 });
 

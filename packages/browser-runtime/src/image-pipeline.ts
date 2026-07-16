@@ -4,7 +4,7 @@ import {
   type ImagePipelineResult,
   type ImageWarning,
   imagePipelineSpecSchema,
-  type ParsedImagePipelineSpecV1,
+  type ParsedImagePipelineSpec,
   type ToolErrorCode,
 } from "@hereisit/tool-contracts";
 
@@ -33,17 +33,31 @@ interface PipelineInput {
 }
 
 type ProgressReporter = (phase: ImagePhase, fraction: number) => void;
-type LossyCompression = Extract<
-  ParsedImagePipelineSpecV1["output"],
-  { format: "jpeg" | "webp" }
->["compression"];
+type ResolvedOutput = Exclude<ParsedImagePipelineSpec["output"], { format: "source" }>;
+type LossyCompression = Extract<ResolvedOutput, { format: "jpeg" | "webp" }>["compression"];
 
-function outputMime(
-  format: ParsedImagePipelineSpecV1["output"]["format"],
-): ImagePipelineResult["mime"] {
+function outputMime(format: ResolvedOutput["format"]): ImagePipelineResult["mime"] {
   if (format === "jpeg") return "image/jpeg";
   if (format === "webp") return "image/webp";
   return "image/png";
+}
+
+function resolveOutput(
+  output: ParsedImagePipelineSpec["output"],
+  sourceFormat: "jpeg" | "png" | "webp",
+): ResolvedOutput {
+  if (output.format !== "source") return output;
+  if (sourceFormat === "jpeg") {
+    return {
+      format: "jpeg",
+      compression: output.compression,
+      matte: "#ffffff",
+    };
+  }
+  if (sourceFormat === "webp") {
+    return { format: "webp", compression: output.compression };
+  }
+  return { format: "png", compression: { mode: "lossless" } };
 }
 
 function decodeHexColor(value: string): string {
@@ -114,7 +128,7 @@ async function encodeWithTarget(
 
 function smallerOnlyTargetBytes(
   inputByteLength: number,
-  sizeGoal: ParsedImagePipelineSpecV1["sizeGoal"],
+  sizeGoal: ParsedImagePipelineSpec["sizeGoal"],
 ): number | undefined {
   if (sizeGoal.mode !== "smaller-only") return undefined;
   const ratioSavings = Math.ceil((inputByteLength * sizeGoal.minSavingsPercent) / 100);
@@ -156,6 +170,18 @@ export async function processImagePipeline(
 
   if (inspected.animated) {
     throw new ImagePipelineError("ANIMATED_INPUT", "움직이는 이미지는 아직 지원하지 않습니다.");
+  }
+  let output: ResolvedOutput;
+  if (spec.output.format === "source") {
+    if (inspected.format === "heic") {
+      throw new ImagePipelineError(
+        "UNSUPPORTED_INPUT",
+        "HEIC는 형식을 유지한 채 다시 저장할 수 없습니다. 이미지 형식 변환 도구를 이용해 주세요.",
+      );
+    }
+    output = resolveOutput(spec.output, inspected.format);
+  } else {
+    output = spec.output;
   }
   if (
     inspected.width > MAX_DIMENSION ||
@@ -206,15 +232,15 @@ export async function processImagePipeline(
 
     const canvas = new OffscreenCanvas(geometry.canvasWidth, geometry.canvasHeight);
     const context = canvas.getContext("2d", {
-      alpha: spec.output.format !== "jpeg",
+      alpha: output.format !== "jpeg",
       desynchronized: true,
     });
     if (context === null) {
       throw new ImagePipelineError("MEMORY_LIMIT", "이미지 작업 공간을 만들지 못했습니다.");
     }
 
-    if (spec.output.format === "jpeg") {
-      context.fillStyle = decodeHexColor(spec.output.matte);
+    if (output.format === "jpeg") {
+      context.fillStyle = decodeHexColor(output.matte);
       context.fillRect(0, 0, canvas.width, canvas.height);
     } else {
       context.clearRect(0, 0, canvas.width, canvas.height);
@@ -237,18 +263,18 @@ export async function processImagePipeline(
 
     report("encoding", 0.9);
     const encodeStarted = performance.now();
-    const mime = outputMime(spec.output.format);
+    const mime = outputMime(output.format);
     const sizeTarget = smallerOnlyTargetBytes(actualByteLength, spec.sizeGoal);
     let blob: Blob;
     let encodeAttempts = 1;
     let targetReached = true;
 
-    if (spec.output.format === "png") {
+    if (output.format === "png") {
       blob = await encodeCanvas(canvas, mime);
       if (sizeTarget !== undefined) targetReached = blob.size <= sizeTarget;
     } else {
-      const lossyMime = spec.output.format === "jpeg" ? "image/jpeg" : "image/webp";
-      const compression: LossyCompression = spec.output.compression;
+      const lossyMime = output.format === "jpeg" ? "image/jpeg" : "image/webp";
+      const compression: LossyCompression = output.compression;
       let encoded: { blob: Blob; attempts: number; targetReached: boolean };
 
       if (
@@ -309,18 +335,49 @@ export async function processImagePipeline(
     if (blob.size > MAX_OUTPUT_BYTES) {
       throw new ImagePipelineError("MEMORY_LIMIT", "결과 파일이 100MB 제한을 넘었습니다.");
     }
+    if (!Number.isSafeInteger(blob.size) || blob.size < 1) {
+      throw new ImagePipelineError("ENCODE_FAILED", "유효한 이미지 결과를 만들지 못했습니다.");
+    }
 
     report("finalizing", 0.98);
     const warnings: ImageWarning[] = [];
     if (geometry.upscalingSkipped) warnings.push("UPSCALING_SKIPPED");
     if (!targetReached) warnings.push("TARGET_SIZE_NOT_REACHED");
 
-    const bytes = await blob.arrayBuffer();
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await blob.arrayBuffer();
+    } catch {
+      throw new ImagePipelineError("ENCODE_FAILED", "이미지 결과를 읽지 못했습니다.");
+    }
+    if (bytes.byteLength !== blob.size) {
+      throw new ImagePipelineError("ENCODE_FAILED", "이미지 결과 크기를 확인하지 못했습니다.");
+    }
+    let inspectedOutput: ReturnType<typeof inspectImageHeader>;
+    try {
+      inspectedOutput = inspectImageHeader(bytes);
+    } catch {
+      throw new ImagePipelineError("ENCODE_FAILED", "이미지 결과 형식을 확인하지 못했습니다.");
+    }
+    if (
+      inspectedOutput.format !== output.format ||
+      inspectedOutput.mime !== mime ||
+      inspectedOutput.width !== geometry.canvasWidth ||
+      inspectedOutput.height !== geometry.canvasHeight ||
+      inspectedOutput.animated
+    ) {
+      throw new ImagePipelineError(
+        "ENCODE_FAILED",
+        "이미지 결과의 형식이나 크기가 요청과 다릅니다.",
+      );
+    }
     report("finalizing", 1);
 
     return {
       bytes,
-      suggestedName: suggestOutputName(input.name, spec.output.format),
+      suggestedName: suggestOutputName(input.name, output.format, {
+        preserveMatchingExtension: spec.output.format === "source",
+      }),
       mime,
       width: geometry.canvasWidth,
       height: geometry.canvasHeight,

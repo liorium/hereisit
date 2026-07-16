@@ -91,10 +91,12 @@ checklist.
 
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
   cannot meet the target are marked as already optimized and are not added to downloads.
+- The size-only preset in `image.pipeline@2` keeps inspected JPG, PNG, and WebP formats and pixel
+  dimensions. PNG is re-encoded losslessly; HEIC/HEIF must use the format-conversion tool.
 - CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
-- `image.pipeline@1` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
-- `image.pipeline@1` allows up to 50 megapixels per input and 25 megapixels per output.
-- `image.pipeline@1` allows up to 100MiB per result and 500MiB of retained results per batch.
+- `image.pipeline@2` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
+- `image.pipeline@2` allows up to 50 megapixels per input and 25 megapixels per output.
+- `image.pipeline@2` allows up to 100MiB per result and 500MiB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
 - `image.watermark@1` adds one text string or one reusable JPG/PNG/WebP logo at any of nine anchors
   (top/middle/bottom × left/center/right) without changing the source's displayed dimensions.

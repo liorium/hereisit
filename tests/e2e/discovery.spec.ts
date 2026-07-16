@@ -901,7 +901,9 @@ test("hands a chosen file to the canonical destination without auto-processing",
   await expect(page.getByText(/이미지 변환을 완료했어요/)).toHaveCount(0);
 });
 
-test("revalidates a detected file at the destination boundary", async ({ page }) => {
+test("revalidates detected bytes instead of filename hints at the destination boundary", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.locator("#home-file-input").setInputFiles({
     name: "revalidate-at-destination.bin",
@@ -912,9 +914,8 @@ test("revalidates a detected file at the destination boundary", async ({ page })
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByText("revalidate-at-destination.bin", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/0개를 추가했어요\. 1개는 형식/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText("revalidate-at-destination.bin", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
 });
 
 test("consumes a handoff only once during client navigation", async ({ page }) => {
@@ -1007,7 +1008,7 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
   await search.getByRole("option", { name: /이미지 용량 줄이기/ }).click();
 
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("파일을 다시 선택해 주세요");
   await expect(page.getByText("expires-locally.png", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
 });
@@ -1050,7 +1051,9 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
   await search.getByRole("option", { name: /PDF 합치기/ }).click();
 
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
-  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("파일을 다시 선택해 주세요", { exact: true }).filter({ visible: true }),
+  ).toBeVisible();
   await expect(page.getByText("target-mismatch.png", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 파일 선택" })).toBeEnabled();
 });

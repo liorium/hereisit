@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { expect, type Locator, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
@@ -244,6 +245,46 @@ test("keeps image compression preset text readable after selection", async ({ pa
     { label: "compression preset description", locator: preset.locator("small") },
     { label: "compression preset badge", locator: preset.locator("em") },
   ]);
+});
+
+test("keeps mixed HEIC compression guidance visible across narrow responsive widths", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/image/compress");
+  const heic = await readFile("tests/fixtures/rainbow-451x461.heic");
+  const guidance =
+    "1개를 추가했어요. HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
+
+  await page.locator('input[type="file"][multiple]').setInputFiles([
+    { name: "sample.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "disguised.jpg", mimeType: "image/jpeg", buffer: heic },
+  ]);
+
+  await expect(page.getByRole("status")).toHaveText(guidance);
+  const visualStatus = page.getByTestId("image-workbench-status");
+  await expect(visualStatus).toHaveText(guidance);
+  expect(
+    await visualStatus.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      whiteSpace: getComputedStyle(element).whiteSpace,
+    })),
+  ).toMatchObject({ whiteSpace: "normal" });
+  const widths = await visualStatus.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth + 1);
+
+  await page.setViewportSize({ width: 900, height: 844 });
+  await expect(visualStatus).toHaveCSS("white-space", "normal");
+  const narrowDesktopWidths = await visualStatus.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(narrowDesktopWidths.scrollWidth).toBeLessThanOrEqual(narrowDesktopWidths.clientWidth + 1);
+  await expect(page.getByText("disguised.jpg", { exact: true })).toHaveCount(0);
 });
 
 test("keeps general image result actions touch-safe at every responsive boundary", async ({
@@ -622,7 +663,10 @@ test("keeps representative image and PDF error feedback reachable", async ({ pag
     mimeType: "text/plain",
     buffer: Buffer.from("not an image"),
   });
-  const imageStatus = page.getByRole("status").filter({ hasText: "형식·파일당 50MB" });
+  await expect(page.getByRole("status")).toContainText("형식·파일당 50MB");
+  const imageStatus = page
+    .getByTestId("image-workbench-status")
+    .filter({ hasText: "형식·파일당 50MB" });
   await imageStatus.scrollIntoViewIfNeeded();
   await expect(imageStatus).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
@@ -899,7 +943,10 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
     { label: "resize preset name", locator: resizePreset.locator("strong") },
     { label: "resize preset description", locator: resizePreset.locator("small") },
     { label: "resize preset badge", locator: resizePreset.locator("em") },
-    { label: "resize keep action", locator: page.getByRole("button", { name: "유지" }) },
+    {
+      label: "resize keep action",
+      locator: page.getByRole("button", { name: "유지", exact: true }),
+    },
     {
       label: "resize maximum action",
       locator: page.getByRole("button", { name: "최대 크기" }),

@@ -6,10 +6,10 @@ import type {
   BatchRuntimeEvent,
   ImagePhase,
   ImagePipelineResult,
-  ImagePipelineSpecV1,
+  ImagePipelineSpecV2,
 } from "@hereisit/tool-contracts";
 import { findImagePreset, imagePresets } from "@hereisit/tool-registry";
-import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
+import type { AvailableToolId, FileKind } from "@hereisit/tool-registry/catalog";
 import {
   type ChangeEvent,
   type DragEvent,
@@ -19,6 +19,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { detectFileSelection, LauncherFileLimitError } from "../lib/file-selection-detection";
 import {
   createZipArchive,
   downloadUrl,
@@ -31,14 +32,25 @@ import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
-const ACCEPTED_TYPES = new Set([
+const IMAGE_KINDS = new Set<FileKind>([
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/heic",
   "image/heif",
 ]);
+const COMPRESSION_IMAGE_KINDS = new Set<FileKind>(["image/jpeg", "image/png", "image/webp"]);
+const HEIC_KINDS = new Set<FileKind>(["image/heic", "image/heif"]);
+const HEIC_COMPRESSION_MESSAGE =
+  "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
 export type ImageWorkbenchIntent = "general" | "compress" | "resize" | "convert";
+
+const INTENT_PRESET_IDS: Record<ImageWorkbenchIntent, readonly string[] | null> = {
+  general: null,
+  compress: ["balanced"],
+  resize: ["web-1920", "product-square", "social-square"],
+  convert: ["convert-webp"],
+};
 
 const INTENT_CONFIG: Record<
   ImageWorkbenchIntent,
@@ -92,6 +104,7 @@ type ItemStatus =
 interface WorkItem {
   id: string;
   file: File;
+  detectedKind: FileKind;
   previewUrl: string;
   resultUrl?: string;
   result?: ImagePipelineResult;
@@ -101,13 +114,13 @@ interface WorkItem {
   error?: string | undefined;
 }
 
-function cloneSpec(spec: ImagePipelineSpecV1): ImagePipelineSpecV1 {
+function cloneSpec(spec: ImagePipelineSpecV2): ImagePipelineSpecV2 {
   return structuredClone(spec);
 }
 
 function resolveInitialPreset(intent: ImageWorkbenchIntent): {
   presetId: string;
-  spec: ImagePipelineSpecV1;
+  spec: ImagePipelineSpecV2;
 } {
   const preset = findImagePreset(INTENT_CONFIG[intent].defaultPresetId);
   return { presetId: preset.id, spec: cloneSpec(preset.spec) };
@@ -117,10 +130,10 @@ function makeId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }
 
-function phaseLabel(phase?: ImagePhase): string {
+function phaseLabel(phase: ImagePhase | undefined, intent: ImageWorkbenchIntent): string {
   if (phase === "validating") return "확인 중";
   if (phase === "decoding") return "읽는 중";
-  if (phase === "transforming") return "크기 조절 중";
+  if (phase === "transforming") return intent === "resize" ? "크기 조절 중" : "이미지 준비 중";
   if (phase === "encoding") return "압축 중";
   if (phase === "finalizing") return "마무리 중";
   return "대기 중";
@@ -134,11 +147,11 @@ const SMALLER_ONLY_GOAL = {
   maxAttempts: 6,
 } as const;
 
-function isSmallerOnly(spec: ImagePipelineSpecV1): boolean {
+function isSmallerOnly(spec: ImagePipelineSpecV2): boolean {
   return spec.sizeGoal?.mode === "smaller-only";
 }
 
-function currentQuality(spec: ImagePipelineSpecV1): number {
+function currentQuality(spec: ImagePipelineSpecV2): number {
   if (spec.output.format === "png") return DEFAULT_LOSSY_QUALITY;
   if (spec.output.compression.mode === "maxBytes") {
     return spec.output.compression.maxQuality ?? 92;
@@ -147,9 +160,9 @@ function currentQuality(spec: ImagePipelineSpecV1): number {
 }
 
 function withOutputFormat(
-  spec: ImagePipelineSpecV1,
+  spec: ImagePipelineSpecV2,
   format: "jpeg" | "png" | "webp",
-): ImagePipelineSpecV1 {
+): ImagePipelineSpecV2 {
   const quality = Math.min(95, currentQuality(spec));
   if (format === "png") {
     return { ...spec, output: { format: "png", compression: { mode: "lossless" } } };
@@ -178,6 +191,7 @@ function resetWorkItem(item: WorkItem, status: ItemStatus = "ready", error?: str
   const reset: WorkItem = {
     id: item.id,
     file: item.file,
+    detectedKind: item.detectedKind,
     previewUrl: item.previewUrl,
     status,
     progress: 0,
@@ -186,11 +200,14 @@ function resetWorkItem(item: WorkItem, status: ItemStatus = "ready", error?: str
   return reset;
 }
 
-function isAcceptedFile(file: File): boolean {
-  return (
-    ACCEPTED_TYPES.has(file.type) ||
-    (file.type === "" && /\.(?:jpe?g|png|webp|heic|heif)$/i.test(file.name))
-  );
+function isAcceptedKind(
+  detectedKind: FileKind | null,
+  intent: ImageWorkbenchIntent,
+): detectedKind is FileKind {
+  if (detectedKind === null) return false;
+  return intent === "compress"
+    ? COMPRESSION_IMAGE_KINDS.has(detectedKind)
+    : IMAGE_KINDS.has(detectedKind);
 }
 
 export function ImageWorkbench({
@@ -210,24 +227,31 @@ export function ImageWorkbench({
   }
   const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const intentCopy = INTENT_CONFIG[intent];
+  const isCompressionIntent = intent === "compress";
   const [initialPreset] = useState(() => resolveInitialPreset(intent));
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
   const [presetId, setPresetId] = useState(initialPreset.presetId);
-  const [spec, setSpec] = useState<ImagePipelineSpecV1>(initialPreset.spec);
+  const [spec, setSpec] = useState<ImagePipelineSpecV2>(initialPreset.spec);
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [detectionProgress, setDetectionProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [message, setMessage] = useState("이미지를 선택하면 바로 준비할게요.");
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const batchRef = useRef<BatchHandle | undefined>(undefined);
   const activeRunRef = useRef(0);
+  const detectionGenerationRef = useRef(0);
   const itemsRef = useRef(items);
   const objectUrlsRef = useRef(new Set<string>());
   const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const busy = processing || archiving;
+  const detecting = detectionProgress !== null;
+  const busy = processing || archiving || detecting;
 
   const commitItems = useCallback((update: (current: WorkItem[]) => WorkItem[]) => {
     const next = update(itemsRef.current);
@@ -271,6 +295,7 @@ export function ImageWorkbench({
   useEffect(
     () => () => {
       activeRunRef.current += 1;
+      detectionGenerationRef.current += 1;
       batchRef.current?.cancel();
       for (const timeoutId of archiveLeasesRef.current.values()) clearTimeout(timeoutId);
       archiveLeasesRef.current.clear();
@@ -281,49 +306,108 @@ export function ImageWorkbench({
   );
 
   const addFiles = useCallback(
-    (fileList: FileList | readonly File[]) => {
+    async (fileList: FileList | readonly File[]) => {
       const candidates = Array.from(fileList);
-      const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
-      let remainingBytes = Math.max(0, maxTotalBytes - currentBytes);
-      const available = Math.max(0, maxFiles - itemsRef.current.length);
-      const accepted: File[] = [];
+      const generation = detectionGenerationRef.current + 1;
+      detectionGenerationRef.current = generation;
 
-      for (const file of candidates) {
-        if (
-          accepted.length >= available ||
-          !isAcceptedFile(file) ||
-          file.size < 1 ||
-          file.size > maxFileBytes ||
-          file.size > remainingBytes
-        ) {
-          continue;
+      if (candidates.length === 0) {
+        setDetectionProgress(null);
+        return;
+      }
+
+      setDragging(false);
+      setDetectionProgress({ completed: 0, total: candidates.length });
+      setMessage(`0/${candidates.length}개 이미지 형식을 확인하고 있어요.`);
+
+      try {
+        const detected = await detectFileSelection(candidates, {
+          isCurrent: () => detectionGenerationRef.current === generation,
+          onProgress: ({ completed, total }) => {
+            if (detectionGenerationRef.current !== generation) return;
+            setDetectionProgress({ completed, total });
+            setMessage(`${completed}/${total}개 이미지 형식을 확인하고 있어요.`);
+          },
+        });
+        if (detected === null || detectionGenerationRef.current !== generation) return;
+
+        const currentBytes = itemsRef.current.reduce((total, item) => total + item.file.size, 0);
+        let remainingBytes = Math.max(0, maxTotalBytes - currentBytes);
+        const available = Math.max(0, maxFiles - itemsRef.current.length);
+        const accepted: Array<{ file: File; detectedKind: FileKind }> = [];
+        const rejectedHeicCount =
+          intent === "compress"
+            ? detected.filter(
+                ({ detectedKind }) => detectedKind !== null && HEIC_KINDS.has(detectedKind),
+              ).length
+            : 0;
+
+        for (const { file, detectedKind } of detected) {
+          if (
+            accepted.length >= available ||
+            !isAcceptedKind(detectedKind, intent) ||
+            file.size < 1 ||
+            file.size > maxFileBytes ||
+            file.size > remainingBytes
+          ) {
+            continue;
+          }
+          accepted.push({ file, detectedKind });
+          remainingBytes -= file.size;
         }
-        accepted.push(file);
-        remainingBytes -= file.size;
-      }
 
-      const additions = accepted.map<WorkItem>((file) => ({
-        id: makeId(),
-        file,
-        previewUrl: createOwnedUrl(file),
-        status: "ready",
-        progress: 0,
-      }));
+        const additions = accepted.map<WorkItem>(({ file, detectedKind }) => ({
+          id: makeId(),
+          file,
+          detectedKind,
+          previewUrl: createOwnedUrl(file),
+          status: "ready",
+          progress: 0,
+        }));
 
-      if (additions.length > 0) {
-        commitItems((current) => [...current, ...additions]);
-        setSelectedId((current) => current ?? additions[0]?.id);
-        setMessage(`${additions.length}개 이미지를 준비했어요.`);
-      }
+        if (additions.length > 0) {
+          commitItems((current) => [...current, ...additions]);
+          setSelectedId((current) => current ?? additions[0]?.id);
+          setMessage(`${additions.length}개 이미지를 준비했어요.`);
+        }
 
-      const rejected = candidates.length - additions.length;
-      if (rejected > 0) {
-        setMessage(
-          `${additions.length}개를 추가했어요. ${rejected}개는 형식·파일당 50MB·총 250MB·개수 제한으로 제외했어요.`,
-        );
+        const rejected = detected.length - additions.length;
+        if (rejectedHeicCount > 0) {
+          const otherRejected = Math.max(0, rejected - rejectedHeicCount);
+          setMessage(
+            additions.length === 0 && otherRejected === 0
+              ? HEIC_COMPRESSION_MESSAGE
+              : [
+                  `${additions.length}개를 추가했어요.`,
+                  HEIC_COMPRESSION_MESSAGE,
+                  otherRejected > 0
+                    ? `그 밖의 ${otherRejected}개는 형식·용량·개수 제한으로 제외했어요.`
+                    : undefined,
+                ]
+                  .filter((part): part is string => part !== undefined)
+                  .join(" "),
+          );
+          return;
+        }
+
+        if (rejected > 0) {
+          setMessage(
+            `${additions.length}개를 추가했어요. ${rejected}개는 형식·파일당 50MB·총 250MB·개수 제한으로 제외했어요.`,
+          );
+        }
+      } catch (error) {
+        if (detectionGenerationRef.current === generation) {
+          setMessage(
+            error instanceof LauncherFileLimitError
+              ? `파일은 한 번에 최대 ${error.maximum}개까지 선택할 수 있어요. 파일을 나눠 주세요.`
+              : "파일 형식을 확인하지 못했어요. 다시 선택해 주세요.",
+          );
+        }
+      } finally {
+        if (detectionGenerationRef.current === generation) setDetectionProgress(null);
       }
     },
-    [commitItems, createOwnedUrl, maxFileBytes, maxFiles, maxTotalBytes],
+    [commitItems, createOwnedUrl, intent, maxFileBytes, maxFiles, maxTotalBytes],
   );
 
   usePendingToolFiles({
@@ -345,8 +429,8 @@ export function ImageWorkbench({
       ) {
         return;
       }
-      const imageFiles = Array.from(event.clipboardData?.files ?? []).filter(isAcceptedFile);
-      if (imageFiles.length > 0) addFiles(imageFiles);
+      const files = Array.from(event.clipboardData?.files ?? []);
+      if (files.length > 0) void addFiles(files);
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
@@ -372,6 +456,23 @@ export function ImageWorkbench({
     () => completedItems.reduce((total, item) => total + (item.result?.byteLength ?? 0), 0),
     [completedItems],
   );
+  const visiblePresets = useMemo(() => {
+    const presetIds = INTENT_PRESET_IDS[intent];
+    return presetIds === null
+      ? imagePresets
+      : imagePresets.filter((preset) => presetIds.includes(preset.id));
+  }, [intent]);
+  const pngItemCount = useMemo(
+    () => items.filter((item) => item.detectedKind === "image/png").length,
+    [items],
+  );
+  const hasLossyCompressionInput = useMemo(
+    () =>
+      items.some(
+        (item) => item.detectedKind === "image/jpeg" || item.detectedKind === "image/webp",
+      ),
+    [items],
+  );
 
   const invalidateResults = () => {
     releaseArchiveLeases();
@@ -382,7 +483,11 @@ export function ImageWorkbench({
     if (!hasResultOrError) return;
     for (const item of itemsRef.current) revokeOwnedUrl(item.resultUrl);
     commitItems((current) => current.map((item) => resetWorkItem(item)));
-    setMessage("설정이 바뀌었어요. 새 설정으로 다시 변환해 주세요.");
+    setMessage(
+      isCompressionIntent
+        ? "설정이 바뀌었어요. 새 설정으로 다시 압축해 주세요."
+        : "설정이 바뀌었어요. 새 설정으로 다시 변환해 주세요.",
+    );
   };
 
   const choosePreset = (id: string) => {
@@ -477,6 +582,7 @@ export function ImageWorkbench({
   const reset = () => {
     releaseArchiveLeases();
     activeRunRef.current += 1;
+    detectionGenerationRef.current += 1;
     batchRef.current?.cancel();
     batchRef.current = undefined;
     for (const item of itemsRef.current) {
@@ -488,6 +594,7 @@ export function ImageWorkbench({
     setSelectedId(undefined);
     setProcessing(false);
     setArchiving(false);
+    setDetectionProgress(null);
     setMessage("이미지를 선택하면 바로 준비할게요.");
   };
 
@@ -558,7 +665,11 @@ export function ImageWorkbench({
     itemsRef.current = queuedItems;
     setItems(queuedItems);
     setProcessing(true);
-    setMessage(`${sourceItems.length}개 이미지를 변환하고 있어요.`);
+    setMessage(
+      isCompressionIntent
+        ? `${sourceItems.length}개 이미지를 압축하고 있어요.`
+        : `${sourceItems.length}개 이미지를 변환하고 있어요.`,
+    );
 
     let handle: BatchHandle | undefined;
     try {
@@ -583,7 +694,11 @@ export function ImageWorkbench({
         (result) => result.status === "rejected" && result.error.code !== "NO_SIZE_REDUCTION",
       ).length;
       if (successes === results.length) {
-        setMessage(String(successes).concat("개 이미지 변환을 완료했어요."));
+        setMessage(
+          String(successes).concat(
+            isCompressionIntent ? "개 이미지 압축을 완료했어요." : "개 이미지 변환을 완료했어요.",
+          ),
+        );
       } else if (unchanged === results.length) {
         setMessage("이미 충분히 작아 더 줄이지 못했어요.");
       } else if (successes > 0) {
@@ -712,21 +827,32 @@ export function ImageWorkbench({
   const onDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDragging(false);
-    if (!busy) addFiles(event.dataTransfer.files);
+    if (!busy) void addFiles(event.dataTransfer.files);
   };
 
   return (
     <section className={styles.shell} aria-labelledby="workbench-title">
+      <p className={styles.liveStatus} role="status" aria-live="polite" aria-atomic="true">
+        {!hydrated
+          ? "도구를 준비하고 있어요…"
+          : runtimeSupported
+            ? message
+            : "최신 Safari, Chrome, Firefox 또는 Edge에서 사용할 수 있어요."}
+      </p>
       <input
         ref={inputRef}
         className={styles.hiddenInput}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+        accept={
+          intent === "compress"
+            ? "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+            : "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+        }
         multiple
         tabIndex={-1}
         disabled={!hydrated || busy || !runtimeSupported}
         onChange={(event) => {
-          if (event.target.files !== null) addFiles(event.target.files);
+          if (event.target.files !== null) void addFiles(event.target.files);
           event.target.value = "";
         }}
       />
@@ -737,7 +863,7 @@ export function ImageWorkbench({
           aria-labelledby="workbench-title"
           onDragEnter={(event) => {
             event.preventDefault();
-            setDragging(true);
+            if (!busy) setDragging(true);
           }}
           onDragOver={(event) => event.preventDefault()}
           onDragLeave={(event) => {
@@ -751,19 +877,22 @@ export function ImageWorkbench({
           <div>
             <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
             <h2 id="workbench-title">{intentCopy.emptyTitle}</h2>
-            <p>JPG, PNG, WebP · HEIC(Safari 17+) · 파일당 50MB · 총 250MB · 최대 100개</p>
+            <p>
+              {intent === "compress" ? "JPG, PNG, WebP" : "JPG, PNG, WebP · HEIC(Safari 17+)"}
+              {" · 파일당 50MB · 총 250MB · 최대 100개"}
+            </p>
           </div>
           <div className={styles.dropActions}>
             <button
               className={styles.primaryButton}
               type="button"
-              disabled={!hydrated || !runtimeSupported}
+              disabled={!hydrated || busy || !runtimeSupported}
               onClick={() => inputRef.current?.click()}
             >
               {intentCopy.selectLabel}
             </button>
             <span className={styles.pasteHint}>⌘V 또는 Ctrl+V로 붙여넣기</span>
-            <p className={styles.emptyStatus} role="status" aria-live="polite" aria-atomic="true">
+            <p className={styles.emptyStatus} data-testid="image-workbench-status">
               {!hydrated
                 ? "도구를 준비하고 있어요…"
                 : runtimeSupported
@@ -829,7 +958,7 @@ export function ImageWorkbench({
                         <strong>{item.file.name}</strong>
                         <small>
                           {item.status === "processing"
-                            ? `${phaseLabel(item.phase)} ${Math.round(item.progress * 100)}%`
+                            ? `${phaseLabel(item.phase, intent)} ${Math.round(item.progress * 100)}%`
                             : item.status === "completed" && item.result !== undefined
                               ? `${formatBytes(item.file.size)} → ${formatBytes(item.result.byteLength)} · ${formatSavings(item.file.size, item.result.byteLength)} · ${formatDuration(item.result.timing.totalMs)}`
                               : item.status === "unchanged"
@@ -854,7 +983,7 @@ export function ImageWorkbench({
                       <span
                         className={styles.rowProgress}
                         role="progressbar"
-                        aria-label={`${item.file.name} 변환 진행률`}
+                        aria-label={`${item.file.name} ${isCompressionIntent ? "압축" : "변환"} 진행률`}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(item.progress * 100)}
@@ -866,7 +995,10 @@ export function ImageWorkbench({
               </div>
             </aside>
 
-            <aside className={styles.settingsPanel} aria-label="변환 설정">
+            <aside
+              className={styles.settingsPanel}
+              aria-label={isCompressionIntent ? "압축 설정" : "변환 설정"}
+            >
               <div className={styles.panelTitle}>
                 <strong>설정</strong>
                 <span>{presetId === "custom" ? "직접 설정" : "모두 적용"}</span>
@@ -875,7 +1007,7 @@ export function ImageWorkbench({
               <fieldset className={styles.settingsGroup} disabled={busy}>
                 <legend>빠른 프리셋</legend>
                 <div className={styles.presetList}>
-                  {imagePresets.map((preset) => (
+                  {visiblePresets.map((preset) => (
                     <button
                       className={presetId === preset.id ? styles.activePreset : ""}
                       type="button"
@@ -893,64 +1025,81 @@ export function ImageWorkbench({
                 </div>
               </fieldset>
 
-              <fieldset className={styles.settingsGroup} disabled={busy}>
-                <legend>크기</legend>
-                <div className={styles.segmented}>
-                  {[
-                    ["none", "유지"],
-                    ["inside", "최대 크기"],
-                    ["cover", "정사각 자르기"],
-                  ].map(([value, label]) => (
-                    <button
-                      className={spec.resize.kind === value ? styles.activeSegment : ""}
-                      type="button"
-                      key={value}
-                      aria-pressed={spec.resize.kind === value}
-                      onClick={() => changeResizeMode(value as "none" | "inside" | "cover")}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {spec.resize.kind !== "none" && spec.resize.kind !== "stretch" && (
-                  <label className={styles.numberField}>
-                    <span>{spec.resize.kind === "cover" ? "정사각형 한 변" : "긴 변 최대"}</span>
-                    <span>
-                      <input
-                        type="number"
-                        min="64"
-                        max="16384"
-                        step="10"
-                        value={
-                          spec.resize.kind === "cover"
-                            ? spec.resize.width
-                            : (spec.resize.maxWidth ?? spec.resize.maxHeight ?? 1920)
-                        }
-                        onChange={(event) => changeSize(Number(event.target.value))}
-                      />
-                      px
-                    </span>
-                  </label>
-                )}
-              </fieldset>
+              {intent !== "compress" && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>크기</legend>
+                  <div className={styles.segmented}>
+                    {[
+                      ["none", "유지"],
+                      ["inside", "최대 크기"],
+                      ["cover", "정사각 자르기"],
+                    ].map(([value, label]) => (
+                      <button
+                        className={spec.resize.kind === value ? styles.activeSegment : ""}
+                        type="button"
+                        key={value}
+                        aria-pressed={spec.resize.kind === value}
+                        onClick={() => changeResizeMode(value as "none" | "inside" | "cover")}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {spec.resize.kind !== "none" && spec.resize.kind !== "stretch" && (
+                    <label className={styles.numberField}>
+                      <span>{spec.resize.kind === "cover" ? "정사각형 한 변" : "긴 변 최대"}</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="64"
+                          max="16384"
+                          step="10"
+                          value={
+                            spec.resize.kind === "cover"
+                              ? spec.resize.width
+                              : (spec.resize.maxWidth ?? spec.resize.maxHeight ?? 1920)
+                          }
+                          onChange={(event) => changeSize(Number(event.target.value))}
+                        />
+                        px
+                      </span>
+                    </label>
+                  )}
+                </fieldset>
+              )}
 
               <fieldset className={styles.settingsGroup} disabled={busy}>
                 <legend>형식과 품질</legend>
                 <label className={styles.selectField}>
                   <span>출력 형식</span>
-                  <select value={spec.output.format} onChange={changeFormat}>
-                    <option value="webp">WebP · 작은 용량</option>
-                    <option value="jpeg">JPG · 넓은 호환성</option>
-                    <option value="png">PNG · 무손실</option>
+                  <select
+                    value={intent === "compress" ? "source" : spec.output.format}
+                    disabled={intent === "compress"}
+                    onChange={changeFormat}
+                  >
+                    {intent === "compress" ? (
+                      <option value="source">원본 형식 유지</option>
+                    ) : (
+                      <>
+                        {spec.output.format === "source" && (
+                          <option value="source">원본 형식 유지</option>
+                        )}
+                        <option value="webp">WebP · 작은 용량</option>
+                        <option value="jpeg">JPG · 넓은 호환성</option>
+                        <option value="png">PNG · 무손실</option>
+                      </>
+                    )}
                   </select>
                 </label>
                 {spec.output.format !== "png" && (
                   <label className={styles.qualityField}>
                     <span>
-                      <span>품질</span>
+                      <span>{intent === "compress" ? "JPG/WebP 품질" : "품질"}</span>
                       <strong>{currentQuality(spec)}</strong>
                     </span>
                     <input
+                      aria-label={intent === "compress" ? "JPG/WebP 품질" : undefined}
+                      disabled={intent === "compress" && !hasLossyCompressionInput}
                       type="range"
                       min="35"
                       max="95"
@@ -970,8 +1119,23 @@ export function ImageWorkbench({
                     </span>
                   </p>
                 )}
+                {intent === "compress" && pngItemCount > 0 && (
+                  <p className={styles.formatWarning}>
+                    <strong>
+                      {items.length === 1
+                        ? "PNG는 무손실로 다시 저장해요."
+                        : `PNG ${pngItemCount}개는 무손실로 다시 저장해요.`}
+                    </strong>
+                    <span>더 작아지지 않으면 결과를 만들지 않아요.</span>
+                  </p>
+                )}
                 <label className={styles.sizeGoalField}>
-                  <input type="checkbox" checked={isSmallerOnly(spec)} onChange={changeSizeGoal} />
+                  <input
+                    type="checkbox"
+                    checked={intent === "compress" || isSmallerOnly(spec)}
+                    disabled={intent === "compress"}
+                    onChange={changeSizeGoal}
+                  />
                   <span>
                     <strong>원본보다 작을 때만 완료</strong>
                     <small>더 커지는 결과는 만들지 않아요.</small>
@@ -996,7 +1160,9 @@ export function ImageWorkbench({
                         ? "메모리 절약 모드"
                         : selected.resultUrl === undefined
                           ? "원본 미리보기"
-                          : "변환 전 · 후"}
+                          : isCompressionIntent
+                            ? "압축 전 · 후"
+                            : "변환 전 · 후"}
                     </span>
                     {selected.result !== undefined && (
                       <span>
@@ -1010,7 +1176,10 @@ export function ImageWorkbench({
                     {processing ? (
                       <div className={styles.previewMemoryNotice} role="status">
                         <strong>메모리를 아끼고 있어요</strong>
-                        <span>변환 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
+                        <span>
+                          {isCompressionIntent ? "압축" : "변환"} 중에는 고해상도 원본 미리보기를
+                          잠시 숨겨요.
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -1028,7 +1197,7 @@ export function ImageWorkbench({
                             {/* biome-ignore lint/performance/noImgElement: local generated result */}
                             <img
                               src={selected.resultUrl}
-                              alt={`${selected.file.name} 변환 결과`}
+                              alt={`${selected.file.name} ${isCompressionIntent ? "압축" : "변환"} 결과`}
                               decoding="async"
                             />
                             <figcaption>
@@ -1061,8 +1230,8 @@ export function ImageWorkbench({
           </div>
 
           <div className={styles.actionBar}>
-            <div className={styles.statusCopy} role="status" aria-live="polite" aria-atomic="true">
-              <strong>{message}</strong>
+            <div className={styles.statusCopy}>
+              <strong data-testid="image-workbench-status">{message}</strong>
               <span>
                 {completedItems.length > 0
                   ? `${formatBytes(completedInputBytes)} → ${formatBytes(totalOutputBytes)} · ${formatSavings(completedInputBytes, totalOutputBytes)}`
@@ -1079,10 +1248,10 @@ export function ImageWorkbench({
                   <button
                     className={styles.secondaryButton}
                     type="button"
-                    disabled={archiving}
+                    disabled={busy}
                     onClick={startProcessing}
                   >
-                    다시 변환
+                    {isCompressionIntent ? "다시 압축" : "다시 변환"}
                   </button>
                   <button
                     className={styles.runButton}
