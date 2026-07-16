@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./image-optimize": "./src/image-optimize.ts",
+    "./tool-job": "./src/tool-job.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
