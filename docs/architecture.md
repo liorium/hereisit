@@ -57,6 +57,12 @@ run alongside the processor-marker and route-import isolation checks.
 The initial `image.pipeline@1` tool guarantees one decode and one raster draw per item. Quality-based
 output performs one encode; target-byte mode may encode repeatedly against the already-rendered canvas.
 
+`image.pipeline@2` retains the v1 specification parser for explicit JPG, PNG, and WebP jobs and adds a
+v2 `source` output policy. The current catalog and Worker handshake advertise tool version 2, so an old
+v1 Worker cannot be mistaken for a processor that understands source-preserving compression. The
+runtime resolves `source` from inspected bytes, then validates the encoded result's signature, MIME,
+dimensions, and animation state before assigning its download name.
+
 The source-relative `smaller-only` goal is a hard postcondition. The runtime adaptively encodes against
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
@@ -134,7 +140,7 @@ and never offers a larger result. Only other PDF edits can make an output larger
 
 ## Resource policy
 
-`image.pipeline@1` dimensions are parsed from PNG, JPEG, and WebP structure before decode. Its runtime
+`image.pipeline@2` dimensions are parsed from PNG, JPEG, WebP, and supported HEIC structure before decode. Its runtime
 then keeps a defensive post-decode check, limits automatic concurrency to two Workers (one on low-memory
 devices), and enforces per-file, pixel, output, batch-input, and retained-result budgets. Worker creation
 errors, message decode failures, and a three-minute job watchdog settle into structured failures instead

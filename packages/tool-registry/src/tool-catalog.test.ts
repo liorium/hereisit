@@ -89,7 +89,7 @@ const expectedCopy = {
   "image.compress": {
     name: "이미지 용량 줄이기",
     shortDescription:
-      "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
+      "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
   },
   "image.resize": {
     name: "이미지 크기 조절",
@@ -157,7 +157,10 @@ describe("tool catalog", () => {
     expect(plannedToolEntries.map((tool) => tool.id)).toEqual(["media.video-compress"]);
     expect(getAvailableToolById("image.compress")).toMatchObject({
       route: "/image/compress",
-      contract: { id: "image.pipeline", version: 1 },
+      launcherInput: {
+        kinds: ["image/jpeg", "image/png", "image/webp"],
+      },
+      contract: { id: IMAGE_TOOL_ID, version: IMAGE_TOOL_VERSION },
       experience: "file",
       execution: "browser",
     });
@@ -308,7 +311,13 @@ describe("tool catalog", () => {
 
     const imageKinds = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
     const expectedExecution = {
-      "image.compress": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.compress": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp"],
+      ],
       "pdf.merge": [["application/pdf"], 2, 20, false, ["application/pdf"]],
       "image.resize": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
       "pdf.compress-scanned": [["application/pdf"], 1, 1, false, ["application/pdf"]],

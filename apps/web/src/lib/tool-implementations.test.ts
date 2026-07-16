@@ -126,6 +126,12 @@ describe("tool implementation ownership", () => {
   });
 
   it("owns the approved image watermark summary and exact scanned PDF warning", () => {
+    expect(getToolImplementation("image.compress")).toMatchObject({
+      defaultSummary:
+        "원본 형식과 크기를 유지하고 메타데이터를 제거한 뒤, 원본보다 작을 때만 결과를 만들어요.",
+      notices: [],
+    });
+
     const watermarkSummary = getToolImplementation("image.watermark").defaultSummary;
     for (const approvedCopy of ["© HereIsIt", "12%", "3%", "55%", "#111827", "품질 90"]) {
       expect(watermarkSummary).toContain(approvedCopy);

@@ -45,6 +45,93 @@ async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
+async function installHeldTransformingWorker(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type RunRequest = {
+      type: "run";
+      jobId: string;
+      input: { bytes: ArrayBuffer };
+    };
+    type TestWindow = Window & { __hereisitCompleteImageTransform?: () => void };
+
+    let pending: { request: RunRequest; worker: ControlledImageWorker } | undefined;
+
+    const complete = () => {
+      if (pending === undefined) return;
+      const { request, worker } = pending;
+      pending = undefined;
+      const bytes = request.input.bytes.slice(0);
+      worker.emit({
+        protocol: 1,
+        type: "complete",
+        jobId: request.jobId,
+        result: {
+          bytes,
+          suggestedName: "progress-hereisit.png",
+          mime: "image/png",
+          width: 1,
+          height: 1,
+          byteLength: bytes.byteLength,
+          warnings: [],
+          timing: {
+            inspectMs: 0,
+            decodeMs: 0,
+            transformMs: 0,
+            encodeMs: 0,
+            totalMs: 0,
+            encodeAttempts: 1,
+          },
+        },
+      });
+    };
+
+    class ControlledImageWorker {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      postMessage(message: unknown): void {
+        const request = message as Partial<RunRequest>;
+        if (
+          request.type !== "run" ||
+          typeof request.jobId !== "string" ||
+          !(request.input?.bytes instanceof ArrayBuffer)
+        ) {
+          throw new TypeError("Unexpected image Worker request.");
+        }
+        const run = request as RunRequest;
+        pending = { request: run, worker: this };
+        queueMicrotask(() => {
+          this.emit({
+            protocol: 1,
+            type: "progress",
+            jobId: run.jobId,
+            sequence: 0,
+            phase: "transforming",
+            fraction: 0.5,
+          });
+        });
+      }
+
+      emit(data: unknown): void {
+        this.onmessage?.({ data } as MessageEvent<unknown>);
+      }
+
+      terminate(): void {}
+    }
+
+    (window as TestWindow).__hereisitCompleteImageTransform = complete;
+    Object.defineProperty(navigator, "deviceMemory", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(window, "Worker", {
+      configurable: true,
+      value: ControlledImageWorker,
+    });
+  });
+}
+
 async function installInterleavedCompletionWorker(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type RunRequest = {
@@ -254,19 +341,21 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
   await page.getByRole("button", { name: /용량만 줄이기/ }).click();
   await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "1개 이미지 압축을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel("출력 형식")).toHaveValue("source");
+  await expect(page.getByLabel("출력 형식")).toBeDisabled();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
+  expect(download.suggestedFilename()).toBe("photo-hereisit.jpg");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   const output = new Uint8Array(await readFile(downloadPath as string));
   expect(output.byteLength).toBeLessThan(input.byteLength);
-  expect(new TextDecoder().decode(output.subarray(0, 4))).toBe("RIFF");
-  expect(new TextDecoder().decode(output.subarray(8, 12))).toBe("WEBP");
+  expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
 });
 
 test("does not produce a larger result in the size-only flow", async ({ page }) => {
@@ -279,12 +368,13 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   });
 
   await page.getByRole("button", { name: /용량만 줄이기/ }).click();
-  await page.getByLabel("출력 형식").selectOption("png");
   await expect(page.getByLabel("원본보다 작을 때만 완료")).toBeChecked();
-  await expect(page.getByText("PNG 무손실은 용량이 커질 수 있어요.")).toBeVisible();
-  await page.getByLabel("출력 형식").selectOption("webp");
-  await expect(page.locator("input[type=range]")).toHaveValue("82");
-  await page.getByLabel("출력 형식").selectOption("png");
+  await expect(page.getByLabel("원본보다 작을 때만 완료")).toBeDisabled();
+  await expect(page.getByLabel("출력 형식")).toHaveValue("source");
+  await expect(page.getByLabel("출력 형식")).toBeDisabled();
+  await expect(page.getByText("PNG는 무손실로 다시 저장해요.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("JPG/WebP 품질")).toHaveValue("82");
+  await expect(page.getByLabel("JPG/WebP 품질")).toBeDisabled();
 
   await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   await expect(
@@ -294,6 +384,71 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   ).toBeVisible();
   await expect(page.getByText("이미 최적화됨", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
+});
+
+test("uses compression copy during the source-preserving transform phase", async ({ page }) => {
+  await installHeldTransformingWorker(page);
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "progress.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+  await expect(page.getByText("이미지 준비 중 50%", { exact: true })).toBeVisible();
+  await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
+  await page.evaluate(() =>
+    (
+      window as Window & { __hereisitCompleteImageTransform?: () => void }
+    ).__hereisitCompleteImageTransform?.(),
+  );
+  await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    "1개 이미지 압축을 완료했어요.",
+  );
+});
+
+test("explains why HEIC cannot be compressed while preserving its format", async ({ page }) => {
+  await page.goto("/image/compress");
+  const heic = await readFile("tests/fixtures/rainbow-451x461.heic");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "disguised.jpg",
+    mimeType: "image/jpeg",
+    buffer: heic,
+  });
+
+  await expect(
+    page
+      .getByRole("status")
+      .getByText(
+        "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.",
+        { exact: true },
+      ),
+  ).toBeVisible();
+  await expect(page.getByText("disguised.jpg", { exact: true })).toHaveCount(0);
+});
+
+test("uses detected bytes for PNG guidance and mixed-batch quality", async ({ page }) => {
+  await page.goto("/image/compress");
+  const jpeg = await createPhotoLikeJpeg(page);
+  const fileInput = page.locator("input[type=file]");
+
+  await fileInput.setInputFiles({
+    name: "misleading.png",
+    mimeType: "image/png",
+    buffer: jpeg,
+  });
+  await expect(page.getByText("misleading.png", { exact: true })).toBeVisible();
+  await expect(page.getByText("PNG는 무손실로 다시 저장해요.", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("JPG/WebP 품질")).toBeEnabled();
+
+  await fileInput.setInputFiles({
+    name: "actual.png",
+    mimeType: "application/octet-stream",
+    buffer: onePixelPng,
+  });
+  await expect(page.getByText("PNG 1개는 무손실로 다시 저장해요.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("JPG/WebP 품질")).toBeEnabled();
 });
 
 test("downloads one image without consulting available Web Share APIs", async ({ page }) => {

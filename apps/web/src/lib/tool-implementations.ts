@@ -89,8 +89,8 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     sourceFileLimits: imageSourceFileLimits,
     eyebrow: "IMAGE COMPRESSOR",
     defaultSummary:
-      "기본값은 WebP로 변환해 원본보다 작게 만들고, 초고해상도만 최대 5000px로 조정해요.",
-    notices: [{ tone: "support", text: "HEIC 압축은 Safari 17 이상에서 지원해요." }],
+      "원본 형식과 크기를 유지하고 메타데이터를 제거한 뒤, 원본보다 작을 때만 결과를 만들어요.",
+    notices: [],
   },
   "image.resize": {
     family: "image",

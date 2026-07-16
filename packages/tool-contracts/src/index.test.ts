@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  IMAGE_TOOL_VERSION,
   IMAGE_WATERMARK_TOOL_ID,
   IMAGE_WATERMARK_TOOL_VERSION,
   imagePipelineSpecSchema,
@@ -37,6 +38,50 @@ const baseImageWatermarkSpec = {
 };
 
 describe("imagePipelineSpecSchema", () => {
+  it("publishes source-format compression only in image pipeline v2", () => {
+    expect(IMAGE_TOOL_VERSION).toBe(2);
+    expect(
+      imagePipelineSpecSchema.safeParse({
+        version: 1,
+        resize: { kind: "none" },
+        output: { format: "source", compression: { mode: "quality", quality: 82 } },
+        sizeGoal: { mode: "smaller-only" },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+
+    const result = imagePipelineSpecSchema.parse({
+      version: 2,
+      resize: { kind: "none" },
+      output: { format: "source", compression: { mode: "quality", quality: 82 } },
+      sizeGoal: { mode: "smaller-only" },
+      autoOrient: true,
+      metadata: "strip",
+    });
+
+    expect(result.output).toEqual({
+      format: "source",
+      compression: { mode: "quality", quality: 82 },
+    });
+  });
+
+  it("rejects a max-byte policy that cannot apply to source PNG", () => {
+    expect(
+      imagePipelineSpecSchema.safeParse({
+        version: 2,
+        resize: { kind: "none" },
+        output: {
+          format: "source",
+          compression: { mode: "maxBytes", maxBytes: 10_000 },
+        },
+        sizeGoal: { mode: "smaller-only" },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects an inverted target-size quality range", () => {
     const result = imagePipelineSpecSchema.safeParse({
       version: 1,

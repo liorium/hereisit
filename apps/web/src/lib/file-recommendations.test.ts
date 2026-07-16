@@ -78,6 +78,13 @@ describe("planFileRecommendations", () => {
     ).toEqual({ state: "unsupported", unknownCount: 2, groups: [] });
   });
 
+  it("does not recommend source-preserving compression for a detected HEIC image", () => {
+    const ids = recommendationIds([detectedFile("phone.jpg", "image/heic")]);
+
+    expect(ids).not.toContain("image.compress");
+    expect(ids).toContain("image.convert");
+  });
+
   it("reports that PDF merge needs one more file for a single PDF", () => {
     const plan = planFileRecommendations([detectedFile("document.pdf", "application/pdf")]);
 
