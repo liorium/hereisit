@@ -150,7 +150,7 @@ CREATE TABLE job_quarantine (
 );
 
 CREATE TABLE artifact_cleanup_tombstones (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY NOT NULL,
   input_key TEXT UNIQUE,
   output_key TEXT UNIQUE,
   input_exists INTEGER NOT NULL CHECK (input_exists IN (0, 1)),
@@ -165,7 +165,8 @@ CREATE TABLE artifact_cleanup_tombstones (
   CHECK (
     input_key IS NULL OR (
       substr(input_key, 1, 7) = 'inputs/'
-      AND length(input_key) = 43
+      AND length(CAST(input_key AS BLOB)) = 43
+      AND instr(CAST(input_key AS BLOB), x'00') = 0
       AND substr(input_key, 16, 1) = '-'
       AND substr(input_key, 21, 1) = '-'
       AND substr(input_key, 26, 1) = '-'
@@ -177,7 +178,8 @@ CREATE TABLE artifact_cleanup_tombstones (
   CHECK (
     output_key IS NULL OR (
       substr(output_key, 1, 8) = 'outputs/'
-      AND length(output_key) = 44
+      AND length(CAST(output_key AS BLOB)) = 44
+      AND instr(CAST(output_key AS BLOB), x'00') = 0
       AND substr(output_key, 17, 1) = '-'
       AND substr(output_key, 22, 1) = '-'
       AND substr(output_key, 27, 1) = '-'
@@ -188,7 +190,8 @@ CREATE TABLE artifact_cleanup_tombstones (
   ),
   CHECK (
     last_error_code IS NULL OR (
-      length(last_error_code) BETWEEN 1 AND 64
+      length(CAST(last_error_code AS BLOB)) BETWEEN 1 AND 64
+      AND instr(CAST(last_error_code AS BLOB), x'00') = 0
       AND last_error_code = upper(last_error_code)
       AND last_error_code NOT GLOB '*[^A-Z0-9_]*'
     )

@@ -181,6 +181,51 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
   } as Env;
 }
 
+function runTombstoneSqliteProbe(probe: string): void {
+  const migrationPath = fileURLToPath(
+    new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
+  );
+  const script = `
+    const { readFileSync } = require("node:fs");
+    const { DatabaseSync } = require("node:sqlite");
+    const database = new DatabaseSync(":memory:");
+    database.exec(readFileSync(process.argv[1], "utf8"));
+
+    const insertInput = database.prepare(
+      "INSERT INTO artifact_cleanup_tombstones " +
+        "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
+        "next_attempt_at, attempt_count, last_error_code) " +
+        "VALUES (?, ?, NULL, 1, 0, 0, 0, 0, ?)",
+    );
+    const insertOutput = database.prepare(
+      "INSERT INTO artifact_cleanup_tombstones " +
+        "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
+        "next_attempt_at, attempt_count, last_error_code) " +
+        "VALUES (?, NULL, ?, 0, 1, 0, 0, 0, ?)",
+    );
+    const uuid = "01234567-89ab-cdef-0123-456789abcdef";
+
+    function expectRejected(statement, values, label) {
+      try {
+        statement.run(...values);
+      } catch {
+        return;
+      }
+      throw new Error("Accepted invalid tombstone value: " + label);
+    }
+
+    try {
+      ${probe}
+    } finally {
+      database.close();
+    }
+  `;
+
+  execFileSync(process.execPath, ["--no-warnings", "-e", script, migrationPath], {
+    stdio: "pipe",
+  });
+}
+
 describe("job and session authentication hashes", () => {
   it("hashes a valid 32-byte base64url token as the SHA-256 of its decoded bytes", async () => {
     await expect(hashJobToken(jobToken)).resolves.toBe(
@@ -685,8 +730,10 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "CHECK ((output_key IS NULL AND output_exists = 0) OR (output_key IS NOT NULL AND output_exists = 1))",
     );
     expect(migration).toContain("CHECK (input_exists = 1 OR output_exists = 1)");
+    expect(migration).toContain("id TEXT PRIMARY KEY NOT NULL");
     expect(migration).toContain("substr(input_key, 1, 7) = 'inputs/'");
-    expect(migration).toContain("length(input_key) = 43");
+    expect(migration).toContain("length(CAST(input_key AS BLOB)) = 43");
+    expect(migration).toContain("instr(CAST(input_key AS BLOB), x'00') = 0");
     expect(migration).toContain("substr(input_key, 16, 1) = '-'");
     expect(migration).toContain("substr(input_key, 21, 1) = '-'");
     expect(migration).toContain("substr(input_key, 26, 1) = '-'");
@@ -694,7 +741,8 @@ describe("Wrangler source-of-truth and generated environment", () => {
     expect(migration).toContain("length(replace(substr(input_key, 8), '-', '')) = 32");
     expect(migration).toContain("replace(substr(input_key, 8), '-', '') NOT GLOB '*[^0-9a-f]*'");
     expect(migration).toContain("substr(output_key, 1, 8) = 'outputs/'");
-    expect(migration).toContain("length(output_key) = 44");
+    expect(migration).toContain("length(CAST(output_key AS BLOB)) = 44");
+    expect(migration).toContain("instr(CAST(output_key AS BLOB), x'00') = 0");
     expect(migration).toContain("substr(output_key, 17, 1) = '-'");
     expect(migration).toContain("substr(output_key, 22, 1) = '-'");
     expect(migration).toContain("substr(output_key, 27, 1) = '-'");
@@ -704,46 +752,30 @@ describe("Wrangler source-of-truth and generated environment", () => {
     expect(migration).toContain("CHECK (first_failed_at >= 0)");
     expect(migration).toContain("CHECK (next_attempt_at >= 0)");
     expect(migration).toContain("CHECK (attempt_count >= 0)");
-    expect(migration).toContain("length(last_error_code) BETWEEN 1 AND 64");
+    expect(migration).toContain("length(CAST(last_error_code AS BLOB)) BETWEEN 1 AND 64");
+    expect(migration).toContain("instr(CAST(last_error_code AS BLOB), x'00') = 0");
     expect(migration).toContain("last_error_code = upper(last_error_code)");
     expect(migration).toContain("last_error_code NOT GLOB '*[^A-Z0-9_]*'");
   });
 
-  it("enforces canonical tombstone object keys in an actual SQLite database", () => {
-    const migrationPath = fileURLToPath(
-      new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
-    );
-    const probe = `
-      const { readFileSync } = require("node:fs");
-      const { DatabaseSync } = require("node:sqlite");
-      const database = new DatabaseSync(":memory:");
-      database.exec(readFileSync(process.argv[1], "utf8"));
-
-      const insertInput = database.prepare(
-        "INSERT INTO artifact_cleanup_tombstones " +
-          "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
-          "next_attempt_at, attempt_count, last_error_code) " +
-          "VALUES (?, ?, NULL, 1, 0, 0, 0, 0, NULL)",
-      );
-      const insertOutput = database.prepare(
-        "INSERT INTO artifact_cleanup_tombstones " +
-          "(id, input_key, output_key, input_exists, output_exists, first_failed_at, " +
-          "next_attempt_at, attempt_count, last_error_code) " +
-          "VALUES (?, NULL, ?, 0, 1, 0, 0, 0, NULL)",
-      );
-      const uuid = "01234567-89ab-cdef-0123-456789abcdef";
-      insertInput.run("valid-input", "inputs/" + uuid);
-      insertOutput.run("valid-output", "outputs/" + uuid);
-
-      function expectRejected(statement, id, key) {
-        try {
-          statement.run(id, key);
-        } catch {
-          return;
+  it("accepts canonical tombstone keys and error codes in actual SQLite", () => {
+    expect(() =>
+      runTombstoneSqliteProbe(`
+        insertInput.run("valid-input", "inputs/" + uuid, "DELETE_RETRY");
+        insertOutput.run("valid-output", "outputs/" + uuid, "DELETE_RETRY");
+        const row = database
+          .prepare("SELECT COUNT(*) AS count FROM artifact_cleanup_tombstones")
+          .get();
+        if (row.count !== 2) {
+          throw new Error("Canonical tombstones were not stored.");
         }
-        throw new Error("Accepted invalid tombstone key: " + key);
-      }
+      `),
+    ).not.toThrow();
+  });
 
+  it("rejects malformed tombstone key shapes in actual SQLite", () => {
+    expect(() =>
+      runTombstoneSqliteProbe(`
       const invalidInputKeys = [
         "inputs/" + "-".repeat(36),
         "inputs/" + uuid + "-",
@@ -757,18 +789,55 @@ describe("Wrangler source-of-truth and generated environment", () => {
         "outputz/" + uuid,
       ];
       invalidInputKeys.forEach((key, index) =>
-        expectRejected(insertInput, "invalid-input-" + index, key),
+        expectRejected(insertInput, ["invalid-input-" + index, key, null], key),
       );
       invalidOutputKeys.forEach((key, index) =>
-        expectRejected(insertOutput, "invalid-output-" + index, key),
+        expectRejected(insertOutput, ["invalid-output-" + index, key, null], key),
       );
-      database.close();
-    `;
+      `),
+    ).not.toThrow();
+  });
 
+  it("rejects embedded-NUL tombstone object-key suffixes in actual SQLite", () => {
     expect(() =>
-      execFileSync(process.execPath, ["--no-warnings", "-e", probe, migrationPath], {
-        stdio: "pipe",
-      }),
+      runTombstoneSqliteProbe(`
+        const nul = String.fromCharCode(0);
+        expectRejected(
+          insertInput,
+          ["nul-input", "inputs/" + uuid + nul + "evil", null],
+          "embedded NUL input key",
+        );
+        expectRejected(
+          insertOutput,
+          ["nul-output", "outputs/" + uuid + nul + "evil", null],
+          "embedded NUL output key",
+        );
+      `),
+    ).not.toThrow();
+  });
+
+  it("rejects embedded-NUL tombstone error-code suffixes in actual SQLite", () => {
+    expect(() =>
+      runTombstoneSqliteProbe(`
+        const nul = String.fromCharCode(0);
+        expectRejected(
+          insertInput,
+          ["nul-error", "inputs/" + uuid, "SAFE" + nul + "RAW_PROVIDER_SECRET"],
+          "embedded NUL error code",
+        );
+      `),
+    ).not.toThrow();
+  });
+
+  it("rejects NULL tombstone identifiers in actual SQLite", () => {
+    expect(() =>
+      runTombstoneSqliteProbe(`
+        expectRejected(
+          insertInput,
+          [null, "inputs/" + uuid, null],
+          "NULL tombstone id",
+        );
+      `),
     ).not.toThrow();
   });
 
