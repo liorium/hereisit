@@ -59,18 +59,31 @@ const jobUploadPathSchema = z
     message: "업로드 경로는 작업 입력 경로여야 합니다.",
   });
 
-export const toolJobUploadDescriptorSchema = z
-  .object({
-    kind: z.literal("worker-stream-put"),
-    method: z.literal("PUT"),
-    path: jobUploadPathSchema,
-    contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-    byteLength: positiveByteLengthSchema,
-    expiresAt: offsetDateTimeSchema,
-  })
-  .strict();
+export type ToolJobUploadDescriptor<ContentType extends string = string> = {
+  kind: "worker-stream-put";
+  method: "PUT";
+  path: `/v1/jobs/${string}/input`;
+  contentType: ContentType;
+  byteLength: number;
+  expiresAt: string;
+};
 
-export type ToolJobUploadDescriptor = z.infer<typeof toolJobUploadDescriptorSchema>;
+export function createToolJobUploadDescriptorSchema<ContentTypeSchema extends z.ZodType<string>>(
+  contentTypeSchema: ContentTypeSchema,
+) {
+  return z
+    .object({
+      kind: z.literal("worker-stream-put"),
+      method: z.literal("PUT"),
+      path: jobUploadPathSchema,
+      contentType: contentTypeSchema,
+      byteLength: positiveByteLengthSchema,
+      expiresAt: offsetDateTimeSchema,
+    })
+    .strict();
+}
+
+export const toolJobUploadDescriptorSchema = createToolJobUploadDescriptorSchema(z.string().min(1));
 
 const existingToolJobStateSchema = z.enum([
   "queued",
@@ -81,28 +94,63 @@ const existingToolJobStateSchema = z.enum([
   "expired",
 ]);
 
-export const toolJobCreateResponseSchema = z.discriminatedUnion("mode", [
-  z
-    .object({
-      contract: z.literal(TOOL_JOB_CONTRACT_ID),
-      mode: z.literal("upload-required"),
-      jobId: z.uuid(),
-      upload: toolJobUploadDescriptorSchema,
-      reservedWeightedUnits: nonNegativeFiniteNumberSchema,
-    })
-    .strict(),
-  z
-    .object({
-      contract: z.literal(TOOL_JOB_CONTRACT_ID),
-      mode: z.literal("existing-job"),
-      jobId: z.uuid(),
-      state: existingToolJobStateSchema,
-      reservedWeightedUnits: nonNegativeFiniteNumberSchema,
-    })
-    .strict(),
-]);
+export type ToolJobCreateResponse<ContentType extends string = string> =
+  | {
+      contract: typeof TOOL_JOB_CONTRACT_ID;
+      mode: "upload-required";
+      jobId: string;
+      upload: ToolJobUploadDescriptor<ContentType>;
+      reservedWeightedUnits: number;
+    }
+  | {
+      contract: typeof TOOL_JOB_CONTRACT_ID;
+      mode: "existing-job";
+      jobId: string;
+      state: Exclude<ToolJobState, "created" | "uploading">;
+      reservedWeightedUnits: number;
+    };
 
-export type ToolJobCreateResponse = z.infer<typeof toolJobCreateResponseSchema>;
+export function createToolJobCreateResponseSchema<ContentTypeSchema extends z.ZodType<string>>(
+  contentTypeSchema: ContentTypeSchema,
+) {
+  const uploadDescriptorSchema = createToolJobUploadDescriptorSchema(contentTypeSchema);
+
+  return z
+    .discriminatedUnion("mode", [
+      z
+        .object({
+          contract: z.literal(TOOL_JOB_CONTRACT_ID),
+          mode: z.literal("upload-required"),
+          jobId: z.uuid(),
+          upload: uploadDescriptorSchema,
+          reservedWeightedUnits: nonNegativeFiniteNumberSchema,
+        })
+        .strict(),
+      z
+        .object({
+          contract: z.literal(TOOL_JOB_CONTRACT_ID),
+          mode: z.literal("existing-job"),
+          jobId: z.uuid(),
+          state: existingToolJobStateSchema,
+          reservedWeightedUnits: nonNegativeFiniteNumberSchema,
+        })
+        .strict(),
+    ])
+    .superRefine((response, context) => {
+      if (
+        response.mode === "upload-required" &&
+        response.upload.path !== `/v1/jobs/${response.jobId}/input`
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "업로드 경로는 응답의 작업 ID와 일치해야 합니다.",
+          path: ["upload", "path"],
+        });
+      }
+    });
+}
+
+export const toolJobCreateResponseSchema = createToolJobCreateResponseSchema(z.string().min(1));
 
 export const toolJobMutationAcknowledgementSchema = z
   .object({

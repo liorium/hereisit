@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { createToolJobStatusEnvelopeSchema, TOOL_JOB_CONTRACT_ID } from "./tool-job";
+import {
+  createToolJobCreateResponseSchema,
+  createToolJobStatusEnvelopeSchema,
+  createToolJobUploadDescriptorSchema,
+  TOOL_JOB_CONTRACT_ID,
+} from "./tool-job";
 
 export const IMAGE_OPTIMIZE_CONTRACT_ID = "image.optimize@1" as const;
 export const IMAGE_OPTIMIZE_MAX_FILE_BYTES = 30 * 1024 * 1024;
@@ -8,6 +13,18 @@ export const IMAGE_OPTIMIZE_MAX_DIMENSION = 32_768;
 export const IMAGE_OPTIMIZE_MAX_FILES = 20;
 
 export const imageOptimizeMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
+
+export type ImageOptimizeMime = z.infer<typeof imageOptimizeMimeSchema>;
+
+export const imageOptimizeUploadDescriptorSchema =
+  createToolJobUploadDescriptorSchema(imageOptimizeMimeSchema);
+
+export type ImageOptimizeUploadDescriptor = z.infer<typeof imageOptimizeUploadDescriptorSchema>;
+
+export const imageOptimizeCreateResponseSchema =
+  createToolJobCreateResponseSchema(imageOptimizeMimeSchema);
+
+export type ImageOptimizeCreateResponse = z.infer<typeof imageOptimizeCreateResponseSchema>;
 
 export const imageOptimizeWarningCodeSchema = z.enum([
   "COLOR_PROFILE_NORMALIZED",
@@ -170,31 +187,54 @@ const serverTemporaryResultDeletionSchema = z
 
 const notUploadedResultDeletionSchema = z.object({ mode: z.literal("not-uploaded") }).strict();
 
-export const imageOptimizePolicyResponseSchema = z
+const serverPolicyDisclosureSchema = z
   .object({
-    contract: z.literal(TOOL_JOB_CONTRACT_ID),
-    toolContract: z.literal(IMAGE_OPTIMIZE_CONTRACT_ID),
-    execution: z.enum(["server", "local"]),
-    reason: z.enum(["SERVER_PROCESSING_DISABLED", "LOCAL_FALLBACK_REQUIRED"]).nullable(),
-    maintainer: z.boolean(),
-    disclosure: z
-      .object({
-        upload: z.boolean(),
-        inputDeletion: z.enum(["terminal", "not-uploaded"]),
-        resultDeletion: z.union([
-          serverTemporaryResultDeletionSchema,
-          notUploadedResultDeletionSchema,
-        ]),
-      })
-      .strict(),
-    limits: z
-      .object({
-        maxFiles: z.literal(IMAGE_OPTIMIZE_MAX_FILES),
-        maxBytesPerFile: z.literal(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
-        maxPixelsPerFile: z.literal(IMAGE_OPTIMIZE_MAX_PIXELS),
-      })
-      .strict(),
+    upload: z.literal(true),
+    inputDeletion: z.literal("terminal"),
+    resultDeletion: serverTemporaryResultDeletionSchema,
   })
   .strict();
+
+const localPolicyDisclosureSchema = z
+  .object({
+    upload: z.literal(false),
+    inputDeletion: z.literal("not-uploaded"),
+    resultDeletion: notUploadedResultDeletionSchema,
+  })
+  .strict();
+
+const imageOptimizePolicyLimitsSchema = z
+  .object({
+    maxFiles: z.literal(IMAGE_OPTIMIZE_MAX_FILES),
+    maxBytesPerFile: z.literal(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
+    maxPixelsPerFile: z.literal(IMAGE_OPTIMIZE_MAX_PIXELS),
+  })
+  .strict();
+
+const imageOptimizePolicyCommonShape = {
+  contract: z.literal(TOOL_JOB_CONTRACT_ID),
+  toolContract: z.literal(IMAGE_OPTIMIZE_CONTRACT_ID),
+  maintainer: z.boolean(),
+  limits: imageOptimizePolicyLimitsSchema,
+};
+
+export const imageOptimizePolicyResponseSchema = z.discriminatedUnion("execution", [
+  z
+    .object({
+      ...imageOptimizePolicyCommonShape,
+      execution: z.literal("server"),
+      reason: z.null(),
+      disclosure: serverPolicyDisclosureSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...imageOptimizePolicyCommonShape,
+      execution: z.literal("local"),
+      reason: z.enum(["SERVER_PROCESSING_DISABLED", "LOCAL_FALLBACK_REQUIRED"]),
+      disclosure: localPolicyDisclosureSchema,
+    })
+    .strict(),
+]);
 
 export type ImageOptimizePolicyResponseV1 = z.infer<typeof imageOptimizePolicyResponseSchema>;

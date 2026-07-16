@@ -6,11 +6,13 @@ import {
   IMAGE_OPTIMIZE_MAX_FILES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
   imageOptimizeCreateRequestSchema,
+  imageOptimizeCreateResponseSchema,
   imageOptimizePolicyRequestSchema,
   imageOptimizePolicyResponseSchema,
   imageOptimizeResultDescriptorSchema,
   imageOptimizeSpecV1Schema,
   imageOptimizeStatusResponseSchema,
+  imageOptimizeUploadDescriptorSchema,
 } from "./image-optimize";
 
 const anonymousSessionId = "018f47a2-65d4-7f31-a377-5afbb8f53f27";
@@ -26,6 +28,51 @@ const baseSpec = {
   orientation: "apply",
   colorSpace: "srgb",
   minimumSavingsPercent: 1,
+} as const;
+
+const policyLimits = {
+  maxFiles: 20,
+  maxBytesPerFile: 31_457_280,
+  maxPixelsPerFile: 40_000_000,
+} as const;
+
+const serverTemporaryDisclosure = {
+  upload: true,
+  inputDeletion: "terminal",
+  resultDeletion: {
+    mode: "server-temporary",
+    acknowledged: "immediate-delete-attempt",
+    unacknowledgedDueSeconds: 1800,
+    applicationSloSeconds: 2100,
+    lifecycleExpirationDays: 1,
+    exceptionalDelayPossible: true,
+  },
+} as const;
+
+const notUploadedDisclosure = {
+  upload: false,
+  inputDeletion: "not-uploaded",
+  resultDeletion: { mode: "not-uploaded" },
+} as const;
+
+const serverPolicyResponse = {
+  contract: "tool-job@1",
+  toolContract: "image.optimize@1",
+  execution: "server",
+  reason: null,
+  maintainer: true,
+  disclosure: serverTemporaryDisclosure,
+  limits: policyLimits,
+} as const;
+
+const localPolicyResponse = {
+  contract: "tool-job@1",
+  toolContract: "image.optimize@1",
+  execution: "local",
+  reason: "LOCAL_FALLBACK_REQUIRED",
+  maintainer: false,
+  disclosure: notUploadedDisclosure,
+  limits: policyLimits,
 } as const;
 
 function createRequest(overrides: Record<string, unknown> = {}) {
@@ -88,6 +135,36 @@ describe("image.optimize@1", () => {
       maxPixels: 40_000_000,
       maxDimension: 32_768,
     });
+  });
+
+  it("instantiates image-only upload and create-response transport schemas", () => {
+    expect(
+      imageOptimizeUploadDescriptorSchema.safeParse({
+        kind: "worker-stream-put",
+        method: "PUT",
+        path: `/v1/jobs/${anonymousSessionId}/input`,
+        contentType: "application/pdf",
+        byteLength: 4_000_000,
+        expiresAt: "2026-07-16T00:00:00.000Z",
+      }).success,
+    ).toBe(false);
+
+    const parsed = imageOptimizeCreateResponseSchema.parse({
+      contract: "tool-job@1",
+      mode: "upload-required",
+      jobId: anonymousSessionId,
+      upload: {
+        kind: "worker-stream-put",
+        method: "PUT",
+        path: `/v1/jobs/${anonymousSessionId}/input`,
+        contentType: "image/webp",
+        byteLength: 4_000_000,
+        expiresAt: "2026-07-16T00:00:00.000Z",
+      },
+      reservedWeightedUnits: 12_000,
+    });
+
+    expect(parsed.mode).toBe("upload-required");
   });
 
   it("defaults the minimum savings percentage", () => {
@@ -234,54 +311,70 @@ describe("image.optimize@1 results", () => {
 
 describe("image.optimize@1 policy", () => {
   it("accepts strict server disclosure and exact limits", () => {
-    const parsed = imageOptimizePolicyResponseSchema.parse({
-      contract: "tool-job@1",
-      toolContract: "image.optimize@1",
-      execution: "server",
-      reason: null,
-      maintainer: true,
-      disclosure: {
-        upload: true,
-        inputDeletion: "terminal",
-        resultDeletion: {
-          mode: "server-temporary",
-          acknowledged: "immediate-delete-attempt",
-          unacknowledgedDueSeconds: 1800,
-          applicationSloSeconds: 2100,
-          lifecycleExpirationDays: 1,
-          exceptionalDelayPossible: true,
-        },
-      },
-      limits: {
-        maxFiles: 20,
-        maxBytesPerFile: 31_457_280,
-        maxPixelsPerFile: 40_000_000,
-      },
-    });
+    const parsed = imageOptimizePolicyResponseSchema.parse(serverPolicyResponse);
 
     expect(parsed.disclosure.resultDeletion.mode).toBe("server-temporary");
   });
 
   it("accepts local fallback disclosure without an upload", () => {
-    const parsed = imageOptimizePolicyResponseSchema.parse({
-      contract: "tool-job@1",
-      toolContract: "image.optimize@1",
-      execution: "local",
-      reason: "LOCAL_FALLBACK_REQUIRED",
-      maintainer: false,
-      disclosure: {
-        upload: false,
-        inputDeletion: "not-uploaded",
-        resultDeletion: { mode: "not-uploaded" },
-      },
-      limits: {
-        maxFiles: 20,
-        maxBytesPerFile: 31_457_280,
-        maxPixelsPerFile: 40_000_000,
-      },
-    });
+    const parsed = imageOptimizePolicyResponseSchema.parse(localPolicyResponse);
 
     expect(parsed.execution).toBe("local");
+  });
+
+  it.each([
+    [
+      "a server response with a fallback reason",
+      { ...serverPolicyResponse, reason: "LOCAL_FALLBACK_REQUIRED" },
+    ],
+    [
+      "a server response that says no upload occurred",
+      {
+        ...serverPolicyResponse,
+        disclosure: { ...serverTemporaryDisclosure, upload: false },
+      },
+    ],
+    [
+      "a server response with not-uploaded input deletion",
+      {
+        ...serverPolicyResponse,
+        disclosure: { ...serverTemporaryDisclosure, inputDeletion: "not-uploaded" },
+      },
+    ],
+    [
+      "a server response with no temporary result",
+      {
+        ...serverPolicyResponse,
+        disclosure: { ...serverTemporaryDisclosure, resultDeletion: { mode: "not-uploaded" } },
+      },
+    ],
+    ["a local response without a fallback reason", { ...localPolicyResponse, reason: null }],
+    [
+      "a local response that says an upload occurred",
+      {
+        ...localPolicyResponse,
+        disclosure: { ...notUploadedDisclosure, upload: true },
+      },
+    ],
+    [
+      "a local response with terminal input deletion",
+      {
+        ...localPolicyResponse,
+        disclosure: { ...notUploadedDisclosure, inputDeletion: "terminal" },
+      },
+    ],
+    [
+      "a local response with temporary server result deletion",
+      {
+        ...localPolicyResponse,
+        disclosure: {
+          ...notUploadedDisclosure,
+          resultDeletion: serverTemporaryDisclosure.resultDeletion,
+        },
+      },
+    ],
+  ])("rejects %s", (_case, response) => {
+    expect(imageOptimizePolicyResponseSchema.safeParse(response).success).toBe(false);
   });
 
   it("rejects invalid policy callers and unknown disclosure fields", () => {

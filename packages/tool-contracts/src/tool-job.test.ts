@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  createToolJobCreateResponseSchema,
   createToolJobStatusEnvelopeSchema,
+  createToolJobUploadDescriptorSchema,
   TOOL_JOB_CONTRACT_ID,
-  toolJobCreateResponseSchema,
   toolJobErrorResponseSchema,
   toolJobMutationAcknowledgementSchema,
-  toolJobUploadDescriptorSchema,
 } from "./tool-job";
 
 const jobId = "018f47a2-65d4-7f31-a377-5afbb8f53f27";
@@ -16,6 +16,9 @@ const testStatusSchema = createToolJobStatusEnvelopeSchema(
   z.enum(["queued", "working", "completed"]),
   z.object({ outputId: z.string().min(1) }).strict(),
 );
+const pdfContentTypeSchema = z.literal("application/pdf");
+const pdfUploadDescriptorSchema = createToolJobUploadDescriptorSchema(pdfContentTypeSchema);
+const pdfCreateResponseSchema = createToolJobCreateResponseSchema(pdfContentTypeSchema);
 
 function status(overrides: Record<string, unknown> = {}) {
   return {
@@ -32,8 +35,8 @@ function status(overrides: Record<string, unknown> = {}) {
 }
 
 describe("tool-job@1 transport", () => {
-  it("accepts the fixed worker upload descriptor", () => {
-    const parsed = toolJobCreateResponseSchema.parse({
+  it("accepts a tool-specific content type through the generic factory", () => {
+    const parsed = pdfCreateResponseSchema.parse({
       contract: "tool-job@1",
       mode: "upload-required",
       jobId,
@@ -41,7 +44,7 @@ describe("tool-job@1 transport", () => {
         kind: "worker-stream-put",
         method: "PUT",
         path: `/v1/jobs/${jobId}/input`,
-        contentType: "image/png",
+        contentType: "application/pdf",
         byteLength: 4_000_000,
         expiresAt: updatedAt,
       },
@@ -51,11 +54,12 @@ describe("tool-job@1 transport", () => {
     expect(parsed.mode).toBe("upload-required");
     if (parsed.mode === "upload-required") {
       expect(parsed.upload.path).toBe(`/v1/jobs/${jobId}/input`);
+      expect(parsed.upload.contentType).toBe("application/pdf");
     }
   });
 
   it("accepts only post-upload states for an existing job", () => {
-    const parsed = toolJobCreateResponseSchema.parse({
+    const parsed = pdfCreateResponseSchema.parse({
       contract: "tool-job@1",
       mode: "existing-job",
       jobId,
@@ -70,7 +74,7 @@ describe("tool-job@1 transport", () => {
 
     for (const state of ["created", "uploading"]) {
       expect(
-        toolJobCreateResponseSchema.safeParse({
+        pdfCreateResponseSchema.safeParse({
           contract: "tool-job@1",
           mode: "existing-job",
           jobId,
@@ -81,30 +85,49 @@ describe("tool-job@1 transport", () => {
     }
   });
 
+  it("rejects an upload path belonging to another job", () => {
+    expect(
+      pdfCreateResponseSchema.safeParse({
+        contract: "tool-job@1",
+        mode: "upload-required",
+        jobId,
+        upload: {
+          kind: "worker-stream-put",
+          method: "PUT",
+          path: "/v1/jobs/cf8ae9ec-aaaf-48c6-a657-480e5f85dbfe/input",
+          contentType: "application/pdf",
+          byteLength: 4_000_000,
+          expiresAt: updatedAt,
+        },
+        reservedWeightedUnits: 12_000,
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects arbitrary upload locations, local timestamps, and unknown keys", () => {
     const baseUpload = {
       kind: "worker-stream-put",
       method: "PUT",
       path: `/v1/jobs/${jobId}/input`,
-      contentType: "image/png",
+      contentType: "application/pdf",
       byteLength: 4_000_000,
       expiresAt: updatedAt,
     };
 
     expect(
-      toolJobUploadDescriptorSchema.safeParse({
+      pdfUploadDescriptorSchema.safeParse({
         ...baseUpload,
         path: "https://uploads.example/input",
       }).success,
     ).toBe(false);
     expect(
-      toolJobUploadDescriptorSchema.safeParse({
+      pdfUploadDescriptorSchema.safeParse({
         ...baseUpload,
         expiresAt: "2026-07-16T00:00:00",
       }).success,
     ).toBe(false);
     expect(
-      toolJobUploadDescriptorSchema.safeParse({
+      pdfUploadDescriptorSchema.safeParse({
         ...baseUpload,
         headers: { authorization: "secret" },
       }).success,
