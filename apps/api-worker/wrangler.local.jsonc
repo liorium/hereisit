@@ -18,6 +18,14 @@
       "bucket_name": "hereisit-job-objects-local"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMAGE_JOBS",
+        "queue": "hereisit-image-jobs-local"
+      }
+    ]
+  },
   "ratelimits": [
     {
       "name": "SESSION_JOB_RATE_LIMITER",

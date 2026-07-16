@@ -653,7 +653,7 @@ describe("strict operational configuration", () => {
 });
 
 describe("Wrangler source-of-truth and generated environment", () => {
-  it("declares only Task 4 bindings with the exact current compatibility settings", () => {
+  it("declares the Task 5 Queue producer without adding a consumer", () => {
     const config = JSON.parse(
       readFileSync(new URL("../wrangler.local.jsonc", import.meta.url), "utf8"),
     ) as {
@@ -662,6 +662,10 @@ describe("Wrangler source-of-truth and generated environment", () => {
       observability?: unknown;
       d1_databases: { binding: string; database_id: string }[];
       r2_buckets: { binding: string }[];
+      queues?: {
+        producers?: { binding: string; queue: string }[];
+        consumers?: unknown[];
+      };
       ratelimits: {
         name: string;
         namespace_id: string;
@@ -680,6 +684,13 @@ describe("Wrangler source-of-truth and generated environment", () => {
       }),
     ]);
     expect(config.r2_buckets.map(({ binding }) => binding)).toEqual(["JOB_OBJECTS"]);
+    expect(config.queues?.producers).toEqual([
+      {
+        binding: "IMAGE_JOBS",
+        queue: "hereisit-image-jobs-local",
+      },
+    ]);
+    expect(config.queues?.consumers).toBeUndefined();
     expect(config.ratelimits).toEqual([
       {
         name: "SESSION_JOB_RATE_LIMITER",
@@ -973,12 +984,12 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "RESULT_DOWNLOAD_RATE_LIMITER",
       "POLICY_RATE_LIMITER",
       "JOB_API_NETWORK_RATE_LIMITER",
+      "IMAGE_JOBS",
     ]) {
       expect(generated).toContain(`${binding}:`);
     }
     for (const futureBinding of [
       "USAGE_LOGS",
-      "IMAGE_JOBS",
       "IMAGE_ENGINE",
       "USAGE_ANALYTICS",
       "WORKER_VERSION",
