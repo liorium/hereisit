@@ -6,7 +6,9 @@ import {
   calculateSettledWeightedUnits,
   estimateAttemptReservation,
   estimateImageOptimizeUnits,
+  getEngineAttemptCaps,
   PROCESSING_UNIT_COEFFICIENT_VERSION,
+  validateEngineAttempt,
 } from "./resource-estimate";
 
 const request: ImageOptimizeCreateRequestV1 = {
@@ -32,6 +34,54 @@ const request: ImageOptimizeCreateRequestV1 = {
     minimumSavingsPercent: 1,
   },
 };
+
+const expectedAttemptCaps = {
+  "image-standard-v1": {
+    cpuMs: 45_000,
+    wallMs: 60_000,
+    memoryBytes: 768 * 1024 * 1024,
+    memoryByteMilliseconds: 768 * 1024 * 1024 * 60_000,
+    testedCandidates: 3,
+  },
+  "image-large-v1": {
+    cpuMs: 75_000,
+    wallMs: 90_000,
+    memoryBytes: 1536 * 1024 * 1024,
+    memoryByteMilliseconds: 1536 * 1024 * 1024 * 90_000,
+    testedCandidates: 3,
+  },
+} as const;
+
+type ResourceClass = keyof typeof expectedAttemptCaps;
+
+function validEngineAttempt(resourceClass: ResourceClass) {
+  const caps = expectedAttemptCaps[resourceClass];
+
+  return {
+    inputBytes: 1_000_000,
+    resourceClass,
+    measurements: {
+      processedInputBytes: 1_000_000,
+      processedPixels: 40_000_000,
+      cpuMs: caps.cpuMs,
+      memoryByteMilliseconds: caps.memoryByteMilliseconds,
+      peakMemoryBytes: caps.memoryBytes,
+      testedCandidates: caps.testedCandidates,
+      processingMs: caps.wallMs,
+    },
+    result: {
+      kind: "download",
+      mime: "image/jpeg",
+      byteLength: 999_999,
+      width: 4000,
+      height: 3000,
+      testedCandidates: 3,
+      engineBuildId: "engine-1",
+      codecBuildId: "codec-1",
+      warnings: [],
+    },
+  } as const;
+}
 
 describe("image optimize reservations", () => {
   it("reserves the exact standard-attempt conservative maximum", () => {
@@ -118,6 +168,122 @@ describe("image optimize reservations", () => {
         } as ImageOptimizeCreateRequestV1),
       ).toThrow();
     }
+  });
+});
+
+describe("engine attempt validation", () => {
+  it.each([
+    "image-standard-v1",
+    "image-large-v1",
+  ] as const)("publishes exact immutable %s caps", (resourceClass) => {
+    const caps = getEngineAttemptCaps(resourceClass);
+
+    expect(caps).toEqual(expectedAttemptCaps[resourceClass]);
+    expect(Object.isFrozen(caps)).toBe(true);
+  });
+
+  it.each([
+    "image-standard-v1",
+    "image-large-v1",
+  ] as const)("accepts every exact %s boundary", (resourceClass) => {
+    expect(validateEngineAttempt(validEngineAttempt(resourceClass))).toEqual({ valid: true });
+  });
+
+  it.each([
+    ["image-standard-v1", "cpuMs", "CPU_MS_EXCEEDED"],
+    ["image-large-v1", "cpuMs", "CPU_MS_EXCEEDED"],
+    ["image-standard-v1", "processingMs", "PROCESSING_MS_EXCEEDED"],
+    ["image-large-v1", "processingMs", "PROCESSING_MS_EXCEEDED"],
+    ["image-standard-v1", "peakMemoryBytes", "PEAK_MEMORY_BYTES_EXCEEDED"],
+    ["image-large-v1", "peakMemoryBytes", "PEAK_MEMORY_BYTES_EXCEEDED"],
+    ["image-standard-v1", "memoryByteMilliseconds", "MEMORY_BYTE_MILLISECONDS_EXCEEDED"],
+    ["image-large-v1", "memoryByteMilliseconds", "MEMORY_BYTE_MILLISECONDS_EXCEEDED"],
+  ] as const)("rejects %s %s above its class cap", (resourceClass, field, expectedCode) => {
+    const attempt = validEngineAttempt(resourceClass);
+    const result = validateEngineAttempt({
+      ...attempt,
+      measurements: {
+        ...attempt.measurements,
+        [field]: attempt.measurements[field] + 1,
+      },
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      error: {
+        code: expectedCode,
+        field,
+      },
+    });
+  });
+
+  it.each([
+    ["image-standard-v1", "processedInputBytes", 1_000_001, "PROCESSED_INPUT_BYTES_EXCEEDED"],
+    ["image-large-v1", "processedInputBytes", 1_000_001, "PROCESSED_INPUT_BYTES_EXCEEDED"],
+    ["image-standard-v1", "processedPixels", 40_000_001, "PROCESSED_PIXELS_EXCEEDED"],
+    ["image-large-v1", "processedPixels", 40_000_001, "PROCESSED_PIXELS_EXCEEDED"],
+    ["image-standard-v1", "testedCandidates", 4, "TESTED_CANDIDATES_EXCEEDED"],
+    ["image-large-v1", "testedCandidates", 4, "TESTED_CANDIDATES_EXCEEDED"],
+  ] as const)("rejects %s universal %s cap", (resourceClass, field, value, expectedCode) => {
+    const attempt = validEngineAttempt(resourceClass);
+    const result = validateEngineAttempt({
+      ...attempt,
+      measurements: {
+        ...attempt.measurements,
+        [field]: value,
+      },
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      error: {
+        code: expectedCode,
+        field,
+      },
+    });
+  });
+
+  it.each([
+    "image-standard-v1",
+    "image-large-v1",
+  ] as const)("requires %s download output to be strictly smaller", (resourceClass) => {
+    const attempt = validEngineAttempt(resourceClass);
+    const result = validateEngineAttempt({
+      ...attempt,
+      result: {
+        ...attempt.result,
+        byteLength: attempt.inputBytes,
+      },
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      error: {
+        code: "OUTPUT_NOT_SMALLER",
+        field: "result.byteLength",
+        actual: 1_000_000,
+        maximum: 999_999,
+      },
+    });
+  });
+
+  it("rejects invalid numeric measurements with a normalized validation error", () => {
+    const attempt = validEngineAttempt("image-standard-v1");
+    const result = validateEngineAttempt({
+      ...attempt,
+      measurements: {
+        ...attempt.measurements,
+        cpuMs: Number.MAX_SAFE_INTEGER + 1,
+      },
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      error: {
+        code: "INVALID_MEASUREMENT",
+        field: "cpuMs",
+      },
+    });
   });
 });
 

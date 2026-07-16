@@ -72,6 +72,24 @@ describe("decideAdmission", () => {
   });
 
   it.each([
+    "accountDailyLimit",
+    "anonymousDailyLimit",
+    "networkDailyLimit",
+  ] as const)("disables create processing for negative safe %s", (field) => {
+    expect(
+      decideAdmission({
+        ...otherwiseAllowedAdmission,
+        [field]: -1,
+        activeJobs: 1,
+        oldestQueuedAgeSeconds: 601,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "SERVER_PROCESSING_DISABLED",
+    });
+  });
+
+  it.each([
     ["an active job", { activeJobs: 1 }],
     ["the network pending boundary", { networkPendingJobs: 3, networkPendingJobLimit: 3 }],
     ["the account pending boundary", { accountPendingJobs: 10, accountPendingJobLimit: 10 }],
@@ -185,6 +203,23 @@ describe("decideRetryReservation", () => {
         networkReservedToday: 3_000,
       }),
     ).toEqual({ allowed: false, code: "SERVER_PROCESSING_DISABLED" });
+  });
+
+  it.each([
+    "accountDailyLimit",
+    "anonymousDailyLimit",
+    "networkDailyLimit",
+  ] as const)("disables retry processing for negative safe %s", (field) => {
+    expect(
+      decideRetryReservation({
+        ...otherwiseAllowedRetryReservation,
+        [field]: -1,
+        networkReservedToday: 3_000,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "SERVER_PROCESSING_DISABLED",
+    });
   });
 
   it.each([

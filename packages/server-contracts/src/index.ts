@@ -1,5 +1,7 @@
 import type { ImageOptimizeSpecV1, ImageOptimizeWarningCode } from "@hereisit/tool-contracts";
 import {
+  IMAGE_OPTIMIZE_MAX_FILE_BYTES,
+  IMAGE_OPTIMIZE_MAX_PIXELS,
   imageOptimizeMimeSchema,
   imageOptimizeSpecV1Schema,
   imageOptimizeWarningCodeSchema,
@@ -8,6 +10,7 @@ import { z } from "zod";
 
 export type ImageResourceClass = "image-standard-v1" | "image-large-v1";
 export type ImageJobAttempt = 1 | 2 | 3;
+export const IMAGE_ENGINE_MAX_TESTED_CANDIDATES = 3 as const;
 
 export type ImageContentClass =
   | "photo"
@@ -252,12 +255,12 @@ export const engineCreateJobRequestSchema = z
 
 export const engineMeasurementsSchema = z
   .object({
-    processedInputBytes: nonNegativeSafeIntegerSchema,
-    processedPixels: nonNegativeSafeIntegerSchema,
+    processedInputBytes: nonNegativeSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
+    processedPixels: nonNegativeSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_PIXELS),
     cpuMs: nonNegativeSafeIntegerSchema,
     memoryByteMilliseconds: nonNegativeSafeIntegerSchema,
     peakMemoryBytes: nonNegativeSafeIntegerSchema,
-    testedCandidates: nonNegativeSafeIntegerSchema,
+    testedCandidates: nonNegativeSafeIntegerSchema.max(IMAGE_ENGINE_MAX_TESTED_CANDIDATES),
     processingMs: nonNegativeSafeIntegerSchema,
   })
   .strict();
@@ -277,7 +280,7 @@ const engineDownloadResultSchema = z
     byteLength: positiveSafeIntegerSchema,
     width: positiveSafeIntegerSchema,
     height: positiveSafeIntegerSchema,
-    testedCandidates: nonNegativeSafeIntegerSchema,
+    testedCandidates: nonNegativeSafeIntegerSchema.max(IMAGE_ENGINE_MAX_TESTED_CANDIDATES),
     engineBuildId: nonEmptyStringSchema,
     codecBuildId: nonEmptyStringSchema,
     warnings: z.array(imageOptimizeWarningCodeSchema).readonly(),
@@ -291,17 +294,27 @@ const originalRetainedWarningsSchema = z
 const engineOriginalRetainedResultSchema = z
   .object({
     kind: z.literal("original-retained"),
-    testedCandidates: nonNegativeSafeIntegerSchema,
+    testedCandidates: nonNegativeSafeIntegerSchema.max(IMAGE_ENGINE_MAX_TESTED_CANDIDATES),
     engineBuildId: nonEmptyStringSchema,
     codecBuildId: nonEmptyStringSchema,
     warnings: originalRetainedWarningsSchema,
   })
   .strict();
 
-export const engineResultSchema = z.discriminatedUnion("kind", [
-  engineDownloadResultSchema,
-  engineOriginalRetainedResultSchema,
-]);
+export const engineResultSchema = z
+  .discriminatedUnion("kind", [engineDownloadResultSchema, engineOriginalRetainedResultSchema])
+  .superRefine((result, context) => {
+    if (
+      result.kind === "download" &&
+      result.width > Math.floor(IMAGE_OPTIMIZE_MAX_PIXELS / result.height)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Download dimensions must not exceed 40,000,000 pixels.",
+        path: ["height"],
+      });
+    }
+  });
 
 const inactiveEngineJobStatusSchema = z
   .object({
@@ -399,14 +412,26 @@ export const engineJobStatusSchema = z
     cancelledEngineJobStatusSchema,
   ])
   .superRefine((status, context) => {
-    if (
-      status.state === "succeeded" &&
-      status.result.testedCandidates !== status.measurements.testedCandidates
-    ) {
+    if (status.state !== "succeeded") {
+      return;
+    }
+
+    if (status.result.testedCandidates !== status.measurements.testedCandidates) {
       context.addIssue({
         code: "custom",
         message: "Result and measurement candidate counts must match.",
         path: ["result", "testedCandidates"],
+      });
+    }
+
+    if (
+      status.result.kind === "download" &&
+      status.result.mime !== status.inspection.verifiedInputMime
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Download MIME must match the verified input MIME.",
+        path: ["result", "mime"],
       });
     }
   });

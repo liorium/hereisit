@@ -1,4 +1,9 @@
-import type { ImageResourceClass } from "@hereisit/server-contracts";
+import {
+  type EngineMeasurements,
+  type EngineResult,
+  IMAGE_ENGINE_MAX_TESTED_CANDIDATES,
+  type ImageResourceClass,
+} from "@hereisit/server-contracts";
 import {
   IMAGE_OPTIMIZE_MAX_PIXELS,
   type ImageOptimizeCreateRequestV1,
@@ -22,6 +27,46 @@ export interface ActualUsageSample {
   mime: ImageOptimizeMime;
 }
 
+export interface EngineAttemptCaps {
+  cpuMs: number;
+  wallMs: number;
+  memoryBytes: number;
+  memoryByteMilliseconds: number;
+  testedCandidates: typeof IMAGE_ENGINE_MAX_TESTED_CANDIDATES;
+}
+
+export type EngineAttemptValidationErrorCode =
+  | "INVALID_MEASUREMENT"
+  | "PROCESSED_INPUT_BYTES_EXCEEDED"
+  | "PROCESSED_PIXELS_EXCEEDED"
+  | "CPU_MS_EXCEEDED"
+  | "PROCESSING_MS_EXCEEDED"
+  | "PEAK_MEMORY_BYTES_EXCEEDED"
+  | "MEMORY_BYTE_MILLISECONDS_EXCEEDED"
+  | "TESTED_CANDIDATES_EXCEEDED"
+  | "OUTPUT_NOT_SMALLER";
+
+export interface EngineAttemptValidationError {
+  code: EngineAttemptValidationErrorCode;
+  field: keyof EngineMeasurements | "inputBytes" | "result.byteLength" | "result.testedCandidates";
+  actual: number;
+  maximum: number;
+}
+
+export type EngineAttemptValidationResult =
+  | { valid: true }
+  | {
+      valid: false;
+      error: EngineAttemptValidationError;
+    };
+
+export interface EngineAttemptValidationInput {
+  inputBytes: number;
+  resourceClass: ImageResourceClass;
+  measurements: EngineMeasurements;
+  result: EngineResult | null;
+}
+
 export const PROCESSING_UNIT_COEFFICIENT_VERSION = 1 as const;
 export const FAILED_ATTEMPT_MINIMUM_UNITS = 2_000_000;
 
@@ -36,28 +81,27 @@ const contentCoefficient = {
   "image/webp": 2,
 } as const satisfies Record<ImageOptimizeMime, number>;
 
-const attemptCaps = {
-  "image-standard-v1": {
-    cpuMs: 45_000,
-    wallMs: 60_000,
-    memoryDeltaMiB: 768,
-    testedCandidates: 3,
-  },
-  "image-large-v1": {
-    cpuMs: 75_000,
-    wallMs: 90_000,
-    memoryDeltaMiB: 1536,
-    testedCandidates: 3,
-  },
-} as const satisfies Record<
-  ImageResourceClass,
-  {
-    cpuMs: number;
-    wallMs: number;
-    memoryDeltaMiB: number;
-    testedCandidates: number;
-  }
->;
+function createEngineAttemptCaps(
+  cpuMs: number,
+  wallMs: number,
+  memoryMiB: number,
+): Readonly<EngineAttemptCaps> {
+  const memoryBytes = checkedProduct(memoryMiB, MEBIBYTE, "engine memory bytes");
+
+  return Object.freeze({
+    cpuMs,
+    wallMs,
+    memoryBytes,
+    memoryByteMilliseconds: checkedProduct(memoryBytes, wallMs, "engine memory byte milliseconds"),
+    testedCandidates: IMAGE_ENGINE_MAX_TESTED_CANDIDATES,
+  });
+}
+
+const engineAttemptCaps: Readonly<Record<ImageResourceClass, Readonly<EngineAttemptCaps>>> =
+  Object.freeze({
+    "image-standard-v1": createEngineAttemptCaps(45_000, 60_000, 768),
+    "image-large-v1": createEngineAttemptCaps(75_000, 90_000, 1536),
+  });
 
 function assertNonNegativeSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -83,12 +127,143 @@ function checkedSum(values: readonly number[], label: string): number {
   return total;
 }
 
-function getAttemptCaps(resourceClass: ImageResourceClass) {
-  if (!Object.hasOwn(attemptCaps, resourceClass)) {
+export function getEngineAttemptCaps(
+  resourceClass: ImageResourceClass,
+): Readonly<EngineAttemptCaps> {
+  if (!Object.hasOwn(engineAttemptCaps, resourceClass)) {
     throw new RangeError(`Unsupported image resource class: ${String(resourceClass)}.`);
   }
-  const caps = attemptCaps[resourceClass];
-  return caps;
+  return engineAttemptCaps[resourceClass];
+}
+
+function invalidEngineAttempt(
+  code: EngineAttemptValidationErrorCode,
+  field: EngineAttemptValidationError["field"],
+  actual: number,
+  maximum: number,
+): EngineAttemptValidationResult {
+  return {
+    valid: false,
+    error: {
+      code,
+      field,
+      actual,
+      maximum,
+    },
+  };
+}
+
+function invalidSafeInteger(
+  field: EngineAttemptValidationError["field"],
+  value: number,
+): EngineAttemptValidationResult | null {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return invalidEngineAttempt("INVALID_MEASUREMENT", field, value, Number.MAX_SAFE_INTEGER);
+  }
+  return null;
+}
+
+export function validateEngineAttempt(
+  input: EngineAttemptValidationInput,
+): EngineAttemptValidationResult {
+  const inputError = invalidSafeInteger("inputBytes", input.inputBytes);
+  if (inputError !== null || input.inputBytes === 0) {
+    return (
+      inputError ?? invalidEngineAttempt("INVALID_MEASUREMENT", "inputBytes", input.inputBytes, 0)
+    );
+  }
+
+  for (const field of [
+    "processedInputBytes",
+    "processedPixels",
+    "cpuMs",
+    "memoryByteMilliseconds",
+    "peakMemoryBytes",
+    "testedCandidates",
+    "processingMs",
+  ] as const satisfies readonly (keyof EngineMeasurements)[]) {
+    const measurementError = invalidSafeInteger(field, input.measurements[field]);
+    if (measurementError !== null) {
+      return measurementError;
+    }
+  }
+
+  const caps = getEngineAttemptCaps(input.resourceClass);
+  const limits = [
+    [
+      "PROCESSED_INPUT_BYTES_EXCEEDED",
+      "processedInputBytes",
+      input.measurements.processedInputBytes,
+      input.inputBytes,
+    ],
+    [
+      "PROCESSED_PIXELS_EXCEEDED",
+      "processedPixels",
+      input.measurements.processedPixels,
+      IMAGE_OPTIMIZE_MAX_PIXELS,
+    ],
+    ["CPU_MS_EXCEEDED", "cpuMs", input.measurements.cpuMs, caps.cpuMs],
+    ["PROCESSING_MS_EXCEEDED", "processingMs", input.measurements.processingMs, caps.wallMs],
+    [
+      "PEAK_MEMORY_BYTES_EXCEEDED",
+      "peakMemoryBytes",
+      input.measurements.peakMemoryBytes,
+      caps.memoryBytes,
+    ],
+    [
+      "MEMORY_BYTE_MILLISECONDS_EXCEEDED",
+      "memoryByteMilliseconds",
+      input.measurements.memoryByteMilliseconds,
+      caps.memoryByteMilliseconds,
+    ],
+    [
+      "TESTED_CANDIDATES_EXCEEDED",
+      "testedCandidates",
+      input.measurements.testedCandidates,
+      caps.testedCandidates,
+    ],
+  ] as const;
+
+  for (const [code, field, actual, maximum] of limits) {
+    if (actual > maximum) {
+      return invalidEngineAttempt(code, field, actual, maximum);
+    }
+  }
+
+  if (input.result !== null) {
+    const resultCandidatesError = invalidSafeInteger(
+      "result.testedCandidates",
+      input.result.testedCandidates,
+    );
+    if (resultCandidatesError !== null) {
+      return resultCandidatesError;
+    }
+    if (input.result.testedCandidates > caps.testedCandidates) {
+      return invalidEngineAttempt(
+        "TESTED_CANDIDATES_EXCEEDED",
+        "result.testedCandidates",
+        input.result.testedCandidates,
+        caps.testedCandidates,
+      );
+    }
+  }
+
+  if (input.result?.kind === "download") {
+    const outputError = invalidSafeInteger("result.byteLength", input.result.byteLength);
+    if (outputError !== null) {
+      return outputError;
+    }
+    if (input.result.byteLength >= input.inputBytes) {
+      return invalidEngineAttempt(
+        "OUTPUT_NOT_SMALLER",
+        "result.byteLength",
+        input.result.byteLength,
+        input.inputBytes - 1,
+      );
+    }
+  }
+
+  return { valid: true };
 }
 
 export function estimateAttemptReservation(input: {
@@ -96,7 +271,7 @@ export function estimateAttemptReservation(input: {
   resourceClass: ImageResourceClass;
 }): number {
   assertNonNegativeSafeInteger(input.inputBytes, "inputBytes");
-  const caps = getAttemptCaps(input.resourceClass);
+  const caps = getEngineAttemptCaps(input.resourceClass);
 
   return checkedSum(
     [
@@ -108,7 +283,7 @@ export function estimateAttemptReservation(input: {
         "pixel reservation",
       ),
       checkedProduct(caps.cpuMs, CPU_WEIGHT, "CPU reservation"),
-      checkedProduct(caps.memoryDeltaMiB, caps.wallMs, "memory reservation"),
+      checkedProduct(caps.memoryBytes / MEBIBYTE, caps.wallMs, "memory reservation"),
       checkedProduct(caps.testedCandidates, CANDIDATE_WEIGHT, "candidate reservation"),
       CONTROL_PLANE_BUDGET_UNITS,
     ],

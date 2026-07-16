@@ -118,6 +118,24 @@ function failedStatus(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function cancelledStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    protocol: 1,
+    jobId,
+    state: "cancelled",
+    phase: null,
+    fraction: null,
+    sequence: 7,
+    measurements,
+    inspection,
+    error: {
+      code: "CANCELLED",
+      retryable: false,
+    },
+    ...overrides,
+  };
+}
+
 describe("internal server messages", () => {
   it("accepts all exact attempts and resource classes", () => {
     for (const attempt of [1, 2, 3]) {
@@ -328,6 +346,147 @@ describe("engine job status protocol", () => {
     ).toBe(true);
   });
 
+  it("accepts a download at the exact 40 MP boundary", () => {
+    expect(
+      engineJobStatusSchema.safeParse(
+        succeededStatus({
+          result: {
+            ...succeededStatus().result,
+            width: 8000,
+            height: 5000,
+          },
+          measurements: {
+            ...measurements,
+            processedPixels: 40_000_000,
+          },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["a download over 40 MP", 8000, 5001],
+    ["an unsafe dimension product", Number.MAX_SAFE_INTEGER, 2],
+  ])("rejects %s without unsafe multiplication", (_case, width, height) => {
+    expect(
+      engineJobStatusSchema.safeParse(
+        succeededStatus({
+          result: {
+            ...succeededStatus().result,
+            width,
+            height,
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it("requires the download MIME to match verified inspection MIME", () => {
+    expect(
+      engineJobStatusSchema.safeParse(
+        succeededStatus({
+          result: {
+            ...succeededStatus().result,
+            mime: "image/png",
+          },
+        }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    [
+      "download success",
+      succeededStatus({
+        result: {
+          ...succeededStatus().result,
+          testedCandidates: 4,
+        },
+        measurements: {
+          ...measurements,
+          testedCandidates: 4,
+        },
+      }),
+    ],
+    [
+      "original-retained success",
+      succeededStatus({
+        result: {
+          kind: "original-retained",
+          testedCandidates: 4,
+          engineBuildId: "engine-1",
+          codecBuildId: "codec-1",
+          warnings: ["ORIGINAL_RETAINED_UNMODIFIED"],
+        },
+        measurements: {
+          ...measurements,
+          testedCandidates: 4,
+        },
+      }),
+    ],
+    [
+      "failure",
+      failedStatus({
+        measurements: {
+          ...measurements,
+          testedCandidates: 4,
+        },
+      }),
+    ],
+    [
+      "cancellation",
+      cancelledStatus({
+        measurements: {
+          ...measurements,
+          testedCandidates: 4,
+        },
+      }),
+    ],
+  ])("rejects four tested candidates for %s", (_case, status) => {
+    expect(engineJobStatusSchema.safeParse(status).success).toBe(false);
+  });
+
+  it.each([
+    [
+      "failure processed pixels",
+      failedStatus({
+        measurements: {
+          ...measurements,
+          processedPixels: 40_000_001,
+        },
+      }),
+    ],
+    [
+      "cancelled processed pixels",
+      cancelledStatus({
+        measurements: {
+          ...measurements,
+          processedPixels: 40_000_001,
+        },
+      }),
+    ],
+    [
+      "failure processed input bytes",
+      failedStatus({
+        measurements: {
+          ...measurements,
+          processedInputBytes: 30 * 1024 * 1024 + 1,
+        },
+      }),
+    ],
+    [
+      "cancelled processed input bytes",
+      cancelledStatus({
+        measurements: {
+          ...measurements,
+          processedInputBytes: 30 * 1024 * 1024 + 1,
+        },
+      }),
+    ],
+  ])("rejects universal measurement limit breach for %s", (_case, status) => {
+    expect(engineJobStatusSchema.safeParse(status).success).toBe(false);
+  });
+
   it.each([
     ["download", { ...succeededStatus().result, testedCandidates: 1 }],
     [
@@ -366,25 +525,21 @@ describe("engine job status protocol", () => {
 
   it("accepts cancelled measurements at zero", () => {
     expect(
-      engineJobStatusSchema.safeParse({
-        protocol: 1,
-        jobId,
-        state: "cancelled",
-        phase: null,
-        fraction: null,
-        sequence: 4,
-        measurements: {
-          processedInputBytes: 0,
-          processedPixels: 0,
-          cpuMs: 0,
-          memoryByteMilliseconds: 0,
-          peakMemoryBytes: 0,
-          testedCandidates: 0,
-          processingMs: 0,
-        },
-        inspection: null,
-        error: { code: "CANCELLED", retryable: false },
-      }).success,
+      engineJobStatusSchema.safeParse(
+        cancelledStatus({
+          sequence: 4,
+          measurements: {
+            processedInputBytes: 0,
+            processedPixels: 0,
+            cpuMs: 0,
+            memoryByteMilliseconds: 0,
+            peakMemoryBytes: 0,
+            testedCandidates: 0,
+            processingMs: 0,
+          },
+          inspection: null,
+        }),
+      ).success,
     ).toBe(true);
   });
 

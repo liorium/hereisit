@@ -43,6 +43,12 @@ function assertNonNegativeSafeInteger(value: number, label: string): void {
   }
 }
 
+function assertSafeInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value)) {
+    throw new RangeError(`${label} must be a safe integer.`);
+  }
+}
+
 function checkedSum(values: readonly number[], label: string): number {
   let total = 0;
   for (const value of values) {
@@ -54,14 +60,17 @@ function checkedSum(values: readonly number[], label: string): number {
   return total;
 }
 
-const retryReservationFields = [
+const dailyLimitFields = [
   "accountDailyLimit",
+  "anonymousDailyLimit",
+  "networkDailyLimit",
+] as const satisfies readonly (keyof RetryReservationInput)[];
+
+const retryUsageFields = [
   "accountReservedToday",
   "accountSettledToday",
-  "anonymousDailyLimit",
   "anonymousReservedToday",
   "anonymousSettledToday",
-  "networkDailyLimit",
   "networkReservedToday",
   "networkSettledToday",
   "requestedUnits",
@@ -77,21 +86,23 @@ const createOnlyFields = [
   "maximumQueuedAgeSeconds",
 ] as const satisfies readonly (keyof CreateAdmissionInput)[];
 
-function validateFields<T extends object>(input: T, fields: readonly (keyof T)[]): void {
+function validateFields<T extends object>(
+  input: T,
+  fields: readonly (keyof T)[],
+  validator: (value: number, label: string) => void,
+): void {
   for (const label of fields) {
     const value = input[label];
     if (typeof value !== "number") {
       throw new TypeError(`${String(label)} must be a number.`);
     }
-    assertNonNegativeSafeInteger(value, String(label));
+    validator(value, String(label));
   }
 }
 
 function processingIsDisabled(input: RetryReservationInput): boolean {
   return (
-    input.accountDailyLimit === 0 ||
-    input.anonymousDailyLimit === 0 ||
-    input.networkDailyLimit === 0
+    input.accountDailyLimit <= 0 || input.anonymousDailyLimit <= 0 || input.networkDailyLimit <= 0
   );
 }
 
@@ -117,7 +128,8 @@ function unitQuotaIsExceeded(input: RetryReservationInput): boolean {
 }
 
 export function decideRetryReservation(input: RetryReservationInput): RetryReservationDecision {
-  validateFields(input, retryReservationFields);
+  validateFields(input, dailyLimitFields, assertSafeInteger);
+  validateFields(input, retryUsageFields, assertNonNegativeSafeInteger);
 
   if (processingIsDisabled(input)) {
     return { allowed: false, code: "SERVER_PROCESSING_DISABLED" };
@@ -135,8 +147,9 @@ export function decideRetryReservation(input: RetryReservationInput): RetryReser
  * because their job is already counted as active and pending.
  */
 export function decideAdmission(input: CreateAdmissionInput): AdmissionDecision {
-  validateFields(input, retryReservationFields);
-  validateFields(input, createOnlyFields);
+  validateFields(input, dailyLimitFields, assertSafeInteger);
+  validateFields(input, retryUsageFields, assertNonNegativeSafeInteger);
+  validateFields(input, createOnlyFields, assertNonNegativeSafeInteger);
 
   if (processingIsDisabled(input)) {
     return { allowed: false, code: "SERVER_PROCESSING_DISABLED" };
