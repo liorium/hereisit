@@ -13,6 +13,9 @@ import {
 } from "./auth";
 import { type Env, parseOperationalConfig } from "./env";
 
+const productionCloudflareEnvExcludesTestMigrations: "TEST_MIGRATIONS" extends keyof Cloudflare.Env
+  ? false
+  : true = true;
 const currentSecret = Buffer.from(Array.from({ length: 32 }, (_, index) => index)).toString(
   "base64url",
 );
@@ -960,6 +963,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     const generated = readFileSync(new URL("./worker-configuration.d.ts", import.meta.url), "utf8");
     const envSource = readFileSync(new URL("./env.ts", import.meta.url), "utf8");
 
+    expect(productionCloudflareEnvExcludesTestMigrations).toBe(true);
     for (const binding of [
       "DB",
       "JOB_OBJECTS",
