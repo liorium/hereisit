@@ -653,7 +653,7 @@ describe("strict operational configuration", () => {
 });
 
 describe("Wrangler source-of-truth and generated environment", () => {
-  it("declares the Task 5 Queue producer without adding a consumer", () => {
+  it("declares the Task 6 Queue producer, fixed-slot consumer, and DLQ consumer", () => {
     const config = JSON.parse(
       readFileSync(new URL("../wrangler.local.jsonc", import.meta.url), "utf8"),
     ) as {
@@ -690,7 +690,23 @@ describe("Wrangler source-of-truth and generated environment", () => {
         queue: "hereisit-image-jobs-local",
       },
     ]);
-    expect(config.queues?.consumers).toBeUndefined();
+    expect(config.queues?.consumers).toEqual([
+      {
+        queue: "hereisit-image-jobs-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 2,
+        dead_letter_queue: "hereisit-image-jobs-dlq-local",
+        max_concurrency: 1,
+      },
+      {
+        queue: "hereisit-image-jobs-dlq-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 0,
+        max_concurrency: 1,
+      },
+    ]);
     expect(config.ratelimits).toEqual([
       {
         name: "SESSION_JOB_RATE_LIMITER",

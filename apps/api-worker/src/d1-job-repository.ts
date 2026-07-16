@@ -2007,3 +2007,234 @@ class D1JobRepository implements JobRepository {
 export function createD1JobRepository(database: D1Database): JobRepository {
   return new D1JobRepository(database);
 }
+
+export interface JobLease {
+  jobId: string;
+  leaseToken: string;
+  attempt: 1 | 2 | 3;
+  leaseExpiresAt: number;
+}
+
+export interface ClaimedQueueJob extends JobLease {
+  contractId: "image.optimize@1";
+  specJson: string;
+  specHash: string;
+  declaredBytes: number;
+  declaredMime: "image/jpeg" | "image/png" | "image/webp";
+  inputKey: string;
+  inputEtag: string;
+  outputKey: string;
+  resourceClass: "image-standard-v1" | "image-large-v1";
+  queueEpoch: string;
+  queueGeneration: number;
+  sessionHash: string;
+  networkHash: string;
+  dayKey: string;
+  reservedUnits: number;
+  accumulatedActualUnits: number;
+  processedInputBytes: number;
+  processedPixels: number;
+  cpuMs: number;
+  memoryByteMilliseconds: number;
+  peakMemoryBytes: number;
+  queuedAt: number;
+  startedAt: number;
+  createdAt: number;
+  cancelRequestedAt: number | null;
+}
+
+const claimedQueueJobRowSchema = z
+  .object({
+    id: canonicalUuidSchema,
+    contract_id: z.literal("image.optimize@1"),
+    spec_json: z.string().min(1).max(16_384),
+    spec_hash: hashSchema,
+    declared_bytes: positiveSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
+    declared_mime: imageOptimizeMimeSchema,
+    input_key: z.string().regex(INPUT_KEY_PATTERN),
+    input_etag: storedObjectEtagSchema,
+    output_key: z.string().regex(OUTPUT_KEY_PATTERN),
+    resource_class: z.enum(["image-standard-v1", "image-large-v1"]),
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    queue_epoch: canonicalUuidSchema,
+    queue_generation: nonnegativeSafeIntegerSchema,
+    lease_token: canonicalUuidSchema,
+    lease_expires_at: positiveSafeIntegerSchema,
+    session_hash: hashSchema,
+    network_hash: hashSchema,
+    day_key: dayKeySchema,
+    reserved_units: positiveSafeIntegerSchema,
+    actual_units: nonnegativeSafeIntegerSchema.nullable(),
+    processed_input_bytes: nonnegativeSafeIntegerSchema,
+    processed_pixels: nonnegativeSafeIntegerSchema,
+    cpu_ms: nonnegativeSafeIntegerSchema.nullable(),
+    memory_byte_milliseconds: nonnegativeSafeIntegerSchema.nullable(),
+    peak_memory_bytes: nonnegativeSafeIntegerSchema.nullable(),
+    queued_at: nonnegativeSafeIntegerSchema,
+    started_at: nonnegativeSafeIntegerSchema,
+    created_at: nonnegativeSafeIntegerSchema,
+    cancel_requested_at: nonnegativeSafeIntegerSchema.nullable(),
+  })
+  .strict();
+
+const claimedQueueJobColumns = `
+  id,
+  contract_id,
+  spec_json,
+  spec_hash,
+  declared_bytes,
+  declared_mime,
+  input_key,
+  input_etag,
+  output_key,
+  resource_class,
+  attempt,
+  queue_epoch,
+  queue_generation,
+  lease_token,
+  lease_expires_at,
+  session_hash,
+  network_hash,
+  day_key,
+  reserved_units,
+  actual_units,
+  processed_input_bytes,
+  processed_pixels,
+  cpu_ms,
+  memory_byte_milliseconds,
+  peak_memory_bytes,
+  queued_at,
+  started_at,
+  created_at,
+  cancel_requested_at
+`;
+
+function toClaimedQueueJob(row: z.infer<typeof claimedQueueJobRowSchema>): ClaimedQueueJob {
+  return {
+    jobId: row.id,
+    contractId: row.contract_id,
+    specJson: row.spec_json,
+    specHash: row.spec_hash,
+    declaredBytes: row.declared_bytes,
+    declaredMime: row.declared_mime,
+    inputKey: row.input_key,
+    inputEtag: row.input_etag,
+    outputKey: row.output_key,
+    resourceClass: row.resource_class,
+    attempt: row.attempt,
+    queueEpoch: row.queue_epoch,
+    queueGeneration: row.queue_generation,
+    leaseToken: row.lease_token,
+    leaseExpiresAt: row.lease_expires_at,
+    sessionHash: row.session_hash,
+    networkHash: row.network_hash,
+    dayKey: row.day_key,
+    reservedUnits: row.reserved_units,
+    accumulatedActualUnits: row.actual_units ?? 0,
+    processedInputBytes: row.processed_input_bytes,
+    processedPixels: row.processed_pixels,
+    cpuMs: row.cpu_ms ?? 0,
+    memoryByteMilliseconds: row.memory_byte_milliseconds ?? 0,
+    peakMemoryBytes: row.peak_memory_bytes ?? 0,
+    queuedAt: row.queued_at,
+    startedAt: row.started_at,
+    createdAt: row.created_at,
+    cancelRequestedAt: row.cancel_requested_at,
+  };
+}
+
+function validateClaimInput(jobId: string, now: number): void {
+  validateCanonicalUuid(jobId, "jobId");
+  checkedNonnegativeSafeInteger(now, "now");
+  if (now > Number.MAX_SAFE_INTEGER - PROCESSING_DEADLINE_MS) {
+    throw new RangeError("Claim time is too large.");
+  }
+}
+
+/**
+ * Atomically acquires a random fenced lease and reads the winning row through one first-primary
+ * session. A concurrent claimant can never receive the winning token.
+ */
+export async function claimQueuedJobRecord(
+  database: D1Database,
+  jobId: string,
+  now: number,
+): Promise<ClaimedQueueJob | null> {
+  validateClaimInput(jobId, now);
+  const leaseToken = crypto.randomUUID();
+  const leaseExpiresAt = now + 30_000;
+  const processingDeadlineAt = now + PROCESSING_DEADLINE_MS;
+  const session = database.withSession("first-primary");
+  const results = await session.batch([
+    session
+      .prepare(
+        `UPDATE jobs
+         SET status = 'running',
+             phase = 'validating',
+             lease_token = ?,
+             lease_expires_at = ?,
+             started_at = COALESCE(started_at, ?),
+             processing_deadline_at = COALESCE(processing_deadline_at, ?),
+             updated_at = ?
+         WHERE id = ?
+           AND settlement_state = 'reserved'
+           AND input_etag IS NOT NULL
+           AND cancel_requested_at IS NULL
+           AND (
+             status = 'queued'
+             OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+           )`,
+      )
+      .bind(leaseToken, leaseExpiresAt, now, processingDeadlineAt, now, jobId, now),
+    session
+      .prepare(
+        `SELECT ${claimedQueueJobColumns}
+         FROM jobs
+         WHERE id = ? AND lease_token = ?`,
+      )
+      .bind(jobId, leaseToken),
+  ]);
+  const changed = batchChanged(results[0], "Queue job claim");
+  if (changed > 1) throw new RepositoryIntegrityError("Queue claim changed multiple jobs.");
+  const rawRow = results[1]?.results[0];
+  if (changed === 0) {
+    if (rawRow !== undefined) {
+      throw new RepositoryIntegrityError("Losing queue claim unexpectedly read its lease token.");
+    }
+    return null;
+  }
+  const parsed = claimedQueueJobRowSchema.safeParse(rawRow);
+  if (!parsed.success) {
+    throw new RepositoryIntegrityError("Claimed queue row does not match the repository contract.");
+  }
+  let spec: unknown;
+  try {
+    spec = JSON.parse(parsed.data.spec_json);
+  } catch {
+    throw new RepositoryIntegrityError("Claimed queue spec is not valid JSON.");
+  }
+  const parsedSpec = imageOptimizeSpecV1Schema.safeParse(spec);
+  if (
+    !parsedSpec.success ||
+    JSON.stringify(parsedSpec.data) !== parsed.data.spec_json ||
+    (await sha256Hex(parsed.data.spec_json)) !== parsed.data.spec_hash
+  ) {
+    throw new RepositoryIntegrityError("Claimed queue spec is invalid.");
+  }
+  return toClaimedQueueJob(parsed.data);
+}
+
+export async function claimQueuedJob(
+  database: D1Database,
+  jobId: string,
+  now: number,
+): Promise<JobLease | null> {
+  const claimed = await claimQueuedJobRecord(database, jobId, now);
+  if (claimed === null) return null;
+  return {
+    jobId: claimed.jobId,
+    leaseToken: claimed.leaseToken,
+    attempt: claimed.attempt,
+    leaseExpiresAt: claimed.leaseExpiresAt,
+  };
+}

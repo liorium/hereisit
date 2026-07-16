@@ -24,6 +24,23 @@
         "binding": "IMAGE_JOBS",
         "queue": "hereisit-image-jobs-local"
       }
+    ],
+    "consumers": [
+      {
+        "queue": "hereisit-image-jobs-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 2,
+        "dead_letter_queue": "hereisit-image-jobs-dlq-local",
+        "max_concurrency": 1
+      },
+      {
+        "queue": "hereisit-image-jobs-dlq-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 0,
+        "max_concurrency": 1
+      }
     ]
   },
   "ratelimits": [

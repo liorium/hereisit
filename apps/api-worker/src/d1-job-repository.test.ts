@@ -5,6 +5,7 @@ import type { ImageOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/imag
 import { describe, expect, it } from "vitest";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
 import {
+  claimQueuedJob,
   createD1JobRepository,
   RepositoryIntegrityError,
   type ReserveAndCreateInput,
@@ -1831,5 +1832,47 @@ describe("normalized invariant circuit", () => {
       reason: "INPUT_ETAG_CONFLICT",
       opened_at: now,
     });
+  });
+});
+
+describe("fenced queue leases", () => {
+  async function queuedDatabase(): Promise<SqliteD1Database> {
+    const database = new SqliteD1Database();
+    const repository = createD1JobRepository(database);
+    await repository.reserveAndCreate(await reservationInput());
+    await repository.beginUpload({ jobId, now });
+    await repository.commitStoredInput({
+      jobId,
+      uploadVersion: 1,
+      inputEtag: "raw-etag",
+      now: now + 1,
+    });
+    return database;
+  }
+
+  it("allows exactly one concurrent claimant", async () => {
+    const database = await queuedDatabase();
+    const [first, second] = await Promise.all([
+      claimQueuedJob(database, jobId, now + 2),
+      claimQueuedJob(database, jobId, now + 2),
+    ]);
+
+    expect([first, second].filter((lease) => lease !== null)).toHaveLength(1);
+    expect(database.sessionConstraints.slice(-2)).toEqual(["first-primary", "first-primary"]);
+  });
+
+  it("recovers only an expired running lease with a new fence token", async () => {
+    const database = await queuedDatabase();
+    const first = await claimQueuedJob(database, jobId, now + 2);
+    expect(first).not.toBeNull();
+    await expect(claimQueuedJob(database, jobId, now + 3)).resolves.toBeNull();
+
+    database.sqlite
+      .prepare("UPDATE jobs SET lease_expires_at = ? WHERE id = ?")
+      .run(now + 3, jobId);
+    const recovered = await claimQueuedJob(database, jobId, now + 4);
+
+    expect(recovered).not.toBeNull();
+    expect(recovered?.leaseToken).not.toBe(first?.leaseToken);
   });
 });
