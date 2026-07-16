@@ -148,6 +148,38 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@24.10.10)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.10.10)(esbuild@0.28.1)(jiti@2.7.0))
 
+  packages/server-contracts:
+    dependencies:
+      '@hereisit/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.10.10)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.10.10)(esbuild@0.28.1)(jiti@2.7.0))
+
+  packages/server-job:
+    dependencies:
+      '@hereisit/server-contracts':
+        specifier: workspace:*
+        version: link:../server-contracts
+      '@hereisit/tool-contracts':
+        specifier: workspace:*
+        version: link:../tool-contracts
+    devDependencies:
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@24.10.10)(@vitest/coverage-v8@4.1.10)(vite@8.1.4(@types/node@24.10.10)(esbuild@0.28.1)(jiti@2.7.0))
+
   packages/tool-contracts:
     dependencies:
       zod:
