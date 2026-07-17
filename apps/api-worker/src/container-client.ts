@@ -5,7 +5,7 @@ import {
   engineCreateJobRequestSchema,
   engineJobStatusSchema,
 } from "@hereisit/server-contracts";
-import type { QueueEnv } from "./pending-container-binding";
+import type { Env } from "./env";
 
 const ENGINE_ORIGIN = "http://image-engine";
 const MAX_STATUS_BYTES = 64 * 1024;
@@ -75,6 +75,11 @@ export class ImageEngineContainer extends Container {
     });
   }
 }
+
+type Assert<T extends true> = T;
+export type ImageEngineBindingTypeAssertion = Assert<
+  Env["IMAGE_ENGINE"] extends DurableObjectNamespace<ImageEngineContainer> ? true : false
+>;
 
 function canonicalJobId(jobId: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(jobId)) {
@@ -239,11 +244,8 @@ export function createEngineClientFromStub(
   };
 }
 
-export function createContainerEngineClient(env: QueueEnv): EngineClient {
+export function createContainerEngineClient(env: Env): EngineClient {
   return createEngineClientFromStub(
-    getContainer(
-      env.IMAGE_ENGINE as DurableObjectNamespace<ImageEngineContainer>,
-      env.ENGINE_INSTANCE_NAME,
-    ) as EngineContainerStub,
+    getContainer(env.IMAGE_ENGINE, env.ENGINE_INSTANCE_NAME) as EngineContainerStub,
   );
 }

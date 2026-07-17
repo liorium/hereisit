@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "images": [
+    {
+      "name": "rust-build",
+      "reference": "rust:1.88.0-bookworm",
+      "indexDigest": "sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0",
+      "platformDigest": "sha256:4727898c104ecd2e22d780925832502faee9fe4e70581b8572af081370b315a0"
+    },
+    {
+      "name": "node-build-runtime",
+      "reference": "node:24.13.0-bookworm-slim",
+      "indexDigest": "sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f",
+      "platformDigest": "sha256:46feb5752989c05b8606e6323fbbc3db667d14ade1c24f5d0d44d9ca9909d607"
+    }
+  ]
+}

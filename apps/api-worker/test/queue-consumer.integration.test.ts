@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import type { EngineJobStatus } from "@hereisit/server-contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import type { EngineClient } from "../src/container-client";
-import type { QueueEnv } from "../src/pending-container-binding";
+import type { Env } from "../src/env";
 import {
   consumeImageJob,
   createR2QueueArtifactStore,
@@ -331,7 +331,7 @@ describe("workerd fenced settlement", () => {
     };
 
     await expect(
-      consumeImageJob(message, env as QueueEnv, {
+      consumeImageJob(message, env as Env, {
         engine,
         artifacts,
         now: () => now,
@@ -365,7 +365,7 @@ describe("workerd fenced settlement", () => {
       queueGeneration: 2,
     };
     await expect(
-      consumeImageJob(retryMessage, env as QueueEnv, {
+      consumeImageJob(retryMessage, env as Env, {
         engine,
         artifacts,
         now: () => now,
@@ -373,7 +373,7 @@ describe("workerd fenced settlement", () => {
       }),
     ).resolves.toBe("completed");
     await expect(
-      consumeImageJob(retryMessage, env as QueueEnv, {
+      consumeImageJob(retryMessage, env as Env, {
         engine,
         artifacts,
         now: () => now,

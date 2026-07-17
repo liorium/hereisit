@@ -1,5 +1,5 @@
 import type { ImageJobMessage } from "@hereisit/server-contracts";
-import type { QueueEnv } from "./pending-container-binding";
+import type { Env } from "./env";
 import { consumeImageQueue } from "./queue-consumer";
 import { routeRequest } from "./router";
 import { runScheduledMaintenance } from "./sweeper";
@@ -12,4 +12,4 @@ export default {
   scheduled: (controller, env, context) => {
     context.waitUntil(runScheduledMaintenance(env, controller.scheduledTime));
   },
-} satisfies ExportedHandler<QueueEnv, ImageJobMessage>;
+} satisfies ExportedHandler<Env, ImageJobMessage>;

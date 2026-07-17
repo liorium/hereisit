@@ -27,7 +27,7 @@ import {
   EngineProtocolError,
 } from "./container-client";
 import { claimQueuedJobRecord } from "./d1-job-repository";
-import type { QueueEnv } from "./pending-container-binding";
+import type { Env } from "./env";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
 
 const LEASE_RENEW_INTERVAL_MS = 5_000;
@@ -346,7 +346,7 @@ function sampleFromMeasurements(
 }
 
 class D1QueueJobStore implements QueueJobStore {
-  constructor(private readonly env: QueueEnv) {}
+  constructor(private readonly env: Env) {}
 
   async claim(message: ImageJobMessage, now: number): Promise<QueueJobContext | null> {
     const row = await claimQueuedJobRecord(this.env.DB, message.jobId, now);
@@ -1247,7 +1247,7 @@ async function ensureLease(
 
 export async function consumeImageJob(
   rawMessage: ImageJobMessage,
-  env: QueueEnv,
+  env: Env,
   dependencies: QueueConsumerDependencies = {},
 ): Promise<"completed" | "retry-scheduled" | "duplicate"> {
   const message = imageJobMessageSchema.parse(rawMessage);
@@ -1497,7 +1497,7 @@ export async function consumeImageJob(
 
 async function consumeDlqMessage(
   message: ImageJobMessage,
-  env: QueueEnv,
+  env: Env,
   attempts: number,
 ): Promise<void> {
   const store = new D1QueueJobStore(env);
@@ -1523,7 +1523,7 @@ async function consumeDlqMessage(
 
 export async function consumeImageQueue(
   batch: MessageBatch<ImageJobMessage>,
-  env: QueueEnv,
+  env: Env,
   dependencies: {
     consume?: typeof consumeImageJob;
     quarantine?: typeof consumeDlqMessage;

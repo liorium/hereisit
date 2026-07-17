@@ -9,6 +9,7 @@ apps/web/public/_headers
 !.dev.vars.example
 coverage/
 .turbo/
+**/target/
 playwright-report/
 test-results/
 .worktrees/

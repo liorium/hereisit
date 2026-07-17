@@ -2,8 +2,8 @@ import type { ImageJobMessage } from "@hereisit/server-contracts";
 import { calculateSettledWeightedUnits, retentionDecision } from "@hereisit/server-job";
 import { z } from "zod";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
+import type { Env } from "./env";
 import { dispatchJobOutbox, dispatchPendingOutbox } from "./outbox";
-import type { QueueEnv } from "./pending-container-binding";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
 
 const MAINTENANCE_LIMIT = 100;
@@ -96,7 +96,7 @@ const recoveryRowSchema = z
   .strict();
 
 async function settleAbandonedRunningJob(
-  env: QueueEnv,
+  env: Env,
   row: z.infer<typeof recoveryRowSchema>,
   now: number,
   terminal: "cancelled" | "expired",
@@ -221,7 +221,7 @@ async function settleAbandonedRunningJob(
   return true;
 }
 
-async function requeueForRecovery(env: QueueEnv, jobId: string, now: number): Promise<boolean> {
+async function requeueForRecovery(env: Env, jobId: string, now: number): Promise<boolean> {
   const results = await env.DB.batch([
     env.DB.prepare(
       `UPDATE jobs
@@ -267,7 +267,7 @@ async function requeueForRecovery(env: QueueEnv, jobId: string, now: number): Pr
   return changed === 1;
 }
 
-async function bestEffortWorkspaceCleanup(env: QueueEnv, jobId: string): Promise<void> {
+async function bestEffortWorkspaceCleanup(env: Env, jobId: string): Promise<void> {
   try {
     const { createContainerEngineClient } = await import("./container-client");
     const engine = createContainerEngineClient(env);
@@ -278,11 +278,7 @@ async function bestEffortWorkspaceCleanup(env: QueueEnv, jobId: string): Promise
   }
 }
 
-async function markRecoveredDeadlineExpired(
-  env: QueueEnv,
-  jobId: string,
-  now: number,
-): Promise<void> {
+async function markRecoveredDeadlineExpired(env: Env, jobId: string, now: number): Promise<void> {
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE jobs
@@ -300,7 +296,7 @@ async function markRecoveredDeadlineExpired(
 }
 
 export async function recoverStaleLeasesAndLostQueueMessages(
-  env: QueueEnv,
+  env: Env,
   now: number,
   limit = MAINTENANCE_LIMIT,
 ): Promise<number> {
@@ -387,7 +383,7 @@ const sweepRowSchema = z
   .strict();
 
 async function deleteTerminalRecord(
-  env: QueueEnv,
+  env: Env,
   row: z.infer<typeof sweepRowSchema>,
   now: number,
 ): Promise<void> {
@@ -449,7 +445,7 @@ const tombstoneRowSchema = z
   })
   .strict();
 
-async function sweepTombstones(env: QueueEnv, now: number, limit: number): Promise<number> {
+async function sweepTombstones(env: Env, now: number, limit: number): Promise<number> {
   const selected = await env.DB.prepare(
     `SELECT id, input_key, output_key, attempt_count
      FROM artifact_cleanup_tombstones
@@ -496,7 +492,7 @@ async function sweepTombstones(env: QueueEnv, now: number, limit: number): Promi
   return removed;
 }
 
-async function markExpiredDownloadResult(env: QueueEnv, jobId: string, now: number): Promise<void> {
+async function markExpiredDownloadResult(env: Env, jobId: string, now: number): Promise<void> {
   await env.DB.prepare(
     `UPDATE jobs
      SET status = 'expired', error_code = 'EXPIRED', error_guidance = NULL,
@@ -510,7 +506,7 @@ async function markExpiredDownloadResult(env: QueueEnv, jobId: string, now: numb
 }
 
 export async function sweepExpiredJobs(
-  env: QueueEnv,
+  env: Env,
   now: number,
   limit = MAINTENANCE_LIMIT,
 ): Promise<number> {
@@ -633,7 +629,7 @@ export async function sweepExpiredJobs(
 const cursorRowSchema = z.object({ cursor: z.string().max(2_048).nullable() }).strict();
 
 export async function sweepOrphanArtifactsFromSavedCursor(
-  env: QueueEnv,
+  env: Env,
   olderThan: number,
   limit = MAINTENANCE_LIMIT,
 ): Promise<number> {
@@ -676,7 +672,7 @@ export async function sweepOrphanArtifactsFromSavedCursor(
   return removed;
 }
 
-export async function runScheduledMaintenance(env: QueueEnv, now = Date.now()): Promise<void> {
+export async function runScheduledMaintenance(env: Env, now = Date.now()): Promise<void> {
   await runScheduledMaintenanceWithDependencies(env, now, {
     dispatchPendingOutbox,
     recoverStale: recoverStaleLeasesAndLostQueueMessages,

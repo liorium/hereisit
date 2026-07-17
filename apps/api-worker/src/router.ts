@@ -1,9 +1,9 @@
 import { hashNetworkBuckets } from "./auth";
 import { readBoundedJson } from "./bounded-json";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
+import type { Env } from "./env";
 import { type OperationalConfig, parseOperationalConfig } from "./env";
 import { dispatchJobOutbox } from "./outbox";
-import type { QueueEnv } from "./pending-container-binding";
 import { deleteAuthorizedArtifact, storeExactInputArtifact } from "./r2-artifacts";
 import {
   type CreateJobRouteRuntime,
@@ -227,7 +227,7 @@ function unavailableConfigurationResponse(request: Request): Response {
 
 export async function routeRequest(
   request: Request,
-  env: QueueEnv,
+  env: Env,
   _context: ExecutionContext,
 ): Promise<Response> {
   let config: OperationalConfig;

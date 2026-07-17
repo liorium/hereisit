@@ -46,6 +46,31 @@
       }
     ]
   },
+  "containers": [
+    {
+      "class_name": "ImageEngineContainer",
+      "image": "../image-engine/Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-2",
+      "max_instances": 1,
+      "rollout_active_grace_period": 180,
+      "rollout_step_percentage": [100]
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "IMAGE_ENGINE",
+        "class_name": "ImageEngineContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "image-engine-v1",
+      "new_sqlite_classes": ["ImageEngineContainer"]
+    }
+  ],
   "ratelimits": [
     {
       "name": "SESSION_JOB_RATE_LIMITER",

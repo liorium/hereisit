@@ -667,6 +667,9 @@ describe("Wrangler source-of-truth and generated environment", () => {
         producers?: { binding: string; queue: string }[];
         consumers?: unknown[];
       };
+      containers?: unknown[];
+      durable_objects?: { bindings?: unknown[] };
+      migrations?: unknown[];
       ratelimits: {
         name: string;
         namespace_id: string;
@@ -708,6 +711,23 @@ describe("Wrangler source-of-truth and generated environment", () => {
         max_retries: 0,
         max_concurrency: 1,
       },
+    ]);
+    expect(config.containers).toEqual([
+      {
+        class_name: "ImageEngineContainer",
+        image: "../image-engine/Dockerfile",
+        image_build_context: "../..",
+        instance_type: "standard-2",
+        max_instances: 1,
+        rollout_active_grace_period: 180,
+        rollout_step_percentage: [100],
+      },
+    ]);
+    expect(config.durable_objects?.bindings).toEqual([
+      { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
+    ]);
+    expect(config.migrations).toEqual([
+      { tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] },
     ]);
     expect(config.ratelimits).toEqual([
       {
@@ -1004,12 +1024,12 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "POLICY_RATE_LIMITER",
       "JOB_API_NETWORK_RATE_LIMITER",
       "IMAGE_JOBS",
+      "IMAGE_ENGINE",
     ]) {
       expect(generated).toContain(`${binding}:`);
     }
     for (const futureBinding of [
       "USAGE_LOGS",
-      "IMAGE_ENGINE",
       "USAGE_ANALYTICS",
       "WORKER_VERSION",
       "ALERT_EMAIL",

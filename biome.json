@@ -7,6 +7,7 @@
       "!!apps/web/public/pdfjs",
       "!!**/.next",
       "!!**/.turbo",
+      "!!**/target",
       "!!**/coverage",
       "!!**/dist",
       "!!**/playwright-report",

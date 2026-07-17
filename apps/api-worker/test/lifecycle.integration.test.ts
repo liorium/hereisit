@@ -3,7 +3,7 @@ import { calculateSettledWeightedUnits } from "@hereisit/server-job";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashJobToken } from "../src/auth";
 import { createD1LifecycleRepository } from "../src/d1-job-repository";
-import type { QueueEnv } from "../src/pending-container-binding";
+import type { Env } from "../src/env";
 import {
   type LifecycleRouteRuntime,
   routeJobDownloadedRequest,
@@ -216,9 +216,9 @@ describe("workerd result lifecycle", () => {
       customMetadata: { kind: "output", jobId },
     });
 
-    await sweepExpiredJobs(env as QueueEnv, now, 100);
+    await sweepExpiredJobs(env as Env, now, 100);
     await expect(env.JOB_OBJECTS.head(outputKey)).resolves.not.toBeNull();
-    await sweepExpiredJobs(env as QueueEnv, now + 1, 100);
+    await sweepExpiredJobs(env as Env, now + 1, 100);
     await expect(env.JOB_OBJECTS.head(outputKey)).resolves.toBeNull();
     await expect(
       env.DB.prepare("SELECT status, error_code, download_lease_hash FROM jobs WHERE id = ?")
@@ -252,7 +252,7 @@ describe("workerd result lifecycle", () => {
       ).bind(jobId, now - 1),
     ]);
 
-    await sweepExpiredJobs(env as QueueEnv, now, 100);
+    await sweepExpiredJobs(env as Env, now, 100);
     await expect(
       env.DB.prepare("SELECT id FROM jobs WHERE id = ?").bind(jobId).first(),
     ).resolves.toBeNull();
@@ -274,7 +274,7 @@ describe("workerd result lifecycle", () => {
       await env.DB.prepare("SELECT COUNT(*) AS count FROM job_quarantine").first("count"),
     ).toBe(0);
 
-    await sweepExpiredJobs(env as QueueEnv, now + 1, 100);
+    await sweepExpiredJobs(env as Env, now + 1, 100);
     await expect(env.JOB_OBJECTS.head(inputKey)).resolves.toBeNull();
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS count FROM artifact_cleanup_tombstones").first(
@@ -291,10 +291,10 @@ describe("workerd result lifecycle", () => {
     }
     const olderThan = Date.now() + 1_000;
 
-    expect(await sweepOrphanArtifactsFromSavedCursor(env as QueueEnv, olderThan, 100)).toBe(100);
-    expect(await sweepOrphanArtifactsFromSavedCursor(env as QueueEnv, olderThan, 100)).toBe(100);
-    expect(await sweepOrphanArtifactsFromSavedCursor(env as QueueEnv, olderThan, 100)).toBe(1);
-    expect(await sweepOrphanArtifactsFromSavedCursor(env as QueueEnv, olderThan, 100)).toBe(0);
+    expect(await sweepOrphanArtifactsFromSavedCursor(env as Env, olderThan, 100)).toBe(100);
+    expect(await sweepOrphanArtifactsFromSavedCursor(env as Env, olderThan, 100)).toBe(100);
+    expect(await sweepOrphanArtifactsFromSavedCursor(env as Env, olderThan, 100)).toBe(1);
+    expect(await sweepOrphanArtifactsFromSavedCursor(env as Env, olderThan, 100)).toBe(0);
     const listed = await env.JOB_OBJECTS.list({ prefix: "inputs/" });
     expect(listed.objects).toHaveLength(0);
   }, 30_000);
@@ -368,7 +368,7 @@ describe("workerd result lifecycle", () => {
       DB: env.DB,
       JOB_OBJECTS: env.JOB_OBJECTS,
       IMAGE_JOBS: queue,
-    } as unknown as QueueEnv;
+    } as unknown as Env;
 
     await expect(recoverStaleLeasesAndLostQueueMessages(maintenanceEnv, now, 100)).resolves.toBe(1);
     expect(queue.send).toHaveBeenCalledWith(
@@ -471,7 +471,7 @@ describe("workerd result lifecycle", () => {
       DB: env.DB,
       JOB_OBJECTS: env.JOB_OBJECTS,
       IMAGE_JOBS: { send: vi.fn(async () => undefined) },
-    } as unknown as QueueEnv;
+    } as unknown as Env;
 
     await expect(recoverStaleLeasesAndLostQueueMessages(maintenanceEnv, now, 100)).resolves.toBe(1);
     await expect(
@@ -542,7 +542,7 @@ describe("workerd result lifecycle", () => {
       ).bind("9".repeat(64), now - 35 * 24 * 60 * 60_000, now),
     ]);
 
-    await sweepExpiredJobs(env as QueueEnv, now, 100);
+    await sweepExpiredJobs(env as Env, now, 100);
 
     await expect(
       env.DB.prepare("SELECT network_hash FROM jobs WHERE id = ?").bind(jobId).first(),
@@ -641,7 +641,7 @@ describe("workerd result lifecycle", () => {
       ).bind(jobId, sessionHash, networkHash, reserved, now - 1_000),
     ]);
 
-    await sweepExpiredJobs(env as QueueEnv, now, 100);
+    await sweepExpiredJobs(env as Env, now, 100);
 
     await expect(env.JOB_OBJECTS.head(inputKey)).resolves.toBeNull();
     await expect(
