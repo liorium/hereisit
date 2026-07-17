@@ -103,8 +103,12 @@ export function createEngineRequestHandler(input: {
           response.statusCode = 200;
           response.setHeader("content-type", status.result.mime);
           response.setHeader("content-length", output.byteLength);
-          response.setHeader("x-engine-build-id", status.result.engineBuildId);
-          response.setHeader("x-codec-build-id", status.result.codecBuildId);
+          response.setHeader("digest", output.digest);
+          response.setHeader("x-hereisit-engine-build", status.result.engineBuildId);
+          response.setHeader(
+            "x-hereisit-tested-candidates",
+            String(status.result.testedCandidates),
+          );
           await pipeline(output.stream, response);
           return;
         }

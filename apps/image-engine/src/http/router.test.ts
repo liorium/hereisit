@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -226,9 +227,16 @@ describe("image engine HTTP lifecycle", () => {
     const output = await request(`/v1/jobs/${jobId}/output`);
     expect(output.status).toBe(200);
     expect(output.headers.get("content-type")).toBe("image/jpeg");
+    expect(output.headers.get("content-length")).toBe("2");
+    expect(output.headers.get("digest")).toBe(
+      `sha-256=${createHash("sha256").update(Uint8Array.of(9, 8)).digest("base64")}`,
+    );
+    expect(output.headers.get("x-hereisit-engine-build")).toBe("engine-test");
+    expect(output.headers.get("x-hereisit-tested-candidates")).toBe("1");
+    expect(output.headers.get("x-codec-build-id")).toBeNull();
     expect(new Uint8Array(await output.arrayBuffer())).toEqual(Uint8Array.of(9, 8));
     const descriptor = await controller.output(jobId);
-    expect(descriptor).toMatchObject({ byteLength: 2 });
+    expect(descriptor).toMatchObject({ byteLength: 2, digest: expect.stringMatching(/^sha-256=/) });
     expect(descriptor?.stream.readable).toBe(true);
     descriptor?.stream.destroy();
     expect((await request(`/v1/jobs/${jobId}`, { method: "DELETE" })).status).toBe(204);

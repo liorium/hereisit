@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import type { Readable } from "node:stream";
@@ -427,9 +428,11 @@ export class JobController {
     return false;
   }
 
-  async output(
-    jobId: string,
-  ): Promise<{ readonly stream: Readable; readonly byteLength: number } | null> {
+  async output(jobId: string): Promise<{
+    readonly stream: Readable;
+    readonly byteLength: number;
+    readonly digest: string;
+  } | null> {
     const job = this.#jobs.get(jobId);
     if (job?.status.state !== "succeeded" || job.status.result.kind !== "download") return null;
     const file = await open(job.workspace.output, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -438,9 +441,12 @@ export class JobController {
       if (!information.isFile() || information.size !== job.status.result.byteLength) {
         throw new Error("verified output mismatch");
       }
+      const hash = createHash("sha256");
+      for await (const chunk of file.createReadStream({ autoClose: false })) hash.update(chunk);
       return {
-        stream: file.createReadStream({ autoClose: true }),
+        stream: file.createReadStream({ autoClose: true, start: 0, end: information.size - 1 }),
         byteLength: information.size,
+        digest: `sha-256=${hash.digest("base64")}`,
       };
     } catch (error) {
       await file.close().catch(() => undefined);

@@ -12,8 +12,8 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe("planning runner", () => {
-  it("emits ordered phases and atomically persists a bounded plan before codecs", async () => {
+describe("production runner", () => {
+  it("emits ordered phases and atomically persists a bounded plan before codec failure", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "hereisit-runner-"));
     roots.push(workspace);
     const inputPath = join(workspace, "input.bin");
@@ -53,7 +53,8 @@ describe("planning runner", () => {
       { state: "running", phase: "validating", sequence: 4 },
       { state: "running", phase: "inspecting", sequence: 5 },
       { state: "running", phase: "normalizing", sequence: 6 },
-      { state: "failed", phase: "optimizing", sequence: 7 },
+      { state: "running", phase: "optimizing", sequence: 7 },
+      { state: "failed", phase: "optimizing", sequence: 8 },
     ]);
     const persisted = JSON.parse(await readFile(join(workspace, "plan.json"), "utf8"));
     expect(persisted.plan.candidates.length).toBeGreaterThanOrEqual(1);

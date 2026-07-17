@@ -1,4 +1,5 @@
-import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,14 +13,17 @@ import sharp from "sharp";
 import { encodeJpegCandidate, JpegCodecError, orientationTransform } from "../codecs/jpeg";
 import { verifyJpegCoefficientTransform } from "../codecs/jpeg-coeff-verify";
 import { encodePngCandidate } from "../codecs/png";
+import { encodeWebpCandidate } from "../codecs/webp";
 import { classifyImage, extractImageFeatures } from "../pipeline/classify";
 import { type ImageInspection, ImagePipelineError, inspectImage } from "../pipeline/inspect";
 import { type NormalizedImageWithSample, normalizeImage } from "../pipeline/normalize";
+import { OptimizationExecutionError, optimizeCandidates } from "../pipeline/optimize";
 import {
   type OptimizationPlan,
   type OptimizationPlanningResult,
   planOptimization,
 } from "../pipeline/plan";
+import { liveQualityFloor, selectVerifiedResult, verifyCandidate } from "../pipeline/verify";
 import { writeJsonAtomic } from "./workspace";
 
 function argument(name: string): string | undefined {
@@ -35,6 +39,7 @@ function measurements(input: {
   readonly request: EngineCreateJobRequest;
   readonly inspection?: ImageInspection;
   readonly startedAt: number;
+  readonly testedCandidates?: number;
 }): EngineMeasurements {
   return {
     processedInputBytes: input.request.input.byteLength,
@@ -42,14 +47,20 @@ function measurements(input: {
     cpuMs: 0,
     memoryByteMilliseconds: 0,
     peakMemoryBytes: 0,
-    testedCandidates: 0,
+    testedCandidates: input.testedCandidates ?? 0,
     processingMs: Math.max(0, Math.round(performance.now() - input.startedAt)),
   };
 }
 
 function progress(
   request: EngineCreateJobRequest,
-  phase: "validating" | "inspecting" | "normalizing",
+  phase:
+    | "validating"
+    | "inspecting"
+    | "normalizing"
+    | "optimizing"
+    | "verifying"
+    | "preparing-output",
   sequence: number,
 ): void {
   emit({
@@ -64,7 +75,13 @@ function progress(
 
 function failed(input: {
   readonly request: EngineCreateJobRequest;
-  readonly phase: "validating" | "inspecting" | "normalizing" | "optimizing";
+  readonly phase:
+    | "validating"
+    | "inspecting"
+    | "normalizing"
+    | "optimizing"
+    | "verifying"
+    | "preparing-output";
   readonly sequence: number;
   readonly code:
     | "UNSUPPORTED_INPUT"
@@ -73,7 +90,9 @@ function failed(input: {
     | "PIXEL_LIMIT_EXCEEDED"
     | "RESOURCE_CLASS_UPGRADE"
     | "ENGINE_OOM"
-    | "ENGINE_CRASH";
+    | "ENGINE_CRASH"
+    | "ENGINE_TIMEOUT"
+    | "VERIFICATION_FAILED";
   readonly retryable: boolean;
   readonly startedAt: number;
   readonly inspection?: ImageInspection;
@@ -84,6 +103,8 @@ function failed(input: {
     | "transparent-graphic"
     | "noisy"
     | "already-optimized";
+  readonly guidance?: "TRY_BALANCED_PRESET";
+  readonly testedCandidates?: number;
 }): void {
   emit({
     protocol: 1,
@@ -101,7 +122,11 @@ function failed(input: {
             inputHasAlpha: input.inspection.hasAlpha,
             contentClass: input.contentClass,
           },
-    error: { code: input.code, retryable: input.retryable },
+    error: {
+      code: input.code,
+      retryable: input.retryable,
+      ...(input.guidance === undefined ? {} : { guidance: input.guidance }),
+    },
   });
 }
 
@@ -125,7 +150,13 @@ export async function runPlanningPipeline(input: {
 }): Promise<void> {
   const startedAt = performance.now();
   let sequence = 4;
-  let phase: "validating" | "inspecting" | "normalizing" | "optimizing" = "validating";
+  let phase:
+    | "validating"
+    | "inspecting"
+    | "normalizing"
+    | "optimizing"
+    | "verifying"
+    | "preparing-output" = "validating";
   let inspection: ImageInspection | undefined;
   progress(input.request, phase, sequence);
   try {
@@ -137,16 +168,17 @@ export async function runPlanningPipeline(input: {
     phase = "inspecting";
     sequence += 1;
     progress(input.request, phase, sequence);
-    inspection = await inspectImage(inputPath, input.request.input.mimeHint, {
+    const currentInspection = await inspectImage(inputPath, input.request.input.mimeHint, {
       resourceClass: input.request.resourceClass,
     });
+    inspection = currentInspection;
     phase = "normalizing";
     sequence += 1;
     progress(input.request, phase, sequence);
     const normalized = await normalizeImage({
       sourcePath: inputPath,
       rawPath: join(input.workspace, "normalized.raw"),
-      inspection,
+      inspection: currentInspection,
     });
     const decodedBytes =
       normalized.width * normalized.height * normalized.channels * (normalized.sampleDepth / 8);
@@ -160,7 +192,7 @@ export async function runPlanningPipeline(input: {
       decodedBytes,
     });
     const contentClass = classifyImage(features);
-    const planning = planOptimization(inspection, contentClass, input.request.spec);
+    const planning = planOptimization(currentInspection, contentClass, input.request.spec);
     if (planning.kind === "unsupported") {
       failed({
         request: input.request,
@@ -169,40 +201,171 @@ export async function runPlanningPipeline(input: {
         code: planning.code,
         retryable: false,
         startedAt,
-        inspection,
+        inspection: currentInspection,
         contentClass,
       });
       return;
     }
     await writeJsonAtomic(join(input.workspace, "plan.json"), {
       version: 1,
-      inspection,
+      inspection: currentInspection,
       normalization: serializableNormalization(normalized),
       features,
       plan: planning.plan,
     });
-
-    // Codec execution begins in Task 13. Until then the runner fails closed after proving and
-    // persisting the bounded plan; it never fabricates a successful optimization result.
-    failed({
-      request: input.request,
-      phase: "optimizing",
-      sequence: sequence + 1,
-      code: "ENGINE_CRASH",
-      retryable: true,
-      startedAt,
-      inspection,
-      contentClass,
+    phase = "optimizing";
+    sequence += 1;
+    progress(input.request, phase, sequence);
+    const candidatePaths: string[] = [];
+    const optimization = await optimizeCandidates({
+      plan: planning.plan,
+      signal: new AbortController().signal,
+      encode: async (candidate, index) => {
+        const extension = currentInspection.format === "jpeg" ? "jpg" : currentInspection.format;
+        const outputPath = join(input.workspace, `candidate-${index}.${extension}`);
+        candidatePaths.push(outputPath);
+        if (currentInspection.format === "jpeg") {
+          return encodeJpegCandidate({
+            sourcePath: inputPath,
+            normalizedRgbPath: normalized.rawPath,
+            width: normalized.width,
+            height: normalized.height,
+            orientation: currentInspection.orientation,
+            candidate,
+            outputPath,
+            signal: new AbortController().signal,
+          });
+        }
+        if (currentInspection.format === "png") {
+          return encodePngCandidate({
+            normalizedPath: normalized.rawPath,
+            width: normalized.width,
+            height: normalized.height,
+            channels: normalized.channels,
+            sampleDepth: normalized.sampleDepth,
+            candidate,
+            outputPath,
+            signal: new AbortController().signal,
+          });
+        }
+        return encodeWebpCandidate({
+          normalizedPath: normalized.rawPath,
+          width: normalized.width,
+          height: normalized.height,
+          channels: normalized.channels,
+          candidate,
+          outputPath,
+          signal: new AbortController().signal,
+        });
+      },
+      verify: async (candidate) => {
+        let coefficientExact: boolean | undefined;
+        if (candidate.mime === "image/jpeg" && candidate.mode === "lossless-structural") {
+          coefficientExact = (
+            await verifyJpegCoefficientTransform({
+              sourcePath: inputPath,
+              candidatePath: candidate.path,
+              transform: orientationTransform(currentInspection.orientation),
+              signal: new AbortController().signal,
+            })
+          ).exact;
+        }
+        const verification = await verifyCandidate({
+          candidate,
+          sourceBytes: input.request.input.byteLength,
+          minimumSavingsPercent: planning.plan.minimumSavingsPercent,
+          inspection: currentInspection,
+          normalized,
+          mode: input.request.spec.mode,
+          preset: input.request.spec.preset,
+          contentClass,
+          ...(coefficientExact === undefined ? {} : { coefficientExact }),
+        });
+        if (!verification.accepted) await rm(candidate.path, { force: true });
+        const floor = liveQualityFloor[input.request.spec.preset];
+        const qualityMarginPassed =
+          verification.accepted &&
+          (verification.liveQuality === null ||
+            verification.liveQuality.worstSsim >=
+              (contentClass === "screenshot-text" ? floor.screenshotTextSsim : floor.defaultSsim) +
+                0.005);
+        return {
+          accepted: verification.accepted,
+          sizeTargetPassed: false,
+          qualityMarginPassed,
+        };
+      },
     });
+    phase = "verifying";
+    sequence += 1;
+    progress(input.request, phase, sequence);
+    const selected = optimization.selected;
+    await Promise.all(
+      candidatePaths
+        .filter((path) => path !== selected?.path)
+        .map((path) => rm(path, { force: true })),
+    );
+    phase = "preparing-output";
+    sequence += 1;
+    progress(input.request, phase, sequence);
+    const engineBuildId = process.env.ENGINE_BUILD_ID ?? "hereisit-image-engine-v1";
+    const result: EngineJobStatus extends infer _Status
+      ? Extract<EngineJobStatus, { state: "succeeded" }>["result"]
+      : never =
+      selected === null
+        ? {
+            kind: "original-retained" as const,
+            testedCandidates: optimization.testedCandidates,
+            engineBuildId,
+            codecBuildId: "none",
+            warnings: ["ORIGINAL_RETAINED_UNMODIFIED", ...optimization.warnings] as const,
+          }
+        : {
+            kind: "download" as const,
+            mime: selected.mime,
+            byteLength: selected.byteLength,
+            width: normalized.width,
+            height: normalized.height,
+            testedCandidates: optimization.testedCandidates,
+            engineBuildId,
+            codecBuildId: selected.codecBuildId,
+            warnings: optimization.warnings,
+          };
+    if (selected !== null) await rename(selected.path, join(input.workspace, "output.bin"));
+    else await rm(join(input.workspace, "output.bin"), { force: true });
+    const terminal = {
+      protocol: 1 as const,
+      jobId: input.request.jobId,
+      state: "succeeded" as const,
+      phase: "preparing-output" as const,
+      fraction: 1 as const,
+      sequence: sequence + 1,
+      result,
+      inspection: {
+        verifiedInputMime: currentInspection.mime,
+        inputHasAlpha: currentInspection.hasAlpha,
+        contentClass,
+      },
+      measurements: measurements({
+        request: input.request,
+        inspection: currentInspection,
+        startedAt,
+        testedCandidates: optimization.testedCandidates,
+      }),
+    };
+    await writeJsonAtomic(join(input.workspace, "result.json"), terminal);
+    emit(terminal);
   } catch (error) {
     const pipelineError = error instanceof ImagePipelineError ? error : null;
     inspection ??= pipelineError?.inspection;
+    const timeout = error instanceof OptimizationExecutionError ? error : null;
     failed({
       request: input.request,
       phase,
       sequence: sequence + 1,
-      code: pipelineError?.code ?? "ENGINE_CRASH",
-      retryable: pipelineError?.retryable ?? true,
+      code: timeout?.code ?? pipelineError?.code ?? "ENGINE_CRASH",
+      retryable: timeout?.retryable ?? pipelineError?.retryable ?? true,
+      ...(timeout === null ? {} : { guidance: timeout.guidance }),
       startedAt,
       ...(inspection === undefined ? {} : { inspection }),
     });
@@ -275,7 +438,7 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-export async function selfTestJpeg(): Promise<void> {
+export async function selfTestJpeg(writeResult = true): Promise<Record<string, unknown>> {
   const workspace = await mkdtemp(join(tmpdir(), "hereisit-jpeg-self-test-"));
   try {
     const sourceWidth = 16;
@@ -383,21 +546,21 @@ export async function selfTestJpeg(): Promise<void> {
         })}`,
       );
     }
-    process.stdout.write(
-      `${JSON.stringify({
-        ok: true,
-        smartBytes: smart.byteLength,
-        exactTransforms: losslessVerifications.length,
-        oddMcuRejected,
-        jpegliPresent,
-      })}\n`,
-    );
+    const result = {
+      ok: true,
+      smartBytes: smart.byteLength,
+      exactTransforms: losslessVerifications.length,
+      oddMcuRejected,
+      jpegliPresent,
+    };
+    if (writeResult) process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 }
 
-export async function selfTestPng(): Promise<void> {
+export async function selfTestPng(writeResult = true): Promise<Record<string, unknown>> {
   const workspace = await mkdtemp(join(tmpdir(), "hereisit-png-self-test-"));
   try {
     const signal = new AbortController().signal;
@@ -519,26 +682,111 @@ export async function selfTestPng(): Promise<void> {
     if (!firstBytes.equals(await readFile(smartAgain.path)) || !gradientAlphaRejected) {
       throw new Error("PNG self-test policy failed");
     }
-    process.stdout.write(
-      `${JSON.stringify({
-        ok: true,
-        losslessBytes: lossless.byteLength,
-        lossless16Bytes: lossless16.byteLength,
-        smartBytes: smart.byteLength,
-        opaqueSmartBytes: opaqueSmart.byteLength,
-        deterministic: true,
-        indexedIntermediateVerified: true,
-        exactAlpha: true,
-        opaqueAlphaVerified: true,
-        gradientAlphaRejected,
-      })}\n`,
-    );
+    const result = {
+      ok: true,
+      losslessBytes: lossless.byteLength,
+      lossless16Bytes: lossless16.byteLength,
+      smartBytes: smart.byteLength,
+      opaqueSmartBytes: opaqueSmart.byteLength,
+      deterministic: true,
+      indexedIntermediateVerified: true,
+      exactAlpha: true,
+      opaqueAlphaVerified: true,
+      gradientAlphaRejected,
+    };
+    if (writeResult) process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 }
 
+export async function selfTestWebp(writeResult = true): Promise<Record<string, unknown>> {
+  const workspace = await mkdtemp(join(tmpdir(), "hereisit-webp-self-test-"));
+  try {
+    const width = 64;
+    const height = 64;
+    const pixels = Buffer.alloc(width * height * 3);
+    for (let index = 0; index < width * height; index += 1) {
+      pixels.set(
+        index % 4 === 0 ? [20, 70, 220] : index % 4 === 1 ? [240, 180, 30] : [30, 180, 80],
+        index * 3,
+      );
+    }
+    const normalizedPath = join(workspace, "normalized.raw");
+    await writeFile(normalizedPath, pixels, { mode: 0o600 });
+    const candidate = await encodeWebpCandidate({
+      normalizedPath,
+      width,
+      height,
+      channels: 3,
+      candidate: { id: "webp-lossless-self-test", codec: "libwebp", mode: "lossless", effort: 4 },
+      outputPath: join(workspace, "candidate.webp"),
+      signal: new AbortController().signal,
+    });
+    const normalized = {
+      rawPath: normalizedPath,
+      width,
+      height,
+      channels: 3 as const,
+      sampleDepth: 8 as const,
+      rawEndian: "little" as const,
+      rawSha256: createHash("sha256").update(pixels).digest("hex"),
+      alphaSha256: null,
+      normalizedColorSpace: "srgb" as const,
+    };
+    const verification = await verifyCandidate({
+      candidate,
+      sourceBytes: candidate.byteLength + 1_000,
+      minimumSavingsPercent: 1,
+      inspection: selfTestInspection("webp"),
+      normalized,
+      mode: "lossless",
+      preset: "balanced",
+      contentClass: "flat-graphic",
+    });
+    const retained = await selectVerifiedResult({
+      candidates: [{ ...candidate, id: "retained-probe" }],
+      verify: async () => ({ accepted: false, reason: "not-smaller", liveQuality: null }),
+      width,
+      height,
+      mime: "image/webp",
+      deleteRejected: false,
+    });
+    if (!verification.accepted || retained.kind !== "original-retained") {
+      throw new Error("WebP self-test policy failed");
+    }
+    const result = {
+      ok: true,
+      losslessBytes: candidate.byteLength,
+      exactPixels: true,
+      originalRetained: true,
+    };
+    if (writeResult) process.stdout.write(`${JSON.stringify(result)}\n`);
+    return result;
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+export async function selfTestAllFormats(): Promise<void> {
+  const [jpeg, png, webp] = await Promise.all([
+    selfTestJpeg(false),
+    selfTestPng(false),
+    selfTestWebp(false),
+  ]);
+  process.stdout.write(`${JSON.stringify({ ok: true, jpeg, png, webp })}\n`);
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes("--self-test-all-formats")) {
+    await selfTestAllFormats();
+    return;
+  }
+  if (process.argv.includes("--self-test-webp")) {
+    await selfTestWebp();
+    return;
+  }
   if (process.argv.includes("--self-test-png")) {
     await selfTestPng();
     return;
