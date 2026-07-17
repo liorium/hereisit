@@ -21,7 +21,7 @@ import type {
   PdfPipelineSpecV1,
 } from "@hereisit/tool-contracts";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import type { PdfEditingIntent } from "../lib/site";
 import styles from "./pdf-workbench.module.css";
 
@@ -544,29 +544,9 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
     setMessage("페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
+  const saveResult = () => {
     const blob = resultBlobRef.current;
     if (result === undefined || resultUrl === undefined || blob === undefined) return;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      const file = new File([blob], result.suggestedName, { type: result.mime });
-      shareData = { files: [file] };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
-    }
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error)) return;
-      }
-    }
     downloadUrl(resultUrl, result.suggestedName);
     setMessage("결과 파일을 저장했어요.");
   };
@@ -1216,7 +1196,7 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
                   >
                     {result.mime === "application/zip"
                       ? `결과 ${result.outputDocumentCount}개 ZIP으로 받기 ↓`
-                      : "PDF 저장·공유 ↓"}
+                      : "PDF 다운로드 ↓"}
                   </button>
                 </>
               ) : (

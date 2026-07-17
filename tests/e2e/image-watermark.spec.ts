@@ -209,7 +209,12 @@ function expectPixelNear(
 
 test("text watermark uses the approved defaults and saves only on request", async ({ page }) => {
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     const trackedWindow = window as Window & {
       __rawWatermarkPreviewUrls?: number;
@@ -274,7 +279,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   await expect(page.getByLabel("문구 색상")).toHaveValue("#111827");
   await expect(page.getByLabel("출력 형식")).toHaveValue("source");
   await expect(page.getByRole("slider", { name: /품질/ })).toHaveValue("90");
-  await expect(page.getByRole("button", { name: /결과 저장|저장·공유|ZIP/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP/ })).toHaveCount(0);
   await expect(page.locator('img[alt*="워터마크 결과"]')).toHaveCount(0);
   expect(downloads).toBe(0);
 
@@ -308,7 +313,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("source-watermarked-hereisit.png");
   const path = await download.path();
@@ -360,7 +365,12 @@ test("loads only the dedicated image watermark Worker marker", async ({ page }) 
 
 test("places a real logo at the top-left and preserves pixels outside it", async ({ page }) => {
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     const trackedWindow = window as Window & {
       __rawWatermarkPreviewUrls?: number;
@@ -438,7 +448,7 @@ test("places a real logo at the top-left and preserves pixels outside it", async
   expect(downloads).toBe(0);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   const path = await download.path();
   expect(path).not.toBeNull();
@@ -696,7 +706,7 @@ test("shows corrections for missing, oversize, and animated logos", async ({ pag
   await expect(page.getByRole("alert").filter({ hasText: /애니메이션|움직이는/ })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByRole("button", { name: "결과 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
 });
 
 test("setting and logo changes revoke stale result URLs and disable saving", async ({ page }) => {
@@ -737,7 +747,7 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
   await opacity.focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "결과 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(
@@ -775,7 +785,7 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
     buffer: secondLogo,
   });
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "결과 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(
@@ -869,68 +879,6 @@ test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ p
   await waitForCompleted(page, 1);
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(1);
 });
-
-for (const shareOutcome of ["resolve", "reject"] as const) {
-  test(`a delayed share ${shareOutcome} cannot save or message after invalidation`, async ({
-    page,
-  }) => {
-    await page.addInitScript(() => {
-      const trackedWindow = window as Window & {
-        __sharePending?: boolean;
-        __settleShare?: (reject: boolean) => void;
-      };
-      Object.defineProperty(navigator, "canShare", {
-        configurable: true,
-        value: (data: ShareData) => data.files?.length === 1,
-      });
-      Object.defineProperty(navigator, "share", {
-        configurable: true,
-        value: () =>
-          new Promise<void>((resolve, reject) => {
-            trackedWindow.__sharePending = true;
-            trackedWindow.__settleShare = (shouldReject) => {
-              if (shouldReject) reject(new Error("delayed share failure"));
-              else resolve();
-            };
-          }),
-      });
-    });
-    await page.goto("/image/watermark");
-    let downloads = 0;
-    page.on("download", () => {
-      downloads += 1;
-    });
-    const source = await createSolidPng(page, 100, 60, "#ffffff");
-    await setSourceFiles(page, {
-      name: "share.png",
-      mimeType: "image/png",
-      buffer: source,
-    });
-    await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
-    await waitForCompleted(page, 1);
-    await page.getByRole("button", { name: "결과 저장·공유 ↓" }).click();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => (window as Window & { __sharePending?: boolean }).__sharePending ?? false,
-        ),
-      )
-      .toBe(true);
-
-    const opacity = page.getByRole("slider", { name: /불투명도/ });
-    await opacity.focus();
-    await page.keyboard.press("ArrowRight");
-    await page.evaluate((shouldReject) => {
-      (window as Window & { __settleShare?: (reject: boolean) => void }).__settleShare?.(
-        shouldReject,
-      );
-    }, shareOutcome === "reject");
-    await page.waitForTimeout(100);
-    expect(downloads).toBe(0);
-    await expect(page.getByRole("status")).toContainText("설정이 바뀌었어요.");
-    await expect(page.getByRole("status")).not.toContainText("결과를 공유 메뉴로 보냈어요.");
-  });
-}
 
 test("reports an unsupported runtime before reading a selected file", async ({ page }) => {
   await page.addInitScript(() => {

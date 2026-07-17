@@ -88,7 +88,7 @@ test("processes and downloads an image without external uploads", async ({ page 
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("1×1", { exact: true })).toBeVisible();
 
-  const saveButton = page.getByRole("button", { name: "결과 저장·공유 ↓" });
+  const saveButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   const [download] = await Promise.all([page.waitForEvent("download"), saveButton.click()]);
   expect(download.suggestedFilename()).toBe("sample-hereisit.webp");
   const downloadPath = await download.path();
@@ -144,7 +144,7 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
@@ -181,24 +181,12 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
   await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
 });
 
-test("uses the device share sheet for one result when files are supported", async ({ page }) => {
+test("downloads directly even when the device share API is available", async ({ page }) => {
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", {
-      configurable: true,
-      value: (data: ShareData) => data.files?.length === 1,
-    });
     Object.defineProperty(navigator, "share", {
       configurable: true,
-      value: async (data: ShareData) => {
-        const file = data.files?.[0];
-        if (file === undefined) throw new Error("Expected one shared file");
-        (
-          window as Window & { sharedResult?: { name: string; type: string; size: number } }
-        ).sharedResult = {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-        };
+      value: () => {
+        throw new Error("navigator.share must not be called");
       },
     });
   });
@@ -214,19 +202,11 @@ test("uses the device share sheet for one result when files are supported", asyn
   ).toBeVisible({
     timeout: 20_000,
   });
-  await page.getByRole("button", { name: "결과 저장·공유 ↓" }).click();
-  await expect(
-    page.getByRole("strong").filter({ hasText: "결과를 공유 메뉴로 보냈어요." }),
-  ).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as Window & { sharedResult?: { name: string; type: string; size: number } })
-            .sharedResult,
-      ),
-    )
-    .toMatchObject({ name: "share-hereisit.webp", type: "image/webp" });
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("share-hereisit.webp");
 });
 
 test("accepts a real HEIC file without uploading it", async ({ page, browserName }) => {

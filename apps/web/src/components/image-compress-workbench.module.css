@@ -1,0 +1,209 @@
+.workbench {
+  width: min(1440px, calc(100% - 40px));
+  margin: 0 auto 80px;
+}
+
+.disclosure {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface, #fff);
+}
+
+.disclosure strong,
+.disclosure p {
+  display: block;
+  margin: 0;
+}
+
+.disclosure p {
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.panel {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--surface, #fff);
+}
+
+.panel h2 {
+  margin: 0 0 18px;
+  font-size: 1.08rem;
+}
+
+.picker {
+  display: flex;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed currentColor;
+  border-radius: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.panel .picker {
+  width: 100%;
+  min-height: 112px;
+  background: transparent;
+  color: inherit;
+}
+
+.picker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.fileList,
+.results {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fileList li,
+.results li {
+  display: grid;
+  gap: 7px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.fileList div,
+.results div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.fileList strong,
+.results strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileList span,
+.results span,
+.panel p {
+  color: var(--muted, #667085);
+  font-size: 0.88rem;
+}
+
+.fileList progress {
+  width: 100%;
+}
+
+.presets {
+  display: grid;
+  gap: 10px;
+}
+
+.presets label {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  min-height: 60px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.presets label[data-selected="true"] {
+  border-color: #4057f4;
+  box-shadow: inset 0 0 0 1px #4057f4;
+}
+
+.presets input {
+  grid-row: 1 / 3;
+  width: 18px;
+  height: 18px;
+}
+
+.panel button,
+.stickyAction button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #4057f4;
+  color: #fff;
+  font-weight: 800;
+  padding: 0 16px;
+  cursor: pointer;
+}
+
+.panel button:disabled,
+.stickyAction button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.stickyAction {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+@media (max-width: 800px) {
+  .workbench {
+    width: min(100% - 24px, 680px);
+    padding-bottom: 88px;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .stickyAction {
+    position: fixed;
+    z-index: 20;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    background: color-mix(in srgb, white 94%, transparent);
+    border-top: 1px solid var(--line);
+  }
+
+  .stickyAction button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .workbench {
+    width: calc(100% - 16px);
+  }
+
+  .panel,
+  .disclosure {
+    padding: 14px;
+  }
+}

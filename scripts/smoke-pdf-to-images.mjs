@@ -128,7 +128,7 @@ async function runDirectPngSmoke(page) {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
   assert.ok(
     download.suggestedFilename() === "report-page-002.png",

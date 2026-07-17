@@ -24,7 +24,6 @@ import {
   formatBytes,
   formatDuration,
   formatSavings,
-  isAbortError,
 } from "../lib/files";
 import styles from "./image-workbench.module.css";
 
@@ -609,33 +608,8 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
     );
   };
 
-  const saveItem = async (item: WorkItem) => {
+  const saveItem = (item: WorkItem) => {
     if (item.resultUrl === undefined || item.result === undefined) return;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      shareData = {
-        files: [
-          new File([item.result.bytes], item.result.suggestedName, { type: item.result.mime }),
-        ],
-      };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
-    }
-
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error)) return;
-      }
-    }
-
     downloadUrl(item.resultUrl, item.result.suggestedName);
     setMessage("결과 파일을 저장했어요.");
   };
@@ -1006,7 +980,7 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
                       type="button"
                       onClick={() => void saveItem(selected)}
                     >
-                      이 이미지 저장·공유 ↓
+                      이 이미지 다운로드 ↓
                     </button>
                   )}
                 </>
@@ -1054,7 +1028,7 @@ export function ImageWorkbench({ intent = "general" }: { intent?: ImageWorkbench
                     {archiving
                       ? "ZIP 만드는 중…"
                       : completedItems.length === 1
-                        ? "결과 저장·공유 ↓"
+                        ? "결과 다운로드 ↓"
                         : `결과 ${completedItems.length}개 ZIP으로 받기 ↓`}
                   </button>
                 </>

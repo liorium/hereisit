@@ -11,7 +11,7 @@ import {
 import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import { PDF_COMPRESS_SCANNED_WARNING } from "../lib/site";
 import styles from "./pdf-workbench.module.css";
 
@@ -294,7 +294,7 @@ export function PdfCompressWorkbench() {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
+  const saveResult = () => {
     const blob = resultBlobRef.current;
     const resultUrl = resultUrlRef.current;
     if (
@@ -317,29 +317,6 @@ export function PdfCompressWorkbench() {
       resultUrlRef.current === resultUrl;
 
     try {
-      let shareData: ShareData | undefined;
-      let canShare = false;
-      if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-        const sharedFile = new File([blob], result.suggestedName, { type: "application/pdf" });
-        shareData = { files: [sharedFile] };
-        try {
-          canShare = navigator.canShare(shareData);
-        } catch {
-          canShare = false;
-        }
-      }
-
-      if (canShare && shareData !== undefined) {
-        try {
-          await navigator.share(shareData);
-          if (!isCurrentSave()) return;
-          setMessage("결과를 공유 메뉴로 보냈어요.");
-          return;
-        } catch (error) {
-          if (!isCurrentSave() || isAbortError(error)) return;
-        }
-      }
-
       if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
       if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
@@ -607,7 +584,7 @@ export function PdfCompressWorkbench() {
                   type="button"
                   onClick={() => void saveResult()}
                 >
-                  PDF 저장·공유 ↓
+                  PDF 다운로드 ↓
                 </button>
               </>
             ) : (

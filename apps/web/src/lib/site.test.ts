@@ -32,6 +32,12 @@ describe("image tool registry", () => {
     expect(relatedImageTools("compress")).toContain(imageTools.watermark);
     expect(relatedImageTools("watermark")).toHaveLength(3);
   });
+
+  it("describes processing location and retention per image tool", () => {
+    expect(imageTools.compress.description).toContain("HereIsIt 처리 서버");
+    expect(imageTools.compress.description).toContain("자동 삭제");
+    expect(imageTools.resize.description).toContain("업로드 없이");
+  });
 });
 
 describe("PDF tool registry classification", () => {

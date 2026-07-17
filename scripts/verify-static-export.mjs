@@ -13,6 +13,7 @@ const pdfjsPackageRoot = path.join(
 const pdfjsOutputRoot = path.join(outputRoot, "pdfjs", PDFJS_VERSION);
 
 const IMAGE_WORKER_MARKER = "hereisit-image-worker";
+const IMAGE_COMPRESSION_SERVER_MARKER = "hereisit-server-runtime";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
 const PDF_WORKER_MARKER = "hereisit-pdf-worker";
 const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
@@ -28,9 +29,9 @@ const toolPages = [
   {
     file: "image/compress.html",
     path: "/image/compress",
-    routeClass: "image",
+    routeClass: "image-compression-server",
     title: "이미지 용량 줄이기",
-    description: "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요.",
+    description: "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요.",
   },
   {
     file: "image/resize.html",
@@ -325,9 +326,15 @@ const homeClosure = collectRouteClosure(html, javaScriptInventory);
 const routeClosures = toolPages.map((tool, index) => {
   const pageHtml = toolHtmlPages[index];
   assert.ok(pageHtml !== undefined, `The ${tool.path} route must have exported HTML.`);
-  return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
+  const initialClosure = readPageScriptPaths(pageHtml).map((scriptPath) =>
+    javaScriptInventory.get(scriptPath),
+  );
+  return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory), initialClosure };
 });
 const imageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "image");
+const imageCompressionServerClosures = routeClosures.filter(
+  ({ tool }) => tool.routeClass === "image-compression-server",
+);
 const imageWatermarkClosures = routeClosures.filter(
   ({ tool }) => tool.routeClass === "image-watermark",
 );
@@ -346,15 +353,24 @@ assertClosureLacks(
 assert.ok(imageClosures.length > 0, "The export inventory must classify image routes.");
 assert.equal(
   imageClosures.length,
-  3,
-  "The export inventory must classify three established image routes.",
+  2,
+  "The export inventory must classify two established image routes.",
+);
+assert.equal(
+  imageCompressionServerClosures.length,
+  1,
+  "The export inventory must classify one server-capable image compression route.",
 );
 assert.equal(
   imageWatermarkClosures.length,
   1,
   "The export inventory must classify one image watermark route.",
 );
-const imageRoutePaths = [...imageClosures, ...imageWatermarkClosures].map(({ tool }) => tool.path);
+const imageRoutePaths = [
+  ...imageClosures,
+  ...imageCompressionServerClosures,
+  ...imageWatermarkClosures,
+].map(({ tool }) => tool.path);
 assert.equal(imageRoutePaths.length, 4, "The export inventory must include four image routes.");
 assert.equal(new Set(imageRoutePaths).size, 4, "Every exported image route path must be unique.");
 assert.ok(pdfEditingClosures.length > 0, "The export inventory must classify PDF editing routes.");
@@ -370,6 +386,7 @@ assert.equal(
 );
 assert.equal(
   imageClosures.length +
+    imageCompressionServerClosures.length +
     imageWatermarkClosures.length +
     pdfEditingClosures.length +
     toImageClosures.length +
@@ -402,6 +419,40 @@ for (const { closure } of imageClosures) {
     "An image route loaded the scanned PDF compression Worker.",
   );
   assertClosureLacks(closure, PDFJS_MARKER, "An image route loaded PDF.js.");
+}
+
+for (const { closure, initialClosure } of imageCompressionServerClosures) {
+  assertClosureHas(
+    closure,
+    IMAGE_COMPRESSION_SERVER_MARKER,
+    "The image compression route is missing its server runtime marker.",
+  );
+  assertClosureLacks(
+    initialClosure,
+    IMAGE_WORKER_MARKER,
+    "The image compression route eagerly loaded the local image Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_WORKER_MARKER,
+    "The image compression route loaded a PDF Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_INSPECTION_WORKER_MARKER,
+    "The image compression route loaded the PDF inspection Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_TO_IMAGES_WORKER_MARKER,
+    "The image compression route loaded the PDF-to-images Worker.",
+  );
+  assertClosureLacks(
+    closure,
+    PDF_COMPRESS_SCANNED_WORKER_MARKER,
+    "The image compression route loaded the scanned PDF compression Worker.",
+  );
+  assertClosureLacks(closure, PDFJS_MARKER, "The image compression route loaded PDF.js.");
 }
 
 for (const { closure } of imageWatermarkClosures) {

@@ -1,9 +1,10 @@
 # HereIsIt
 
-HereIsIt is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
-resize, crop, conversion, compression, and text/logo watermarking plus PDF merge, split, page extraction,
+HereIsIt is a fast, privacy-first toolbox for everyday file work. It provides local image resize, crop,
+conversion and text/logo watermarking plus server-capable same-format image compression, PDF merge, split, page extraction,
 page organization, text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster
-compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
+compression, and JPG/PNG-to-PDF tools. Every route discloses whether it stays in the browser or uses the
+temporary HereIsIt processing service before file selection.
 
 ## Development
 
@@ -73,7 +74,10 @@ checklist.
 ## Current limits
 
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
-  cannot meet the target are marked as already optimized and are not added to downloads.
+  cannot meet the target are returned as the unchanged original with an explicit metadata warning.
+- Dedicated same-format compression accepts up to 20 JPEG/PNG/WebP files of 30MiB and 40 megapixels each.
+  A server policy is checked before selection and immediately before processing. Local-only disclosure
+  means no upload; server disclosure means temporary authenticated processing with lifecycle cleanup.
 - CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
 - `image.pipeline@1` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
 - `image.pipeline@1` allows up to 50 megapixels per input and 25 megapixels per output.
@@ -127,7 +131,8 @@ checklist.
   The scan-oriented compressor above intentionally rasterizes whole pages; other PDF editing can make an
   output larger than its source.
 - JPG/PNG-to-PDF uses a format-aware 128MB estimated decode-memory ceiling for each PNG.
-- Files and filenames stay in the current tab or its Worker. Closing the tab releases in-memory results.
+- Local-tool files and filenames stay in the current tab or its Worker. Server compression never sends
+  source filenames; only file bytes and bounded structural metadata cross the disclosed upload boundary.
 
 ## Repository layout
 
@@ -136,6 +141,7 @@ checklist.
 - packages/image-tool — structural image validation, geometry, and naming.
 - packages/pdf-tool — PDF page-range, page-plan, watermark-layout, signature, and naming helpers.
 - packages/browser-runtime — bounded image/PDF Worker execution runtime.
+- packages/server-runtime — browser-safe policy, upload, polling, cancellation, and download coordinator.
 - packages/tool-registry — user-facing tool and preset metadata.
 
 See docs/architecture.md for execution and privacy boundaries.

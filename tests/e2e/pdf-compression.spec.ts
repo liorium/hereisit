@@ -183,7 +183,12 @@ async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array>
 async function forceDownloadFallback(page: Page): Promise<void> {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
   });
 }
 
@@ -432,38 +437,6 @@ async function observePrivateCompression(
       if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
     },
   };
-}
-
-async function installPendingShare(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const controlledWindow = window as Window & {
-      __hereisitResolveShare?: () => void;
-      __hereisitRejectShare?: () => void;
-    };
-    sessionStorage.setItem("__hereisitDownloadClicks", "0");
-    Object.defineProperty(navigator, "canShare", {
-      configurable: true,
-      value: () => true,
-    });
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () =>
-        new Promise<void>((resolve, reject) => {
-          controlledWindow.__hereisitResolveShare = resolve;
-          controlledWindow.__hereisitRejectShare = () => reject(new Error("share failed"));
-        }),
-    });
-
-    const originalClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function click() {
-      if (this.download.length > 0) {
-        const count = Number(sessionStorage.getItem("__hereisitDownloadClicks") ?? "0");
-        sessionStorage.setItem("__hereisitDownloadClicks", String(count + 1));
-        return;
-      }
-      originalClick.call(this);
-    };
-  });
 }
 
 async function installObjectUrlCounters(page: Page): Promise<void> {
@@ -723,7 +696,7 @@ test("compresses a known scan with the default preset and downloads only after o
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("PRIVATE_SCAN_SENTINEL-compressed-hereisit.pdf");
   expect(downloadCount).toBe(1);
@@ -766,7 +739,7 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
   expect(downloadCount).toBe(0);
   const [balancedDownload] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(balancedDownload.suggestedFilename()).toBe("report-compressed-hereisit.pdf");
   const balanced = await downloadedBytes(await balancedDownload.path());
@@ -788,7 +761,7 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
 
   const [minimumDownload] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(minimumDownload.suggestedFilename()).toBe("report-compressed-hereisit.pdf");
   expect(downloadCount).toBe(2);
@@ -832,7 +805,7 @@ test("shows both preset-specific no-reduction messages without creating a result
       )
       .first(),
   ).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   expect(downloadCount).toBe(0);
 
@@ -845,7 +818,7 @@ test("shows both preset-specific no-reduction messages without creating a result
       )
       .first(),
   ).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   expect(downloadCount).toBe(0);
 });
@@ -881,7 +854,7 @@ test("gives preset-specific guidance when a valid oversized page is unsafe at mi
     ),
   ).toBeVisible({ timeout: 60_000 });
   await expect(resultRegion.getByText(/더 낮은 해상도/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
 });
 
@@ -1007,7 +980,7 @@ test("invalidates and revokes results on preset change, rerun, replacement, rese
 
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
   await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
@@ -1074,57 +1047,7 @@ test("cancels immediately without exposing a partial result or download", async 
   await settleRenderedState(page);
   await expect(page.getByText("PDF 압축을 중단했어요.").first()).toBeVisible();
   await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "PDF 저장·공유 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(downloadCount).toBe(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
-});
-
-test("ignores a fulfilled share after reset invalidates its result URL", async ({ page }) => {
-  await installPendingShare(page);
-  await prepareCompressedResult(page);
-
-  await page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitResolveShare?: () => void })
-            .__hereisitResolveShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitResolveShare?: () => void }).__hereisitResolveShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByText("파일을 선택하면 페이지를 확인할게요.").first()).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
-});
-
-test("does not download a revoked result when a pending share rejects after reset", async ({
-  page,
-}) => {
-  await installPendingShare(page);
-  await prepareCompressedResult(page);
-
-  await page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitRejectShare?: () => void })
-            .__hereisitRejectShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitRejectShare?: () => void }).__hereisitRejectShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByText("파일을 선택하면 페이지를 확인할게요.").first()).toBeVisible();
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
 });

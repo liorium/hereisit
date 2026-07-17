@@ -6,8 +6,8 @@ import { imageToolList, pdfToolList } from "../lib/site";
 const features = [
   {
     number: "01",
-    title: "업로드를 기다리지 않아요",
-    body: "이미지와 PDF는 브라우저 안에서 처리됩니다. 서버 왕복 없이 바로 시작해요.",
+    title: "처리 방식을 먼저 알려드려요",
+    body: "도구마다 기기 내 처리와 서버 처리 여부, 파일 보관 방식을 시작 전에 보여드려요.",
   },
   {
     number: "02",
@@ -28,7 +28,7 @@ export default function HomePage() {
 
       <section id="top" className="hero-section">
         <div className="hero-copy">
-          <p className="eyebrow">FAST · PRIVATE · LOCAL</p>
+          <p className="eyebrow">FAST · PRIVATE · CLEAR</p>
           <h1>
             파일 작업,
             <br />
@@ -36,7 +36,7 @@ export default function HomePage() {
           </h1>
           <p className="hero-description">
             이미지와 PDF, 필요한 작업을 빠르게.
-            <br className="desktop-break" /> 파일은 기기 밖으로 나가지 않아요.
+            <br className="desktop-break" /> 도구별 처리 방식을 먼저 확인하세요.
           </p>
         </div>
         <aside className="hero-note" aria-label="제품 원칙">

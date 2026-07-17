@@ -47,7 +47,7 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
@@ -100,7 +100,7 @@ test("extracts a validated page range into one PDF", async ({ page }) => {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   const output = await downloadedBytes(await download.path());
   const extracted = await PDFDocument.load(output);
@@ -141,7 +141,7 @@ test("reorders, rotates, and deletes PDF pages without external uploads", async 
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("handout-organized-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
@@ -164,7 +164,7 @@ test("creates one PDF page per image", async ({ page }) => {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("images-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
@@ -204,7 +204,7 @@ test("adds a rasterized text watermark without external or write requests", asyn
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("proposal-watermarked-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
@@ -294,7 +294,7 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   const output = await downloadedBytes(await download.path());
   const document = await PDFDocument.load(output);

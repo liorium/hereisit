@@ -16,7 +16,7 @@ import {
 } from "@hereisit/pdf-tool";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration, isAbortError } from "../lib/files";
+import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import styles from "./pdf-workbench.module.css";
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -337,7 +337,7 @@ export function PdfToImageWorkbench() {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = async () => {
+  const saveResult = () => {
     const blob = resultBlobRef.current;
     if (
       result === undefined ||
@@ -360,29 +360,6 @@ export function PdfToImageWorkbench() {
       resultUrlRef.current === resultUrl;
 
     try {
-      let shareData: ShareData | undefined;
-      let canShare = false;
-      if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-        const sharedFile = new File([blob], result.suggestedName, { type: result.mime });
-        shareData = { files: [sharedFile] };
-        try {
-          canShare = navigator.canShare(shareData);
-        } catch {
-          canShare = false;
-        }
-      }
-
-      if (canShare && shareData !== undefined) {
-        try {
-          await navigator.share(shareData);
-          if (!isCurrentSave()) return;
-          setMessage("결과를 공유 메뉴로 보냈어요.");
-          return;
-        } catch (error) {
-          if (!isCurrentSave() || isAbortError(error)) return;
-        }
-      }
-
       if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
       if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
@@ -766,7 +743,7 @@ export function PdfToImageWorkbench() {
                     onClick={() => void saveResult()}
                   >
                     {result.outputFileCount === 1
-                      ? "이미지 저장·공유 ↓"
+                      ? "이미지 다운로드 ↓"
                       : `결과 ${result.outputFileCount}개 ZIP으로 받기 ↓`}
                   </button>
                 </>

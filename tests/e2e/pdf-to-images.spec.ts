@@ -154,7 +154,12 @@ function pngDimensions(bytes: Uint8Array): { width: number; height: number } {
 async function forceDownloadFallback(page: Page): Promise<void> {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
   });
 }
 
@@ -192,38 +197,6 @@ async function observePrivateConversion(page: Page) {
       if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
     },
   };
-}
-
-async function installPendingShare(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const controlledWindow = window as Window & {
-      __hereisitResolveShare?: () => void;
-      __hereisitRejectShare?: () => void;
-    };
-    sessionStorage.setItem("__hereisitDownloadClicks", "0");
-    Object.defineProperty(navigator, "canShare", {
-      configurable: true,
-      value: () => true,
-    });
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () =>
-        new Promise<void>((resolve, reject) => {
-          controlledWindow.__hereisitResolveShare = resolve;
-          controlledWindow.__hereisitRejectShare = () => reject(new Error("share failed"));
-        }),
-    });
-
-    const originalClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function click() {
-      if (this.download.length > 0) {
-        const count = Number(sessionStorage.getItem("__hereisitDownloadClicks") ?? "0");
-        sessionStorage.setItem("__hereisitDownloadClicks", String(count + 1));
-        return;
-      }
-      originalClick.call(this);
-    };
-  });
 }
 
 async function installObjectUrlCounters(page: Page): Promise<void> {
@@ -381,7 +354,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("report-page-001.png");
   const imageBytes = await downloadedBytes(await download.path());
@@ -468,7 +441,7 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename() === "report-page-002.png").toBe(true);
   const image = await downloadedBytes(await download.path());
@@ -580,7 +553,7 @@ test("cancels before a result or download is offered", async ({ page }) => {
   await settleRenderedState(page);
   await expect(page.getByText("이미지 변환을 중단했어요.").first()).toBeVisible();
   await expect(page.getByText(/이미지 \d+개.*준비 완료/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /저장·공유|ZIP으로 받기/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /이미지 다운로드|ZIP으로 받기/ })).toHaveCount(0);
   expect(downloadCount).toBe(0);
   privacy.assertClean(false);
 });
@@ -750,60 +723,4 @@ test("loads only each raster route's inspection and dedicated Worker markers", a
     page.off("request", onRequest);
     page.off("response", onResponse);
   }
-});
-
-test("ignores a fulfilled share after reset invalidates its result URL", async ({
-  browserName,
-  page,
-}) => {
-  await installPendingShare(page);
-  const privacy = await prepareSinglePageResult(page);
-
-  await page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitResolveShare?: () => void })
-            .__hereisitResolveShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitResolveShare?: () => void }).__hereisitResolveShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByRole("status")).toHaveText("파일을 선택하면 페이지를 확인할게요.");
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
-  privacy.assertClean(browserName !== "firefox");
-});
-
-test("does not download a revoked result when a pending share rejects after reset", async ({
-  browserName,
-  page,
-}) => {
-  await installPendingShare(page);
-  const privacy = await prepareSinglePageResult(page);
-
-  await page.getByRole("button", { name: "이미지 저장·공유 ↓" }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          typeof (window as Window & { __hereisitRejectShare?: () => void })
-            .__hereisitRejectShare === "function",
-      ),
-    )
-    .toBe(true);
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitRejectShare?: () => void }).__hereisitRejectShare?.();
-  });
-  await settleRenderedState(page);
-
-  await expect(page.getByRole("status")).toHaveText("파일을 선택하면 페이지를 확인할게요.");
-  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitDownloadClicks"))).toBe("0");
-  privacy.assertClean(browserName !== "firefox");
 });

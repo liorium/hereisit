@@ -87,6 +87,9 @@ importers:
       '@hereisit/pdf-tool':
         specifier: workspace:*
         version: link:../../packages/pdf-tool
+      '@hereisit/server-runtime':
+        specifier: workspace:*
+        version: link:../../packages/server-runtime
       '@hereisit/tool-contracts':
         specifier: workspace:*
         version: link:../../packages/tool-contracts

@@ -22,13 +22,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  createZipArchive,
-  downloadUrl,
-  formatBytes,
-  formatDuration,
-  isAbortError,
-} from "../lib/files";
+import { createZipArchive, downloadUrl, formatBytes, formatDuration } from "../lib/files";
 import styles from "./image-workbench.module.css";
 
 const SOURCE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
@@ -484,34 +478,9 @@ export function ImageWatermarkWorkbench() {
     );
   };
 
-  const saveItem = async (item: WorkItem) => {
+  const saveItem = (item: WorkItem) => {
     if (item.result === undefined || item.resultUrl === undefined) return;
     const generation = activeGenerationRef.current;
-    let shareData: ShareData | undefined;
-    let canShare = false;
-    if (typeof navigator.share === "function" && typeof navigator.canShare === "function") {
-      shareData = {
-        files: [
-          new File([item.result.bytes], item.result.suggestedName, { type: item.result.mime }),
-        ],
-      };
-      try {
-        canShare = navigator.canShare(shareData);
-      } catch {
-        canShare = false;
-      }
-    }
-
-    if (canShare && shareData !== undefined) {
-      try {
-        await navigator.share(shareData);
-        if (activeGenerationRef.current === generation) setMessage("결과를 공유 메뉴로 보냈어요.");
-        return;
-      } catch (error) {
-        if (isAbortError(error) || activeGenerationRef.current !== generation) return;
-      }
-    }
-
     const current = itemsRef.current.find((candidate) => candidate.id === item.id);
     if (
       activeGenerationRef.current !== generation ||
@@ -1107,7 +1076,7 @@ export function ImageWatermarkWorkbench() {
                   type="button"
                   onClick={() => void saveItem(completedItems[0] as WorkItem)}
                 >
-                  결과 저장·공유 ↓
+                  결과 다운로드 ↓
                 </button>
               ) : null}
               {completedItems.length > 1 ? (

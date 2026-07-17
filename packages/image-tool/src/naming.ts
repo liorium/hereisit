@@ -37,3 +37,16 @@ export function safeImageBaseName(inputName: string): string {
 export function suggestOutputName(inputName: string, format: ImageOutput["format"]): string {
   return `${safeImageBaseName(inputName)}-hereisit.${extensionByFormat[format]}`;
 }
+
+const extensionByMime = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+} as const;
+
+export function suggestSameFormatOptimizedName(
+  inputName: string,
+  mime: keyof typeof extensionByMime,
+): string {
+  return `${safeImageBaseName(inputName)}-hereisit.${extensionByMime[mime]}`;
+}

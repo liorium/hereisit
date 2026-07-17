@@ -3,9 +3,9 @@ export const SITE_URL = "https://hereisit.pages.dev";
 
 export const HOME_TITLE = "HereIsIt — 이미지·PDF 작업, 여기서 끝";
 export const HOME_DESCRIPTION =
-  "이미지 압축·크기 조절·형식 변환·이미지 워터마크와 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환·스캔 PDF 용량 줄이기를 업로드 없이 내 기기에서 빠르게 처리하세요.";
+  "이미지 압축·크기 조절·형식 변환·이미지 워터마크와 PDF 합치기·분할·페이지 정리·워터마크·PDF 이미지 변환·이미지 PDF 변환·스캔 PDF 용량 줄이기를 빠르게 처리하세요.";
 export const HOME_OPEN_GRAPH_DESCRIPTION =
-  "파일은 기기 밖으로 나가지 않아요. 이미지와 PDF 작업을 브라우저에서 빠르게 처리하세요.";
+  "개인정보를 먼저 생각하는 이미지와 PDF 도구를 빠르게 사용하세요.";
 export const PDF_COMPRESS_SCANNED_WARNING =
   "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
 
@@ -36,19 +36,18 @@ export const imageTools = {
     eyebrow: "IMAGE COMPRESSOR",
     title: "이미지 용량 줄이기",
     description:
-      "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
+      "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요. 서버 처리 대상이면 선택한 파일을 HereIsIt 처리 서버로 전송합니다. 입력은 작업 종료 시, 결과는 다운로드 확인 시 자동 삭제를 시도합니다. 확인되지 않은 결과는 일반적으로 35분 안에 삭제하지만 서비스 장애 시 늦어질 수 있으며, 1일 만료 규칙을 추가 안전망으로 사용합니다.",
     defaultSummary:
-      "기본값은 WebP로 변환해 원본보다 작게 만들고, 초고해상도만 최대 5000px로 조정해요.",
-    heicNote: "HEIC 압축은 Safari 17 이상에서 지원해요.",
+      "추천 설정은 원본 형식을 유지하면서 품질과 용량의 균형을 찾고, 작아지지 않으면 원본을 유지해요.",
     steps: [
       { title: "이미지 선택", description: "압축할 이미지를 한 장 또는 여러 장 선택하세요." },
       {
         title: "용량 줄이기",
-        description: "기기 안에서 품질을 조정해 원본보다 작은 결과를 찾아요.",
+        description: "확인된 처리 방식으로 원본 형식을 유지하며 더 작은 결과를 찾아요.",
       },
       {
-        title: "결과 저장",
-        description: "기본 WebP 결과 한 장은 바로 저장하고 여러 장은 ZIP으로 받아요.",
+        title: "결과 다운로드",
+        description: "각 결과를 바로 다운로드하고 조건이 맞으면 여러 장을 ZIP으로 받아요.",
       },
     ],
   },

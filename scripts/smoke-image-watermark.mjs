@@ -116,7 +116,12 @@ let context;
 try {
   context = await browser.newContext({ acceptDownloads: true });
   await context.addInitScript(() => {
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
   });
 
@@ -175,7 +180,7 @@ try {
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   assert.equal(download.suggestedFilename(), "source-watermarked-hereisit.png");
   assertPng(await readDownload(download));

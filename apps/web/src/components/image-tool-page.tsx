@@ -14,12 +14,20 @@ type ImageToolConfigFor<Intent extends ImageToolIntent> = Omit<
 type ImageToolPageProps =
   | {
       tool: ImageToolConfigFor<"watermark">;
+      imageCompressWorkbench?: never;
       imageWorkbench?: never;
       imageWatermarkWorkbench: ReactNode;
     }
   | {
-      tool: ImageToolConfigFor<Exclude<ImageToolIntent, "watermark">>;
+      tool: ImageToolConfigFor<"compress">;
+      imageCompressWorkbench: ReactNode;
+      imageWorkbench?: never;
+      imageWatermarkWorkbench?: never;
+    }
+  | {
+      tool: ImageToolConfigFor<Exclude<ImageToolIntent, "compress" | "watermark">>;
       imageWorkbench: ReactNode;
+      imageCompressWorkbench?: never;
       imageWatermarkWorkbench?: never;
     };
 
@@ -27,7 +35,11 @@ export function ImageToolPage(props: ImageToolPageProps) {
   const { tool } = props;
   const relatedTools = relatedImageTools(tool.intent);
   const workbench =
-    tool.intent === "watermark" ? props.imageWatermarkWorkbench : props.imageWorkbench;
+    tool.intent === "watermark"
+      ? props.imageWatermarkWorkbench
+      : tool.intent === "compress"
+        ? props.imageCompressWorkbench
+        : props.imageWorkbench;
 
   return (
     <main>

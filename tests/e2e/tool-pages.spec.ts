@@ -5,14 +5,16 @@ const tools = [
     path: "/image/compress",
     title: "이미지 용량 줄이기",
     selectLabel: "압축할 이미지 선택",
-    preset: /용량만 줄이기/,
-    runLabel: "1개 이미지 용량 줄이기 →",
+    preset: /추천/,
+    presetRole: "radio",
+    runLabel: "이미지 1개 압축하기",
   },
   {
     path: "/image/resize",
     title: "이미지 크기 조절",
     selectLabel: "크기를 바꿀 이미지 선택",
     preset: /웹용 이미지/,
+    presetRole: "button",
     runLabel: "1개 이미지 크기 조절 →",
   },
   {
@@ -20,6 +22,7 @@ const tools = [
     title: "이미지 형식 변환",
     selectLabel: "변환할 이미지 선택",
     preset: /형식만 바꾸기/,
+    presetRole: "button",
     runLabel: "1개 이미지 형식 변환 →",
   },
 ] as const;
@@ -28,7 +31,7 @@ const imageRoutes = [
   {
     path: "/image/compress",
     title: "이미지 용량 줄이기",
-    description: "JPG, PNG, WebP, HEIC 이미지를 무료로 압축하세요.",
+    description: "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요.",
   },
   {
     path: "/image/resize",
@@ -85,10 +88,14 @@ test("links to dedicated image tools and initializes each intent", async ({ page
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await expect(page.getByRole("button", { name: tool.preset })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    if (tool.presetRole === "radio") {
+      await expect(page.getByRole("radio", { name: tool.preset })).toBeChecked();
+    } else {
+      await expect(page.getByRole("button", { name: tool.preset })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    }
     await expect(page.getByRole("button", { name: tool.runLabel })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",

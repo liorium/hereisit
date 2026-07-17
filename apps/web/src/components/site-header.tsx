@@ -24,7 +24,8 @@ export function SiteHeader({ activePath }: { activePath?: string }) {
           ))}
         </nav>
         <div className="privacy-pill">
-          <span className="privacy-dot" aria-hidden="true" />내 기기에서만 처리
+          <span className="privacy-dot" aria-hidden="true" />
+          개인정보를 먼저 생각하는 파일 도구
         </div>
       </div>
     </header>

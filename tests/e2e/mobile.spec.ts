@@ -215,7 +215,7 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
       exact: true,
     }),
   ).toBeVisible();
-  const save = page.getByRole("button", { name: "PDF 저장·공유 ↓" });
+  const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -351,7 +351,7 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page
 
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
-  const save = page.getByRole("button", { name: "이미지 저장·공유 ↓" });
+  const save = page.getByRole("button", { name: "이미지 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -485,7 +485,7 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   await expect(page.getByText("1페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
   const resultActions = [
     page.getByRole("button", { name: "같은 설정으로 다시 실행" }),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }),
   ];
   for (const control of resultActions) {
     const box = await control.boundingBox();

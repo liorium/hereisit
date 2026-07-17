@@ -303,7 +303,7 @@ async function saveResult(page, expectedDownloadCount, downloadCount) {
   assert.equal(downloadCount(), expectedDownloadCount - 1, "A result downloaded automatically.");
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 저장·공유 ↓" }).click(),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   assert.equal(
     downloadCount(),
@@ -355,7 +355,12 @@ try {
   await context.addInitScript(() => {
     sessionStorage.setItem("__hereisitCreatedUrls", "0");
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        throw new Error("navigator.share must not be called");
+      },
+    });
     const originalCreateObjectUrl = URL.createObjectURL.bind(URL);
     URL.createObjectURL = (object) => {
       const count = Number(sessionStorage.getItem("__hereisitCreatedUrls") ?? "0");
@@ -449,7 +454,7 @@ try {
   await uploadPdf(page, `${SENTINELS[0]}.pdf`, await createTinyVectorPdf(), 1);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await page.getByText(BALANCED_NO_REDUCTION_MESSAGE).first().waitFor({ timeout: 60_000 });
-  assert.equal(await page.getByRole("button", { name: "PDF 저장·공유 ↓" }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "PDF 다운로드 ↓" }).count(), 0);
   assert.equal(await createdObjectUrlCount(page), 2, "No-reduction must not create a result URL.");
   assert.equal(downloads, 2, "The no-reduction result must not download.");
 
