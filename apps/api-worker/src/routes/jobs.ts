@@ -382,3 +382,5 @@ export async function routeCreateJobRequest(
     true,
   );
 }
+
+export { routeJobCancelRequest, routeJobStatusRequest } from "./results";

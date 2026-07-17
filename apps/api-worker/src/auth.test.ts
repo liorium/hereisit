@@ -653,13 +653,14 @@ describe("strict operational configuration", () => {
 });
 
 describe("Wrangler source-of-truth and generated environment", () => {
-  it("declares the Task 6 Queue producer, fixed-slot consumer, and DLQ consumer", () => {
+  it("declares the Task 7 Queue topology, rate limits, and five-minute maintenance", () => {
     const config = JSON.parse(
       readFileSync(new URL("../wrangler.local.jsonc", import.meta.url), "utf8"),
     ) as {
       compatibility_date: string;
       compatibility_flags: string[];
       observability?: unknown;
+      triggers?: { crons?: string[] };
       d1_databases: { binding: string; database_id: string }[];
       r2_buckets: { binding: string }[];
       queues?: {
@@ -677,6 +678,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     expect(config.compatibility_date).toBe("2026-07-16");
     expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
     expect(config.observability).toBeUndefined();
+    expect(config.triggers?.crons).toEqual(["*/5 * * * *"]);
     expect(config.d1_databases).toEqual([
       expect.objectContaining({
         binding: "DB",
@@ -761,6 +763,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     );
     expect(migration).toContain("CHECK (input_exists = 1 OR output_exists = 1)");
     expect(migration).toContain("id TEXT PRIMARY KEY NOT NULL");
+    expect(migration).toContain("reconciled_at INTEGER");
     expect(migration).toContain("substr(input_key, 1, 7) = 'inputs/'");
     expect(migration).toContain("length(CAST(input_key AS BLOB)) = 43");
     expect(migration).toContain("instr(CAST(input_key AS BLOB), x'00') = 0");

@@ -877,15 +877,18 @@ class D1QueueJobStore implements QueueJobStore {
         nextGeneration,
       ),
       this.env.DB.prepare(
-        `INSERT INTO job_outbox (job_id, payload, attempts, next_attempt_at, sent_at)
-           SELECT ?, ?, 0, ?, NULL
+        `INSERT INTO job_outbox (
+             job_id, payload, attempts, next_attempt_at, sent_at, reconciled_at
+           )
+           SELECT ?, ?, 0, ?, NULL, NULL
            WHERE EXISTS (
              SELECT 1 FROM jobs WHERE id = ? AND status = 'queued'
                AND queue_generation = ? AND lease_token IS NULL
            )
            ON CONFLICT(job_id) DO UPDATE SET
              payload = excluded.payload, attempts = 0,
-             next_attempt_at = excluded.next_attempt_at, sent_at = NULL`,
+             next_attempt_at = excluded.next_attempt_at, sent_at = NULL,
+             reconciled_at = NULL`,
       ).bind(
         context.jobId,
         JSON.stringify(nextMessage),

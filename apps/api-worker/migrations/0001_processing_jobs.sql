@@ -122,7 +122,8 @@ CREATE TABLE job_outbox (
   payload TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   next_attempt_at INTEGER NOT NULL,
-  sent_at INTEGER
+  sent_at INTEGER,
+  reconciled_at INTEGER
 );
 
 CREATE TABLE maintenance_cursors (
@@ -212,5 +213,7 @@ CREATE UNIQUE INDEX jobs_client_request_idx
   ON jobs(session_hash, client_request_id);
 CREATE INDEX outbox_pending_idx
   ON job_outbox(sent_at, next_attempt_at);
+CREATE INDEX outbox_reconciliation_idx
+  ON job_outbox(sent_at, reconciled_at);
 CREATE INDEX cleanup_tombstones_retry_idx
   ON artifact_cleanup_tombstones(next_attempt_at);

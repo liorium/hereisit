@@ -10,10 +10,19 @@ import {
   type ImageOptimizeCreateRequestV1,
   imageOptimizeCreateRequestSchema,
   imageOptimizeMimeSchema,
+  imageOptimizePhaseSchema,
   imageOptimizeSpecV1Schema,
+  imageOptimizeWarningCodeSchema,
 } from "@hereisit/tool-contracts/image-optimize";
+import { toolJobErrorCodeSchema } from "@hereisit/tool-contracts/tool-job";
 import { z } from "zod";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
+import type {
+  ClaimDownloadResult,
+  LifecycleJob,
+  LifecycleMutationResult,
+  LifecycleRepository,
+} from "./routes/results";
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -2006,6 +2015,504 @@ class D1JobRepository implements JobRepository {
 
 export function createD1JobRepository(database: D1Database): JobRepository {
   return new D1JobRepository(database);
+}
+
+const lifecycleJobRowSchema = z
+  .object({
+    id: canonicalUuidSchema,
+    status: jobStateSchema,
+    phase: imageOptimizePhaseSchema,
+    phase_fraction: z.number().finite().min(0).max(1).nullable(),
+    phase_sequence: nonnegativeSafeIntegerSchema,
+    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    input_key: z.string().regex(INPUT_KEY_PATTERN),
+    output_key: z.string().regex(OUTPUT_KEY_PATTERN),
+    output_bytes: positiveSafeIntegerSchema.nullable(),
+    output_mime: imageOptimizeMimeSchema.nullable(),
+    output_width: positiveSafeIntegerSchema.nullable(),
+    output_height: positiveSafeIntegerSchema.nullable(),
+    result_kind: z.enum(["download", "original-retained"]).nullable(),
+    engine_build_id: z.string().min(1).max(128).nullable(),
+    codec_build_id: z.string().min(1).max(128).nullable(),
+    warnings_json: z.string().max(4_096).nullable(),
+    tested_candidates: nonnegativeSafeIntegerSchema.nullable(),
+    error_code: toolJobErrorCodeSchema.nullable(),
+    error_guidance: z.literal("TRY_BALANCED_PRESET").nullable(),
+    actual_units: nonnegativeSafeIntegerSchema.nullable(),
+    queued_at: nonnegativeSafeIntegerSchema.nullable(),
+    started_at: nonnegativeSafeIntegerSchema.nullable(),
+    engine_contact_started_at: nonnegativeSafeIntegerSchema.nullable(),
+    finished_at: nonnegativeSafeIntegerSchema.nullable(),
+    result_expires_at: nonnegativeSafeIntegerSchema.nullable(),
+    download_acknowledged_at: nonnegativeSafeIntegerSchema.nullable(),
+    download_lease_expires_at: nonnegativeSafeIntegerSchema.nullable(),
+    created_at: nonnegativeSafeIntegerSchema,
+    updated_at: nonnegativeSafeIntegerSchema,
+  })
+  .strict();
+
+const lifecycleColumns = `
+  id,
+  status,
+  phase,
+  phase_fraction,
+  phase_sequence,
+  attempt,
+  input_key,
+  output_key,
+  output_bytes,
+  output_mime,
+  output_width,
+  output_height,
+  result_kind,
+  engine_build_id,
+  codec_build_id,
+  warnings_json,
+  tested_candidates,
+  error_code,
+  error_guidance,
+  actual_units,
+  queued_at,
+  started_at,
+  engine_contact_started_at,
+  finished_at,
+  result_expires_at,
+  download_acknowledged_at,
+  download_lease_expires_at,
+  created_at,
+  updated_at
+`;
+
+function parseWarnings(value: string | null): LifecycleJob["warnings"] {
+  if (value === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new RepositoryIntegrityError("Stored warning metadata is not valid JSON.");
+  }
+  const warnings = z.array(imageOptimizeWarningCodeSchema).max(16).safeParse(parsed);
+  if (!warnings.success) {
+    throw new RepositoryIntegrityError("Stored warning metadata is invalid.");
+  }
+  return warnings.data;
+}
+
+function toLifecycleJob(row: z.infer<typeof lifecycleJobRowSchema>): LifecycleJob {
+  return {
+    jobId: row.id,
+    state: row.status,
+    phase: row.phase,
+    phaseFraction: row.phase_fraction,
+    sequence: row.phase_sequence,
+    attempt: row.attempt,
+    inputKey: row.input_key,
+    outputKey: row.output_key,
+    outputBytes: row.output_bytes,
+    outputMime: row.output_mime,
+    outputWidth: row.output_width,
+    outputHeight: row.output_height,
+    resultKind: row.result_kind,
+    engineBuildId: row.engine_build_id,
+    codecBuildId: row.codec_build_id,
+    warnings: parseWarnings(row.warnings_json),
+    testedCandidates: row.tested_candidates,
+    errorCode: row.error_code,
+    errorGuidance: row.error_guidance,
+    actualWeightedUnits: row.actual_units,
+    queuedAt: row.queued_at,
+    startedAt: row.started_at,
+    engineContactStartedAt: row.engine_contact_started_at,
+    finishedAt: row.finished_at,
+    resultExpiresAt: row.result_expires_at,
+    downloadAcknowledgedAt: row.download_acknowledged_at,
+    downloadLeaseExpiresAt: row.download_lease_expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseLifecycleRow(raw: unknown, label: string): LifecycleJob | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = lifecycleJobRowSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryIntegrityError(`${label} does not match the lifecycle contract.`);
+  }
+  return toLifecycleJob(parsed.data);
+}
+
+const cancellationSnapshotSchema = z
+  .object({
+    id: canonicalUuidSchema,
+    status: jobStateSchema,
+    input_key: z.string().regex(INPUT_KEY_PATTERN),
+    output_key: z.string().regex(OUTPUT_KEY_PATTERN),
+    upload_version: nonnegativeSafeIntegerSchema,
+  })
+  .strict();
+
+const leaseHashRowSchema = z.object({ download_lease_hash: hashSchema.nullable() }).strict();
+
+class D1LifecycleRepository implements LifecycleRepository {
+  private readonly jobs: D1JobRepository;
+
+  constructor(private readonly database: D1Database) {
+    this.jobs = new D1JobRepository(database);
+  }
+
+  loadExpectedTokenHash(jobId: string): Promise<string | null> {
+    return this.jobs.loadExpectedTokenHash(jobId);
+  }
+
+  async readJob(jobId: string): Promise<LifecycleJob | null> {
+    validateCanonicalUuid(jobId, "jobId");
+    const session = this.database.withSession("first-primary");
+    const row = await session
+      .prepare(`SELECT ${lifecycleColumns} FROM jobs WHERE id = ?`)
+      .bind(jobId)
+      .first();
+    return parseLifecycleRow(row, "Lifecycle job row");
+  }
+
+  private async settleQueuedCancellation(jobId: string, now: number): Promise<boolean> {
+    const terminalExpiry = checkedAdd(
+      now,
+      TERMINAL_RECORD_RETENTION_MS,
+      "terminal record deadline",
+    );
+    const marker = `EXISTS (
+      SELECT 1 FROM jobs
+      JOIN usage_ledger ON usage_ledger.job_id = jobs.id
+      WHERE jobs.id = ? AND jobs.status = 'cancelled'
+        AND jobs.settlement_state = 'settled' AND jobs.finished_at = ?
+        AND usage_ledger.settled_at IS NULL
+    )`;
+    const session = this.database.withSession("first-primary");
+    const results = await session.batch([
+      session
+        .prepare(
+          `UPDATE jobs
+           SET status = 'cancelled', phase = 'completed', phase_fraction = 1,
+               phase_sequence = phase_sequence + 1,
+               actual_units = COALESCE(actual_units, 0) + ?,
+               settlement_state = 'settled', cancel_requested_at = COALESCE(cancel_requested_at, ?),
+               lease_token = NULL, lease_expires_at = NULL,
+               error_code = 'CANCELLED', error_guidance = NULL,
+               result_expires_at = NULL, finished_at = ?, terminal_record_expires_at = ?,
+               network_hash_expires_at = MIN(network_hash_expires_at, ?), updated_at = ?
+           WHERE id = ? AND status = 'queued' AND settlement_state = 'reserved'
+             AND input_etag IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM account_usage
+               WHERE day_key = jobs.day_key AND reserved_units >= jobs.reserved_units
+                 AND pending_jobs > 0
+             )
+             AND EXISTS (
+               SELECT 1 FROM anonymous_usage
+               WHERE session_hash = jobs.session_hash AND day_key = jobs.day_key
+                 AND reserved_units >= jobs.reserved_units AND active_jobs > 0
+             )
+             AND EXISTS (
+               SELECT 1 FROM network_usage
+               WHERE network_hash = jobs.network_hash AND day_key = jobs.day_key
+                 AND reserved_units >= jobs.reserved_units AND pending_jobs > 0
+             )
+             AND EXISTS (
+               SELECT 1 FROM usage_ledger WHERE job_id = jobs.id AND settled_at IS NULL
+             )`,
+        )
+        .bind(PRE_ENGINE_SETTLED_UNITS, now, now, terminalExpiry, terminalExpiry, now, jobId),
+      session
+        .prepare(
+          `UPDATE account_usage
+           SET reserved_units = reserved_units - (SELECT reserved_units FROM jobs WHERE id = ?),
+               settled_units = settled_units + (SELECT actual_units FROM jobs WHERE id = ?),
+               pending_jobs = pending_jobs - 1, updated_at = ?
+           WHERE day_key = (SELECT day_key FROM jobs WHERE id = ?)
+             AND ${marker}`,
+        )
+        .bind(jobId, jobId, now, jobId, jobId, now),
+      session
+        .prepare(
+          `UPDATE anonymous_usage
+           SET reserved_units = reserved_units - (SELECT reserved_units FROM jobs WHERE id = ?),
+               settled_units = settled_units + (SELECT actual_units FROM jobs WHERE id = ?),
+               active_jobs = active_jobs - 1, updated_at = ?
+           WHERE session_hash = (SELECT session_hash FROM jobs WHERE id = ?)
+             AND day_key = (SELECT day_key FROM jobs WHERE id = ?)
+             AND ${marker}`,
+        )
+        .bind(jobId, jobId, now, jobId, jobId, jobId, now),
+      session
+        .prepare(
+          `UPDATE network_usage
+           SET reserved_units = reserved_units - (SELECT reserved_units FROM jobs WHERE id = ?),
+               settled_units = settled_units + (SELECT actual_units FROM jobs WHERE id = ?),
+               pending_jobs = pending_jobs - 1, updated_at = ?
+           WHERE network_hash = (SELECT network_hash FROM jobs WHERE id = ?)
+             AND day_key = (SELECT day_key FROM jobs WHERE id = ?)
+             AND ${marker}`,
+        )
+        .bind(jobId, jobId, now, jobId, jobId, jobId, now),
+      session
+        .prepare(
+          `UPDATE usage_ledger
+           SET actual_units = (SELECT actual_units FROM jobs WHERE id = ?),
+               outcome = 'cancelled', settled_at = ?
+           WHERE job_id = ? AND settled_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM jobs WHERE id = ? AND status = 'cancelled'
+                 AND settlement_state = 'settled' AND finished_at = ?
+             )`,
+        )
+        .bind(jobId, now, jobId, jobId, now),
+      session.prepare("DELETE FROM job_outbox WHERE job_id = ?").bind(jobId),
+    ]);
+    const changed = batchChanged(results[0], "Queued cancellation settlement");
+    if (changed > 1) {
+      throw new RepositoryIntegrityError("Queued cancellation changed multiple jobs.");
+    }
+    if (changed === 1) {
+      for (const [index, label] of [
+        [1, "account"],
+        [2, "anonymous"],
+        [3, "network"],
+        [4, "ledger"],
+      ] as const) {
+        if (batchChanged(results[index], `Queued cancellation ${label}`) !== 1) {
+          throw new RepositoryIntegrityError(`Queued cancellation did not settle ${label}.`);
+        }
+      }
+    }
+    return changed === 1;
+  }
+
+  private async requestRunningCancellation(jobId: string, now: number): Promise<boolean> {
+    const result = await this.database
+      .prepare(
+        `UPDATE jobs
+         SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ?
+         WHERE id = ? AND status = 'running' AND settlement_state = 'reserved'`,
+      )
+      .bind(now, now, jobId)
+      .run();
+    return batchChanged(result, "Running cancellation request") === 1;
+  }
+
+  private async cancellationSnapshot(jobId: string) {
+    const session = this.database.withSession("first-primary");
+    const row = await session
+      .prepare("SELECT id, status, input_key, output_key, upload_version FROM jobs WHERE id = ?")
+      .bind(jobId)
+      .first();
+    if (row === null) return null;
+    const parsed = cancellationSnapshotSchema.safeParse(row);
+    if (!parsed.success) {
+      throw new RepositoryIntegrityError("Cancellation snapshot is invalid.");
+    }
+    return parsed.data;
+  }
+
+  private async mutate(
+    jobId: string,
+    now: number,
+    intent: "cancel" | "delete",
+  ): Promise<LifecycleMutationResult> {
+    validateJobIdAndTime(jobId, now);
+    for (let pass = 0; pass < 4; pass += 1) {
+      const snapshot = await this.cancellationSnapshot(jobId);
+      if (snapshot === null) return { kind: "missing" };
+      if (snapshot.status === "created" || snapshot.status === "uploading") {
+        const settlement = await this.jobs.settlePreEngineFailure({
+          jobId,
+          inputKey: snapshot.input_key,
+          uploadVersion: snapshot.upload_version,
+          now,
+          outcome: "cancelled",
+          errorCode: "CANCELLED",
+        });
+        if (settlement.kind === "settled" || settlement.kind === "already-settled") {
+          const job = await this.readJob(jobId);
+          if (job === null) return { kind: "missing" };
+          return {
+            kind: "cancelled-and-settled",
+            job,
+            inputKey: snapshot.input_key,
+            outputKey: snapshot.output_key,
+          };
+        }
+        continue;
+      }
+      if (snapshot.status === "queued") {
+        if (!(await this.settleQueuedCancellation(jobId, now))) continue;
+        const job = await this.readJob(jobId);
+        if (job === null) return { kind: "missing" };
+        return {
+          kind: "cancelled-and-settled",
+          job,
+          inputKey: snapshot.input_key,
+          outputKey: snapshot.output_key,
+        };
+      }
+      if (snapshot.status === "running") {
+        if (!(await this.requestRunningCancellation(jobId, now))) continue;
+        const job = await this.readJob(jobId);
+        if (job === null) return { kind: "missing" };
+        if (job.state !== "running") continue;
+        return { kind: "running", job };
+      }
+      if (intent === "delete" && snapshot.status === "succeeded") {
+        await this.database
+          .prepare(
+            `UPDATE jobs
+             SET download_acknowledged_at = COALESCE(download_acknowledged_at, ?), updated_at = ?
+             WHERE id = ? AND status = 'succeeded'`,
+          )
+          .bind(now, now, jobId)
+          .run();
+      }
+      const job = await this.readJob(jobId);
+      if (job === null) return { kind: "missing" };
+      return { kind: "terminal", job };
+    }
+    throw new RepositoryIntegrityError("Lifecycle mutation did not converge.");
+  }
+
+  cancelJob(jobId: string, now: number): Promise<LifecycleMutationResult> {
+    return this.mutate(jobId, now, "cancel");
+  }
+
+  deleteJob(jobId: string, now: number): Promise<LifecycleMutationResult> {
+    return this.mutate(jobId, now, "delete");
+  }
+
+  async claimDownload(input: {
+    jobId: string;
+    leaseHash: string;
+    now: number;
+    expiresAt: number;
+  }): Promise<ClaimDownloadResult> {
+    validateJobIdAndTime(input.jobId, input.now);
+    validateHash(input.leaseHash, "leaseHash");
+    checkedPositiveSafeInteger(input.expiresAt, "download lease expiry");
+    if (input.expiresAt <= input.now || input.expiresAt - input.now > 2 * 60_000) {
+      throw new RangeError("Download lease duration is invalid.");
+    }
+    const session = this.database.withSession("first-primary");
+    const results = await session.batch([
+      session
+        .prepare(
+          `UPDATE jobs
+           SET download_lease_hash = ?, download_lease_expires_at = ?, updated_at = ?
+           WHERE id = ? AND status = 'succeeded' AND result_kind = 'download'
+             AND result_expires_at > ? AND download_acknowledged_at IS NULL
+             AND (download_lease_expires_at IS NULL OR download_lease_expires_at <= ?)`,
+        )
+        .bind(input.leaseHash, input.expiresAt, input.now, input.jobId, input.now, input.now),
+      session.prepare(`SELECT ${lifecycleColumns} FROM jobs WHERE id = ?`).bind(input.jobId),
+    ]);
+    const changed = batchChanged(results[0], "Download lease claim");
+    if (changed > 1) throw new RepositoryIntegrityError("Download lease changed multiple jobs.");
+    const job = parseLifecycleRow(results[1]?.results[0], "Download lease snapshot");
+    if (job === null) return { kind: "missing" };
+    if (changed === 1) return { kind: "claimed", job };
+    if (job.state === "succeeded" && job.resultKind === "original-retained") {
+      return { kind: "original-retained", job };
+    }
+    if (
+      job.state === "succeeded" &&
+      job.resultKind === "download" &&
+      job.downloadAcknowledgedAt === null &&
+      job.downloadLeaseExpiresAt !== null &&
+      job.downloadLeaseExpiresAt > input.now
+    ) {
+      return { kind: "busy" };
+    }
+    if (
+      job.state === "succeeded" &&
+      job.resultKind === "download" &&
+      (job.resultExpiresAt === null || job.resultExpiresAt <= input.now)
+    ) {
+      return { kind: "expired" };
+    }
+    return { kind: "not-ready" };
+  }
+
+  async loadDownloadLeaseHash(jobId: string): Promise<string | null> {
+    validateCanonicalUuid(jobId, "jobId");
+    const session = this.database.withSession("first-primary");
+    const row = await session
+      .prepare("SELECT download_lease_hash FROM jobs WHERE id = ?")
+      .bind(jobId)
+      .first();
+    if (row === null) return null;
+    const parsed = leaseHashRowSchema.safeParse(row);
+    if (!parsed.success) throw new RepositoryIntegrityError("Stored download lease is invalid.");
+    return parsed.data.download_lease_hash;
+  }
+
+  async acknowledgeDownload(
+    jobId: string,
+    leaseHash: string,
+    now: number,
+  ): Promise<
+    | { readonly kind: "acknowledged"; readonly outputKey: string }
+    | { readonly kind: "invalid-lease" | "missing" }
+  > {
+    validateJobIdAndTime(jobId, now);
+    validateHash(leaseHash, "leaseHash");
+    const session = this.database.withSession("first-primary");
+    const results = await session.batch([
+      session
+        .prepare(
+          `UPDATE jobs
+           SET download_acknowledged_at = COALESCE(download_acknowledged_at, ?), updated_at = ?
+           WHERE id = ? AND status = 'succeeded' AND result_kind = 'download'
+             AND download_lease_hash = ? AND download_lease_expires_at > ?`,
+        )
+        .bind(now, now, jobId, leaseHash, now),
+      session.prepare("SELECT output_key FROM jobs WHERE id = ?").bind(jobId),
+    ]);
+    const changed = batchChanged(results[0], "Download acknowledgement");
+    if (changed > 1) throw new RepositoryIntegrityError("Download acknowledgement changed jobs.");
+    const raw = results[1]?.results[0];
+    if (raw === undefined) return { kind: "missing" };
+    const parsed = z
+      .object({ output_key: z.string().regex(OUTPUT_KEY_PATTERN) })
+      .strict()
+      .safeParse(raw);
+    if (!parsed.success) throw new RepositoryIntegrityError("Download output key is invalid.");
+    return changed === 1
+      ? { kind: "acknowledged", outputKey: parsed.data.output_key }
+      : { kind: "invalid-lease" };
+  }
+
+  async completeResultDeletion(jobId: string, now: number): Promise<boolean> {
+    validateJobIdAndTime(jobId, now);
+    const result = await this.database
+      .prepare(
+        `UPDATE jobs
+         SET download_lease_hash = NULL, download_lease_expires_at = NULL, updated_at = ?
+         WHERE id = ? AND status IN ('succeeded', 'expired')
+           AND download_acknowledged_at IS NOT NULL`,
+      )
+      .bind(now, jobId)
+      .run();
+    const changed = batchChanged(result, "Result deletion completion");
+    if (changed > 1) throw new RepositoryIntegrityError("Result deletion changed multiple jobs.");
+    if (changed === 1) return true;
+    const job = await this.readJob(jobId);
+    return (
+      job !== null &&
+      (job.state === "succeeded" || job.state === "expired") &&
+      job.downloadAcknowledgedAt !== null &&
+      job.downloadLeaseExpiresAt === null
+    );
+  }
+}
+
+export function createD1LifecycleRepository(database: D1Database): LifecycleRepository {
+  return new D1LifecycleRepository(database);
 }
 
 export interface JobLease {

@@ -7,6 +7,7 @@ import { hashAnonymousSessionId, hashJobToken } from "./auth";
 import {
   claimQueuedJob,
   createD1JobRepository,
+  createD1LifecycleRepository,
   RepositoryIntegrityError,
   type ReserveAndCreateInput,
 } from "./d1-job-repository";
@@ -1874,5 +1875,138 @@ describe("fenced queue leases", () => {
 
     expect(recovered).not.toBeNull();
     expect(recovered?.leaseToken).not.toBe(first?.leaseToken);
+  });
+});
+
+describe("authenticated lifecycle persistence", () => {
+  async function queuedDatabase(): Promise<SqliteD1Database> {
+    const database = new SqliteD1Database();
+    const repository = createD1JobRepository(database);
+    await repository.reserveAndCreate(await reservationInput());
+    await repository.beginUpload({ jobId, now });
+    await repository.commitStoredInput({
+      jobId,
+      uploadVersion: 1,
+      inputEtag: "raw-etag",
+      now: now + 1,
+    });
+    return database;
+  }
+
+  it("settles a queued cancellation exactly once and removes its outbox", async () => {
+    const database = await queuedDatabase();
+    const lifecycle = createD1LifecycleRepository(database);
+    const before = usageRows(database);
+
+    await expect(lifecycle.cancelJob(jobId, now + 2)).resolves.toMatchObject({
+      kind: "cancelled-and-settled",
+      job: { state: "cancelled", errorCode: "CANCELLED" },
+      inputKey,
+      outputKey,
+    });
+    await expect(lifecycle.cancelJob(jobId, now + 3)).resolves.toMatchObject({
+      kind: "terminal",
+      job: { state: "cancelled" },
+    });
+
+    expect(count(database, "job_outbox")).toBe(0);
+    const after = usageRows(database) as {
+      account: Array<{ reserved_units: number; settled_units: number; pending_jobs: number }>;
+      anonymous: Array<{ reserved_units: number; settled_units: number; active_jobs: number }>;
+      network: Array<{ reserved_units: number; settled_units: number; pending_jobs: number }>;
+      ledger: Array<{ actual_units: number; outcome: string; settled_at: number }>;
+    };
+    expect(after.account[0]).toMatchObject({
+      reserved_units: 0,
+      pending_jobs: 0,
+      settled_units: calculateSettledWeightedUnits([]),
+    });
+    expect(after.anonymous[0]).toMatchObject({ reserved_units: 0, active_jobs: 0 });
+    expect(after.network[0]).toMatchObject({ reserved_units: 0, pending_jobs: 0 });
+    expect(after.ledger[0]).toMatchObject({
+      actual_units: calculateSettledWeightedUnits([]),
+      outcome: "cancelled",
+      settled_at: now + 2,
+    });
+    expect(before.ledger).toHaveLength(1);
+  });
+
+  it("records running cancellation without changing its lease or accounting", async () => {
+    const database = await queuedDatabase();
+    const lease = await claimQueuedJob(database, jobId, now + 2);
+    const before = usageRows(database);
+    const lifecycle = createD1LifecycleRepository(database);
+
+    await expect(lifecycle.deleteJob(jobId, now + 3)).resolves.toMatchObject({
+      kind: "running",
+      job: { state: "running" },
+    });
+
+    const row = database.sqlite
+      .prepare(
+        "SELECT status, lease_token, lease_expires_at, cancel_requested_at, settlement_state FROM jobs WHERE id = ?",
+      )
+      .get(jobId);
+    expect(row).toMatchObject({
+      status: "running",
+      lease_token: lease?.leaseToken,
+      lease_expires_at: lease?.leaseExpiresAt,
+      cancel_requested_at: now + 3,
+      settlement_state: "reserved",
+    });
+    expect(usageRows(database)).toEqual(before);
+  });
+
+  it("fences download leases and acknowledges only the matching live hash", async () => {
+    const database = await queuedDatabase();
+    database.sqlite
+      .prepare(
+        `UPDATE jobs
+         SET status = 'succeeded', phase = 'completed', phase_fraction = 1,
+             phase_sequence = 8, settlement_state = 'settled', actual_units = 10,
+             result_kind = 'download', output_bytes = 2, output_mime = 'image/png',
+             output_width = 1, output_height = 1, engine_build_id = 'engine-1',
+             codec_build_id = 'codec-1', warnings_json = '[]', tested_candidates = 1,
+             started_at = ?, engine_contact_started_at = ?, finished_at = ?,
+             result_expires_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(now + 2, now + 3, now + 4, now + 30 * 60_000, now + 4, jobId);
+    const lifecycle = createD1LifecycleRepository(database);
+    const leaseHash = "d".repeat(64);
+
+    await expect(
+      lifecycle.claimDownload({
+        jobId,
+        leaseHash,
+        now: now + 5,
+        expiresAt: now + 5 + 2 * 60_000,
+      }),
+    ).resolves.toMatchObject({ kind: "claimed", job: { outputBytes: 2 } });
+    await expect(
+      lifecycle.claimDownload({
+        jobId,
+        leaseHash: "e".repeat(64),
+        now: now + 6,
+        expiresAt: now + 6 + 2 * 60_000,
+      }),
+    ).resolves.toEqual({ kind: "busy" });
+    const reclaimedAt = now + 5 + 2 * 60_000;
+    await expect(
+      lifecycle.claimDownload({
+        jobId,
+        leaseHash: "e".repeat(64),
+        now: reclaimedAt,
+        expiresAt: reclaimedAt + 2 * 60_000,
+      }),
+    ).resolves.toMatchObject({ kind: "claimed" });
+    await expect(lifecycle.acknowledgeDownload(jobId, leaseHash, reclaimedAt + 1)).resolves.toEqual(
+      { kind: "invalid-lease" },
+    );
+    await expect(
+      lifecycle.acknowledgeDownload(jobId, "e".repeat(64), reclaimedAt + 1),
+    ).resolves.toEqual({ kind: "acknowledged", outputKey });
+    await expect(lifecycle.completeResultDeletion(jobId, reclaimedAt + 2)).resolves.toBe(true);
+    await expect(lifecycle.loadDownloadLeaseHash(jobId)).resolves.toBeNull();
   });
 });
