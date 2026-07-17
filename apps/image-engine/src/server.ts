@@ -12,6 +12,7 @@ import {
   terminateProcessGroups,
 } from "./job/job-controller";
 import { captureCgroupBaseline, createLinuxResourceSampler } from "./job/resource-monitor";
+import { resolveRunnerModuleUrl } from "./job/runner-path";
 import {
   parseRunnerRecord,
   resourceFailureStatus,
@@ -33,7 +34,7 @@ async function processGroupAlive(pgid: number): Promise<boolean> {
 async function startServer(): Promise<void> {
   const config = readEngineConfig();
   await scrubWorkspaceRoot(config.workspaceRoot);
-  const runnerPath = fileURLToPath(new URL("./job-runner.mjs", import.meta.url));
+  const runnerPath = fileURLToPath(resolveRunnerModuleUrl(import.meta.url));
   const runner: EngineRunner = {
     async start(input) {
       const cgroupBaseline = await captureCgroupBaseline();
@@ -90,6 +91,7 @@ async function startServer(): Promise<void> {
         () => undefined,
       );
       let runnerSequence = 3;
+      let runnerReportedTerminal = false;
       const terminalCompletion = new Promise<EngineJobStatus>((resolve, reject) => {
         let terminal: EngineJobStatus | null = null;
         let protocolError: Error | null = null;
@@ -129,6 +131,7 @@ async function startServer(): Promise<void> {
               throw new Error("runner emitted an inactive status");
             }
             if (terminal !== null) throw new Error("runner emitted multiple terminal statuses");
+            runnerReportedTerminal = true;
             terminal = record;
           } catch (error) {
             protocolError = error instanceof Error ? error : new Error("runner output is invalid");
@@ -161,6 +164,11 @@ async function startServer(): Promise<void> {
       const supervisor = startResourceSupervisor({
         sample: () => sampler.sample(),
         onProcessGroup: register,
+        acceptObservation: async (observation) => {
+          if (runnerReportedTerminal) return false;
+          if (observation.exceeded?.exceeded !== "measurement") return true;
+          return processGroupAlive(runnerPgid);
+        },
       });
       const completion = Promise.race([
         terminalCompletion.catch(async (error) => {

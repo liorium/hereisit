@@ -33,6 +33,9 @@ export function parseRunnerRecord(line: string): RunnerRecord {
 export function startResourceSupervisor(input: {
   readonly sample: () => Promise<LinuxResourceObservation>;
   readonly onProcessGroup: (pgid: number) => void;
+  readonly acceptObservation?: (
+    observation: LinuxResourceObservation,
+  ) => boolean | Promise<boolean>;
   readonly schedule?: (callback: () => void, milliseconds: number) => unknown;
   readonly clear?: (handle: unknown) => void;
 }) {
@@ -41,6 +44,7 @@ export function startResourceSupervisor(input: {
   const clear = input.clear ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
   let settled = false;
   let sampling = false;
+  let consecutiveMeasurementFailures = 0;
   let resolveCompletion!: (observation: LinuxResourceObservation) => void;
   const completion = new Promise<LinuxResourceObservation>((resolve) => {
     resolveCompletion = resolve;
@@ -50,14 +54,33 @@ export function startResourceSupervisor(input: {
     sampling = true;
     void input
       .sample()
-      .then((observation) => {
+      .then(async (observation) => {
+        if ((await input.acceptObservation?.(observation)) === false) return;
+        if (observation.exceeded?.exceeded === "measurement") {
+          consecutiveMeasurementFailures += 1;
+          if (consecutiveMeasurementFailures < 2) return;
+        } else {
+          consecutiveMeasurementFailures = 0;
+        }
         for (const pgid of observation.processGroups) input.onProcessGroup(pgid);
         if (observation.exceeded !== null && !settled) {
           settled = true;
           resolveCompletion(observation);
         }
       })
-      .catch(() => {
+      .catch(async () => {
+        if (
+          (await input.acceptObservation?.({
+            exceeded: { exceeded: "measurement" },
+            sample: { measurementFailed: true },
+            memoryByteMilliseconds: 0,
+            peakMemoryBytes: 0,
+            processGroups: [],
+          })) === false
+        )
+          return;
+        consecutiveMeasurementFailures += 1;
+        if (consecutiveMeasurementFailures < 2) return;
         if (settled) return;
         settled = true;
         resolveCompletion({

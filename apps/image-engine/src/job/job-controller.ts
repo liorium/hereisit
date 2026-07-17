@@ -86,7 +86,12 @@ async function bestEffortSignal(
 }
 
 export async function terminateProcessGroups(input: ProcessTerminationInput): Promise<void> {
-  const known = new Set([...input.registeredCodecPgids, ...(await input.enumerate())]);
+  const known = new Set(input.registeredCodecPgids);
+  try {
+    for (const pgid of await input.enumerate()) known.add(pgid);
+  } catch (error) {
+    if (await input.alive(input.runnerPgid)) throw error;
+  }
   known.delete(input.runnerPgid);
   for (const pgid of known) await bestEffortSignal(input.signal, pgid, "SIGTERM");
   await bestEffortSignal(input.signal, input.runnerPgid, "SIGTERM");

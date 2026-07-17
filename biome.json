@@ -13,7 +13,8 @@
       "!!**/playwright-report",
       "!!**/test-results",
       "!!**/out",
-      "!!**/.wrangler"
+      "!!**/.wrangler",
+      "!!**/.artifacts"
     ]
   },
   "formatter": {

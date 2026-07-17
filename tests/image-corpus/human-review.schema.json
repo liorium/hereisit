@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/human-review-v1.json",
+  "type": "array",
+  "minItems": 20,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "corpusId",
+      "reviewerIdHash",
+      "presentationSeed",
+      "hereisitSide",
+      "preference",
+      "severeDefect",
+      "defect"
+    ],
+    "properties": {
+      "corpusId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+      "reviewerIdHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "presentationSeed": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "hereisitSide": { "enum": ["left", "right"] },
+      "preference": { "enum": ["hereisit", "baseline", "tie"] },
+      "severeDefect": { "type": "boolean" },
+      "defect": {
+        "enum": ["none", "text", "edge", "banding", "color", "alpha", "blocking", "other"]
+      }
+    }
+  }
+}

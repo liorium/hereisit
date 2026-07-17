@@ -13,6 +13,9 @@ coverage/
 playwright-report/
 test-results/
 .worktrees/
+tests/image-corpus/private/
+tests/image-corpus/competitor-output/
+.artifacts/
 
 .env
 .env.*

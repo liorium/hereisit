@@ -98,10 +98,43 @@ describe("runner protocol and resource supervisor", () => {
       clear: vi.fn(),
     });
     tick?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    tick?.();
     await expect(supervisor.completion).resolves.toMatchObject({
       exceeded: { exceeded: "measurement" },
       sample: { measurementFailed: true },
     });
+    supervisor.stop();
+  });
+
+  it("ignores a late measurement failure after the runner has reported terminal status", async () => {
+    let tick: (() => void) | undefined;
+    let acceptObservation = true;
+    let resolveSample!: (value: LinuxResourceObservation) => void;
+    const sample = new Promise<LinuxResourceObservation>((resolve) => {
+      resolveSample = resolve;
+    });
+    const supervisor = startResourceSupervisor({
+      sample: () => sample,
+      onProcessGroup: vi.fn(),
+      acceptObservation: () => acceptObservation,
+      schedule: (callback) => {
+        tick = callback;
+        return 1;
+      },
+      clear: vi.fn(),
+    });
+    tick?.();
+    acceptObservation = false;
+    resolveSample(observation({ exceeded: "measurement" }));
+    await Promise.resolve();
+    await Promise.resolve();
+    let settled = false;
+    void supervisor.completion.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
     supervisor.stop();
   });
 

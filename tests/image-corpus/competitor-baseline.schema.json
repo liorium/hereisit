@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/competitor-baseline-v1.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "vendor",
+      "tool",
+      "toolVersionOrObservedBuild",
+      "observedAt",
+      "settings",
+      "authorization",
+      "corpusId",
+      "inputSha256",
+      "outputSha256",
+      "outputMime",
+      "outputBytes",
+      "width",
+      "height",
+      "metricBuildIds",
+      "ssimulacra2",
+      "butteraugli",
+      "normalizedPixelMatch"
+    ],
+    "properties": {
+      "vendor": { "type": "string", "minLength": 1 },
+      "tool": { "type": "string", "minLength": 1 },
+      "toolVersionOrObservedBuild": { "type": "string", "minLength": 1 },
+      "observedAt": { "type": "string", "format": "date-time" },
+      "settings": {
+        "type": "object",
+        "additionalProperties": { "type": ["string", "number", "boolean"] }
+      },
+      "authorization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["owner", "basis", "referenceHash"],
+        "properties": {
+          "owner": { "type": "string", "minLength": 1 },
+          "basis": { "enum": ["owned-input", "written-permission"] },
+          "referenceHash": { "$ref": "#/$defs/sha256" }
+        }
+      },
+      "corpusId": { "type": "string" },
+      "inputSha256": { "$ref": "#/$defs/sha256" },
+      "outputSha256": { "$ref": "#/$defs/sha256" },
+      "outputMime": { "enum": ["image/jpeg", "image/png", "image/webp"] },
+      "outputBytes": { "type": "integer", "minimum": 1 },
+      "width": { "type": "integer", "minimum": 1 },
+      "height": { "type": "integer", "minimum": 1 },
+      "metricBuildIds": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ssimulacra2", "butteraugli"],
+        "properties": { "ssimulacra2": { "type": "string" }, "butteraugli": { "type": "string" } }
+      },
+      "ssimulacra2": { "type": ["number", "null"] },
+      "butteraugli": { "type": ["number", "null"] },
+      "normalizedPixelMatch": { "type": ["boolean", "null"] }
+    }
+  },
+  "$defs": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+}

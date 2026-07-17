@@ -78,6 +78,21 @@ async function ready(controller: JobController, request: EngineCreateJobRequest)
 }
 
 describe("detached process-group cleanup", () => {
+  it("treats an already-exited runner before initial enumeration as successfully cleaned", async () => {
+    await expect(
+      terminateProcessGroups({
+        runnerPgid: 20,
+        registeredCodecPgids: [],
+        enumerate: async () => {
+          throw new Error("runner process is not measurable");
+        },
+        signal: async () => undefined,
+        wait: async () => undefined,
+        alive: async () => false,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("terminates codec groups before the runner and kills every survivor after re-enumeration", async () => {
     const signals: Array<[number, NodeJS.Signals]> = [];
     const dead = new Set([31]);
