@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -7,6 +8,9 @@ import {
   type EngineMeasurements,
   engineCreateJobRequestSchema,
 } from "@hereisit/server-contracts";
+import sharp from "sharp";
+import { encodeJpegCandidate, JpegCodecError, orientationTransform } from "../codecs/jpeg";
+import { verifyJpegCoefficientTransform } from "../codecs/jpeg-coeff-verify";
 import { classifyImage, extractImageFeatures } from "../pipeline/classify";
 import { type ImageInspection, ImagePipelineError, inspectImage } from "../pipeline/inspect";
 import { type NormalizedImageWithSample, normalizeImage } from "../pipeline/normalize";
@@ -261,7 +265,142 @@ export function selfTestPlanner(): void {
   );
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function selfTestJpeg(): Promise<void> {
+  const workspace = await mkdtemp(join(tmpdir(), "hereisit-jpeg-self-test-"));
+  try {
+    const sourceWidth = 16;
+    const sourceHeight = 32;
+    const pixels = Buffer.alloc(sourceWidth * sourceHeight * 3);
+    for (let y = 0; y < sourceHeight; y += 1) {
+      for (let x = 0; x < sourceWidth; x += 1) {
+        const offset = (y * sourceWidth + x) * 3;
+        pixels[offset] = (x * 13 + y * 3) & 0xff;
+        pixels[offset + 1] = (x * 5 + y * 11) & 0xff;
+        pixels[offset + 2] = (x * 17 + y * 7) & 0xff;
+      }
+    }
+    const normalizedPath = join(workspace, "normalized.raw");
+    const sourcePath = join(workspace, "source.jpg");
+    await writeFile(normalizedPath, pixels, { mode: 0o600 });
+    await sharp(pixels, {
+      raw: { width: sourceWidth, height: sourceHeight, channels: 3 },
+    })
+      .jpeg({ progressive: false, chromaSubsampling: "4:2:0", quality: 90 })
+      .toFile(sourcePath);
+
+    const smart = await encodeJpegCandidate({
+      sourcePath,
+      normalizedRgbPath: normalizedPath,
+      width: sourceWidth,
+      height: sourceHeight,
+      orientation: 1,
+      candidate: {
+        id: "self-test-smart",
+        codec: "mozjpeg",
+        mode: "lossy",
+        quality: 82,
+        chroma: "444",
+        effort: 3,
+      },
+      outputPath: join(workspace, "smart.jpg"),
+      signal: new AbortController().signal,
+    });
+    const losslessVerifications: Awaited<ReturnType<typeof verifyJpegCoefficientTransform>>[] = [];
+    for (const orientation of [1, 2, 3, 4, 5, 6, 7, 8] as const) {
+      const swapsAxes = orientation >= 5;
+      const encoded = await encodeJpegCandidate({
+        sourcePath,
+        normalizedRgbPath: normalizedPath,
+        width: swapsAxes ? sourceHeight : sourceWidth,
+        height: swapsAxes ? sourceWidth : sourceHeight,
+        orientation,
+        candidate: {
+          id: `self-test-lossless-${orientation}`,
+          codec: "mozjpeg",
+          mode: "lossless-structural",
+          effort: 3,
+        },
+        outputPath: join(workspace, `lossless-${orientation}.jpg`),
+        signal: new AbortController().signal,
+      });
+      losslessVerifications.push(
+        await verifyJpegCoefficientTransform({
+          sourcePath,
+          candidatePath: encoded.path,
+          transform: orientationTransform(orientation),
+          signal: new AbortController().signal,
+        }),
+      );
+    }
+    const oddSourcePath = join(workspace, "odd-source.jpg");
+    await sharp({
+      create: { width: 17, height: 17, channels: 3, background: "#5279a3" },
+    })
+      .jpeg({ progressive: false, chromaSubsampling: "4:2:0", quality: 90 })
+      .toFile(oddSourcePath);
+    let oddMcuRejected = false;
+    try {
+      await encodeJpegCandidate({
+        sourcePath: oddSourcePath,
+        normalizedRgbPath: normalizedPath,
+        width: 17,
+        height: 17,
+        orientation: 6,
+        candidate: {
+          id: "self-test-odd-mcu",
+          codec: "mozjpeg",
+          mode: "lossless-structural",
+          effort: 3,
+        },
+        outputPath: join(workspace, "odd-result.jpg"),
+        signal: new AbortController().signal,
+      });
+    } catch (error) {
+      oddMcuRejected =
+        error instanceof JpegCodecError && error.reason === "unsafe-lossless-transform";
+    }
+    const jpegliPresent = await pathExists("/usr/local/bin/cjpegli");
+    if (
+      losslessVerifications.some((verification) => !verification.exact) ||
+      !oddMcuRejected ||
+      jpegliPresent
+    ) {
+      throw new Error(
+        `JPEG self-test policy failed: ${JSON.stringify({
+          losslessVerifications,
+          oddMcuRejected,
+          jpegliPresent,
+        })}`,
+      );
+    }
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: true,
+        smartBytes: smart.byteLength,
+        exactTransforms: losslessVerifications.length,
+        oddMcuRejected,
+        jpegliPresent,
+      })}\n`,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes("--self-test-jpeg")) {
+    await selfTestJpeg();
+    return;
+  }
   if (process.argv.includes("--self-test-planner")) {
     selfTestPlanner();
     return;

@@ -21,11 +21,6 @@ cmake -S "$SOURCE" -B "$SOURCE/build" -G Ninja \
 cmake --build "$SOURCE/build" --parallel "$(nproc)"
 cmake --install "$SOURCE/build"
 
-cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
-  -I"$PREFIX/include" "$(dirname "$0")/jpeg-coeff-verify.c" \
-  -L"$PREFIX/lib" -Wl,-Bstatic -ljpeg -Wl,-Bdynamic -lm \
-  -o "$PREFIX/bin/jpeg-coeff-verify"
-strip "$PREFIX/bin/cjpeg" "$PREFIX/bin/djpeg" "$PREFIX/bin/jpegtran" \
-  "$PREFIX/bin/jpeg-coeff-verify"
+strip "$PREFIX/bin/cjpeg" "$PREFIX/bin/djpeg" "$PREFIX/bin/jpegtran"
 finalize_source "$SOURCE"
 record_build "$NAME" "$REVISION" "release static simd no-java no-turbojpeg" "$PREFIX"

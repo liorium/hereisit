@@ -13,7 +13,10 @@ RUN sed -i \
   && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git jq \
   && rm -rf /var/lib/apt/lists/*
-COPY apps/image-engine/native /build/native
+COPY apps/image-engine/native/build-common.sh apps/image-engine/native/build-oxipng.sh \
+  apps/image-engine/native/build-png-smart.sh apps/image-engine/native/sources.lock.json \
+  /build/native/
+COPY apps/image-engine/native/png-smart /build/native/png-smart
 RUN /build/native/build-oxipng.sh \
   && /build/native/build-png-smart.sh
 
@@ -42,10 +45,21 @@ RUN sed -i \
       pkg-config \
       python3 \
   && rm -rf /var/lib/apt/lists/*
-COPY apps/image-engine/native /build/native
+COPY apps/image-engine/native/build-common.sh apps/image-engine/native/build-mozjpeg.sh \
+  apps/image-engine/native/build-libwebp.sh apps/image-engine/native/build-libvips.sh \
+  apps/image-engine/native/sources.lock.json /build/native/
 RUN /build/native/build-mozjpeg.sh \
   && /build/native/build-libwebp.sh \
   && /build/native/build-libvips.sh
+COPY apps/image-engine/native/jpeg-coeff-verify.c /build/native/jpeg-coeff-verify.c
+RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+      -I/opt/hereisit-native/mozjpeg/include /build/native/jpeg-coeff-verify.c \
+      -L/opt/hereisit-native/mozjpeg/lib -Wl,-Bstatic -ljpeg -Wl,-Bdynamic -lm \
+      -o /opt/hereisit-native/mozjpeg/bin/jpeg-coeff-verify \
+  && strip /opt/hereisit-native/mozjpeg/bin/jpeg-coeff-verify \
+  && source /build/native/build-common.sh \
+  && record_build mozjpeg a2d2907ff023227e80c1e4efa809812410275a12 \
+      "release static simd no-java no-turbojpeg" /opt/hereisit-native/mozjpeg
 
 FROM native-build AS node-build
 WORKDIR /src
@@ -78,6 +92,8 @@ RUN cd apps/image-engine/node_modules/sharp \
 RUN cp -a apps/image-engine/dist /opt/app/dist
 
 FROM native-build AS benchmark-build
+COPY apps/image-engine/native/build-jpegli.sh apps/image-engine/native/build-libjxl-metrics.sh \
+  /build/native/
 RUN /build/native/build-jpegli.sh \
   && /build/native/build-libjxl-metrics.sh
 
