@@ -88,9 +88,12 @@ async function startServer(): Promise<void> {
       void captureBoundedDiagnostic(child.stderr, input.workspace.diagnostic).catch(
         () => undefined,
       );
+      let runnerSequence = 3;
       const terminalCompletion = new Promise<EngineJobStatus>((resolve, reject) => {
         let terminal: EngineJobStatus | null = null;
         let protocolError: Error | null = null;
+        let lastSequence = 0;
+        let progressWrites = Promise.resolve();
         const lines = createInterface({ input: child.stdout as NodeJS.ReadableStream });
         lines.on("line", (line) => {
           try {
@@ -99,6 +102,30 @@ async function startServer(): Promise<void> {
               if (record.type === "process-group:add") register(record.pgid);
               else unregister(record.pgid);
               return;
+            }
+            if (record.sequence <= lastSequence)
+              throw new Error("runner sequence is not increasing");
+            lastSequence = record.sequence;
+            runnerSequence = record.sequence;
+            if (record.state === "running") {
+              if (terminal !== null)
+                throw new Error("runner emitted progress after terminal status");
+              progressWrites = progressWrites.then(() => input.onProgress(record));
+              progressWrites.catch((error) => {
+                protocolError =
+                  error instanceof Error
+                    ? error
+                    : new Error("runner progress could not be persisted");
+                lines.close();
+              });
+              return;
+            }
+            if (
+              record.state !== "succeeded" &&
+              record.state !== "failed" &&
+              record.state !== "cancelled"
+            ) {
+              throw new Error("runner emitted an inactive status");
             }
             if (terminal !== null) throw new Error("runner emitted multiple terminal statuses");
             terminal = record;
@@ -109,10 +136,16 @@ async function startServer(): Promise<void> {
         });
         child.once("error", reject);
         child.once("close", (code) => {
-          if (protocolError !== null) return reject(protocolError);
-          if (code !== 0 || terminal === null)
-            return reject(new Error("runner exited without status"));
-          resolve(terminal);
+          void progressWrites.then(
+            () => {
+              if (protocolError !== null) return reject(protocolError);
+              if (code !== 0 || terminal === null) {
+                return reject(new Error("runner exited without status"));
+              }
+              resolve(terminal);
+            },
+            (error) => reject(error),
+          );
         });
       });
       const sampler = createLinuxResourceSampler({
@@ -135,7 +168,7 @@ async function startServer(): Promise<void> {
         }),
         supervisor.completion.then(async (observation) => {
           await terminate();
-          return resourceFailureStatus(input.request, observation);
+          return resourceFailureStatus(input.request, observation, runnerSequence + 1);
         }),
       ]).finally(() => supervisor.stop());
       return { runnerPgid, completion };

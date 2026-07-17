@@ -9,6 +9,7 @@ export interface JobWorkspace {
   readonly home: string;
   readonly tmp: string;
   readonly input: string;
+  readonly request: string;
   readonly output: string;
   readonly result: string;
   readonly status: string;
@@ -33,6 +34,7 @@ export async function createJobWorkspace(root: string, jobId: string): Promise<J
     home,
     tmp,
     input: join(workspaceRoot, "input.bin"),
+    request: join(workspaceRoot, "request.json"),
     output: join(workspaceRoot, "output.bin"),
     result: join(workspaceRoot, "result.json"),
     status: join(workspaceRoot, "status.json"),

@@ -90,6 +90,7 @@ function rounded(value: number | undefined): number {
 export function resourceFailureStatus(
   request: EngineCreateJobRequest,
   observation: LinuxResourceObservation,
+  sequence = 2,
 ): EngineJobStatus {
   const exceeded = observation.exceeded?.exceeded ?? "measurement";
   const code =
@@ -104,7 +105,7 @@ export function resourceFailureStatus(
     state: "failed",
     phase: null,
     fraction: null,
-    sequence: 2,
+    sequence,
     measurements: {
       processedInputBytes: request.input.byteLength,
       processedPixels: 0,

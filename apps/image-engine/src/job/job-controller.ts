@@ -45,6 +45,7 @@ export interface RunnerStartInput {
   readonly workspace: JobWorkspace;
   readonly onProcessGroup: (pgid: number) => void;
   readonly onProcessGroupRemoved: (pgid: number) => void;
+  readonly onProgress: (status: Extract<EngineJobStatus, { state: "running" }>) => Promise<void>;
 }
 
 export interface RunnerHandle {
@@ -228,17 +229,23 @@ export class JobController {
         fraction: null,
         sequence: 0,
       };
-      await writeJsonAtomic(workspace.status, status);
-      this.#jobs.set(request.jobId, {
-        request,
-        identity: requestIdentity,
-        workspace,
-        status,
-        inputSha256: null,
-        runnerPgid: null,
-        codecPgids: new Set(),
-      });
-      return status;
+      try {
+        await writeJsonAtomic(workspace.request, request);
+        await writeJsonAtomic(workspace.status, status);
+        this.#jobs.set(request.jobId, {
+          request,
+          identity: requestIdentity,
+          workspace,
+          status,
+          inputSha256: null,
+          runnerPgid: null,
+          codecPgids: new Set(),
+        });
+        return status;
+      } catch (error) {
+        await removeJobWorkspace(workspace).catch(() => undefined);
+        throw error;
+      }
     })();
     this.#pendingCreates.set(request.jobId, { identity: requestIdentity, promise });
     try {
@@ -364,6 +371,19 @@ export class JobController {
         workspace: job.workspace,
         onProcessGroup: (pgid) => job.codecPgids.add(pgid),
         onProcessGroupRemoved: (pgid) => job.codecPgids.delete(pgid),
+        onProgress: async (untrustedStatus) => {
+          const parsed = engineJobStatusSchema.parse(untrustedStatus) as EngineJobStatus;
+          if (
+            parsed.state !== "running" ||
+            parsed.jobId !== jobId ||
+            parsed.sequence <= job.status.sequence ||
+            this.#jobs.get(jobId) !== job
+          ) {
+            throw new Error("runner returned invalid progress");
+          }
+          await writeJsonAtomic(job.workspace.status, parsed);
+          job.status = parsed;
+        },
       });
     } catch (error) {
       job.status = crashStatus(jobId, job.status.sequence + 1);
@@ -378,7 +398,8 @@ export class JobController {
         const status = engineJobStatusSchema.parse(untrustedStatus) as EngineJobStatus;
         if (
           status.jobId !== jobId ||
-          !["succeeded", "failed", "cancelled"].includes(status.state)
+          !["succeeded", "failed", "cancelled"].includes(status.state) ||
+          status.sequence <= job.status.sequence
         ) {
           throw new Error("runner returned an invalid terminal status");
         }

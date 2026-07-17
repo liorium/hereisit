@@ -81,6 +81,9 @@ importers:
       '@hereisit/server-contracts':
         specifier: workspace:*
         version: link:../../packages/server-contracts
+      '@hereisit/tool-contracts':
+        specifier: workspace:*
+        version: link:../../packages/tool-contracts
       node-addon-api:
         specifier: 8.9.0
         version: 8.9.0

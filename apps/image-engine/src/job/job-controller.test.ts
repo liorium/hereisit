@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -208,6 +208,41 @@ describe("detached process-group cleanup", () => {
 });
 
 describe("engine admission and single-job lifecycle", () => {
+  it("persists the validated request privately and mirrors runner progress", async () => {
+    const completion = deferred<EngineJobStatus>();
+    const root = await mkdtemp(join(tmpdir(), "hereisit-engine-controller-"));
+    roots.push(root);
+    let requestPath = "";
+    const controller = new JobController({
+      workspaceRoot: root,
+      runner: {
+        start: async ({ workspace, onProgress }) => {
+          requestPath = workspace.request;
+          await onProgress({
+            protocol: 1,
+            jobId: baseRequest.jobId,
+            state: "running",
+            phase: "inspecting",
+            fraction: null,
+            sequence: 4,
+          });
+          return { runnerPgid: 999_999, completion: completion.promise };
+        },
+      },
+    });
+    await ready(controller, baseRequest);
+    await controller.run(baseRequest.jobId);
+    expect(JSON.parse(await readFile(requestPath, "utf8"))).toEqual(baseRequest);
+    expect((await lstat(requestPath)).mode & 0o077).toBe(0);
+    expect(controller.get(baseRequest.jobId)).toMatchObject({
+      state: "running",
+      phase: "inspecting",
+      sequence: 4,
+    });
+    completion.resolve({ ...terminalFailure(baseRequest.jobId), sequence: 5 });
+    await expect.poll(() => controller.activeJobId).toBeNull();
+  });
+
   it("allows only one active runner and releases the slot after terminal completion", async () => {
     const completions = new Map<string, ReturnType<typeof deferred<EngineJobStatus>>>();
     const runner: EngineRunner = {

@@ -126,4 +126,8 @@ describe("runner protocol and resource supervisor", () => {
       },
     });
   });
+
+  it("places a supervisor failure after the latest runner sequence", () => {
+    expect(resourceFailureStatus(request, observation({ exceeded: "memory" }), 9).sequence).toBe(9);
+  });
 });
