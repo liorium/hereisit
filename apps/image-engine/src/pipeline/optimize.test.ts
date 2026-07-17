@@ -26,6 +26,7 @@ const plan: OptimizationPlan = {
   requirePixelExact: false,
   requireAlphaExact: true,
   minimumSavingsPercent: 1,
+  warnings: [],
 };
 
 function encoded(candidate: OptimizationCandidatePlan, byteLength: number): CodecCandidate {
@@ -67,7 +68,7 @@ describe("optimizeCandidates", () => {
     }));
     await expect(
       optimizeCandidates({ plan, encode, verify, signal: new AbortController().signal }),
-    ).resolves.toEqual({ selected: null, testedCandidates: 3 });
+    ).resolves.toEqual({ selected: null, testedCandidates: 3, warnings: [] });
     expect(encode).toHaveBeenCalledTimes(3);
   });
 
@@ -84,7 +85,7 @@ describe("optimizeCandidates", () => {
     }));
     await expect(
       optimizeCandidates({ plan, encode, verify, signal: new AbortController().signal }),
-    ).resolves.toEqual({ selected: first, testedCandidates: 2 });
+    ).resolves.toEqual({ selected: first, testedCandidates: 2, warnings: [] });
   });
 
   it("fails the first deadline without asking Queue to repeat the preset", async () => {

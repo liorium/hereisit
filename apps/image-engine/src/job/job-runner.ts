@@ -11,6 +11,7 @@ import {
 import sharp from "sharp";
 import { encodeJpegCandidate, JpegCodecError, orientationTransform } from "../codecs/jpeg";
 import { verifyJpegCoefficientTransform } from "../codecs/jpeg-coeff-verify";
+import { encodePngCandidate } from "../codecs/png";
 import { classifyImage, extractImageFeatures } from "../pipeline/classify";
 import { type ImageInspection, ImagePipelineError, inspectImage } from "../pipeline/inspect";
 import { type NormalizedImageWithSample, normalizeImage } from "../pipeline/normalize";
@@ -396,7 +397,152 @@ export async function selfTestJpeg(): Promise<void> {
   }
 }
 
+export async function selfTestPng(): Promise<void> {
+  const workspace = await mkdtemp(join(tmpdir(), "hereisit-png-self-test-"));
+  try {
+    const signal = new AbortController().signal;
+    const width = 16;
+    const height = 16;
+    const losslessPixels = Buffer.alloc(width * height * 4);
+    const logoPixels = Buffer.alloc(width * height * 4);
+    const gradientAlphaPixels = Buffer.alloc(width * height * 4);
+    const opaquePixels = Buffer.alloc(width * height * 3);
+    for (let index = 0; index < width * height; index += 1) {
+      const offset = index * 4;
+      losslessPixels.set(
+        [(index * 17) & 255, (index * 29) & 255, (index * 43) & 255, (index * 7) & 255],
+        offset,
+      );
+      const logoColor = index % 3;
+      logoPixels.set(
+        logoColor === 0
+          ? [240, 40, 60, 0]
+          : logoColor === 1
+            ? [20, 180, 90, 128]
+            : [30, 70, 220, 255],
+        offset,
+      );
+      gradientAlphaPixels.set([60, 120, 200, index], offset);
+      opaquePixels.set(index % 2 === 0 ? [250, 210, 30] : [20, 80, 230], index * 3);
+    }
+    const losslessPath = join(workspace, "lossless.raw");
+    const logoPath = join(workspace, "logo.raw");
+    const gradientPath = join(workspace, "gradient.raw");
+    const opaquePath = join(workspace, "opaque.raw");
+    const sixteenBitPath = join(workspace, "sixteen-bit.raw");
+    const sixteenBitPixels = Buffer.alloc(2 * 2 * 3 * 2);
+    [1, 65_534, 1_023, 32_769, 12_345, 54_321, 7, 60_001, 2_049, 40_003, 222, 44_444].forEach(
+      (value, index) => {
+        sixteenBitPixels.writeUInt16LE(value, index * 2);
+      },
+    );
+    await Promise.all([
+      writeFile(losslessPath, losslessPixels, { mode: 0o600 }),
+      writeFile(logoPath, logoPixels, { mode: 0o600 }),
+      writeFile(gradientPath, gradientAlphaPixels, { mode: 0o600 }),
+      writeFile(opaquePath, opaquePixels, { mode: 0o600 }),
+      writeFile(sixteenBitPath, sixteenBitPixels, { mode: 0o600 }),
+    ]);
+    const lossless = await encodePngCandidate({
+      normalizedPath: losslessPath,
+      width,
+      height,
+      channels: 4,
+      sampleDepth: 8,
+      candidate: { id: "png-lossless-self-test", codec: "oxipng", mode: "lossless", effort: 3 },
+      outputPath: join(workspace, "lossless.png"),
+      signal,
+    });
+    const smartCandidate = {
+      id: "png-smart-self-test",
+      codec: "quantizr-oxipng" as const,
+      mode: "quantized-255",
+      quality: 255,
+      effort: 3,
+    };
+    const smart = await encodePngCandidate({
+      normalizedPath: logoPath,
+      width,
+      height,
+      channels: 4,
+      sampleDepth: 8,
+      candidate: smartCandidate,
+      outputPath: join(workspace, "smart-a.png"),
+      signal,
+    });
+    const smartAgain = await encodePngCandidate({
+      normalizedPath: logoPath,
+      width,
+      height,
+      channels: 4,
+      sampleDepth: 8,
+      candidate: smartCandidate,
+      outputPath: join(workspace, "smart-b.png"),
+      signal,
+    });
+    const opaqueSmart = await encodePngCandidate({
+      normalizedPath: opaquePath,
+      width,
+      height,
+      channels: 3,
+      sampleDepth: 8,
+      candidate: { ...smartCandidate, id: "png-opaque-self-test" },
+      outputPath: join(workspace, "opaque.png"),
+      signal,
+    });
+    const lossless16 = await encodePngCandidate({
+      normalizedPath: sixteenBitPath,
+      width: 2,
+      height: 2,
+      channels: 3,
+      sampleDepth: 16,
+      candidate: { id: "png-16-self-test", codec: "oxipng", mode: "lossless", effort: 3 },
+      outputPath: join(workspace, "sixteen-bit.png"),
+      signal,
+    });
+    const firstBytes = await readFile(smart.path);
+    let gradientAlphaRejected = false;
+    try {
+      await encodePngCandidate({
+        normalizedPath: gradientPath,
+        width,
+        height,
+        channels: 4,
+        sampleDepth: 8,
+        candidate: { ...smartCandidate, id: "png-gradient-self-test" },
+        outputPath: join(workspace, "gradient.png"),
+        signal,
+      });
+    } catch (error) {
+      gradientAlphaRejected = error instanceof Error && error.message.includes("alpha-mismatch");
+    }
+    if (!firstBytes.equals(await readFile(smartAgain.path)) || !gradientAlphaRejected) {
+      throw new Error("PNG self-test policy failed");
+    }
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: true,
+        losslessBytes: lossless.byteLength,
+        lossless16Bytes: lossless16.byteLength,
+        smartBytes: smart.byteLength,
+        opaqueSmartBytes: opaqueSmart.byteLength,
+        deterministic: true,
+        indexedIntermediateVerified: true,
+        exactAlpha: true,
+        opaqueAlphaVerified: true,
+        gradientAlphaRejected,
+      })}\n`,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.argv.includes("--self-test-png")) {
+    await selfTestPng();
+    return;
+  }
   if (process.argv.includes("--self-test-jpeg")) {
     await selfTestJpeg();
     return;

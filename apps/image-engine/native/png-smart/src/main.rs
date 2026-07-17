@@ -86,7 +86,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let palette = result.get_palette();
     let colors = &palette.entries[..palette.count as usize];
     let rgb: Vec<u8> = colors.iter().flat_map(|color| [color.r, color.g, color.b]).collect();
-    let alpha: Vec<u8> = colors.iter().map(|color| color.a).collect();
+    let mut alpha: Vec<u8> = colors.iter().map(|color| color.a).collect();
+    while alpha.last() == Some(&255) {
+        alpha.pop();
+    }
 
     let output = OpenOptions::new()
         .write(true)
@@ -100,7 +103,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     encoder.set_color(ColorType::Indexed);
     encoder.set_depth(BitDepth::Eight);
     encoder.set_palette(rgb);
-    if alpha.iter().any(|value| *value != 255) {
+    if !alpha.is_empty() {
         encoder.set_trns(alpha);
     }
     encoder.write_header()?.write_image_data(&indexes)?;
@@ -108,8 +111,8 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("png-smart failed: {error}");
+    if run().is_err() {
+        eprintln!("PNG_SMART_FAILED");
         std::process::exit(1);
     }
 }

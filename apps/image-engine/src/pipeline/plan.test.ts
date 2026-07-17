@@ -96,7 +96,11 @@ describe("planOptimization", () => {
     );
     expect(result).toMatchObject({
       kind: "plan",
-      plan: { requirePixelExact: true, candidates: [{ codec: "oxipng" }] },
+      plan: {
+        requirePixelExact: true,
+        candidates: [{ codec: "oxipng" }],
+        warnings: ["SMART_PNG_FELL_BACK_TO_LOSSLESS"],
+      },
     });
   });
 

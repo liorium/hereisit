@@ -1,5 +1,5 @@
 import type { ImageContentClass } from "@hereisit/server-contracts";
-import type { ImageOptimizeSpecV1 } from "@hereisit/tool-contracts";
+import type { ImageOptimizeSpecV1, ImageOptimizeWarningCode } from "@hereisit/tool-contracts";
 import type { ImageInspection } from "./inspect";
 
 export interface OptimizationCandidatePlan {
@@ -18,6 +18,7 @@ export interface OptimizationPlan {
   readonly requirePixelExact: boolean;
   readonly requireAlphaExact: boolean;
   readonly minimumSavingsPercent: number;
+  readonly warnings: readonly ImageOptimizeWarningCode[];
 }
 
 export type OptimizationPlanningResult =
@@ -52,6 +53,7 @@ function finalize(
     OptimizationPlan,
     "normalizeColorWithLcms" | "requirePixelExact" | "requireAlphaExact"
   >,
+  warnings: readonly ImageOptimizeWarningCode[] = [],
 ): OptimizationPlanningResult {
   if (candidates.length < 1 || candidates.length > 3) {
     throw new RangeError("optimization candidate count must be between one and three");
@@ -62,6 +64,7 @@ function finalize(
       contentClass,
       candidates: candidates as [OptimizationCandidatePlan, ...OptimizationCandidatePlan[]],
       minimumSavingsPercent: spec.minimumSavingsPercent,
+      warnings,
       ...flags,
     },
   };
@@ -129,11 +132,17 @@ function planPng(
     !source.wideGamut &&
     (source.iccProfileKind === "none" || source.iccProfileKind === "srgb-compatible");
   if (!quantizationEligible) {
-    return finalize(contentClass, [candidate("png-lossless-o3", "oxipng", "lossless", 3)], spec, {
-      normalizeColorWithLcms: false,
-      requirePixelExact: true,
-      requireAlphaExact: true,
-    });
+    return finalize(
+      contentClass,
+      [candidate("png-lossless-o3", "oxipng", "lossless", 3)],
+      spec,
+      {
+        normalizeColorWithLcms: false,
+        requirePixelExact: true,
+        requireAlphaExact: true,
+      },
+      spec.mode === "smart" ? ["SMART_PNG_FELL_BACK_TO_LOSSLESS"] : [],
+    );
   }
   return finalize(
     contentClass,
