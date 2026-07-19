@@ -8,5 +8,5 @@ const toolId = "image.compress" satisfies AvailableToolId;
 export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function CompressImagePage() {
-  return <ToolDetailPage toolId={toolId} workbench={<ImageCompressWorkbench />} />;
+  return <ToolDetailPage toolId={toolId} workbench={<ImageCompressWorkbench toolId={toolId} />} />;
 }

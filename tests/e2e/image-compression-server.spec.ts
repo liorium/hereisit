@@ -119,7 +119,7 @@ test("discloses local processing before selection and preserves PNG", async ({ p
     buffer: onePixelPng,
   });
   await expect(page.getByText("sample.png")).toBeVisible();
-  await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   await expect(downloadButton).toBeVisible({ timeout: 20_000 });
   const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
@@ -137,7 +137,7 @@ test("keeps the mobile workbench in one column without horizontal overflow", asy
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
-  const action = page.getByRole("button", { name: "이미지 0개 압축하기" });
+  const action = page.getByRole("button", { name: "0개 이미지 용량 줄이기 →" });
   await expect(action).toBeVisible();
   expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   expect(
@@ -298,7 +298,7 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: progressPng,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText("안전하게 업로드 중")).toBeVisible();
     await expect(page.locator("progress")).toBeVisible();
     expect(
@@ -391,7 +391,7 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(
       page
         .getByLabel("3. 결과")
@@ -475,14 +475,14 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
     await page.getByRole("button", { name: "처리 중단" }).click();
     await expect.poll(() => calls.includes(`POST /v1/jobs/${jobId}/cancel`)).toBe(true);
     await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
     await expect(page.getByText("작업을 중단했어요.")).toBeVisible();
     await expect(page.locator("progress")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "이미지 1개 압축하기" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeVisible();
   });
 
   test("keeps an earlier batch result downloadable while a later item is running", async ({
@@ -581,7 +581,7 @@ test.describe("configured processing server", () => {
       { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
       { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
     ]);
-    await page.getByRole("button", { name: "이미지 2개 압축하기" }).click();
+    await page.getByRole("button", { name: "2개 이미지 용량 줄이기 →" }).click();
     const downloadButtons = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await expect(downloadButtons).toHaveCount(1);
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
@@ -658,7 +658,7 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText(/처리 시간이 초과됐어요/)).toBeVisible();
     await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
     await expect(page.getByText(/사용량 보호/)).toHaveCount(0);
@@ -678,7 +678,7 @@ test.describe("configured processing server", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
-    const action = page.getByRole("button", { name: "이미지 0개 압축하기" });
+    const action = page.getByRole("button", { name: "0개 이미지 용량 줄이기 →" });
     const box = await action.boundingBox();
     expect(box).not.toBeNull();
     expect(box?.height).toBeGreaterThanOrEqual(44);
@@ -727,7 +727,7 @@ test.describe("configured processing server", () => {
       buffer: structuralWebp(),
     });
     await page.getByRole("radio", { name: /무손실/ }).check();
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText("사용량 보호 · 업로드 없이 내 기기에서 처리")).toBeVisible();
     await expect(page.getByText(/무손실 서버 처리가 필요한 이미지/)).toBeVisible();
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
@@ -769,7 +769,7 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText("사용량 보호 · 업로드 없이 내 기기에서 처리")).toBeVisible();
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
     expect(uploadCalls).toBe(0);

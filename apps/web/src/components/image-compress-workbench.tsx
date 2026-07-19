@@ -1,5 +1,6 @@
 "use client";
 
+import { supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
 import { inspectImageHeader, suggestSameFormatOptimizedName } from "@hereisit/image-tool";
 import {
   getProcessingPolicy,
@@ -12,7 +13,8 @@ import type {
   ImageOptimizePhase,
   ImageOptimizeSpecV1,
 } from "@hereisit/tool-contracts/image-optimize";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes } from "../lib/files";
 import {
   type LocalImageOptimizeResult,
@@ -24,6 +26,7 @@ import {
   readProcessingClientConfig,
 } from "../lib/processing-config";
 import { buildRemoteImageArchive, remoteArchiveByteBudget } from "../lib/remote-image-archive";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-compress-workbench.module.css";
 
 const MAX_FILES = 20;
@@ -95,19 +98,24 @@ async function disposeRemoteItems(items: readonly WorkItem[]): Promise<void> {
   );
 }
 
-export function ImageCompressWorkbench() {
+export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const config = useMemo(() => readProcessingClientConfig(), []);
   const sessionId = useMemo(() => getOrCreateAnonymousSessionId(), []);
   const [policy, setPolicy] = useState<PolicyView>({ state: "checking" });
   const [items, setItems] = useState<readonly WorkItem[]>([]);
   const [preset, setPreset] = useState<Preset>("recommended");
   const [message, setMessage] = useState("처리 방식을 확인하고 있어요.");
+  const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const batchRef = useRef<ReturnType<typeof runRemoteImageOptimizeBatch> | null>(null);
   const processingControllerRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<readonly WorkItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setRuntimeSupported(supportsBrowserImageRuntime());
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -168,25 +176,18 @@ export function ImageCompressWorkbench() {
     [],
   );
 
-  const chooseFiles = async (files: FileList | null) => {
-    if (files === null || processing || archiving) return;
+  const chooseFiles = useCallback(async (files: FileList | readonly File[] | null) => {
+    if (files === null) return;
     const selected = Array.from(files).slice(0, MAX_FILES);
     const next: WorkItem[] = [];
     for (const file of selected) {
-      if (
-        !ACCEPTED.has(file.type as ImageOptimizeMime) ||
-        file.size < 1 ||
-        file.size > MAX_FILE_BYTES
-      ) {
-        continue;
-      }
+      if (file.size < 1 || file.size > MAX_FILE_BYTES) continue;
       try {
         const inspected = inspectImageHeader(await file.arrayBuffer());
         if (
           inspected.animated ||
           inspected.width * inspected.height > 40_000_000 ||
-          !ACCEPTED.has(inspected.mime as ImageOptimizeMime) ||
-          inspected.mime !== file.type
+          !ACCEPTED.has(inspected.mime as ImageOptimizeMime)
         ) {
           continue;
         }
@@ -214,7 +215,18 @@ export function ImageCompressWorkbench() {
         ? `${next.length}개 이미지를 확인했어요.`
         : `지원되는 정지 이미지 ${next.length}개를 확인했어요.`,
     );
-  };
+  }, []);
+
+  const executionReady =
+    policy.state === "server" || (policy.state === "local" && runtimeSupported);
+  const busy = processing || archiving;
+
+  usePendingToolFiles({
+    toolId,
+    ready: executionReady && !busy,
+    acceptFiles: chooseFiles,
+    onReselectRequired: setMessage,
+  });
 
   const changePreset = (value: Preset) => {
     setPreset(value);
@@ -560,7 +572,7 @@ export function ImageCompressWorkbench() {
           <button
             type="button"
             className={styles.picker}
-            disabled={policy.state === "checking" || processing || archiving}
+            disabled={!executionReady || busy}
             onClick={() => fileInputRef.current?.click()}
           >
             압축할 이미지 선택
@@ -571,7 +583,7 @@ export function ImageCompressWorkbench() {
             type="file"
             accept="image/jpeg,image/png,image/webp"
             multiple
-            disabled={policy.state === "checking" || processing || archiving}
+            disabled={!executionReady || busy}
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               const input = event.currentTarget;
               void chooseFiles(input.files).finally(() => {
@@ -629,7 +641,9 @@ export function ImageCompressWorkbench() {
 
         <section className={styles.panel} aria-labelledby="compress-results-title">
           <h2 id="compress-results-title">3. 결과</h2>
-          <p aria-live="polite">{message}</p>
+          <p aria-live="polite" data-testid="image-workbench-status">
+            {message}
+          </p>
           <ul className={styles.results}>
             {completed.map((item) => (
               <li key={item.id}>
@@ -672,7 +686,7 @@ export function ImageCompressWorkbench() {
             disabled={actionableCount === 0 || policy.state === "checking" || archiving}
             onClick={() => void processItems()}
           >
-            이미지 {items.length}개 압축하기
+            {items.length}개 이미지 용량 줄이기 →
           </button>
         )}
       </div>
