@@ -105,4 +105,25 @@ describe("Workers Trace Events usage-log parser", () => {
       payloadSha256: createHash("sha256").update(input).digest("hex"),
     });
   });
+
+  it("hashes each UTC hour from canonical newline-terminated source records", async () => {
+    const first = JSON.stringify(record({ EventTimestampMs: 3_600_000 }));
+    const second = JSON.stringify(record({ EventTimestampMs: 7_200_000, CPUTimeMs: 3 }));
+
+    const parsed = await parseTraceEventNdjson(chunked(`${first}\n${second}`, 17), {
+      ...options,
+      createDigest: nodeDigest,
+    });
+
+    expect(parsed.hours).toEqual([
+      expect.objectContaining({
+        hourKey: 1,
+        payloadSha256: createHash("sha256").update(`${first}\n`).digest("hex"),
+      }),
+      expect.objectContaining({
+        hourKey: 2,
+        payloadSha256: createHash("sha256").update(`${second}\n`).digest("hex"),
+      }),
+    ]);
+  });
 });

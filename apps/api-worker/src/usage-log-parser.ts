@@ -41,6 +41,7 @@ export interface TraceEventHourAggregate {
   readonly invocationCount: number;
   readonly workerCpuMs: number;
   readonly handlerInvocationCount: number;
+  readonly payloadSha256: string;
 }
 
 export interface ParsedTraceEvents {
@@ -102,14 +103,18 @@ export async function parseTraceEventNdjson(
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const digest = options.createDigest();
   const pending: Uint8Array[] = [];
-  const hours = new Map<number, TraceEventHourAggregate>();
+  const hours = new Map<
+    number,
+    Omit<TraceEventHourAggregate, "payloadSha256"> & { readonly digest: StreamingDigest }
+  >();
   let pendingBytes = 0;
   let decompressedBytes = 0;
   let invocationCount = 0;
 
-  const parseLine = (parts: readonly Uint8Array[], byteLength: number) => {
+  const parseLine = async (parts: readonly Uint8Array[], byteLength: number) => {
     if (byteLength < 1) throw new TypeError("Trace log contains an empty line.");
-    const parsedJson = JSON.parse(decoder.decode(joinLine(parts, byteLength))) as unknown;
+    const line = joinLine(parts, byteLength);
+    const parsedJson = JSON.parse(decoder.decode(line)) as unknown;
     const event = traceEventSchema.parse(parsedJson);
     if (event.ScriptName !== options.scriptName) {
       throw new TypeError("Trace log belongs to an unexpected Worker script.");
@@ -130,6 +135,9 @@ export async function parseTraceEventNdjson(
     }
     const hourKey = Math.floor(event.EventTimestampMs / 3_600_000);
     const prior = hours.get(hourKey);
+    const hourDigest = prior?.digest ?? options.createDigest();
+    await hourDigest.update(line);
+    await hourDigest.update(Uint8Array.of(0x0a));
     const next = {
       hourKey,
       invocationCount: checkedAdd(prior?.invocationCount ?? 0, 1, "Hourly invocation count"),
@@ -139,6 +147,7 @@ export async function parseTraceEventNdjson(
         HANDLER_EVENT_TYPES.has(event.EventType) ? 1 : 0,
         "Hourly handler invocation count",
       ),
+      digest: hourDigest,
     };
     hours.set(hourKey, next);
     if (hours.size > MAXIMUM_HOURS) {
@@ -162,7 +171,7 @@ export async function parseTraceEventNdjson(
         const part = value.slice(start, index);
         const lineBytes = checkedAdd(pendingBytes, part.byteLength, "Trace line bytes");
         if (lineBytes > MAXIMUM_LINE_BYTES) throw new RangeError("Trace line exceeds 4 KiB.");
-        parseLine([...pending, part], lineBytes);
+        await parseLine([...pending, part], lineBytes);
         pending.length = 0;
         pendingBytes = 0;
         start = index + 1;
@@ -174,16 +183,27 @@ export async function parseTraceEventNdjson(
         pending.push(tail);
       }
     }
-    if (pendingBytes > 0) parseLine(pending, pendingBytes);
+    if (pendingBytes > 0) await parseLine(pending, pendingBytes);
     const payloadSha256 = await digest.finish();
     if (!/^[0-9a-f]{64}$/.test(payloadSha256)) {
       throw new TypeError("Trace payload digest is not canonical SHA-256.");
     }
+    const finalizedHours = await Promise.all(
+      [...hours.values()]
+        .sort((left, right) => left.hourKey - right.hourKey)
+        .map(async ({ digest: hourDigest, ...hour }) => {
+          const hourPayloadSha256 = await hourDigest.finish();
+          if (!/^[0-9a-f]{64}$/.test(hourPayloadSha256)) {
+            throw new TypeError("Hourly trace payload digest is not canonical SHA-256.");
+          }
+          return { ...hour, payloadSha256: hourPayloadSha256 };
+        }),
+    );
     return {
       invocationCount,
       decompressedBytes,
       payloadSha256,
-      hours: [...hours.values()].sort((left, right) => left.hourKey - right.hourKey),
+      hours: finalizedHours,
     };
   } catch (error) {
     await reader.cancel(error).catch(() => undefined);
