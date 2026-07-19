@@ -329,6 +329,10 @@ export async function reconcileWorkerProviderHour(
              analytics_engine_data_points = ?,
              analytics_engine_read_queries = 1,
              analytics_engine_usage_complete = 1,
+             provider_usage_complete = CASE
+               WHEN provider_container_usage_complete = 1 THEN 1
+               ELSE 0
+             END,
              workers_logpush_events = ?,
              usage_log_objects = ?,
              usage_log_bytes = ?,

@@ -201,6 +201,43 @@ describe("Worker provider-hour reconciliation", () => {
     });
   });
 
+  it("completes combined provider usage when Container verification arrived first", async () => {
+    await env.DB.prepare(
+      `INSERT INTO operational_cost_hourly (
+         accounting_epoch, hour_key, live_cost_model_sha256,
+         provider_usage_schema_sha256, release_report_sha256,
+         provider_container_usage_complete, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    )
+      .bind(
+        accountingEpoch,
+        hourKey,
+        liveCostModelSha256,
+        providerUsageSchemaSha256,
+        releaseReportSha256,
+        observedAt,
+      )
+      .run();
+
+    await reconcileWorkerProviderHour(env.DB, input());
+
+    await expect(
+      env.DB.prepare(
+        `SELECT provider_worker_usage_complete, analytics_engine_usage_complete,
+                provider_container_usage_complete, provider_usage_complete
+         FROM operational_cost_hourly
+         WHERE accounting_epoch = ? AND hour_key = ?`,
+      )
+        .bind(accountingEpoch, hourKey)
+        .first(),
+    ).resolves.toEqual({
+      provider_worker_usage_complete: 1,
+      analytics_engine_usage_complete: 1,
+      provider_container_usage_complete: 1,
+      provider_usage_complete: 1,
+    });
+  });
+
   it("opens the circuit when Analytics and Trace handler counts disagree", async () => {
     await expect(
       reconcileWorkerProviderHour(env.DB, input({ analytics: analytics(2) })),
