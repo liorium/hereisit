@@ -12,10 +12,13 @@ import {
   type ReserveAndCreateInput,
 } from "./d1-job-repository";
 
-const migration = readFileSync(
-  new URL("../migrations/0001_processing_jobs.sql", import.meta.url),
-  "utf8",
-);
+const migration = [
+  "0001_processing_jobs.sql",
+  "0003_circuit_breaker.sql",
+  "0007_operational_counters.sql",
+]
+  .map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"))
+  .join("\n");
 const now = Date.parse("2026-07-16T00:10:00.000Z");
 const dayKey = "2026-07-16";
 const priorDayKey = "2026-07-15";
@@ -406,6 +409,14 @@ describe("atomic job reservation", () => {
         pending_jobs: 1,
       }),
     ]);
+    expect(
+      database.sqlite
+        .prepare("SELECT SUM(admitted_jobs) AS admitted_jobs FROM operational_counter_hourly")
+        .get(),
+    ).toEqual({ admitted_jobs: 1 });
+    expect(database.sqlite.prepare("SELECT first_admitted_at FROM rollout_control").get()).toEqual({
+      first_admitted_at: now,
+    });
   });
 
   it("uses the full candidate plus an absent ledger as the reservation marker", async () => {

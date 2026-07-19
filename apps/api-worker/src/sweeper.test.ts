@@ -51,6 +51,9 @@ describe("scheduled maintenance policy", () => {
   it("runs cleanup before evaluating the circuit breaker", async () => {
     const calls: string[] = [];
     const dependencies = {
+      recordCounters: vi.fn(async () => {
+        calls.push("counters");
+      }),
       dispatchPendingOutbox: vi.fn(async () => {
         calls.push("outbox");
       }),
@@ -72,7 +75,8 @@ describe("scheduled maintenance policy", () => {
 
     await runScheduledMaintenanceWithDependencies({} as never, now, dependencies);
 
-    expect(calls).toEqual(["outbox", "recovery", "expiry", "orphans", "circuit"]);
+    expect(calls).toEqual(["counters", "outbox", "recovery", "expiry", "orphans", "circuit"]);
+    expect(dependencies.recordCounters).toHaveBeenCalledWith(expect.anything(), now);
     expect(dependencies.dispatchPendingOutbox).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.recoverStale).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.sweepExpired).toHaveBeenCalledWith(expect.anything(), now, 100);

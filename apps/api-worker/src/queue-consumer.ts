@@ -29,6 +29,7 @@ import {
 } from "./container-client";
 import { claimQueuedJobRecord } from "./d1-job-repository";
 import type { Env } from "./env";
+import { prepareOperationalCounter } from "./operational-counters";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
 
 const LEASE_RENEW_INTERVAL_MS = 5_000;
@@ -1548,11 +1549,26 @@ export async function consumeImageQueue(
   dependencies: {
     consume?: typeof consumeImageJob;
     quarantine?: typeof consumeDlqMessage;
+    recordQueueOperations?: (operations: number) => Promise<void>;
   } = {},
 ): Promise<void> {
   const isDlq = batch.queue === env.IMAGE_JOBS_DLQ_NAME;
   const consume = dependencies.consume ?? consumeImageJob;
   const quarantine = dependencies.quarantine ?? consumeDlqMessage;
+  const recordQueueOperations =
+    dependencies.recordQueueOperations ??
+    (async (operations: number) => {
+      const recordedAt = Date.now();
+      await env.DB.batch([
+        prepareOperationalCounter(env.DB, {
+          recordedAt,
+          queueOperations: operations,
+          d1RowsRead: 1,
+          d1RowsWritten: 1,
+        }),
+      ]);
+    });
+  if (batch.messages.length > 0) await recordQueueOperations(batch.messages.length * 3);
   for (const queueMessage of batch.messages) {
     const parsed = imageJobMessageSchema.safeParse(queueMessage.body);
     if (!parsed.success) {

@@ -413,7 +413,12 @@ describe("Queue batch disposition", () => {
   it("acks malformed bodies without touching a consumer", async () => {
     const item = queueMessage({ filename: "private.png" });
     const consume = vi.fn();
-    await consumeImageQueue(batchFor(item), { IMAGE_JOBS_DLQ_NAME: "dlq" } as never, { consume });
+    const recordQueueOperations = vi.fn(async () => undefined);
+    await consumeImageQueue(batchFor(item), { IMAGE_JOBS_DLQ_NAME: "dlq" } as never, {
+      consume,
+      recordQueueOperations,
+    });
+    expect(recordQueueOperations).toHaveBeenCalledWith(3);
     expect(item.ack).toHaveBeenCalledOnce();
     expect(item.retry).not.toHaveBeenCalled();
     expect(consume).not.toHaveBeenCalled();
@@ -421,11 +426,14 @@ describe("Queue batch disposition", () => {
 
   it("explicitly retries an unexpected platform failure with bounded delay", async () => {
     const item = queueMessage(message);
+    const recordQueueOperations = vi.fn(async () => undefined);
     await consumeImageQueue(batchFor(item), { IMAGE_JOBS_DLQ_NAME: "dlq" } as never, {
+      recordQueueOperations,
       consume: vi.fn(async () => {
         throw new Error("platform unavailable");
       }),
     });
+    expect(recordQueueOperations).toHaveBeenCalledWith(3);
     expect(item.ack).not.toHaveBeenCalled();
     expect(item.retry).toHaveBeenCalledWith({ delaySeconds: 10 });
   });

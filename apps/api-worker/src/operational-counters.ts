@@ -64,3 +64,28 @@ export function prepareOperationalCounter(
     )
     .bind(hourKey, ...values, input.recordedAt);
 }
+
+/** Must immediately follow its single-row creation-marker statement in one D1 batch. */
+export function prepareAdmissionCounterAfterCreationMarker(
+  database: Pick<D1Database, "prepare">,
+  recordedAt: number,
+): D1PreparedStatement {
+  if (!Number.isSafeInteger(recordedAt) || recordedAt < 0) {
+    throw new RangeError("Admission counter time is invalid.");
+  }
+  const hourKey = Math.floor(recordedAt / 3_600_000);
+  return database
+    .prepare(
+      `INSERT INTO operational_counter_hourly (
+         accounting_epoch, hour_key, admitted_jobs, d1_rows_read, d1_rows_written, updated_at
+       )
+       SELECT cost_accounting_epoch, ?, CASE WHEN changes() = 1 THEN 1 ELSE 0 END, 50, 10, ?
+       FROM rollout_control WHERE id = 1
+       ON CONFLICT(accounting_epoch, hour_key) DO UPDATE SET
+         admitted_jobs = admitted_jobs + excluded.admitted_jobs,
+         d1_rows_read = d1_rows_read + excluded.d1_rows_read,
+         d1_rows_written = d1_rows_written + excluded.d1_rows_written,
+         updated_at = MAX(updated_at, excluded.updated_at)`,
+    )
+    .bind(hourKey, recordedAt);
+}

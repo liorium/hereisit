@@ -1,3 +1,5 @@
+import { prepareOperationalCounter } from "./operational-counters";
+
 const CONTAINER_BILLING_TAIL_MS = 60_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -108,5 +110,11 @@ export async function recordContainerActivity(
            )`,
       )
       .bind(input.segmentId, input.segmentId, input.segmentId),
+    prepareOperationalCounter(session, {
+      recordedAt: input.contactedAt,
+      durableObjectRequests: 1,
+      d1RowsRead: 10,
+      d1RowsWritten: 4,
+    }),
   ]);
 }

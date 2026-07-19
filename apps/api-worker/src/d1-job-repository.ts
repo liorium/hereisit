@@ -17,6 +17,7 @@ import {
 import { toolJobErrorCodeSchema } from "@hereisit/tool-contracts/tool-job";
 import { z } from "zod";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
+import { prepareAdmissionCounterAfterCreationMarker } from "./operational-counters";
 import type {
   ClaimDownloadResult,
   LifecycleJob,
@@ -906,6 +907,15 @@ function prepareReservationBatch(
       input.clientRequestId,
     );
 
+  const recordAdmission = prepareAdmissionCounterAfterCreationMarker(session, input.now);
+  const recordFirstAdmission = session
+    .prepare(
+      `UPDATE rollout_control
+       SET first_admitted_at = COALESCE(first_admitted_at, ?)
+       WHERE id = 1 AND changes() = 1`,
+    )
+    .bind(input.now);
+
   const updateAccount = session
     .prepare(
       `UPDATE account_usage
@@ -996,6 +1006,8 @@ function prepareReservationBatch(
     insertAnonymous,
     insertNetwork,
     insertJob,
+    recordFirstAdmission,
+    recordAdmission,
     updateAccount,
     updateAnonymous,
     updateNetwork,
@@ -1964,7 +1976,7 @@ class D1JobRepository implements JobRepository {
     const session = this.database.withSession("first-primary");
     const batchResults = await session.batch(prepareReservationBatch(session, input));
     const created = batchResults[3]?.meta.changes === 1;
-    const admissionState = parseAdmissionStateResult(batchResults[8]);
+    const admissionState = parseAdmissionStateResult(batchResults[10]);
     const replayedRow = await readReservationByReplayKey(
       session,
       input.sessionHash,

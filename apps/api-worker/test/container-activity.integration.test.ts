@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { recordContainerActivity } from "../src/container-activity";
 
 afterEach(async () => {
-  await env.DB.prepare("DELETE FROM container_activity_segments").run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM container_activity_segments"),
+    env.DB.prepare("DELETE FROM operational_counter_hourly"),
+  ]);
 });
 
 describe("container activity ledger", () => {
@@ -31,6 +34,14 @@ describe("container activity ledger", () => {
         { started_at: 120_001, billed_until_at: 180_001 },
       ],
     });
+    await expect(
+      env.DB.prepare(
+        `SELECT SUM(durable_object_requests) AS durable_object_requests,
+                SUM(d1_rows_read) AS d1_rows_read,
+                SUM(d1_rows_written) AS d1_rows_written
+         FROM operational_counter_hourly`,
+      ).first(),
+    ).resolves.toEqual({ durable_object_requests: 3, d1_rows_read: 30, d1_rows_written: 12 });
   });
 
   it("rejects replay of a segment identifier instead of losing an activity touch", async () => {

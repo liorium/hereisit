@@ -4,6 +4,7 @@ import { z } from "zod";
 import { evaluateCircuitBreaker } from "./circuit-breaker";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
 import { type Env, parseOperationalConfig } from "./env";
+import { prepareOperationalCounter } from "./operational-counters";
 import { dispatchJobOutbox, dispatchPendingOutbox } from "./outbox";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
 
@@ -62,6 +63,7 @@ function requireLimit(limit: number): void {
 }
 
 export interface ScheduledMaintenanceDependencies<Environment> {
+  readonly recordCounters: (env: Environment, now: number) => Promise<unknown>;
   readonly dispatchPendingOutbox: (
     env: Environment,
     now: number,
@@ -79,6 +81,7 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
   dependencies: ScheduledMaintenanceDependencies<Environment>,
 ): Promise<void> {
   requireTime(now);
+  await dependencies.recordCounters(env, now);
   await dependencies.dispatchPendingOutbox(env, now, MAINTENANCE_LIMIT);
   await dependencies.recoverStale(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepExpired(env, now, MAINTENANCE_LIMIT);
@@ -677,6 +680,15 @@ export async function sweepOrphanArtifactsFromSavedCursor(
 
 export async function runScheduledMaintenance(env: Env, now = Date.now()): Promise<void> {
   await runScheduledMaintenanceWithDependencies(env, now, {
+    recordCounters: async (environment, recordedAt) => {
+      await environment.DB.batch([
+        prepareOperationalCounter(environment.DB, {
+          recordedAt,
+          d1RowsRead: 1,
+          d1RowsWritten: 1,
+        }),
+      ]);
+    },
     dispatchPendingOutbox,
     recoverStale: recoverStaleLeasesAndLostQueueMessages,
     sweepExpired: sweepExpiredJobs,
