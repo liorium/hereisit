@@ -657,6 +657,7 @@ test("keeps representative image and PDF error feedback reachable", async ({ pag
   await page.setViewportSize({ width: 320, height: 568 });
 
   await page.goto("/image/compress");
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
   await page.locator("input[type=file]").setInputFiles({
     name: "not-an-image.txt",
     mimeType: "text/plain",
