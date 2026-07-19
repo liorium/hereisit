@@ -1,0 +1,16 @@
+[package]
+name = "png-smart"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+png = "=0.18.0"
+quantizr = { git = "https://github.com/DarthSim/quantizr.git", rev = "cfb26aaf3039ac1179d42a66cc7988c8c6feeba9" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = true

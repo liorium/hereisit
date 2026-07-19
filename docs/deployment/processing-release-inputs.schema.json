@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/processing-release-inputs-v1.json",
+  "title": "HereIsIt immutable processing release inputs v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "releaseId",
+    "baseSourceSha256",
+    "reviewedAt",
+    "reviewerIdHash",
+    "pricesAndResources",
+    "ceilings",
+    "routeCpuBenchmark",
+    "routeCpuBenchmarkSha256",
+    "routeCpuEnvelopeMs"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "releaseId": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$" },
+    "baseSourceSha256": { "$ref": "#/$defs/sha256" },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "reviewerIdHash": { "$ref": "#/$defs/sha256" },
+    "pricesAndResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "artifactSha256", "modelInput"],
+      "properties": {
+        "version": { "const": 1 },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "modelInput": { "$ref": "#/$defs/modelInput" }
+      }
+    },
+    "ceilings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxCostPer1000JobsMicrousd", "maxProjectedMonthlyCostMicrousd"],
+      "properties": {
+        "maxCostPer1000JobsMicrousd": { "type": "integer", "minimum": 0 },
+        "maxProjectedMonthlyCostMicrousd": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "routeCpuBenchmark": { "$ref": "#/$defs/routeBenchmarkWithArtifact" },
+    "routeCpuBenchmarkSha256": { "$ref": "#/$defs/sha256" },
+    "routeCpuEnvelopeMs": { "$ref": "#/$defs/routeEnvelope" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "decimalUsd": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$" },
+    "trace": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "modelInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "pricesUsd", "resources", "projectedMonthlyJobs", "arrivalTraces"],
+      "properties": {
+        "version": { "const": 1 },
+        "pricesUsd": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "containerVcpuSecond",
+            "containerGibSecond",
+            "containerDiskGbSecond",
+            "containerEgressRegion",
+            "workersMillionRequests",
+            "workersMillionCpuMs",
+            "durableObjectMillionRequests",
+            "durableObjectGibSecond",
+            "durableObjectStorageGbMonth",
+            "r2StorageGbMonth",
+            "r2ClassAMillion",
+            "r2ClassBMillion",
+            "queueMillionOperations",
+            "d1MillionRowsRead",
+            "d1MillionRowsWritten",
+            "d1StorageGbMonth",
+            "observabilityMillionLogEvents",
+            "workersLogpushMillionEvents",
+            "analyticsEngineMillionDataPoints",
+            "analyticsEngineMillionReadQueries",
+            "monthlyFixed"
+          ],
+          "properties": {
+            "containerVcpuSecond": { "$ref": "#/$defs/decimalUsd" },
+            "containerGibSecond": { "$ref": "#/$defs/decimalUsd" },
+            "containerDiskGbSecond": { "$ref": "#/$defs/decimalUsd" },
+            "containerEgressRegion": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "pattern": "^[A-Z][A-Z0-9_-]{1,15}$" },
+              "additionalProperties": { "$ref": "#/$defs/decimalUsd" }
+            },
+            "workersMillionRequests": { "$ref": "#/$defs/decimalUsd" },
+            "workersMillionCpuMs": { "$ref": "#/$defs/decimalUsd" },
+            "durableObjectMillionRequests": { "$ref": "#/$defs/decimalUsd" },
+            "durableObjectGibSecond": { "$ref": "#/$defs/decimalUsd" },
+            "durableObjectStorageGbMonth": { "$ref": "#/$defs/decimalUsd" },
+            "r2StorageGbMonth": { "$ref": "#/$defs/decimalUsd" },
+            "r2ClassAMillion": { "$ref": "#/$defs/decimalUsd" },
+            "r2ClassBMillion": { "$ref": "#/$defs/decimalUsd" },
+            "queueMillionOperations": { "$ref": "#/$defs/decimalUsd" },
+            "d1MillionRowsRead": { "$ref": "#/$defs/decimalUsd" },
+            "d1MillionRowsWritten": { "$ref": "#/$defs/decimalUsd" },
+            "d1StorageGbMonth": { "$ref": "#/$defs/decimalUsd" },
+            "observabilityMillionLogEvents": { "$ref": "#/$defs/decimalUsd" },
+            "workersLogpushMillionEvents": { "$ref": "#/$defs/decimalUsd" },
+            "analyticsEngineMillionDataPoints": { "$ref": "#/$defs/decimalUsd" },
+            "analyticsEngineMillionReadQueries": { "$ref": "#/$defs/decimalUsd" },
+            "monthlyFixed": { "$ref": "#/$defs/decimalUsd" }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "containerInstanceVcpu",
+            "containerInstanceMemoryGib",
+            "containerInstanceDiskGb"
+          ],
+          "properties": {
+            "containerInstanceVcpu": { "type": "number", "exclusiveMinimum": 0 },
+            "containerInstanceMemoryGib": { "type": "number", "exclusiveMinimum": 0 },
+            "containerInstanceDiskGb": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "projectedMonthlyJobs": { "type": "integer", "minimum": 1 },
+        "arrivalTraces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["steady", "bursty", "sparse"],
+          "properties": {
+            "steady": { "$ref": "#/$defs/trace" },
+            "bursty": { "$ref": "#/$defs/trace" },
+            "sparse": { "$ref": "#/$defs/trace" }
+          }
+        }
+      }
+    },
+    "routeMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["p99Ms", "samples"],
+      "properties": {
+        "p99Ms": { "type": "number", "exclusiveMinimum": 0 },
+        "samples": { "type": "integer", "minimum": 20 }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "create", "upload", "read", "result", "maintenance", "queue"],
+      "properties": {
+        "policy": { "$ref": "#/$defs/routeMeasurement" },
+        "create": { "$ref": "#/$defs/routeMeasurement" },
+        "upload": { "$ref": "#/$defs/routeMeasurement" },
+        "read": { "$ref": "#/$defs/routeMeasurement" },
+        "result": { "$ref": "#/$defs/routeMeasurement" },
+        "maintenance": { "$ref": "#/$defs/routeMeasurement" },
+        "queue": { "$ref": "#/$defs/routeMeasurement" }
+      }
+    },
+    "routeBenchmarkWithArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "artifactSha256",
+        "sourceModuleSha256",
+        "toolchain",
+        "margin",
+        "routes"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "sourceModuleSha256": { "$ref": "#/$defs/sha256" },
+        "toolchain": { "type": "string", "minLength": 3, "maxLength": 100 },
+        "margin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "percent"],
+          "properties": {
+            "kind": { "const": "p99-plus-percent" },
+            "percent": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        },
+        "routes": { "$ref": "#/$defs/routes" }
+      }
+    },
+    "routeEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "create", "upload", "read", "result", "maintenance", "queue"],
+      "properties": {
+        "policy": { "type": "integer", "minimum": 1 },
+        "create": { "type": "integer", "minimum": 1 },
+        "upload": { "type": "integer", "minimum": 1 },
+        "read": { "type": "integer", "minimum": 1 },
+        "result": { "type": "integer", "minimum": 1 },
+        "maintenance": { "type": "integer", "minimum": 1 },
+        "queue": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -18,6 +18,7 @@ const pdfjsPackageRoot = path.join(
 const pdfjsOutputRoot = path.join(outputRoot, "pdfjs", PDFJS_VERSION);
 
 const IMAGE_WORKER_MARKER = "hereisit-image-worker";
+const IMAGE_SERVER_RUNTIME_MARKER = "hereisit-server-runtime";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
 const PDF_WORKER_MARKER = "hereisit-pdf-worker";
 const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
@@ -52,6 +53,7 @@ const plannedRouteFiles = plannedToolEntries.map((tool) => ({
 
 const ALL_PROCESSING_MARKERS = [
   IMAGE_WORKER_MARKER,
+  IMAGE_SERVER_RUNTIME_MARKER,
   IMAGE_WATERMARK_WORKER_MARKER,
   PDF_WORKER_MARKER,
   PDF_INSPECTION_WORKER_MARKER,
@@ -85,6 +87,7 @@ const DISCOVERY_PROCESSING_MARKERS = [
 ];
 const bundleProfileMarkers = {
   image: [IMAGE_WORKER_MARKER],
+  "image-compression-server": [IMAGE_SERVER_RUNTIME_MARKER, IMAGE_WORKER_MARKER],
   "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
   "pdf-editing": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER],
   "pdf-to-images": [PDF_INSPECTION_WORKER_MARKER, PDF_TO_IMAGES_WORKER_MARKER, PDFJS_MARKER],

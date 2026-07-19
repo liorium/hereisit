@@ -8,6 +8,7 @@
     "node": ">=24.0.0 <25"
   },
   "scripts": {
+    "audit:prod": "pnpm audit --prod --audit-level moderate",
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "biome check .",
@@ -16,10 +17,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:export",
+    "test:worker": "pnpm --filter @hereisit/api-worker test:integration",
+    "test:processing-stack": "node scripts/test-processing-stack.mjs",
+    "prepare:image-engine:local": "node scripts/prepare-image-engine-local.mjs",
+    "test:image-engine:fuzz:pr": "pnpm prepare:image-engine:local && node scripts/fuzz-image-engine.mjs --duration-seconds 60 --seed 20260716 --engine-image hereisit-image-engine:local-source",
+    "verify": "pnpm audit:prod && pnpm lint && pnpm typecheck && pnpm test && pnpm test:worker && pnpm test:image-engine:fuzz:pr && pnpm build && pnpm verify:export",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "verify:all": "pnpm verify && pnpm test:e2e",
+    "verify:all": "pnpm verify && pnpm test:processing-stack && pnpm test:e2e",
     "verify:export": "node scripts/verify-static-export.mjs && node scripts/verify-discovery-imports.mjs && node scripts/verify-discovery-bundles.mjs",
     "smoke:navigation": "node scripts/smoke-navigation.mjs",
     "cloudflare:preview": "pnpm --filter @hereisit/web start",
@@ -36,6 +41,6 @@
     "turbo": "2.10.4",
     "typescript": "6.0.3",
     "vitest": "4.1.10",
-    "wrangler": "4.110.0"
+    "wrangler": "4.111.0"
   }
 }

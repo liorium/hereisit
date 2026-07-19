@@ -1,0 +1,91 @@
+name: Apply processing staging attestation
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        required: true
+        type: string
+      attestation_sha256:
+        required: true
+        type: string
+      wrangler_config_sha256:
+        required: true
+        type: string
+      database_name:
+        required: true
+        type: string
+      database_id:
+        required: true
+        type: string
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_D1_API_TOKEN:
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: processing-staging-attestation
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Apply sealed staging attestation
+    if: github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
+    environment: processing-staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.11.0
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: .artifacts/staging-attestation-gate
+      - run: pnpm install --frozen-lockfile
+      - name: Verify sealed deployment inputs
+        env:
+          ATTESTATION_SHA256: ${{ inputs.attestation_sha256 }}
+          WRANGLER_CONFIG_SHA256: ${{ inputs.wrangler_config_sha256 }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-deployment-gate-artifacts.mjs \
+            --attestation .artifacts/staging-attestation-gate/worker-version-attestation.json \
+            --attestation-sha256 "$ATTESTATION_SHA256" \
+            --config .artifacts/staging-attestation-gate/wrangler.staging.jsonc \
+            --config-sha256 "$WRANGLER_CONFIG_SHA256"
+      - name: Apply remote D1 migrations
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          D1_NAME: ${{ inputs.database_name }}
+          WRANGLER_CONFIG: .artifacts/staging-attestation-gate/wrangler.staging.jsonc
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 migrations apply "$D1_NAME" \
+            --config "$WRANGLER_CONFIG" \
+            --remote
+      - name: Apply and verify Worker version attestation
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          D1_DATABASE_ID: ${{ inputs.database_id }}
+        run: |
+          set -euo pipefail
+          node scripts/apply-worker-version-attestations.mjs \
+            --attestation .artifacts/staging-attestation-gate/worker-version-attestation.json \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$D1_DATABASE_ID"

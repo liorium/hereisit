@@ -714,7 +714,16 @@
   cursor: pointer;
 }
 
-.modeTabs input,
+.modeTabs input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .positionOption input {
   position: absolute;
   width: 1px;
@@ -1254,6 +1263,15 @@
   .modeTabs label,
   .positionOption {
     font-size: 11px;
+  }
+
+  .positionOption,
+  .positionOption input,
+  .rangeValueRow input,
+  .numberField input,
+  .selectField select,
+  .qualityField input {
+    scroll-margin-bottom: 160px;
   }
 
   .removeButton {

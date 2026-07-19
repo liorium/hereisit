@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/live-cost-model-v1.json",
+  "title": "HereIsIt live cost model v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "containerVcpuSecondMicrousd",
+    "containerGibSecondMicrousd",
+    "containerDiskGbSecondMicrousd",
+    "containerEgressGbMicrousd",
+    "containerEgressRegionPricesMicrousd",
+    "containerEgressRegionPricesSha256",
+    "containerInstanceVcpu",
+    "containerInstanceMemoryGib",
+    "containerInstanceDiskGb",
+    "containerSleepAfterSeconds",
+    "workersMillionRequestsMicrousd",
+    "workersMillionCpuMsMicrousd",
+    "durableObjectMillionRequestsMicrousd",
+    "durableObjectGibSecondMicrousd",
+    "durableObjectStorageGbMonthMicrousd",
+    "r2StorageGbMonthMicrousd",
+    "r2ClassAMillionMicrousd",
+    "r2ClassBMillionMicrousd",
+    "queueMillionOperationsMicrousd",
+    "d1MillionRowsReadMicrousd",
+    "d1MillionRowsWrittenMicrousd",
+    "d1StorageGbMonthMicrousd",
+    "observabilityMillionLogEventsMicrousd",
+    "workersLogpushMillionEventsMicrousd",
+    "analyticsEngineMillionDataPointsMicrousd",
+    "analyticsEngineMillionReadQueriesMicrousd",
+    "monthlyFixedMicrousd",
+    "projectedMonthlyJobs",
+    "routeCpuBenchmarkSha256",
+    "routeCpuEnvelopeMs",
+    "arrivalProjection"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "containerVcpuSecondMicrousd": { "$ref": "#/$defs/microusd" },
+    "containerGibSecondMicrousd": { "$ref": "#/$defs/microusd" },
+    "containerDiskGbSecondMicrousd": { "$ref": "#/$defs/microusd" },
+    "containerEgressGbMicrousd": { "$ref": "#/$defs/microusd" },
+    "containerEgressRegionPricesMicrousd": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Z][A-Z0-9_-]{1,15}$" },
+      "additionalProperties": { "$ref": "#/$defs/microusd" }
+    },
+    "containerEgressRegionPricesSha256": { "$ref": "#/$defs/sha256" },
+    "containerInstanceVcpu": { "type": "number", "exclusiveMinimum": 0 },
+    "containerInstanceMemoryGib": { "type": "number", "exclusiveMinimum": 0 },
+    "containerInstanceDiskGb": { "type": "number", "exclusiveMinimum": 0 },
+    "containerSleepAfterSeconds": { "const": 60 },
+    "workersMillionRequestsMicrousd": { "$ref": "#/$defs/microusd" },
+    "workersMillionCpuMsMicrousd": { "$ref": "#/$defs/microusd" },
+    "durableObjectMillionRequestsMicrousd": { "$ref": "#/$defs/microusd" },
+    "durableObjectGibSecondMicrousd": { "$ref": "#/$defs/microusd" },
+    "durableObjectStorageGbMonthMicrousd": { "$ref": "#/$defs/microusd" },
+    "r2StorageGbMonthMicrousd": { "$ref": "#/$defs/microusd" },
+    "r2ClassAMillionMicrousd": { "$ref": "#/$defs/microusd" },
+    "r2ClassBMillionMicrousd": { "$ref": "#/$defs/microusd" },
+    "queueMillionOperationsMicrousd": { "$ref": "#/$defs/microusd" },
+    "d1MillionRowsReadMicrousd": { "$ref": "#/$defs/microusd" },
+    "d1MillionRowsWrittenMicrousd": { "$ref": "#/$defs/microusd" },
+    "d1StorageGbMonthMicrousd": { "$ref": "#/$defs/microusd" },
+    "observabilityMillionLogEventsMicrousd": { "$ref": "#/$defs/microusd" },
+    "workersLogpushMillionEventsMicrousd": { "$ref": "#/$defs/microusd" },
+    "analyticsEngineMillionDataPointsMicrousd": { "$ref": "#/$defs/microusd" },
+    "analyticsEngineMillionReadQueriesMicrousd": { "$ref": "#/$defs/microusd" },
+    "monthlyFixedMicrousd": { "$ref": "#/$defs/microusd" },
+    "projectedMonthlyJobs": { "type": "integer", "minimum": 1 },
+    "routeCpuBenchmarkSha256": { "$ref": "#/$defs/sha256" },
+    "routeCpuEnvelopeMs": { "$ref": "#/$defs/routes" },
+    "arrivalProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "steadyHourlyJobs",
+        "burstyHourlyJobs",
+        "sparseHourlyJobs",
+        "scenariosSha256"
+      ],
+      "properties": {
+        "algorithm": { "const": "arrival-union-tail-v1" },
+        "steadyHourlyJobs": { "$ref": "#/$defs/trace" },
+        "burstyHourlyJobs": { "$ref": "#/$defs/trace" },
+        "sparseHourlyJobs": { "$ref": "#/$defs/trace" },
+        "scenariosSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  },
+  "$defs": {
+    "microusd": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "trace": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": { "type": "integer", "minimum": 0 }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "create", "upload", "read", "result", "maintenance", "queue"],
+      "properties": {
+        "policy": { "type": "integer", "minimum": 1 },
+        "create": { "type": "integer", "minimum": 1 },
+        "upload": { "type": "integer", "minimum": 1 },
+        "read": { "type": "integer", "minimum": 1 },
+        "result": { "type": "integer", "minimum": 1 },
+        "maintenance": { "type": "integer", "minimum": 1 },
+        "queue": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

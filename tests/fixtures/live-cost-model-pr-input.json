@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "pricesUsd": {
+    "containerVcpuSecond": "0.000020",
+    "containerGibSecond": "0.000003",
+    "containerDiskGbSecond": "0.000001",
+    "containerEgressRegion": { "APAC": "0.12", "EU": "0.09", "US": "0.08" },
+    "workersMillionRequests": "0.30",
+    "workersMillionCpuMs": "0.02",
+    "durableObjectMillionRequests": "0.15",
+    "durableObjectGibSecond": "0.000013",
+    "durableObjectStorageGbMonth": "0.20",
+    "r2StorageGbMonth": "0.015",
+    "r2ClassAMillion": "4.50",
+    "r2ClassBMillion": "0.36",
+    "queueMillionOperations": "0.40",
+    "d1MillionRowsRead": "0.001",
+    "d1MillionRowsWritten": "1.00",
+    "d1StorageGbMonth": "0.75",
+    "observabilityMillionLogEvents": "1.00",
+    "workersLogpushMillionEvents": "0.50",
+    "analyticsEngineMillionDataPoints": "0.25",
+    "analyticsEngineMillionReadQueries": "1.00",
+    "monthlyFixed": "0"
+  },
+  "resources": {
+    "containerInstanceVcpu": 2,
+    "containerInstanceMemoryGib": 6,
+    "containerInstanceDiskGb": 12
+  },
+  "routeCpuBenchmark": {
+    "version": 1,
+    "sourceModuleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "toolchain": "workerd-test@1",
+    "margin": { "kind": "p99-plus-percent", "percent": 25 },
+    "routes": {
+      "policy": { "p99Ms": 1, "samples": 100 },
+      "create": { "p99Ms": 2, "samples": 100 },
+      "upload": { "p99Ms": 3, "samples": 100 },
+      "read": { "p99Ms": 4, "samples": 100 },
+      "result": { "p99Ms": 5, "samples": 100 },
+      "maintenance": { "p99Ms": 6, "samples": 100 },
+      "queue": { "p99Ms": 7, "samples": 100 }
+    }
+  },
+  "projectedMonthlyJobs": 10000,
+  "arrivalTraces": {
+    "steady": [
+      417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417, 417,
+      417, 417, 417, 417, 417
+    ],
+    "bursty": [
+      5000, 2000, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137, 137,
+      137, 137, 137, 137, 137, 137
+    ],
+    "sparse": [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+  }
+}

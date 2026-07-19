@@ -329,7 +329,7 @@ test("reaches the upload action through the real tab order", async ({ page }) =>
   expect(reachedUpload).toBe(true);
 });
 
-test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) => {
+test("makes a photo-like JPEG smaller while preserving its format", async ({ page }) => {
   await page.goto("/image/compress");
   const input = await createPhotoLikeJpeg(page);
   await page.locator("input[type=file]").setInputFiles({
@@ -338,13 +338,10 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
     buffer: input,
   });
 
-  await page.getByRole("button", { name: /용량만 줄이기/ }).click();
   await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(
-    page.getByRole("strong").filter({ hasText: "1개 이미지 압축을 완료했어요." }),
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByLabel("출력 형식")).toHaveValue("source");
-  await expect(page.getByLabel("출력 형식")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible({
+    timeout: 20_000,
+  });
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -358,7 +355,9 @@ test("makes a photo-like JPEG smaller in the size-only flow", async ({ page }) =
   expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
 });
 
-test("does not produce a larger result in the size-only flow", async ({ page }) => {
+test("retains and downloads the original when compression cannot make it smaller", async ({
+  page,
+}) => {
   await page.goto("/image/compress");
   const fileInput = page.locator("input[type=file]");
   await fileInput.setInputFiles({
@@ -367,26 +366,25 @@ test("does not produce a larger result in the size-only flow", async ({ page }) 
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: /용량만 줄이기/ }).click();
-  await expect(page.getByLabel("원본보다 작을 때만 완료")).toBeChecked();
-  await expect(page.getByLabel("원본보다 작을 때만 완료")).toBeDisabled();
-  await expect(page.getByLabel("출력 형식")).toHaveValue("source");
-  await expect(page.getByLabel("출력 형식")).toBeDisabled();
-  await expect(page.getByText("PNG는 무손실로 다시 저장해요.", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("JPG/WebP 품질")).toHaveValue("82");
-  await expect(page.getByLabel("JPG/WebP 품질")).toBeDisabled();
-
   await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
   await expect(
-    page.getByRole("status").getByText("이미 충분히 작아 더 줄이지 못했어요.", {
-      exact: true,
-    }),
+    page
+      .getByLabel("3. 결과")
+      .getByText("원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요", {
+        exact: true,
+      }),
   ).toBeVisible();
-  await expect(page.getByText("이미 최적화됨", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /ZIP으로 받기/ })).toBeHidden();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("tiny-hereisit.png");
+  const downloadPath = await download.path();
+  expect(downloadPath).not.toBeNull();
+  expect(await readFile(downloadPath as string)).toEqual(onePixelPng);
 });
 
-test("uses compression copy during the source-preserving transform phase", async ({ page }) => {
+test("uses compression progress copy during local source-preserving work", async ({ page }) => {
   await installHeldTransformingWorker(page);
   await page.goto("/image/compress");
   await page.locator("input[type=file]").setInputFiles({
@@ -396,7 +394,7 @@ test("uses compression copy during the source-preserving transform phase", async
   });
 
   await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(page.getByText("이미지 준비 중 50%", { exact: true })).toBeVisible();
+  await expect(page.getByText("용량 최적화 중", { exact: true })).toBeVisible();
   await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
   await page.evaluate(() =>
     (
@@ -404,7 +402,7 @@ test("uses compression copy during the source-preserving transform phase", async
     ).__hereisitCompleteImageTransform?.(),
   );
   await expect(page.getByTestId("image-workbench-status")).toHaveText(
-    "1개 이미지 압축을 완료했어요.",
+    "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
   );
 });
 
@@ -421,14 +419,14 @@ test("explains why HEIC cannot be compressed while preserving its format", async
     page
       .getByRole("status")
       .getByText(
-        "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.",
+        "지원되는 이미지를 찾지 못했어요. HEIC·HEIF는 같은 형식으로 압축할 수 없어요. 이미지 형식 변환 도구를 이용해 주세요.",
         { exact: true },
       ),
   ).toBeVisible();
   await expect(page.getByText("disguised.jpg", { exact: true })).toHaveCount(0);
 });
 
-test("uses detected bytes for PNG guidance and mixed-batch quality", async ({ page }) => {
+test("uses detected bytes for same-format PNG guidance", async ({ page }) => {
   await page.goto("/image/compress");
   const jpeg = await createPhotoLikeJpeg(page);
   const fileInput = page.locator("input[type=file]");
@@ -439,16 +437,18 @@ test("uses detected bytes for PNG guidance and mixed-batch quality", async ({ pa
     buffer: jpeg,
   });
   await expect(page.getByText("misleading.png", { exact: true })).toBeVisible();
-  await expect(page.getByText("PNG는 무손실로 다시 저장해요.", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("JPG/WebP 품질")).toBeEnabled();
+  await expect(page.getByText(/PNG 스마트 모드/)).toHaveCount(0);
 
   await fileInput.setInputFiles({
     name: "actual.png",
     mimeType: "application/octet-stream",
     buffer: onePixelPng,
   });
-  await expect(page.getByText("PNG 1개는 무손실로 다시 저장해요.", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("JPG/WebP 품질")).toBeEnabled();
+  await expect(
+    page.getByText("PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.", {
+      exact: true,
+    }),
+  ).toBeVisible();
 });
 
 test("downloads one image without consulting available Web Share APIs", async ({ page }) => {

@@ -4,6 +4,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const workbenchModuleNames = new Set([
+  "image-compress-workbench",
   "image-workbench",
   "image-watermark-workbench",
   "pdf-workbench",
@@ -15,7 +16,7 @@ const migratedRoutes = [
   {
     route: "/image/compress",
     sourcePath: "apps/web/src/app/image/compress/page.tsx",
-    expectedWorkbench: "image-workbench",
+    expectedWorkbench: "image-compress-workbench",
   },
   {
     route: "/image/resize",

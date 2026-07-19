@@ -1,0 +1,365 @@
+import { IMAGE_OPTIMIZE_MAX_FILE_BYTES, type ImageOptimizeMime } from "@hereisit/tool-contracts";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const INPUT_KEY_PATTERN = new RegExp(`^inputs/${UUID_PATTERN.source.slice(1, -1)}$`);
+const OUTPUT_KEY_PATTERN = new RegExp(`^outputs/${UUID_PATTERN.source.slice(1, -1)}$`);
+const SAFE_ETAG_PATTERN = /^[\x20-\x7e]{1,256}$/;
+const ALLOWED_MIMES = new Set<ImageOptimizeMime>(["image/jpeg", "image/png", "image/webp"]);
+
+export type ArtifactObjectKey = `inputs/${string}` | `outputs/${string}`;
+export type InputArtifactObjectKey = `inputs/${string}`;
+
+export interface ArtifactHead {
+  readonly key: string;
+  readonly size: number;
+  readonly etag: string;
+  readonly httpEtag?: string;
+  readonly httpMetadata?: {
+    readonly contentType?: string;
+  };
+  readonly customMetadata?: Readonly<Record<string, string>>;
+}
+
+export interface ArtifactBucket {
+  put(
+    key: string,
+    value: ReadableStream,
+    options: {
+      onlyIf: Headers;
+      httpMetadata: { contentType: ImageOptimizeMime };
+      customMetadata: { kind: "input"; uploadVersion: string };
+    },
+  ): Promise<ArtifactHead | null>;
+  head(key: string): Promise<ArtifactHead | null>;
+  delete(key: string): Promise<void>;
+}
+
+export interface FixedLengthStreamPair {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
+}
+
+export interface VerifiedInputArtifact {
+  readonly key: InputArtifactObjectKey;
+  readonly byteLength: number;
+  readonly mime: ImageOptimizeMime;
+  readonly etag: string;
+  readonly uploadVersion: number;
+}
+
+export type StoreExactInputArtifactResult =
+  | { readonly kind: "stored"; readonly artifact: VerifiedInputArtifact }
+  | {
+      /**
+       * A create-only put lost or its response was lost, and the authoritative R2 head matches only
+       * the immutable key/size/MIME/upload-version contract. This never proves source-body equality.
+       */
+      readonly kind: "existing-authoritative";
+      readonly artifact: VerifiedInputArtifact;
+    };
+
+export type ArtifactUploadErrorCode =
+  | "INVALID_ARTIFACT_REQUEST"
+  | "UPLOAD_EXPIRED"
+  | "UPLOAD_MISMATCH"
+  | "STORAGE_FAILURE";
+
+export class ArtifactUploadError extends Error {
+  readonly code: ArtifactUploadErrorCode;
+
+  constructor(code: ArtifactUploadErrorCode) {
+    super(code);
+    this.name = "ArtifactUploadError";
+    this.code = code;
+  }
+}
+
+export interface ArtifactDeletionAuthorization {
+  readonly kind: "delete-unowned-object";
+  readonly key: ArtifactObjectKey;
+}
+
+function isImageOptimizeMime(value: string): value is ImageOptimizeMime {
+  return ALLOWED_MIMES.has(value as ImageOptimizeMime);
+}
+
+function isCanonicalInputKey(value: string): value is InputArtifactObjectKey {
+  return INPUT_KEY_PATTERN.test(value);
+}
+
+function isCanonicalArtifactKey(value: string): value is ArtifactObjectKey {
+  return isCanonicalInputKey(value) || OUTPUT_KEY_PATTERN.test(value);
+}
+
+function defaultFixedLengthStream(expectedLength: number): FixedLengthStreamPair {
+  return new FixedLengthStream(expectedLength);
+}
+
+async function pipeToFixedLengthStream(
+  source: ReadableStream<Uint8Array>,
+  destination: WritableStream<ArrayBuffer | ArrayBufferView>,
+  signal: AbortSignal,
+): Promise<void> {
+  const reader = source.getReader();
+  const writer = destination.getWriter();
+  let abortSettlement: Promise<void> | null = null;
+  const abort = () => {
+    const reason = signal.reason ?? new ArtifactUploadError("UPLOAD_MISMATCH");
+    abortSettlement = Promise.allSettled([reader.cancel(reason), writer.abort(reason)]).then(
+      () => undefined,
+    );
+  };
+  signal.addEventListener("abort", abort, { once: true });
+
+  try {
+    if (signal.aborted) {
+      abort();
+      await abortSettlement;
+      throw signal.reason;
+    }
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      await writer.write(next.value);
+    }
+    await writer.close();
+  } catch (error) {
+    if (abortSettlement === null) {
+      await Promise.allSettled([reader.cancel(error), writer.abort(error)]);
+    } else {
+      await abortSettlement;
+    }
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+    reader.releaseLock();
+    writer.releaseLock();
+  }
+}
+
+export function createOpaqueObjectKey(
+  kind: "inputs" | "outputs",
+  randomId: string,
+): ArtifactObjectKey {
+  if (!UUID_PATTERN.test(randomId)) {
+    throw new TypeError("Object IDs must be canonical lowercase UUIDs.");
+  }
+  return `${kind}/${randomId}`;
+}
+
+export function verifyInputArtifactHead(
+  head: ArtifactHead | null,
+  expected: {
+    readonly key: string;
+    readonly byteLength: number;
+    readonly mime: string;
+    readonly uploadVersion: number;
+  },
+): VerifiedInputArtifact {
+  if (
+    head === null ||
+    !isCanonicalInputKey(expected.key) ||
+    !Number.isSafeInteger(expected.byteLength) ||
+    expected.byteLength < 1 ||
+    expected.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES ||
+    !isImageOptimizeMime(expected.mime) ||
+    !Number.isSafeInteger(expected.uploadVersion) ||
+    expected.uploadVersion < 1
+  ) {
+    throw new ArtifactUploadError("UPLOAD_MISMATCH");
+  }
+
+  const metadata = head.customMetadata;
+  if (
+    head.key !== expected.key ||
+    head.size !== expected.byteLength ||
+    head.httpMetadata?.contentType !== expected.mime ||
+    metadata === undefined ||
+    Object.keys(metadata).length !== 2 ||
+    metadata.kind !== "input" ||
+    metadata.uploadVersion !== String(expected.uploadVersion) ||
+    !SAFE_ETAG_PATTERN.test(head.etag)
+  ) {
+    throw new ArtifactUploadError("UPLOAD_MISMATCH");
+  }
+
+  return {
+    key: expected.key,
+    byteLength: expected.byteLength,
+    mime: expected.mime,
+    etag: head.etag,
+    uploadVersion: expected.uploadVersion,
+  };
+}
+
+async function readArtifactHead(
+  bucket: Pick<ArtifactBucket, "head">,
+  key: string,
+): Promise<ArtifactHead | null> {
+  try {
+    return await bucket.head(key);
+  } catch {
+    throw new ArtifactUploadError("STORAGE_FAILURE");
+  }
+}
+
+function errorCodeForPipelineFailure(input: {
+  deadlineExpired: boolean;
+  putRejectedFirst: boolean;
+}): ArtifactUploadErrorCode {
+  if (input.deadlineExpired) return "UPLOAD_EXPIRED";
+  if (input.putRejectedFirst) return "STORAGE_FAILURE";
+  return "UPLOAD_MISMATCH";
+}
+
+/**
+ * Streams a body only for a repository-authorized, uncommitted upload attempt.
+ *
+ * A route handling a repository replay with an already committed input ETag must return its
+ * idempotent acknowledgement without calling this function or consuming the repeated request body.
+ * R2 is create-only and first-writer-wins; no client-supplied content identity is available here.
+ */
+export async function storeExactInputArtifact(input: {
+  readonly bucket: ArtifactBucket;
+  readonly source: ReadableStream<Uint8Array>;
+  readonly key: string;
+  readonly byteLength: number;
+  readonly mime: string;
+  readonly uploadVersion: number;
+  readonly deadlineAt: number;
+  readonly now?: () => number;
+  readonly createFixedLengthStream?: (expectedLength: number) => FixedLengthStreamPair;
+}): Promise<StoreExactInputArtifactResult> {
+  const now = input.now ?? Date.now;
+  if (
+    !isCanonicalInputKey(input.key) ||
+    !isImageOptimizeMime(input.mime) ||
+    !Number.isSafeInteger(input.byteLength) ||
+    input.byteLength < 1 ||
+    input.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES ||
+    !Number.isSafeInteger(input.deadlineAt) ||
+    !Number.isSafeInteger(input.uploadVersion) ||
+    input.uploadVersion < 1
+  ) {
+    throw new ArtifactUploadError("INVALID_ARTIFACT_REQUEST");
+  }
+
+  const remainingMilliseconds = input.deadlineAt - now();
+  if (remainingMilliseconds <= 0) {
+    throw new ArtifactUploadError("UPLOAD_EXPIRED");
+  }
+
+  const fixedLengthStream = (input.createFixedLengthStream ?? defaultFixedLengthStream)(
+    input.byteLength,
+  );
+  const mime = input.mime;
+  const abortController = new AbortController();
+  let deadlineExpired = false;
+  let putRejectedFirst = false;
+  let conditionalPutLost = false;
+
+  const timeout = setTimeout(() => {
+    deadlineExpired = true;
+    abortController.abort(new ArtifactUploadError("UPLOAD_EXPIRED"));
+  }, remainingMilliseconds);
+
+  const producerPromise = pipeToFixedLengthStream(
+    input.source,
+    fixedLengthStream.writable,
+    abortController.signal,
+  );
+  const putPromise = Promise.resolve().then(() =>
+    input.bucket.put(input.key, fixedLengthStream.readable, {
+      onlyIf: new Headers({ "if-none-match": "*" }),
+      httpMetadata: { contentType: mime },
+      customMetadata: {
+        kind: "input",
+        uploadVersion: String(input.uploadVersion),
+      },
+    }),
+  );
+
+  const producerObserved = producerPromise.then(
+    () => ({ side: "producer" as const, status: "fulfilled" as const }),
+    (reason: unknown) => ({ side: "producer" as const, status: "rejected" as const, reason }),
+  );
+  const putObserved = putPromise.then(
+    (value) => ({ side: "put" as const, status: "fulfilled" as const, value }),
+    (reason: unknown) => ({ side: "put" as const, status: "rejected" as const, reason }),
+  );
+
+  const first = await Promise.race([producerObserved, putObserved]);
+  let readableCancellation: Promise<void> | null = null;
+  if (first.status === "rejected") {
+    putRejectedFirst = first.side === "put";
+    const failure = new ArtifactUploadError(
+      putRejectedFirst ? "STORAGE_FAILURE" : "UPLOAD_MISMATCH",
+    );
+    abortController.abort(failure);
+    if (first.side === "put") {
+      readableCancellation = fixedLengthStream.readable.cancel(failure).catch(() => undefined);
+    }
+  } else if (first.side === "put" && first.value === null) {
+    conditionalPutLost = true;
+    const failure = new ArtifactUploadError("UPLOAD_MISMATCH");
+    abortController.abort(failure);
+    readableCancellation = fixedLengthStream.readable.cancel(failure).catch(() => undefined);
+  }
+
+  const [producer, put] = await Promise.allSettled([producerPromise, putPromise]);
+  if (readableCancellation !== null) {
+    await readableCancellation;
+  }
+  clearTimeout(timeout);
+
+  if (conditionalPutLost || (put.status === "fulfilled" && put.value === null)) {
+    const head = await readArtifactHead(input.bucket, input.key);
+    return {
+      kind: "existing-authoritative",
+      artifact: verifyInputArtifactHead(head, input),
+    };
+  }
+
+  if (producer.status === "rejected") {
+    throw new ArtifactUploadError(
+      errorCodeForPipelineFailure({ deadlineExpired, putRejectedFirst }),
+    );
+  }
+
+  if (put.status === "rejected") {
+    const head = await readArtifactHead(input.bucket, input.key);
+    try {
+      return {
+        kind: "existing-authoritative",
+        artifact: verifyInputArtifactHead(head, input),
+      };
+    } catch {
+      throw new ArtifactUploadError(
+        errorCodeForPipelineFailure({ deadlineExpired, putRejectedFirst: true }),
+      );
+    }
+  }
+
+  const head = await readArtifactHead(input.bucket, input.key);
+  return {
+    kind: "stored",
+    artifact: verifyInputArtifactHead(head, input),
+  };
+}
+
+export async function deleteAuthorizedArtifact(
+  bucket: Pick<ArtifactBucket, "delete">,
+  authorization: ArtifactDeletionAuthorization,
+): Promise<void> {
+  if (
+    authorization.kind !== "delete-unowned-object" ||
+    !isCanonicalArtifactKey(authorization.key)
+  ) {
+    throw new TypeError("Artifact deletion requires repository authorization.");
+  }
+  try {
+    await bucket.delete(authorization.key);
+  } catch {
+    throw new ArtifactUploadError("STORAGE_FAILURE");
+  }
+}

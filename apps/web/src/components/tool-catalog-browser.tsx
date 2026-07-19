@@ -124,7 +124,7 @@ export function ToolCatalogBrowser(): ReactNode {
   const totalResults = availableTools.length + plannedTools.length;
 
   function replaceState(nextState: CatalogUrlState): void {
-    router.replace(catalogHref(nextState), { scroll: false });
+    window.history.replaceState(null, "", catalogHref(nextState));
   }
 
   function pushState(nextState: CatalogUrlState): void {

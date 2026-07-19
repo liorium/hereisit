@@ -9,7 +9,7 @@ import {
 } from "./tool-implementations";
 
 const expectedImplementationMapping = {
-  "image.compress": { intent: "compress", bundleProfile: "image" },
+  "image.compress": { intent: "compress", bundleProfile: "image-compression-server" },
   "image.resize": { intent: "resize", bundleProfile: "image" },
   "image.convert": { intent: "convert", bundleProfile: "image" },
   "image.watermark": { intent: "watermark", bundleProfile: "image-watermark" },
@@ -35,6 +35,7 @@ void exactLiteralImplementationMapping;
 
 const supportedBundleProfiles = [
   "image",
+  "image-compression-server",
   "image-watermark",
   "pdf-editing",
   "pdf-to-images",
@@ -89,9 +90,9 @@ describe("tool implementation ownership", () => {
     }
   });
 
-  it("keeps catalog launchers and implementation limits aligned for local processing", () => {
+  it("keeps catalog launchers and implementation limits aligned with each execution path", () => {
     for (const tool of availableToolEntries) {
-      expect(tool.execution).toBe("browser");
+      expect(tool.execution).toBe(tool.id === "image.compress" ? "server" : "browser");
       expect(tool.launcherInput).not.toBeNull();
 
       const launcherInput = tool.launcherInput;
@@ -128,7 +129,7 @@ describe("tool implementation ownership", () => {
   it("owns the approved image watermark summary and exact scanned PDF warning", () => {
     expect(getToolImplementation("image.compress")).toMatchObject({
       defaultSummary:
-        "원본 형식과 크기를 유지하고 메타데이터를 제거한 뒤, 원본보다 작을 때만 결과를 만들어요.",
+        "원본 형식과 크기를 유지한 채 프로덕션급 압축을 시도하고, 작아지지 않으면 원본을 그대로 유지해요.",
       notices: [],
     });
 

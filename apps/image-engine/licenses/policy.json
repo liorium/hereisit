@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "defaultDecision": "deny",
+  "applicationAndNative": {
+    "firstPartyPackages": [
+      "@hereisit/image-engine",
+      "@hereisit/server-contracts",
+      "@hereisit/tool-contracts",
+      "png-smart"
+    ],
+    "allowed": [
+      "0BSD",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "IJG",
+      "ISC",
+      "MIT",
+      "Unlicense",
+      "Unicode-3.0",
+      "Zlib"
+    ],
+    "allowedExceptions": ["LLVM-exception"],
+    "conditional": {
+      "LGPL-2.1-or-later": {
+        "linkage": "dynamic-only",
+        "requirements": [
+          "external-commercial-review",
+          "complete-corresponding-source",
+          "license-and-copyright-notices",
+          "relinking-materials"
+        ]
+      }
+    },
+    "prohibited": [
+      "GPL-2.0",
+      "GPL-2.0-only",
+      "GPL-2.0-or-later",
+      "GPL-3.0",
+      "GPL-3.0-only",
+      "GPL-3.0-or-later",
+      "AGPL-3.0",
+      "AGPL-3.0-only",
+      "AGPL-3.0-or-later"
+    ],
+    "rejectUnknownExpressions": true,
+    "rejectLicenseRefs": true,
+    "rejectNoAssertion": true
+  },
+  "runtime": {
+    "prohibitedNames": ["libimagequant", "pngquant"],
+    "benchmarkOnlyNames": ["jpegli", "libjxl", "libjxl-metrics"]
+  },
+  "debianBase": {
+    "requiresSnapshot": true,
+    "requiresPackageInventory": true,
+    "requiresCopyrightFiles": true,
+    "requiresSourceRetrievalNotices": true
+  },
+  "vulnerabilityExceptions": {
+    "maximumLifetimeDays": 30,
+    "requiredFields": [
+      "cve",
+      "affectedPackage",
+      "affectedDigest",
+      "exploitabilityEvidence",
+      "owner",
+      "approvalReference",
+      "expiresAt"
+    ]
+  }
+}

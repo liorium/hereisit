@@ -1,0 +1,153 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "hereisit-api-worker-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hereisit-processing-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "JOB_OBJECTS",
+      "bucket_name": "hereisit-job-objects-local"
+    },
+    {
+      "binding": "USAGE_LOGS",
+      "bucket_name": "hereisit-usage-logs-local"
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "USAGE_ANALYTICS",
+      "dataset": "hereisit-processing-usage-local"
+    }
+  ],
+  "version_metadata": {
+    "binding": "WORKER_VERSION"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMAGE_JOBS",
+        "queue": "hereisit-image-jobs-local"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "hereisit-image-jobs-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 2,
+        "dead_letter_queue": "hereisit-image-jobs-dlq-local",
+        "max_concurrency": 1
+      },
+      {
+        "queue": "hereisit-image-jobs-dlq-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 0,
+        "max_concurrency": 1
+      }
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "ImageEngineContainer",
+      "image": "../image-engine/Dockerfile.local-reuse",
+      "image_build_context": "../image-engine",
+      "instance_type": "standard-2",
+      "max_instances": 1,
+      "rollout_active_grace_period": 180,
+      "rollout_step_percentage": [100]
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "IMAGE_ENGINE",
+        "class_name": "ImageEngineContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "image-engine-v1",
+      "new_sqlite_classes": ["ImageEngineContainer"]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SESSION_JOB_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 20, "period": 60 }
+    },
+    {
+      "name": "NETWORK_JOB_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "JOB_READ_RATE_LIMITER",
+      "namespace_id": "1003",
+      "simple": { "limit": 90, "period": 60 }
+    },
+    {
+      "name": "RESULT_DOWNLOAD_RATE_LIMITER",
+      "namespace_id": "1004",
+      "simple": { "limit": 3, "period": 60 }
+    },
+    {
+      "name": "POLICY_RATE_LIMITER",
+      "namespace_id": "1005",
+      "simple": { "limit": 60, "period": 60 }
+    },
+    {
+      "name": "JOB_API_NETWORK_RATE_LIMITER",
+      "namespace_id": "1006",
+      "simple": { "limit": 180, "period": 60 }
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "local",
+    "CLOUDFLARE_ACCOUNT_ID": "00000000000000000000000000000000",
+    "APP_ORIGINS": "[\"http://127.0.0.1:3000\",\"http://127.0.0.1:4173\",\"http://localhost:4173\"]",
+    "R2_BUCKET_NAME": "hereisit-job-objects-local",
+    "USAGE_LOG_BUCKET_NAME": "hereisit-usage-logs-local",
+    "USAGE_ANALYTICS_DATASET_NAME": "hereisit-processing-usage-local",
+    "COST_ACCOUNTING_MODE": "active",
+    "LOGPUSH_JOB_ID": "1",
+    "CONTAINER_APPLICATION_ID": "00000000-0000-4000-8000-000000000011",
+    "WORKER_SCRIPT_NAME": "hereisit-api-worker-local",
+    "USAGE_LOG_PREFIX": "workers-trace-events/local/",
+    "ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT": "80000000000",
+    "ANONYMOUS_DAILY_WEIGHTED_UNIT_LIMIT": "8000000000",
+    "NETWORK_DAILY_WEIGHTED_UNIT_LIMIT": "24000000000",
+    "ACCOUNT_PENDING_JOB_LIMIT": "10",
+    "NETWORK_PENDING_JOB_LIMIT": "3",
+    "MAX_QUEUED_AGE_SECONDS": "600",
+    "MAX_LIVE_MEDIAN_OUTPUT_RATIO_BPS": "10000",
+    "MAX_LIVE_P95_WEIGHTED_UNITS": "1000000000",
+    "MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS": "10000",
+    "MAX_LIVE_COST_PER_1000_MICROUSD": "1000000000",
+    "MAX_PROJECTED_MONTHLY_COST_MICROUSD": "1000000000",
+    "LIVE_COST_MODEL_JSON": "{\"analyticsEngineMillionDataPointsMicrousd\":19,\"analyticsEngineMillionReadQueriesMicrousd\":20,\"arrivalProjection\":{\"algorithm\":\"arrival-union-tail-v1\",\"burstyHourlyJobs\":[20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,1000,1000,1000,1000,20,20,20],\"scenariosSha256\":\"d896ff4362f1119ab670e80f876f3aa6653c343978e8f279b8d7ec0c5252d67e\",\"sparseHourlyJobs\":[5,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0],\"steadyHourlyJobs\":[100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100]},\"containerDiskGbSecondMicrousd\":3,\"containerEgressGbMicrousd\":4,\"containerEgressRegionPricesMicrousd\":{\"synthetic\":4},\"containerEgressRegionPricesSha256\":\"ce022e174bb0136cea0996e02a9b7498fb4388d3a1c1857f4ca8c69552357866\",\"containerGibSecondMicrousd\":2,\"containerInstanceDiskGb\":2,\"containerInstanceMemoryGib\":0.5,\"containerInstanceVcpu\":0.25,\"containerSleepAfterSeconds\":60,\"containerVcpuSecondMicrousd\":1,\"d1MillionRowsReadMicrousd\":14,\"d1MillionRowsWrittenMicrousd\":15,\"d1StorageGbMonthMicrousd\":16,\"durableObjectGibSecondMicrousd\":8,\"durableObjectMillionRequestsMicrousd\":7,\"durableObjectStorageGbMonthMicrousd\":9,\"monthlyFixedMicrousd\":21,\"observabilityMillionLogEventsMicrousd\":17,\"queueMillionOperationsMicrousd\":13,\"r2ClassAMillionMicrousd\":11,\"r2ClassBMillionMicrousd\":12,\"r2StorageGbMonthMicrousd\":10,\"routeCpuBenchmarkSha256\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"routeCpuEnvelopeMs\":{\"create\":2,\"maintenance\":6,\"policy\":1,\"queue\":7,\"read\":4,\"result\":5,\"upload\":3},\"version\":1,\"workersLogpushMillionEventsMicrousd\":18,\"workersMillionCpuMsMicrousd\":6,\"workersMillionRequestsMicrousd\":5}",
+    "LIVE_COST_MODEL_SHA256": "27bbb4d0245d0e95a4e9dd310f996d646411096bb32ad5ba6b5bb45bbff67a41",
+    "PROVIDER_USAGE_SCHEMA_SHA256": "cabac55c2f89b604777f03f6f82ee96a567a5f8380dfe4f1b0c33250c5df291d",
+    "RELEASE_REPORT_SHA256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT": "100",
+    "MAINTAINER_SESSION_HASHES": "[]",
+    "ENGINE_INSTANCE_NAME": "image-slot-0",
+    "ENGINE_IMAGE_DIGEST": "local-dockerfile",
+    "IMAGE_JOBS_QUEUE_NAME": "hereisit-image-jobs-local",
+    "IMAGE_JOBS_DLQ_NAME": "hereisit-image-jobs-dlq-local"
+  }
+}

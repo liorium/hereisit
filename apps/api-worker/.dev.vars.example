@@ -1,0 +1,8 @@
+# Non-working local placeholders. Replace each value in the ignored .dev.vars file.
+# Abuse HMAC secrets must be independently generated 32-byte, unpadded base64url values.
+ABUSE_HMAC_SECRET_CURRENT=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+ABUSE_HMAC_SECRET_PREVIOUS=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA
+
+# Non-working account-scoped, read-only provider tokens.
+ANALYTICS_READ_TOKEN=replace-with-read-only-analytics-token
+LOGPUSH_STATUS_TOKEN=replace-with-read-only-logpush-status-token

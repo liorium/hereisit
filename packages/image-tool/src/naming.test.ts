@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { suggestOutputName } from "./naming";
+import { suggestOutputName, suggestSameFormatOptimizedName } from "./naming";
 
 describe("suggestOutputName", () => {
   it("replaces the source extension", () => {
@@ -32,5 +32,15 @@ describe("suggestOutputName", () => {
 
   it("uses a safe fallback for a dot-only name", () => {
     expect(suggestOutputName("...", "png")).toBe("image-hereisit.png");
+  });
+});
+
+describe("suggestSameFormatOptimizedName", () => {
+  it("normalizes the extension while preserving the safe source stem", () => {
+    expect(suggestSameFormatOptimizedName("휴가.JPG", "image/jpeg")).toBe("휴가-hereisit.jpg");
+    expect(suggestSameFormatOptimizedName("../private.png", "image/png")).toBe(
+      "private-hereisit.png",
+    );
+    expect(suggestSameFormatOptimizedName("photo.jpeg", "image/webp")).toBe("photo-hereisit.webp");
   });
 });

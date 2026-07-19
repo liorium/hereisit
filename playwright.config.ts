@@ -4,13 +4,16 @@ const isCI = Boolean(process.env.CI);
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: This local-only flag does not affect Turbo task outputs.
 const includeWebKit = isCI || process.env.PLAYWRIGHT_WEBKIT === "1";
 const imageWatermarkSpec = /image-watermark\.spec\.ts/;
+const imageCompressionServerSpec = /image-compression-server\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  failOnFlakyTests: isCI,
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
-  workers: isCI ? 1 : undefined,
+  // Two workers fit the 4-vCPU hosted runner while keeping the six-project matrix deterministic.
+  workers: isCI ? 2 : undefined,
   reporter: isCI ? "github" : "list",
   use: {
     baseURL: "http://127.0.0.1:4173",
@@ -30,8 +33,14 @@ export default defineConfig({
     },
     {
       name: "mobile-chromium",
-      use: { ...devices["iPhone 15"], browserName: "chromium" },
-      testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
+      use: {
+        ...devices["iPhone 13"],
+        browserName: "chromium",
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+        isMobile: true,
+      },
+      testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
     },
     {
       name: "mobile-firefox",
@@ -53,7 +62,7 @@ export default defineConfig({
           {
             name: "mobile-webkit",
             use: { ...devices["iPhone 15"] },
-            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
+            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
           },
         ]
       : []),

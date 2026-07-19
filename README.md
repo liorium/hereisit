@@ -93,6 +93,9 @@ checklist.
   cannot meet the target are marked as already optimized and are not added to downloads.
 - The size-only preset in `image.pipeline@2` keeps inspected JPG, PNG, and WebP formats and pixel
   dimensions. PNG is re-encoded losslessly; HEIC/HEIF must use the format-conversion tool.
+- Dedicated `image.optimize@1` compression accepts up to 20 JPEG/PNG/WebP files of 30MiB and 40
+  megapixels each. The page discloses local or temporary server processing before file selection;
+  server results use bounded lifecycle cleanup and retain the original when no smaller output wins.
 - CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
 - `image.pipeline@2` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
 - `image.pipeline@2` allows up to 50 megapixels per input and 25 megapixels per output.

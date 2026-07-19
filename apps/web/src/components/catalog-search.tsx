@@ -241,9 +241,11 @@ export function CatalogSearch({
         </div>
       ) : null}
 
-      <span aria-atomic="true" aria-live="polite" className={styles.liveRegion} role="status">
-        {liveMessage}
-      </span>
+      {variant === "catalog" ? null : (
+        <span aria-atomic="true" aria-live="polite" className={styles.liveRegion} role="status">
+          {liveMessage}
+        </span>
+      )}
     </form>
   );
 }

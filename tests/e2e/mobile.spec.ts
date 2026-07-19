@@ -239,11 +239,10 @@ test("keeps image compression preset text readable after selection", async ({ pa
   });
   await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
 
-  const preset = page.getByRole("button", { name: /용량만 줄이기/ });
+  const preset = page.getByRole("radio", { name: /추천/ }).locator("..");
   await expectFunctionalTextFloor([
     { label: "compression preset name", locator: preset.locator("strong") },
-    { label: "compression preset description", locator: preset.locator("small") },
-    { label: "compression preset badge", locator: preset.locator("em") },
+    { label: "compression preset description", locator: preset.locator("span") },
   ]);
 });
 
@@ -254,7 +253,7 @@ test("keeps mixed HEIC compression guidance visible across narrow responsive wid
   await page.goto("/image/compress");
   const heic = await readFile("tests/fixtures/rainbow-451x461.heic");
   const guidance =
-    "1개를 추가했어요. HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
+    "1개 이미지를 확인했어요. HEIC·HEIF는 같은 형식으로 압축할 수 없어 1개를 제외했어요. 이미지 형식 변환 도구를 이용해 주세요.";
 
   await page.locator('input[type="file"][multiple]').setInputFiles([
     { name: "sample.png", mimeType: "image/png", buffer: onePixelPng },
@@ -658,15 +657,14 @@ test("keeps representative image and PDF error feedback reachable", async ({ pag
   await page.setViewportSize({ width: 320, height: 568 });
 
   await page.goto("/image/compress");
+  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
   await page.locator("input[type=file]").setInputFiles({
     name: "not-an-image.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("not an image"),
   });
-  await expect(page.getByRole("status")).toContainText("형식·파일당 50MB");
-  const imageStatus = page
-    .getByTestId("image-workbench-status")
-    .filter({ hasText: "형식·파일당 50MB" });
+  await expect(page.getByRole("status")).toContainText("JPG, PNG, WebP 정지 이미지");
+  const imageStatus = page.getByTestId("image-workbench-status").filter({ hasText: "파일당 30MB" });
   await imageStatus.scrollIntoViewIfNeeded();
   await expect(imageStatus).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);

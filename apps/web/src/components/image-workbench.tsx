@@ -28,7 +28,7 @@ import {
   formatSavings,
   resolveIfCurrent,
 } from "../lib/files";
-import { getToolImplementation } from "../lib/tool-implementations";
+import { getToolImplementation, type ToolImplementationConfig } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
@@ -210,13 +210,10 @@ function isAcceptedKind(
     : IMAGE_KINDS.has(detectedKind);
 }
 
-export function ImageWorkbench({
-  intent,
-  toolId,
-}: {
-  intent: Exclude<ImageWorkbenchIntent, "general">;
-  toolId: AvailableToolId;
-}) {
+function getValidatedImageImplementation(
+  toolId: AvailableToolId,
+  intent: Exclude<ImageWorkbenchIntent, "general">,
+): ToolImplementationConfig {
   const implementation = getToolImplementation(toolId);
   if (
     implementation.bundleProfile !== "image" ||
@@ -225,6 +222,17 @@ export function ImageWorkbench({
   ) {
     throw new Error(`ImageWorkbench tool mismatch: ${toolId}/${intent}`);
   }
+  return implementation;
+}
+
+export function ImageWorkbench({
+  intent,
+  toolId,
+}: {
+  intent: Exclude<ImageWorkbenchIntent, "general">;
+  toolId: AvailableToolId;
+}) {
+  const implementation = getValidatedImageImplementation(toolId, intent);
   const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const intentCopy = INTENT_CONFIG[intent];
   const isCompressionIntent = intent === "compress";

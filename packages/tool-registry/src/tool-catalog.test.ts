@@ -72,7 +72,7 @@ const expectedRelatedToolIds = {
 } as const satisfies Record<ExpectedAvailableToolId, readonly [string, string, string]>;
 
 const expectedContracts = {
-  "image.compress": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.compress": ["image.optimize", 1],
   "image.resize": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.convert": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.watermark": [IMAGE_WATERMARK_TOOL_ID, IMAGE_WATERMARK_TOOL_VERSION],
@@ -89,7 +89,7 @@ const expectedCopy = {
   "image.compress": {
     name: "이미지 용량 줄이기",
     shortDescription:
-      "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
+      "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요. 처리 전에 로컬 또는 임시 서버 처리 여부를 명확히 알려드려요.",
   },
   "image.resize": {
     name: "이미지 크기 조절",
@@ -159,10 +159,11 @@ describe("tool catalog", () => {
       route: "/image/compress",
       launcherInput: {
         kinds: ["image/jpeg", "image/png", "image/webp"],
+        maxFiles: 20,
       },
-      contract: { id: IMAGE_TOOL_ID, version: IMAGE_TOOL_VERSION },
+      contract: { id: "image.optimize", version: 1 },
       experience: "file",
-      execution: "browser",
+      execution: "server",
     });
     expect(getAvailableToolById("pdf.organize").experience).toBe("workspace");
   });
@@ -314,7 +315,7 @@ describe("tool catalog", () => {
       "image.compress": [
         ["image/jpeg", "image/png", "image/webp"],
         1,
-        100,
+        20,
         true,
         ["image/jpeg", "image/png", "image/webp"],
       ],

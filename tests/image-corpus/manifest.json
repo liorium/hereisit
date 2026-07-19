@@ -1,0 +1,845 @@
+{
+  "entries": [
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 427,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 640
+      },
+      "id": "photo-ordinary-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-ordinary-jpeg.jpg",
+      "sha256": "fcd4d40f8424a8ae5a705417ea3b2343fca16e1f683300ff4028956ad5453052",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "portrait",
+        "format": "jpeg",
+        "height": 640,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 427
+      },
+      "id": "photo-portrait-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-portrait-jpeg.jpg",
+      "sha256": "631a6a6aa16be8270a068630a957def73c5f8dd1a01a6e38f9321e1d752d5d57",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "night-noisy",
+        "format": "jpeg",
+        "height": 429,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 641
+      },
+      "id": "photo-night-noisy-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-night-noisy-jpeg.jpg",
+      "sha256": "6f9f456a7c91ab72bc8d290d1295b46348a3374157b73e8047aec6323bce9dd5",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 481,
+        "orientation": 6,
+        "profile": "srgb",
+        "width": 321
+      },
+      "id": "photo-oriented-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-oriented-jpeg.jpg",
+      "sha256": "e339b28de033b419832cacc2bbf13918bc2742122c65b872f28bd3e8b8ca5a62",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 343,
+        "orientation": 1,
+        "profile": "wide-gamut",
+        "width": 513
+      },
+      "id": "photo-wide-gamut-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-wide-gamut-jpeg.jpg",
+      "sha256": "81aaa2dd8fd825c01fe4efdaefc0fabfc2ad9897b2eb2b1c5fd9ecbfeceee9ce",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 341,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 511
+      },
+      "id": "photo-gray-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-gray-jpeg.jpg",
+      "sha256": "8840a98e2b01db9181d14c4e95541ff77407766ba0c37a9e9c7f42aca8c554b9",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 339,
+        "orientation": 1,
+        "profile": "none",
+        "width": 509
+      },
+      "id": "photo-cmyk-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-cmyk-jpeg.jpg",
+      "sha256": "6d583ff05eaf04c8d9fa7fdbea81ec06d76cce86ee3990a9a4d1f5b4f9e20dbe",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 337,
+        "orientation": 1,
+        "profile": "wide-gamut",
+        "width": 507
+      },
+      "id": "photo-cmyk-profile-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-cmyk-profile-jpeg.jpg",
+      "sha256": "c088a14c436fcdcd3910330348c813d792b227c7de414b7b0e3f0f3d20729415",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 335,
+        "orientation": 1,
+        "profile": "none",
+        "width": 505
+      },
+      "id": "photo-ycck-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-ycck-jpeg.jpg",
+      "sha256": "9d9f92a059a26d4765bbf2117e5b789dd0fda9f08a72b283ec88f2d0defae2c3",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "jpeg",
+        "height": 333,
+        "orientation": 1,
+        "profile": "none",
+        "width": 503
+      },
+      "id": "photo-conflicting-adobe-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/photo-conflicting-adobe-jpeg.jpg",
+      "sha256": "51acbe5a55f9a53ebc260f99187cb519f61c5ead160cd50ecac29ed7b1c68daf",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "screenshot-text",
+        "format": "png",
+        "height": 167,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 241
+      },
+      "id": "korean-text-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/korean-text-png.png",
+      "sha256": "dc371a20fa1d4b8c87b62105607c63bc727ebe1ffb33e2ca0bbe5ed4397e5225",
+      "strategicTags": ["korean-text"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "screenshot-text",
+        "format": "webp",
+        "height": 169,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 243
+      },
+      "id": "korean-text-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/korean-text-webp.webp",
+      "sha256": "5b694c7ee9ff638f568dace02eded945fc917927744839529562545c1c92c703",
+      "strategicTags": ["korean-text"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "screenshot-text",
+        "format": "jpeg",
+        "height": 171,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 245
+      },
+      "id": "korean-text-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/korean-text-jpeg.jpg",
+      "sha256": "41f705ec5525d6d4897d5d0208ff4ac9af5e50a7a2a1209aec5cb91f709b3937",
+      "strategicTags": ["korean-text"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "ui",
+        "format": "png",
+        "height": 181,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 257
+      },
+      "id": "ui-controls-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/ui-controls-png.png",
+      "sha256": "1b7f581833b91eb5b64d571cb0f45c1af609317295cd307d20afca8f3378ff40",
+      "strategicTags": ["ui"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "ui",
+        "format": "webp",
+        "height": 183,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 259
+      },
+      "id": "ui-controls-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/ui-controls-webp.webp",
+      "sha256": "151e8858ac7d93ac7b0a2f98ed590fab7b1366589bee3876e6f6f876967a3d34",
+      "strategicTags": ["ui"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "ui",
+        "format": "jpeg",
+        "height": 185,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 261
+      },
+      "id": "ui-controls-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/ui-controls-jpeg.jpg",
+      "sha256": "7038e78f39937fc1a08246ca60ea3b051d791c0989d2e7930cc2a3111b776e6e",
+      "strategicTags": ["ui"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "code",
+        "format": "png",
+        "height": 187,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 263
+      },
+      "id": "code-dark-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/code-dark-png.png",
+      "sha256": "c6674c350c33483838314e4faa3c8443bc848cb94edb0765d4bc0f8f95f42f5d",
+      "strategicTags": ["code"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "code",
+        "format": "webp",
+        "height": 189,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 265
+      },
+      "id": "code-dark-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/code-dark-webp.webp",
+      "sha256": "f54d4c5fb28b7857c6b77909e19f68a8d5f9a697389d775b89eb4462a5093a34",
+      "strategicTags": ["code"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "code",
+        "format": "jpeg",
+        "height": 191,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 267
+      },
+      "id": "code-dark-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/code-dark-jpeg.jpg",
+      "sha256": "22476cb15f7d7a990820b8511c15589332aea7e636688f4cfcef4195531a8953",
+      "strategicTags": ["code"]
+    },
+    {
+      "assertions": ["signature", "dimensions", "alpha-composite"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "logo",
+        "format": "png",
+        "height": 193,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 269
+      },
+      "id": "logo-alpha-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/logo-alpha-png.png",
+      "sha256": "757966f02d99380dce6ee93f2857b9844e4cfc761cf4b01f77bfb5c0ad652359",
+      "strategicTags": ["logo"]
+    },
+    {
+      "assertions": ["signature", "dimensions", "alpha-composite"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "logo",
+        "format": "webp",
+        "height": 195,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 271
+      },
+      "id": "logo-alpha-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/logo-alpha-webp.webp",
+      "sha256": "8e8066d817116336eb09d4aa7abe56fd5935899be1980dfbbd1f21b560f6f2c5",
+      "strategicTags": ["logo"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "logo",
+        "format": "jpeg",
+        "height": 197,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 273
+      },
+      "id": "logo-flat-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/logo-flat-jpeg.jpg",
+      "sha256": "dc72ade4750102afeaac37cd254fc281a421586b939205a0e78816a5b0fc1fe0",
+      "strategicTags": ["logo"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "flat-graphic",
+        "format": "png",
+        "height": 199,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 275
+      },
+      "id": "flat-graphic-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/flat-graphic-png.png",
+      "sha256": "895d25dc77ded2930c4d91cec978a8952f50487f9dea89ea17c91b80a6a90e29",
+      "strategicTags": ["flat-graphic"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "flat-graphic",
+        "format": "webp",
+        "height": 201,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 277
+      },
+      "id": "flat-graphic-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/flat-graphic-webp.webp",
+      "sha256": "ca684317858fab823f02a0275e53fb0f4b0103381e6879431d418ab468cf98ec",
+      "strategicTags": ["flat-graphic"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "flat-graphic",
+        "format": "jpeg",
+        "height": 203,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 279
+      },
+      "id": "flat-graphic-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/flat-graphic-jpeg.jpg",
+      "sha256": "6b27da5ddd065bbfb12df1a89651916470490e82ed872cb079ab794a6d32afcd",
+      "strategicTags": ["flat-graphic"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "screenshot-text",
+        "format": "png",
+        "height": 205,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 281
+      },
+      "id": "korean-poster-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/korean-poster-png.png",
+      "sha256": "3f2cceecc107a9cd4e55e0de2c19a8a70d79fdfdfd9c39e733d2692f14fd3a8e",
+      "strategicTags": ["korean-text"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "ui",
+        "format": "png",
+        "height": 207,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 283
+      },
+      "id": "ui-dialog-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/ui-dialog-png.png",
+      "sha256": "e71a2657201ee3556ac55b63b83c4c4328f282a16ac3fc1ce663747d46a558e3",
+      "strategicTags": ["ui"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "code",
+        "format": "png",
+        "height": 209,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 285
+      },
+      "id": "code-terminal-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/code-terminal-png.png",
+      "sha256": "8f137982ecf6184a5ff3027aa242e4d1018c0b0042a7cc6c104da4065d61004a",
+      "strategicTags": ["code"]
+    },
+    {
+      "assertions": ["signature", "dimensions", "alpha-composite"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "logo",
+        "format": "png",
+        "height": 211,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 287
+      },
+      "id": "logo-badge-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/logo-badge-png.png",
+      "sha256": "b7629706e2053811b7bc1a2f72cdde44dc401c6991b6dacd7afb40a1d5ef975f",
+      "strategicTags": ["logo"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "flat-graphic",
+        "format": "png",
+        "height": 213,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 289
+      },
+      "id": "flat-poster-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/flat-poster-png.png",
+      "sha256": "9c92285312b7a3db512f7732d45bfb0fbd8b9dba6eaa5af0dee523329d9732fc",
+      "strategicTags": ["flat-graphic"]
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "gradient",
+        "format": "png",
+        "height": 215,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 291
+      },
+      "id": "gradient-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/gradient-png.png",
+      "sha256": "2339284174704c207960ea6cd0a8f60b2a2e89f879d57ad5a2be4bb53d7139da",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "illustration",
+        "format": "webp",
+        "height": 217,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 293
+      },
+      "id": "illustration-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/illustration-webp.webp",
+      "sha256": "0813f44d0dbffb40b31f1cc18044988e6e60068745b3cf01847a09aabd2147dd",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions", "alpha-composite"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "illustration",
+        "format": "png",
+        "height": 219,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 295
+      },
+      "id": "transparent-fringe-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/transparent-fringe-png.png",
+      "sha256": "66974274f05a39e2e0f34fb5c5fab6bff9cd550da7571e66690d10cd34bca821",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions", "alpha-composite"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "illustration",
+        "format": "webp",
+        "height": 221,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 297
+      },
+      "id": "transparent-fringe-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/transparent-fringe-webp.webp",
+      "sha256": "9d88d2ff53bebc012c3809316d44f7331c9f2c23cc551ed453f8fa862bbeaa8a",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 16,
+        "class": "gradient",
+        "format": "png",
+        "height": 223,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 299
+      },
+      "id": "gradient-16bit-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/gradient-16bit-png.png",
+      "sha256": "23aba39de39647940bf9a58124c1724c26dfb2ad943c421fdc21a2c1adcf2b16",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "png",
+        "height": 1501,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 2049
+      },
+      "id": "odd-large-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/odd-large-png.png",
+      "sha256": "d948a1c539af1c3670cc2159288070259eab0e5540fa56cb43997f6112a2af49",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "png",
+        "height": 1024,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 1024
+      },
+      "id": "medium-noise-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/medium-noise-png.png",
+      "sha256": "f0723e44f02fef2ddf4a2d2a07d16741b2e17a4559ea194cdf66cc8c98bc6623",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "png",
+        "height": 2048,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 2048
+      },
+      "id": "large-noise-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/large-noise-png.png",
+      "sha256": "f3315901d1185e2800d58fab588d1e83b6731434d301fd5c74391b48b70d9f3a",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["signature", "dimensions"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "photo",
+        "format": "webp",
+        "height": 213,
+        "orientation": 1,
+        "profile": "srgb",
+        "width": 319
+      },
+      "id": "already-optimized-webp",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/already-optimized-webp.webp",
+      "sha256": "7f327b40ec02c0cdcb0a746f59c6523074feffa11f4198e5cdfcd34553c8b87b",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["bounded-rejection", "no-declared-pixel-allocation"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "malformed",
+        "format": "png",
+        "height": 1,
+        "orientation": 1,
+        "profile": "none",
+        "width": 1
+      },
+      "id": "malformed-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/malformed-png.png",
+      "sha256": "ef6f8789db64e06d89a40f688167580849a5fde7a62a921036637d1d297a5fff",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["bounded-rejection", "no-declared-pixel-allocation"],
+      "expected": {
+        "alpha": false,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "truncated",
+        "format": "jpeg",
+        "height": 1,
+        "orientation": 1,
+        "profile": "none",
+        "width": 1
+      },
+      "id": "truncated-jpeg",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/truncated-jpeg.jpg",
+      "sha256": "eb7e0381d519c6a257584ed4a69cf3ae4e4cfc7351cacb301ac646c0df5e8aca",
+      "strategicTags": []
+    },
+    {
+      "assertions": ["bounded-rejection", "no-declared-pixel-allocation"],
+      "expected": {
+        "alpha": true,
+        "animated": false,
+        "bitDepth": 8,
+        "class": "bomb-regression",
+        "format": "png",
+        "height": 2147483647,
+        "orientation": 1,
+        "profile": "none",
+        "width": 2147483647
+      },
+      "id": "bomb-declaration-png",
+      "provenance": { "license": "HereIsIt-Owned-1.0", "owner": "HereIsIt", "sourceUrl": null },
+      "relativePath": "public/bomb-declaration-png.png",
+      "sha256": "227d45d6baab9479b77aeed21b5426dbf9d4fb420df1ffd3690060091a68f5b6",
+      "strategicTags": []
+    }
+  ],
+  "requiredStrata": [
+    {
+      "alpha": false,
+      "contentClass": "photo",
+      "id": "jpeg-tiny-opaque-photo",
+      "mime": "jpeg",
+      "minimumSuccessfulSamples": 3,
+      "sizeBand": "tiny"
+    },
+    {
+      "alpha": false,
+      "contentClass": "flat-graphic",
+      "id": "png-tiny-opaque-flat",
+      "mime": "png",
+      "minimumSuccessfulSamples": 3,
+      "sizeBand": "tiny"
+    },
+    {
+      "alpha": true,
+      "contentClass": "logo",
+      "id": "png-tiny-alpha-logo",
+      "mime": "png",
+      "minimumSuccessfulSamples": 3,
+      "sizeBand": "tiny"
+    },
+    {
+      "alpha": false,
+      "contentClass": "ui",
+      "id": "webp-tiny-opaque-ui",
+      "mime": "webp",
+      "minimumSuccessfulSamples": 3,
+      "sizeBand": "tiny"
+    },
+    {
+      "alpha": true,
+      "contentClass": "logo",
+      "id": "webp-tiny-alpha-logo",
+      "mime": "webp",
+      "minimumSuccessfulSamples": 3,
+      "sizeBand": "tiny"
+    }
+  ],
+  "version": 1
+}

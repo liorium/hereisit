@@ -3,13 +3,19 @@ node_modules/
 dist/
 out/
 apps/web/public/pdfjs/
+apps/web/public/_headers
 .wrangler/
 .dev.vars*
+!.dev.vars.example
 coverage/
 .turbo/
+**/target/
 playwright-report/
 test-results/
 .worktrees/
+tests/image-corpus/private/
+tests/image-corpus/competitor-output/
+.artifacts/
 
 .env
 .env.*

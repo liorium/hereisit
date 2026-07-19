@@ -6,11 +6,12 @@ HereIsIt chooses the narrowest execution target that can produce a correct resul
 
 1. Browser Worker for supported local transformations.
 2. Browser Worker plus a lazily loaded WASM codec when the platform codec is insufficient.
-3. A separately deployed server worker only for operations that cannot safely or efficiently run locally.
+3. A separately deployed server worker for same-format production compression that cannot be matched by
+   the browser's built-in codecs.
 
-The web application never proxies large file bodies. Future server jobs will upload directly to object
-storage with a short-lived signed URL, then exchange only artifact IDs and progress events with the
-control plane.
+The web application never proxies file bodies through Next.js. Server jobs stream to an authenticated
+Worker route, persist temporary random-key objects, and exchange only opaque job IDs and progress events
+with the browser. Source filenames never cross the boundary.
 
 ## Tool boundary
 
@@ -196,6 +197,9 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
   archive failure, and archive timeout. No download begins until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
+- `image.optimize@1` keeps the source `File` in the tab, checks policy twice, uploads sequentially, and
+  retains only lazy authenticated download handles. Interrupted downloads stay retryable; MIME or byte
+  mismatches are rejected before a browser download begins.
 
 ## Release proof
 

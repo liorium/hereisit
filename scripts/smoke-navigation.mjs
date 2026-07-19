@@ -146,7 +146,13 @@ async function assertRobots(page, routePath) {
   console.log(`[assertion] ${routePath} robots`);
 }
 
-async function assertDetailShell(page, title, workAreaLabel, expectedNextActions) {
+async function assertDetailShell(
+  page,
+  title,
+  workAreaLabel,
+  expectedExecutionDisclosure,
+  expectedNextActions,
+) {
   await page.getByRole("heading", { level: 1, name: title, exact: true }).waitFor();
   assert.equal(
     await page.getByRole("navigation", { name: "현재 위치" }).count(),
@@ -156,10 +162,10 @@ async function assertDetailShell(page, title, workAreaLabel, expectedNextActions
   assert.equal(
     await page
       .getByRole("region", { name: "처리 방식" })
-      .getByText("이 기기에서 처리", { exact: true })
+      .getByText(expectedExecutionDisclosure, { exact: true })
       .count(),
     1,
-    "detail: local execution disclosure",
+    "detail: execution disclosure",
   );
   assert.equal(
     await page.getByRole("region", { name: workAreaLabel }).count(),
@@ -231,14 +237,14 @@ try {
   await assertRobots(page, "/workflows");
 
   await gotoRoute(page, baseUrl, "/image/compress");
-  await assertDetailShell(page, "이미지 용량 줄이기", "파일 작업 영역", [
+  await assertDetailShell(page, "이미지 용량 줄이기", "파일 작업 영역", "처리 방식 자동 확인", [
     "/image/resize",
     "/image/convert",
     "/image/watermark",
   ]);
 
   await gotoRoute(page, baseUrl, "/pdf/organize");
-  await assertDetailShell(page, "PDF 페이지 정리", "편집 작업 공간", [
+  await assertDetailShell(page, "PDF 페이지 정리", "편집 작업 공간", "이 기기에서 처리", [
     "/pdf/merge",
     "/pdf/split",
     "/pdf/watermark",

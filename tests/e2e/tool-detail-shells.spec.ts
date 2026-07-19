@@ -21,6 +21,7 @@ async function expectCatalogShell(
   page: import("@playwright/test").Page,
   title: string,
   workAreaLabel: "파일 작업 영역" | "편집 작업 공간",
+  execution: "local" | "automatic" = "local",
 ): Promise<void> {
   const breadcrumb = page.getByRole("navigation", { name: "현재 위치" });
   await expect(breadcrumb).toBeVisible();
@@ -32,9 +33,15 @@ async function expectCatalogShell(
   await expect(heading).toBeVisible();
   await expect(heading.locator("..").getByRole("button", { name: /즐겨찾기/ })).toBeVisible();
   const disclosure = page.getByRole("region", { name: "처리 방식" });
-  await expect(disclosure.getByText("이 기기에서 처리", { exact: true })).toBeVisible();
+  await expect(
+    disclosure.getByText(execution === "local" ? "이 기기에서 처리" : "처리 방식 자동 확인", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(disclosure).toContainText(
-    "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.",
+    execution === "local"
+      ? "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요."
+      : "실제 처리 위치와 보관 정책을 파일 선택 전에 아래에서 알려드려요.",
   );
   expect(
     await disclosure.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
@@ -49,7 +56,7 @@ async function expectCatalogShell(
 test("renders the image compressor in the catalog-driven file shell", async ({ page }) => {
   await page.goto("/image/compress");
 
-  await expectCatalogShell(page, "이미지 용량 줄이기", "파일 작업 영역");
+  await expectCatalogShell(page, "이미지 용량 줄이기", "파일 작업 영역", "automatic");
   await expectRelatedLinks(page, ["/image/resize", "/image/convert", "/image/watermark"]);
 });
 

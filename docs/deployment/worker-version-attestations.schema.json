@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.example/schemas/worker-version-attestations.schema.json",
+  "title": "HereIsIt Worker version attestations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "verifiedAt",
+    "workerModuleSha256",
+    "generatedConfigSha256",
+    "releaseReportSha256",
+    "activeVersionId",
+    "previousActive",
+    "versions"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-worker-version-attestations@1" },
+    "version": { "const": 1 },
+    "verifiedAt": { "type": "string", "format": "date-time" },
+    "workerModuleSha256": { "$ref": "#/$defs/sha256" },
+    "generatedConfigSha256": { "$ref": "#/$defs/sha256" },
+    "releaseReportSha256": { "$ref": "#/$defs/sha256" },
+    "activeVersionId": { "$ref": "#/$defs/versionId" },
+    "previousActive": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["versionId", "state", "retireAfter"],
+          "properties": {
+            "versionId": { "$ref": "#/$defs/versionId" },
+            "state": { "const": "retiring" },
+            "retireAfter": { "type": "string", "format": "date-time" }
+          }
+        }
+      ]
+    },
+    "versions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        { "$ref": "#/$defs/bootstrap" },
+        { "$ref": "#/$defs/secretIntermediate" },
+        { "$ref": "#/$defs/secretIntermediate" },
+        { "$ref": "#/$defs/secretIntermediate" },
+        { "$ref": "#/$defs/secretIntermediate" },
+        { "$ref": "#/$defs/active" }
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "versionId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$"
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["versionId", "state", "publicAdmissionPercent"],
+      "properties": {
+        "versionId": { "$ref": "#/$defs/versionId" },
+        "state": { "type": "string" },
+        "publicAdmissionPercent": { "const": 0 }
+      }
+    },
+    "bootstrap": {
+      "allOf": [
+        { "$ref": "#/$defs/attestation" },
+        { "properties": { "state": { "const": "bootstrap" } } }
+      ]
+    },
+    "secretIntermediate": {
+      "allOf": [
+        { "$ref": "#/$defs/attestation" },
+        { "properties": { "state": { "const": "secret-intermediate" } } }
+      ]
+    },
+    "active": {
+      "allOf": [
+        { "$ref": "#/$defs/attestation" },
+        { "properties": { "state": { "const": "active" } } }
+      ]
+    }
+  }
+}

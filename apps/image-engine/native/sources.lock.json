@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "name": "mozjpeg",
+      "version": "4.1.1",
+      "repository": "https://github.com/mozilla/mozjpeg.git",
+      "revision": "a2d2907ff023227e80c1e4efa809812410275a12",
+      "licenses": ["IJG", "BSD-3-Clause", "Zlib"],
+      "noticePaths": ["LICENSE.md", "README.ijg"],
+      "buildRole": "runtime-codec",
+      "artifactRecord": "/build-metadata/mozjpeg.json",
+      "production": true,
+      "complianceReview": "approved-runtime"
+    },
+    {
+      "name": "oxipng",
+      "version": "10.1.1",
+      "repository": "https://github.com/oxipng/oxipng.git",
+      "revision": "628e241e23f368097883807fa6e985ccf7c00357",
+      "licenses": ["MIT"],
+      "noticePaths": ["LICENSE"],
+      "buildRole": "runtime-codec",
+      "artifactRecord": "/build-metadata/oxipng.json",
+      "production": true,
+      "complianceReview": "approved-runtime"
+    },
+    {
+      "name": "quantizr",
+      "version": "1.4.3",
+      "repository": "https://github.com/DarthSim/quantizr.git",
+      "revision": "cfb26aaf3039ac1179d42a66cc7988c8c6feeba9",
+      "licenses": ["MIT"],
+      "noticePaths": ["LICENSE"],
+      "buildRole": "runtime-library",
+      "artifactRecord": "/build-metadata/png-smart.json",
+      "production": true,
+      "complianceReview": "approved-runtime"
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0",
+      "repository": "https://github.com/webmproject/libwebp.git",
+      "revision": "4fa21912338357f89e4fd51cf2368325b59e9bd9",
+      "licenses": ["BSD-3-Clause"],
+      "noticePaths": ["COPYING", "PATENTS"],
+      "buildRole": "runtime-codec",
+      "artifactRecord": "/build-metadata/libwebp.json",
+      "production": true,
+      "complianceReview": "approved-runtime"
+    },
+    {
+      "name": "libvips",
+      "version": "8.18.4",
+      "repository": "https://github.com/libvips/libvips.git",
+      "revision": "e01a4797cabe77d457fdfa7d776b7a7e7ca6d6a7",
+      "licenses": ["LGPL-2.1-or-later"],
+      "noticePaths": ["LICENSE"],
+      "buildRole": "runtime-dynamic-library",
+      "artifactRecord": "/build-metadata/libvips.json",
+      "production": true,
+      "complianceReview": "approved-dynamic-link-with-source-and-relinking-materials"
+    },
+    {
+      "name": "jpegli",
+      "version": "benchmark-2026-07-16",
+      "repository": "https://github.com/google/jpegli.git",
+      "revision": "031a0077f5799a6041004267fc12b956c1f52a20",
+      "licenses": ["BSD-3-Clause"],
+      "noticePaths": ["LICENSE", "PATENTS"],
+      "buildRole": "benchmark-candidate",
+      "artifactRecord": "/build-metadata/jpegli.json",
+      "production": false,
+      "complianceReview": "blocked-pending-patent-and-corpus-review"
+    },
+    {
+      "name": "libjxl-metrics",
+      "version": "0.11.2",
+      "repository": "https://github.com/libjxl/libjxl.git",
+      "revision": "332feb17d17311c748445f7ee75c4fb55cc38530",
+      "licenses": ["BSD-3-Clause"],
+      "noticePaths": ["LICENSE", "PATENTS"],
+      "buildRole": "benchmark-metrics",
+      "artifactRecord": "/build-metadata/libjxl-metrics.json",
+      "production": false,
+      "complianceReview": "approved-benchmark-only"
+    }
+  ]
+}

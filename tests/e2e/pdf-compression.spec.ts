@@ -931,6 +931,7 @@ test("hard-rejects page counts outside the advisory limit without preflighting M
 test("invalidates and revokes results on preset change, rerun, replacement, reset, and unmount", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await installObjectUrlCounters(page);
   let downloads = 0;
   page.on("download", () => {

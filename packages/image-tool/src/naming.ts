@@ -65,3 +65,16 @@ export function suggestOutputName(
     : extensionByFormat[format];
   return `${safeImageBaseName(inputName)}-hereisit.${extension}`;
 }
+
+const extensionByMime = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+} as const;
+
+export function suggestSameFormatOptimizedName(
+  inputName: string,
+  mime: keyof typeof extensionByMime,
+): string {
+  return `${safeImageBaseName(inputName)}-hereisit.${extensionByMime[mime]}`;
+}

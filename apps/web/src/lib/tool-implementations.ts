@@ -2,6 +2,7 @@ import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 
 export type ToolBundleProfile =
   | "image"
+  | "image-compression-server"
   | "image-watermark"
   | "pdf-editing"
   | "pdf-to-images"
@@ -60,6 +61,13 @@ const imageSourceFileLimits = {
   maxTotalBytes: 250 * MEBIBYTE,
 } as const;
 
+const imageOptimizeSourceFileLimits = {
+  minFiles: 1,
+  maxFiles: 20,
+  maxFileBytes: 30 * MEBIBYTE,
+  maxTotalBytes: 600 * MEBIBYTE,
+} as const;
+
 const pdfEditingSourceFileLimits = {
   minFiles: 1,
   maxFiles: 1,
@@ -84,12 +92,12 @@ function defineToolImplementationConfig<
 export const toolImplementationConfig = defineToolImplementationConfig({
   "image.compress": {
     family: "image",
-    bundleProfile: "image",
+    bundleProfile: "image-compression-server",
     intent: "compress",
-    sourceFileLimits: imageSourceFileLimits,
+    sourceFileLimits: imageOptimizeSourceFileLimits,
     eyebrow: "IMAGE COMPRESSOR",
     defaultSummary:
-      "원본 형식과 크기를 유지하고 메타데이터를 제거한 뒤, 원본보다 작을 때만 결과를 만들어요.",
+      "원본 형식과 크기를 유지한 채 프로덕션급 압축을 시도하고, 작아지지 않으면 원본을 그대로 유지해요.",
     notices: [],
   },
   "image.resize": {

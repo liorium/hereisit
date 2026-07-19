@@ -1,5 +1,7 @@
 import type { ImagePipelineSpecV2, ToolPreset } from "@hereisit/tool-contracts";
 
+export * from "./processing";
+
 const base: Pick<ImagePipelineSpecV2, "version" | "autoOrient" | "metadata" | "sizeGoal"> = {
   version: 2,
   autoOrient: true,

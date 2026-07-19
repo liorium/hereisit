@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node ../../scripts/sync-pdfjs-assets.mjs && next dev",
-    "build": "node ../../scripts/sync-pdfjs-assets.mjs && next build",
+    "dev": "node ../../scripts/generate-web-headers.mjs && node ../../scripts/sync-pdfjs-assets.mjs && next dev",
+    "build": "node ../../scripts/generate-web-headers.mjs && node ../../scripts/sync-pdfjs-assets.mjs && next build",
     "start": "wrangler pages dev out --ip 127.0.0.1 --port 3000 --compatibility-date=2026-07-10 --show-interactive-dev-session=false",
     "typecheck": "tsc --noEmit",
     "preview:test": "wrangler pages dev out --ip 127.0.0.1 --port 4173 --compatibility-date=2026-07-10 --log-level warn --show-interactive-dev-session=false"
@@ -13,6 +13,7 @@
     "@hereisit/browser-runtime": "workspace:*",
     "@hereisit/image-tool": "workspace:*",
     "@hereisit/pdf-tool": "workspace:*",
+    "@hereisit/server-runtime": "workspace:*",
     "@hereisit/tool-contracts": "workspace:*",
     "@hereisit/tool-registry": "workspace:*",
     "fflate": "0.8.3",

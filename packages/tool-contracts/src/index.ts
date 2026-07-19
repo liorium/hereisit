@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export * from "./image-optimize";
+export * from "./tool-job";
+
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;
 export const IMAGE_TOOL_VERSION = 2 as const;
