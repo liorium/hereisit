@@ -4,6 +4,7 @@ import { checkLogpushHour, queryAnalyticsHour } from "./provider-usage";
 const accountId = "a".repeat(32);
 const token = "provider-read-token";
 const hourKey = 495_408;
+const releaseReportSha256 = "b".repeat(64);
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -71,6 +72,7 @@ describe("Cloudflare provider usage checks", () => {
             event_type: "fetch",
             entrypoint: "default",
             version_id: "123e4567-e89b-42d3-a456-426614174000",
+            release_report_sha256: releaseReportSha256,
             point_count: 3,
             minimum_sample_interval: 1,
             maximum_sample_interval: 1,
@@ -96,6 +98,7 @@ describe("Cloudflare provider usage checks", () => {
     expect(init).toMatchObject({ method: "POST", redirect: "error" });
     expect(String(init?.body)).toContain("FORMAT JSON");
     expect(String(init?.body)).toContain("double1 = 495408");
+    expect(String(init?.body)).toContain("blob8 AS release_report_sha256");
   });
 
   it("rejects Analytics results containing any sampled group", async () => {
@@ -107,6 +110,7 @@ describe("Cloudflare provider usage checks", () => {
             event_type: "fetch",
             entrypoint: "default",
             version_id: "123e4567-e89b-42d3-a456-426614174000",
+            release_report_sha256: releaseReportSha256,
             point_count: 2,
             minimum_sample_interval: 1,
             maximum_sample_interval: 2,
@@ -125,5 +129,35 @@ describe("Cloudflare provider usage checks", () => {
         hourKey,
       }),
     ).rejects.toThrow(/sample/i);
+  });
+
+  it("rejects an Analytics event paired with the wrong Worker entrypoint", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({
+        meta: [],
+        data: [
+          {
+            event_type: "queue",
+            entrypoint: "default",
+            version_id: "123e4567-e89b-42d3-a456-426614174000",
+            release_report_sha256: releaseReportSha256,
+            point_count: 1,
+            minimum_sample_interval: 1,
+            maximum_sample_interval: 1,
+          },
+        ],
+        rows: 1,
+      }),
+    );
+
+    await expect(
+      queryAnalyticsHour(fetcher, {
+        accountId,
+        token,
+        dataset: "hereisit_processing_usage_staging",
+        environment: "staging",
+        hourKey,
+      }),
+    ).rejects.toThrow(/entrypoint/i);
   });
 });

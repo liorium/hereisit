@@ -4,6 +4,7 @@ const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
 const DATASET_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const TOKEN_PATTERN = /^[!-~]{1,4096}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const MAXIMUM_RESPONSE_BYTES = 64 * 1024;
 
 type ProviderFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -31,11 +32,26 @@ const analyticsRowSchema = z
     event_type: z.enum(["fetch", "queue", "scheduled"]),
     entrypoint: z.enum(["default", "queue", "scheduled"]),
     version_id: z.string().regex(UUID_PATTERN),
+    release_report_sha256: z.string().regex(SHA256_PATTERN),
     point_count: nonnegativeInteger,
     minimum_sample_interval: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     maximum_sample_interval: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   })
-  .strict();
+  .strict()
+  .superRefine((row, context) => {
+    const expectedEntrypoint = {
+      fetch: "default",
+      queue: "queue",
+      scheduled: "scheduled",
+    }[row.event_type];
+    if (row.entrypoint !== expectedEntrypoint) {
+      context.addIssue({
+        code: "custom",
+        path: ["entrypoint"],
+        message: "Analytics event has an unexpected Worker entrypoint.",
+      });
+    }
+  });
 const analyticsEnvelopeSchema = z
   .object({
     meta: z.array(z.unknown()).max(64),
@@ -57,6 +73,14 @@ export interface AnalyticsHourQueryInput {
   readonly dataset: string;
   readonly environment: "local" | "staging" | "production";
   readonly hourKey: number;
+}
+
+export type AnalyticsUsageGroup = z.infer<typeof analyticsRowSchema>;
+
+export interface AnalyticsHourResult {
+  readonly handlerInvocationCount: number;
+  readonly sampled: false;
+  readonly groups: readonly AnalyticsUsageGroup[];
 }
 
 function validateCommon(accountId: string, token: string, hourKey: number): void {
@@ -151,17 +175,14 @@ export async function checkLogpushHour(
 export async function queryAnalyticsHour(
   fetcher: ProviderFetch,
   input: AnalyticsHourQueryInput,
-): Promise<{
-  readonly handlerInvocationCount: number;
-  readonly sampled: false;
-  readonly groups: readonly z.infer<typeof analyticsRowSchema>[];
-}> {
+): Promise<AnalyticsHourResult> {
   validateCommon(input.accountId, input.token, input.hourKey);
   if (!DATASET_PATTERN.test(input.dataset))
     throw new TypeError("Analytics dataset name is invalid.");
   const query = `SELECT blob3 AS event_type,
        blob4 AS entrypoint,
        blob7 AS version_id,
+       blob8 AS release_report_sha256,
        count() AS point_count,
        min(_sample_interval) AS minimum_sample_interval,
        max(_sample_interval) AS maximum_sample_interval
@@ -169,8 +190,8 @@ FROM ${input.dataset}
 WHERE double1 = ${input.hourKey}
   AND blob1 = 'usage-v1'
   AND blob2 = '${input.environment}'
-GROUP BY event_type, entrypoint, version_id
-ORDER BY event_type, entrypoint, version_id
+GROUP BY event_type, entrypoint, version_id, release_report_sha256
+ORDER BY event_type, entrypoint, version_id, release_report_sha256
 FORMAT JSON`;
   const response = await fetcher(
     `https://api.cloudflare.com/client/v4/accounts/${input.accountId}/analytics_engine/sql`,
