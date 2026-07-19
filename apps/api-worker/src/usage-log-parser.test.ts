@@ -1,0 +1,108 @@
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { parseGzipTraceEvents, parseTraceEventNdjson } from "./usage-log-parser";
+
+const versionId = "550e8400-e29b-41d4-a716-446655440000";
+
+function record(overrides: Record<string, unknown> = {}) {
+  return {
+    CPUTimeMs: 7,
+    Entrypoint: "fetch",
+    EventTimestampMs: 3_600_123,
+    EventType: "fetch",
+    Outcome: "ok",
+    ScriptName: "hereisit-processing-staging",
+    ScriptVersion: { id: versionId, message: "release", tag: "staging" },
+    ...overrides,
+  };
+}
+
+function chunked(text: string, chunkSize: number): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(bytes.slice(offset, offset + chunkSize));
+      offset += chunkSize;
+    },
+  });
+}
+
+const options = {
+  scriptName: "hereisit-processing-staging",
+  handlerEntrypoints: new Set(["fetch", "queue", "scheduled"]),
+  allowedVersionIds: new Set([versionId]),
+  createDigest: () => ({
+    update: async () => undefined,
+    finish: async () => "a".repeat(64),
+  }),
+};
+
+function nodeDigest() {
+  const hash = createHash("sha256");
+  return {
+    update: async (chunk: Uint8Array) => {
+      hash.update(chunk);
+    },
+    finish: async () => hash.digest("hex"),
+  };
+}
+
+describe("Workers Trace Events usage-log parser", () => {
+  it("aggregates arbitrarily chunked records by event-start hour", async () => {
+    const input = `${JSON.stringify(record())}\n${JSON.stringify(
+      record({ CPUTimeMs: 5, EventTimestampMs: 3_700_000, EventType: "alarm" }),
+    )}\n`;
+
+    await expect(parseTraceEventNdjson(chunked(input, 3), options)).resolves.toMatchObject({
+      invocationCount: 2,
+      hours: [
+        {
+          hourKey: 1,
+          invocationCount: 2,
+          workerCpuMs: 12,
+          handlerInvocationCount: 1,
+        },
+      ],
+      decompressedBytes: new TextEncoder().encode(input).byteLength,
+    });
+  });
+
+  it.each([
+    record({ EventType: "email" }),
+    record({ Outcome: "exceededCpu" }),
+    record({ ScriptName: "other-worker" }),
+    record({ ScriptVersion: { id: crypto.randomUUID(), message: "x", tag: "x" } }),
+    { ...record(), Event: { request: { url: "https://private.example" } } },
+  ])("rejects unapproved values or any extra privacy-sensitive field", async (value) => {
+    await expect(
+      parseTraceEventNdjson(chunked(`${JSON.stringify(value)}\n`, 64), options),
+    ).rejects.toThrow();
+  });
+
+  it("cancels after a line crosses the 4 KiB bound", async () => {
+    await expect(
+      parseTraceEventNdjson(chunked(`${"x".repeat(4_097)}\n`, 257), options),
+    ).rejects.toThrow(/4 KiB/i);
+  });
+
+  it("decompresses gzip incrementally and returns the exact payload digest", async () => {
+    const input = `${JSON.stringify(record())}\n`;
+    const compressor = new CompressionStream("gzip") as unknown as ReadableWritablePair<
+      Uint8Array,
+      Uint8Array
+    >;
+    const compressed = chunked(input, 11).pipeThrough(compressor);
+
+    await expect(
+      parseGzipTraceEvents(compressed, { ...options, createDigest: nodeDigest }),
+    ).resolves.toMatchObject({
+      invocationCount: 1,
+      payloadSha256: createHash("sha256").update(input).digest("hex"),
+    });
+  });
+});
