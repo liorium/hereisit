@@ -570,6 +570,16 @@ test("honors reduced motion and avoids overflow at 200 percent zoom", async ({ p
   expect(maximumDurationSeconds(motion.transitionDuration)).toBeLessThanOrEqual(0.000_01);
   expect(motion.scrollBehavior).toBe("auto");
 
+  const tabs = page.getByRole("tablist", { name: "도구 분야" });
+  const imageTab = tabs.getByRole("tab", { name: "이미지", exact: true });
+  await expect(async () => {
+    await imageTab.click();
+    await expect(imageTab).toHaveAttribute("aria-selected", "true", { timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+  const allTab = tabs.getByRole("tab", { name: "전체·추천", exact: true });
+  await allTab.click();
+  await expect(allTab).toHaveAttribute("aria-selected", "true");
+
   await page.evaluate(() => {
     document.documentElement.style.zoom = "2";
   });
