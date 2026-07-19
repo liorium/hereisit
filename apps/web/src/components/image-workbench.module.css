@@ -1256,6 +1256,15 @@
     font-size: 11px;
   }
 
+  .positionOption,
+  .positionOption input,
+  .rangeValueRow input,
+  .numberField input,
+  .selectField select,
+  .qualityField input {
+    scroll-margin-bottom: 160px;
+  }
+
   .removeButton {
     width: 44px;
     height: 44px;

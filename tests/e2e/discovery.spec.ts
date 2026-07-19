@@ -231,7 +231,9 @@ test("resets through client navigation without losing memory-only favorites", as
   });
 
   await page.getByRole("combobox", { name: "도구 검색" }).fill("no-such-hereisit-tool");
-  await expect(page.getByText("검색 결과 0개", { exact: true })).toBeVisible();
+  const emptyResultCount = page.getByText("검색 결과 0개", { exact: true });
+  await expect(emptyResultCount).toHaveCount(1);
+  await expect(emptyResultCount).toBeVisible();
   documentRequests.length = 0;
   await page.getByRole("button", { name: "모든 필터 초기화" }).click();
 
