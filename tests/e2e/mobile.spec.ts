@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { PDFDocument } from "@cantoo/pdf-lib";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
+import { installPrivacyObserver } from "./support/privacy-observer";
 
 const PDF_COMPRESSION_WARNING =
   "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
@@ -8,6 +10,136 @@ const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function expectFunctionalTextFloor(
+  samples: readonly { label: string; locator: Locator }[],
+): Promise<void> {
+  const readings: { label: string; fontSize: number }[] = [];
+  for (const sample of samples) {
+    await expect(sample.locator, sample.label).toBeVisible();
+    readings.push({
+      label: sample.label,
+      fontSize: await sample.locator.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).fontSize),
+      ),
+    });
+  }
+  const belowFloor = readings.filter(({ fontSize }) => fontSize < 12);
+  expect(
+    belowFloor,
+    `Computed functional font sizes: ${readings
+      .map(({ label, fontSize }) => `${label}=${fontSize}px`)
+      .join(", ")}`,
+  ).toEqual([]);
+}
+
+const RESPONSIVE_RESULT_WIDTHS = [320, 390, 600, 601, 800, 801, 1280] as const;
+
+async function expectResponsiveResultActions(
+  page: import("@playwright/test").Page,
+  actions: readonly Locator[],
+): Promise<void> {
+  for (const width of RESPONSIVE_RESULT_WIDTHS) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const action of actions) {
+      await expect(action).toBeVisible();
+      const box = await action.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    const layout = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  }
+}
+
+async function holdTerminalWorkerEvents(page: import("@playwright/test").Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    const releaseCallbacks: Array<() => void> = [];
+    let released = false;
+    class HeldTerminalWorker {
+      private readonly native: Worker;
+      private readonly pending: MessageEvent<unknown>[] = [];
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        this.native = new NativeWorker(scriptURL, options);
+        this.native.onmessage = (event) => {
+          const type = (event.data as { type?: unknown } | null)?.type;
+          if ((type === "complete" || type === "failed") && !released) this.pending.push(event);
+          else this.onmessage?.(event);
+        };
+        this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+        this.native.onerror = (event) => this.onerror?.(event);
+        releaseCallbacks.push(() => {
+          for (const event of this.pending.splice(0)) this.onmessage?.(event);
+        });
+      }
+
+      postMessage(message: unknown, transfer?: Transferable[]): void {
+        if (transfer === undefined) this.native.postMessage(message);
+        else this.native.postMessage(message, transfer);
+      }
+
+      terminate(): void {
+        this.native.terminate();
+      }
+    }
+    Object.defineProperty(window, "Worker", { configurable: true, value: HeldTerminalWorker });
+    (window as Window & { __releaseHeldWorkerEvents?: () => void }).__releaseHeldWorkerEvents =
+      () => {
+        released = true;
+        for (const release of releaseCallbacks) release();
+      };
+  });
+}
+
+async function createMobilePng(page: import("@playwright/test").Page): Promise<Buffer> {
+  const bytes = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("2D canvas unavailable");
+    context.fillStyle = "#f5f5f4";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((value) => {
+        if (value === null) reject(new Error("PNG encoding failed"));
+        else resolve(value);
+      }, "image/png");
+    });
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  return Buffer.from(bytes);
+}
+
+function crc32(bytes: Uint8Array): number {
+  let checksum = 0xffffffff;
+  for (const byte of bytes) {
+    checksum ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      checksum = (checksum >>> 1) ^ (checksum & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (checksum ^ 0xffffffff) >>> 0;
+}
+
+function addPngTextChunk(png: Buffer, text: string): Buffer {
+  const type = Buffer.from("tEXt");
+  const data = Buffer.from(`Comment\0${text}`);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(Buffer.concat([type, data])));
+  const chunk = Buffer.concat([length, type, data, checksum]);
+  return Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]);
+}
 
 async function createMobileScannedPdf(page: import("@playwright/test").Page): Promise<Buffer> {
   const jpegBase64 = await page.evaluate(async () => {
@@ -34,11 +166,19 @@ async function createMobileScannedPdf(page: import("@playwright/test").Page): Pr
   return Buffer.from(await document.save());
 }
 
-test("keeps the primary upload flow inside an iPhone viewport", async ({ page }) => {
+test("keeps the home discovery flow inside an iPhone viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "파일 작업, 여기서 끝." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  const fileSelect = page.getByRole("button", { name: "파일 선택" });
+  await expect(fileSelect).toBeEnabled();
+  const fileSelectBox = await fileSelect.boundingBox();
+  expect(fileSelectBox).not.toBeNull();
+  expect(fileSelectBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((fileSelectBox?.y ?? 0) + (fileSelectBox?.height ?? 569)).toBeLessThanOrEqual(568);
+  await expect(page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab")).toHaveCount(8);
+  await expect(page.getByRole("tabpanel")).toBeAttached();
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
@@ -51,35 +191,133 @@ test("keeps the primary upload flow inside an iPhone viewport", async ({ page })
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
-test("keeps every dedicated tool inside an iPhone viewport", async ({ page }) => {
-  const tools = [
-    ["/image/compress", "이미지 용량 줄이기", "압축할 이미지 선택"],
-    ["/image/resize", "이미지 크기 조절", "크기를 바꿀 이미지 선택"],
-    ["/image/convert", "이미지 형식 변환", "변환할 이미지 선택"],
-    ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
-    ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
-    ["/pdf/to-image", "PDF를 JPG·PNG로 변환", "PDF 선택"],
-    ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
-    ["/pdf/organize", "PDF 페이지 정리", "정리할 PDF 선택"],
-    ["/pdf/watermark", "PDF 워터마크 넣기", "워터마크를 넣을 PDF 선택"],
-    ["/pdf/compress", "스캔 PDF 용량 줄이기", "PDF 선택"],
-  ] as const;
-
-  for (const [path, title, selectLabel] of tools) {
+test("shows representative image and PDF selectors in the initial 390 by 844 viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const [path, label] of [
+    ["/image/compress", "압축할 이미지 선택"],
+    ["/pdf/organize", "정리할 PDF 선택"],
+  ] as const) {
     await page.goto(path);
-    await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
-    await expect(page.getByRole("button", { name: selectLabel })).toBeEnabled();
-    const layout = await page.evaluate(() => ({
-      clientWidth: document.documentElement.clientWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-    }));
-    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+    const selector = page.getByRole("button", { name: label, exact: true });
+    await expect(selector).toBeEnabled({ timeout: 60_000 });
+    const box = await selector.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.y ?? 0) + (box?.height ?? 845)).toBeLessThanOrEqual(844);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
   }
+});
+
+test("starts each representative work area inside a 320 by 568 viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const [path, regionName] of [
+    ["/image/compress", "파일 작업 영역"],
+    ["/pdf/organize", "편집 작업 공간"],
+  ] as const) {
+    await page.goto(path);
+    const box = await page.getByRole("region", { name: regionName }).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.y ?? 569).toBeLessThan(568);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
+  }
+});
+
+test("keeps image compression preset text readable after selection", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/image/compress");
+  await page.locator('input[type="file"][multiple]').setInputFiles({
+    name: "sample.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
+
+  const preset = page.getByRole("button", { name: /용량만 줄이기/ });
+  await expectFunctionalTextFloor([
+    { label: "compression preset name", locator: preset.locator("strong") },
+    { label: "compression preset description", locator: preset.locator("small") },
+    { label: "compression preset badge", locator: preset.locator("em") },
+  ]);
+});
+
+test("keeps mixed HEIC compression guidance visible across narrow responsive widths", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/image/compress");
+  const heic = await readFile("tests/fixtures/rainbow-451x461.heic");
+  const guidance =
+    "1개를 추가했어요. HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
+
+  await page.locator('input[type="file"][multiple]').setInputFiles([
+    { name: "sample.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "disguised.jpg", mimeType: "image/jpeg", buffer: heic },
+  ]);
+
+  await expect(page.getByRole("status")).toHaveText(guidance);
+  const visualStatus = page.getByTestId("image-workbench-status");
+  await expect(visualStatus).toHaveText(guidance);
+  expect(
+    await visualStatus.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      whiteSpace: getComputedStyle(element).whiteSpace,
+    })),
+  ).toMatchObject({ whiteSpace: "normal" });
+  const widths = await visualStatus.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth + 1);
+
+  await page.setViewportSize({ width: 900, height: 844 });
+  await expect(visualStatus).toHaveCSS("white-space", "normal");
+  const narrowDesktopWidths = await visualStatus.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(narrowDesktopWidths.scrollWidth).toBeLessThanOrEqual(narrowDesktopWidths.clientWidth + 1);
+  await expect(page.getByText("disguised.jpg", { exact: true })).toHaveCount(0);
+});
+
+test("keeps general image result actions touch-safe at every responsive boundary", async ({
+  page,
+}) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
+  await page.goto("/image/convert");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+  await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
+  await expect(
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+  ).toBeVisible({ timeout: 20_000 });
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "이 이미지 다운로드 ↓" }),
+    page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }),
+  ]);
+  expect(downloads).toBe(0);
 });
 
 test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and touch-safe", async ({
   page,
 }) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   await page.goto("/pdf/compress");
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
   await expect(
@@ -119,6 +357,24 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   ]);
   expect(sourceBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
   expect(settingsBox?.y ?? 0).toBeLessThan(resultBox?.y ?? 0);
+
+  const sourceStatus = source.getByText("1페이지 · 페이지 수만 압축 준비에 사용해요.", {
+    exact: true,
+  });
+  await expectFunctionalTextFloor([
+    { label: "PDF compression panel state", locator: settings.getByText("LOCAL", { exact: true }) },
+    { label: "PDF compression file order", locator: source.getByText("01", { exact: true }) },
+    { label: "PDF compression file name", locator: source.locator("article strong") },
+    { label: "PDF compression inspection status", locator: sourceStatus },
+    {
+      label: "PDF compression control help",
+      locator: settings.getByText("글자 가독성과 용량의 균형을 맞춰요.", { exact: true }),
+    },
+    {
+      label: "PDF compression action status",
+      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+    },
+  ]);
 
   const run = page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" });
   const runBox = await run.boundingBox();
@@ -225,40 +481,30 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
+  expect(downloads).toBe(0);
 });
 
-test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page }) => {
+test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
+  browserName,
+  page,
+}) => {
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
 
+  const sentinelFilename = "PRIVATE_MOBILE_PDF_SENTINEL.pdf";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, "PRIVATE_MOBILE_PDF_BYTES"],
+  });
   await page.goto("/pdf/to-image");
-  const origin = new URL(page.url()).origin;
-  const requestViolations: string[] = [];
-  let parserWorkerRequests = 0;
-  let failedRequests = 0;
-  let pageErrors = 0;
-  await page.context().route("**/*", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    if (url.origin !== origin) requestViolations.push("cross-origin");
-    if (!["GET", "HEAD"].includes(request.method())) requestViolations.push("write-method");
-    if (request.postData() !== null) requestViolations.push("request-body");
-    if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
-    await route.continue();
-  });
-  page.context().on("requestfailed", () => {
-    failedRequests += 1;
-  });
-  page.on("pageerror", () => {
-    pageErrors += 1;
-  });
-
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
+  await privacy.clear();
   await page.locator("input[type=file]").setInputFiles({
-    name: "mobile.pdf",
+    name: sentinelFilename,
     mimeType: "application/pdf",
-    buffer: pdf,
+    buffer: Buffer.concat([pdf, Buffer.from("\n% PRIVATE_MOBILE_PDF_BYTES")]),
   });
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
 
@@ -361,10 +607,80 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({ page
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-  expect(requestViolations).toEqual([]);
-  expect(parserWorkerRequests).toBeGreaterThan(0);
-  expect(failedRequests).toBe(0);
-  expect(pageErrors).toBe(0);
+  const selectedPages = settings.getByRole("radio", { name: /지정 페이지/ }).locator("..");
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF to-image option legend",
+      locator: settings.getByText("변환할 페이지", { exact: true }),
+    },
+    { label: "PDF to-image option label", locator: selectedPages.locator("strong") },
+    { label: "PDF to-image option help", locator: selectedPages.locator("small") },
+    {
+      label: "PDF to-image range label",
+      locator: settings.getByText("페이지 범위", { exact: true }),
+    },
+    {
+      label: "PDF to-image range status",
+      locator: settings.getByText("1페이지를 선택했어요.", { exact: true }),
+    },
+    {
+      label: "PDF to-image format legend",
+      locator: settings.getByText("출력 형식", { exact: true }),
+    },
+    {
+      label: "PDF to-image format control",
+      locator: settings.getByRole("radio", { name: "JPG", exact: true }).locator(".."),
+    },
+    {
+      label: "PDF to-image result limitation",
+      locator: result.getByText("텍스트는 더 이상 검색하거나 선택할 수 없어요.", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF to-image action status",
+      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+    },
+  ]);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "이미지 다운로드 ↓" }),
+  ]);
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toEqual([]);
+  expect(observation.writeRequests).toEqual([]);
+  expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
+    [],
+  );
+  await privacy.assertClean(0, browserName !== "firefox");
+});
+
+test("keeps representative image and PDF error feedback reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "not-an-image.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+  await expect(page.getByRole("status")).toContainText("형식·파일당 50MB");
+  const imageStatus = page
+    .getByTestId("image-workbench-status")
+    .filter({ hasText: "형식·파일당 50MB" });
+  await imageStatus.scrollIntoViewIfNeeded();
+  await expect(imageStatus).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+
+  await page.goto("/pdf/organize");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "broken.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("not a pdf"),
+  });
+  const pdfStatus = page.getByRole("status").filter({ hasText: /확인할 수 없|다시 시도/ });
+  await pdfStatus.scrollIntoViewIfNeeded();
+  await expect(pdfStatus).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("keeps PDF settings and controls touch-safe", async ({ page }) => {
@@ -405,6 +721,25 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
   expect(removeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(removeBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
+  const splitSettings = page.getByLabel("PDF 설정");
+  const extractOption = splitSettings.getByRole("radio", { name: /페이지 추출/ }).locator("..");
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF option legend",
+      locator: splitSettings.getByText("나눌 방식", { exact: true }),
+    },
+    { label: "PDF option label", locator: extractOption.locator("strong") },
+    { label: "PDF option help", locator: extractOption.locator("small") },
+    {
+      label: "PDF range control label",
+      locator: splitSettings.getByText("페이지 범위", { exact: true }),
+    },
+    {
+      label: "PDF range control help",
+      locator: range.locator("..").locator("small"),
+    },
+  ]);
+
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
@@ -413,6 +748,10 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
 });
 
 test("keeps PDF organizer controls touch-safe without horizontal overflow", async ({ page }) => {
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   const document = await PDFDocument.create();
   document.addPage([100, 200]);
   document.addPage([200, 100]);
@@ -433,6 +772,7 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     page.getByRole("button", { name: "2페이지 아래로 이동" }),
     page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }),
     page.getByRole("button", { name: "2페이지 삭제" }),
+    page.getByRole("button", { name: "페이지 순서 초기화" }),
     page.getByRole("button", { name: "3페이지 정리하기 →" }),
   ];
   for (const control of controls) {
@@ -441,11 +781,79 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
 
+  await page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "페이지 순서 초기화" }).click();
+  await page.getByRole("button", { name: "3페이지 정리하기 →" }).click();
+  await expect(page.getByText("3페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+
+  const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
+  await expect(save).toBeVisible();
+  const saveBox = await save.boundingBox();
+  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const actionBar = save.locator("..").locator("..");
+  expect(await actionBar.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
+
+  const viewportHeight = page.viewportSize()?.height ?? 0;
+  const workArea = page.getByRole("region", { name: "편집 작업 공간" });
+  await workArea.evaluate((element) => {
+    document.documentElement.style.scrollBehavior = "auto";
+    const bounds = element.getBoundingClientRect();
+    window.scrollTo(0, window.scrollY + bounds.top + 16);
+  });
+  const stickyBox = await actionBar.boundingBox();
+  expect(stickyBox).not.toBeNull();
+  expect(
+    Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
+  ).toBeLessThanOrEqual(2);
+
+  await expectFunctionalTextFloor([
+    {
+      label: "PDF organizer reset action",
+      locator: page.getByRole("button", { name: "페이지 순서 초기화" }),
+    },
+    {
+      label: "PDF organizer help",
+      locator: page.getByText("왼쪽 목록을 위아래로 옮기고, 90도씩 돌리거나 결과에서 빼세요.", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer page order",
+      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("01", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer page label",
+      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("원본 1페이지", {
+        exact: true,
+      }),
+    },
+    {
+      label: "PDF organizer rotation state",
+      locator: page
+        .getByRole("region", { name: "PDF 페이지 순서" })
+        .getByText("회전 0°", {
+          exact: true,
+        })
+        .first(),
+    },
+  ]);
+  const orderPanelTitle = page.getByText("페이지 순서", { exact: true }).locator("..");
+  expect(await orderPanelTitle.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+    44,
+  );
+
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  expect(downloads).toBe(0);
+  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
+  expect(downloads).toBe(0);
 });
 
 test("runs the watermark Worker with touch-safe controls on an iPhone", async ({ page }) => {
@@ -530,6 +938,25 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
   );
   expect(fontSize).toBeGreaterThanOrEqual(16);
 
+  const resizePreset = page.getByRole("button", { name: /웹용 이미지/ });
+  await expectFunctionalTextFloor([
+    { label: "resize preset name", locator: resizePreset.locator("strong") },
+    { label: "resize preset description", locator: resizePreset.locator("small") },
+    { label: "resize preset badge", locator: resizePreset.locator("em") },
+    {
+      label: "resize keep action",
+      locator: page.getByRole("button", { name: "유지", exact: true }),
+    },
+    {
+      label: "resize maximum action",
+      locator: page.getByRole("button", { name: "최대 크기" }),
+    },
+    {
+      label: "resize crop action",
+      locator: page.getByRole("button", { name: "정사각 자르기" }),
+    },
+  ]);
+
   const removeButton = page.getByRole("button", { name: "sample.png 제거" });
   const removeBox = await removeButton.boundingBox();
   expect(removeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -559,12 +986,21 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
 test("keeps image watermark controls ordered, reachable, and inside an iPhone viewport", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await holdTerminalWorkerEvents(page);
+  const sentinelFilename = "PRIVATE_MOBILE_IMAGE_SENTINEL.png";
+  const sentinelBytes = "PRIVATE_MOBILE_IMAGE_BYTES";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, sentinelBytes],
+  });
   await page.goto("/image/watermark");
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await privacy.clear();
+  const source = addPngTextChunk(await createMobilePng(page), sentinelBytes);
   await page.locator('input[type="file"][multiple]').setInputFiles({
-    name: "mobile.png",
+    name: sentinelFilename,
     mimeType: "image/png",
-    buffer: onePixelPng,
+    buffer: source,
   });
 
   const files = page.getByLabel("선택한 이미지");
@@ -607,4 +1043,83 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+
+  await run.click();
+  const cancel = page.getByRole("button", { name: "작업 중단" });
+  await expect(cancel).toBeVisible();
+  await cancel.scrollIntoViewIfNeeded();
+  await expect(cancel).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+  await page.evaluate(() => {
+    (window as Window & { __releaseHeldWorkerEvents?: () => void }).__releaseHeldWorkerEvents?.();
+  });
+  await expect(page.getByText("1개 이미지 워터마크 처리를 완료했어요.")).toBeVisible({
+    timeout: 20_000,
+  });
+  const resultDownload = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  const selectedDownload = page.getByRole("button", { name: "선택 파일 다운로드 ↓" });
+  await resultDownload.scrollIntoViewIfNeeded();
+  await expect(resultDownload).toBeInViewport();
+  for (const target of [resultDownload, selectedDownload]) {
+    const box = await target.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  const watermarkSettings = page.getByLabel("워터마크 설정");
+  await expectFunctionalTextFloor([
+    {
+      label: "watermark mode control",
+      locator: watermarkSettings.getByRole("radio", { name: "문구", exact: true }).locator(".."),
+    },
+    {
+      label: "watermark position control",
+      locator: watermarkSettings
+        .getByRole("radio", { name: "정가운데", exact: true })
+        .locator(".."),
+    },
+    {
+      label: "watermark text field label",
+      locator: watermarkSettings.getByText("워터마크 문구", { exact: true }),
+    },
+    {
+      label: "watermark color field label",
+      locator: watermarkSettings.getByText("문구 색상", { exact: true }),
+    },
+    {
+      label: "watermark range label",
+      locator: watermarkSettings.getByText("문구 크기", { exact: true }),
+    },
+    {
+      label: "watermark range value",
+      locator: watermarkSettings.getByText("12%", { exact: true }),
+    },
+    {
+      label: "watermark output control label",
+      locator: watermarkSettings.getByText("출력 형식", { exact: true }),
+    },
+    {
+      label: "watermark contract state",
+      locator: watermarkSettings.getByText("image.watermark@1", { exact: true }),
+    },
+    {
+      label: "watermark file status",
+      locator: files.locator("small").first(),
+    },
+    {
+      label: "watermark source limitation",
+      locator: page.getByText("원본 파일은 메인 화면에서 디코드하지 않아요.", { exact: true }),
+    },
+  ]);
+  await expectResponsiveResultActions(page, [
+    page.getByRole("button", { name: "선택 파일 다운로드 ↓" }),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }),
+  ]);
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toEqual([]);
+  expect(observation.writeRequests).toEqual([]);
+  expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
+    [],
+  );
+  await privacy.assertClean(0, false);
 });

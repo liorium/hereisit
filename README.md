@@ -1,10 +1,22 @@
 # HereIsIt
 
-HereIsIt is a fast, privacy-first toolbox for everyday file work. It provides local image resize, crop,
-conversion and text/logo watermarking plus server-capable same-format image compression, PDF merge, split, page extraction,
+HereIsIt is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
+resize, crop, conversion, compression, and text/logo watermarking plus PDF merge, split, page extraction,
 page organization, text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster
-compression, and JPG/PNG-to-PDF tools. Every route discloses whether it stays in the browser or uses the
-temporary HereIsIt processing service before file selection.
+compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
+
+## Discovery and local state
+
+The home page searches the local tool catalog and can inspect a selected file's bounded signature prefix
+to recommend compatible tools without uploading it or starting processing. `/tools` provides the complete
+searchable and filterable catalog. Favorites and recent tools store only versioned tool IDs in this
+browser, with an in-memory fallback when local storage is unavailable; file contents and filenames are
+never preference data.
+
+Every available processor has a catalog-driven detail page. `file` shells expose a focused file work
+area, while `workspace` shells expose editing controls such as PDF page organization. Each route imports
+only its own workbench, shows the local-execution disclosure, and links to exactly three catalog-owned next
+actions.
 
 ## Development
 
@@ -17,6 +29,8 @@ Requirements:
 pnpm install --frozen-lockfile
 pnpm dev
 ~~~
+
+The developer server is available at http://127.0.0.1:3000.
 
 Core verification runs formatting/lint checks, TypeScript, unit tests, and a production build:
 
@@ -54,15 +68,17 @@ pnpm cloudflare:preview
 
 The static site is written to apps/web/out.
 
-With that preview running on its default port, exercise the image-watermark and PDF raster smokes:
+With that preview running on its default port, exercise all four tracked release smokes:
 
 ~~~bash
+node scripts/smoke-navigation.mjs http://127.0.0.1:3000
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Omitting the base URL targets the production Pages origin.
+Omitting the base URL targets the production Pages origin. `pnpm smoke:navigation` is the shorthand for
+the production navigation smoke.
 
 ## Deployment
 
@@ -74,14 +90,16 @@ checklist.
 ## Current limits
 
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
-  cannot meet the target are returned as the unchanged original with an explicit metadata warning.
-- Dedicated same-format compression accepts up to 20 JPEG/PNG/WebP files of 30MiB and 40 megapixels each.
-  A server policy is checked before selection and immediately before processing. Local-only disclosure
-  means no upload; server disclosure means temporary authenticated processing with lifecycle cleanup.
+  cannot meet the target are marked as already optimized and are not added to downloads.
+- The size-only preset in `image.pipeline@2` keeps inspected JPG, PNG, and WebP formats and pixel
+  dimensions. PNG is re-encoded losslessly; HEIC/HEIF must use the format-conversion tool.
+- Dedicated `image.optimize@1` compression accepts up to 20 JPEG/PNG/WebP files of 30MiB and 40
+  megapixels each. The page discloses local or temporary server processing before file selection;
+  server results use bounded lifecycle cleanup and retain the original when no smaller output wins.
 - CI release browsers: current Chromium, Firefox, WebKit, and mobile Chromium/WebKit profiles.
-- `image.pipeline@1` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
-- `image.pipeline@1` allows up to 50 megapixels per input and 25 megapixels per output.
-- `image.pipeline@1` allows up to 100MiB per result and 500MiB of retained results per batch.
+- `image.pipeline@2` accepts up to 100 files, 50MiB per file, and 250MiB total input per batch.
+- `image.pipeline@2` allows up to 50 megapixels per input and 25 megapixels per output.
+- `image.pipeline@2` allows up to 100MiB per result and 500MiB of retained results per batch.
 - Animated PNG and WebP files are rejected rather than silently flattening a frame.
 - `image.watermark@1` adds one text string or one reusable JPG/PNG/WebP logo at any of nine anchors
   (top/middle/bottom × left/center/right) without changing the source's displayed dimensions.
@@ -131,8 +149,7 @@ checklist.
   The scan-oriented compressor above intentionally rasterizes whole pages; other PDF editing can make an
   output larger than its source.
 - JPG/PNG-to-PDF uses a format-aware 128MB estimated decode-memory ceiling for each PNG.
-- Local-tool files and filenames stay in the current tab or its Worker. Server compression never sends
-  source filenames; only file bytes and bounded structural metadata cross the disclosed upload boundary.
+- Files and filenames stay in the current tab or its Worker. Closing the tab releases in-memory results.
 
 ## Repository layout
 
@@ -141,7 +158,6 @@ checklist.
 - packages/image-tool — structural image validation, geometry, and naming.
 - packages/pdf-tool — PDF page-range, page-plan, watermark-layout, signature, and naming helpers.
 - packages/browser-runtime — bounded image/PDF Worker execution runtime.
-- packages/server-runtime — browser-safe policy, upload, polling, cancellation, and download coordinator.
 - packages/tool-registry — user-facing tool and preset metadata.
 
 See docs/architecture.md for execution and privacy boundaries.

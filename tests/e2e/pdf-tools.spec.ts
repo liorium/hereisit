@@ -2,6 +2,12 @@ import { readFile } from "node:fs/promises";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { expect, test } from "@playwright/test";
 import { unzipSync } from "fflate";
+import {
+  expectWebShareUnused,
+  installAvailableWebShare,
+  installDownloadActivationController,
+  setDownloadActivationBlocked,
+} from "./support/result-download";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -20,10 +26,15 @@ async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array>
 }
 
 test("merges PDFs in the chosen order without external uploads", async ({ page }) => {
+  await installAvailableWebShare(page);
   await page.goto("/pdf/merge");
   const unexpectedRequests: string[] = [];
   const failedRequests: string[] = [];
   const pageErrors: string[] = [];
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
   page.on("request", (request) => {
     const requestUrl = new URL(request.url());
     const pageUrl = new URL(page.url());
@@ -44,6 +55,7 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   await page.getByRole("button", { name: "second.pdf 위로 이동" }).click();
   await page.getByRole("button", { name: "2개 PDF 합치기 →" }).click();
   await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -53,13 +65,46 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   const output = await downloadedBytes(await download.path());
   const merged = await PDFDocument.load(output);
   expect(merged.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([200, 100]);
+  expect(downloadCount).toBe(1);
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
 
+test("keeps a prepared PDF result retryable when download activation fails", async ({ page }) => {
+  await installDownloadActivationController(page);
+  await page.goto("/pdf/merge");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.pdf", mimeType: "application/pdf", buffer: await createPdf([100]) },
+    { name: "second.pdf", mimeType: "application/pdf", buffer: await createPdf([200]) },
+  ]);
+  await page.getByRole("button", { name: "2개 PDF 합치기 →" }).click();
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "PDF 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
+});
+
 test("splits every PDF page into a ZIP", async ({ page }) => {
+  await installAvailableWebShare(page);
   await page.goto("/pdf/split");
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
     mimeType: "application/pdf",
@@ -67,10 +112,11 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
   });
   await page.getByRole("button", { name: "PDF 페이지별로 나누기 →" }).click();
   await expect(page.getByText("3개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 3개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("report-pages-hereisit.zip");
   const archive = unzipSync(await downloadedBytes(await download.path()));
@@ -83,6 +129,46 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
   expect(second).toBeDefined();
   const secondDocument = await PDFDocument.load(second as Uint8Array);
   expect(secondDocument.getPage(0).getWidth()).toBe(200);
+  expect(downloadCount).toBe(1);
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
+});
+
+test("downloads a one-page split result as a ZIP", async ({ page }) => {
+  await installAvailableWebShare(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100]),
+  });
+  await page.getByRole("button", { name: "PDF 페이지별로 나누기 →" }).click();
+  await expect(page.getByText("1개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  expect(downloadCount).toBe(0);
+  await expect(page.getByRole("button", { name: "ZIP 다운로드 ↓" })).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("report-pages-hereisit.zip");
+  const archive = unzipSync(await downloadedBytes(await download.path()));
+  expect(Object.keys(archive)).toEqual(["report-page-001.pdf"]);
+  const first = archive["report-page-001.pdf"];
+  expect(first).toBeDefined();
+  expect(new TextDecoder().decode((first as Uint8Array).subarray(0, 5))).toBe("%PDF-");
+  const firstDocument = await PDFDocument.load(first as Uint8Array);
+  expect(firstDocument.getPageCount()).toBe(1);
+  expect(firstDocument.getPage(0).getWidth()).toBe(100);
+  expect(downloadCount).toBe(1);
+  await expect(
+    page.getByRole("status").getByText("ZIP 다운로드를 시작했어요.", { exact: true }),
+  ).toBeVisible();
+  await expectWebShareUnused(page);
 });
 
 test("extracts a validated page range into one PDF", async ({ page }) => {
@@ -393,9 +479,9 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
   }
 
   await page.goto("/pdf/split");
-  const pdfCategoryLink = page.getByRole("link", { name: "PDF", exact: true });
-  await expect(pdfCategoryLink).toHaveAttribute("data-active", "true");
-  await expect(pdfCategoryLink).not.toHaveAttribute("aria-current");
+  const toolsMenuButton = page.getByRole("button", { name: "모든 도구", exact: true });
+  await expect(toolsMenuButton).toHaveAttribute("data-active", "true");
+  await expect(toolsMenuButton).not.toHaveAttribute("aria-current");
 
   const response = await request.get("/sitemap.xml");
   const sitemap = await response.text();

@@ -19,9 +19,9 @@ interactive structure are removed or flattened; signatures become invalid and co
 
 ## Important choice
 
-Connect the repository from the Cloudflare dashboard before using any Wrangler upload command.
-A Pages project created with Direct Upload cannot later switch to Git integration. Do not run
-wrangler pages project create or wrangler pages deploy for the production project.
+The production project is Git-integration-only: connect the GitHub repository from the Cloudflare
+dashboard and publish only reviewed Git commits. Never create or use a Direct Upload project for
+production, and never run `wrangler pages project create` or `wrangler pages deploy` for it.
 
 ## Local checks
 
@@ -29,34 +29,38 @@ Requirements: Node.js 24 LTS and pnpm 11.11.0.
 
 ~~~bash
 pnpm install --frozen-lockfile
-pnpm exec playwright install --with-deps chromium firefox
-pnpm verify:all
+pnpm verify
+pnpm exec playwright install --with-deps chromium firefox webkit
+PLAYWRIGHT_WEBKIT=1 pnpm verify:all
 pnpm cloudflare:preview
 ~~~
 
-The default local browser projects are desktop Chromium and Firefox plus mobile Chromium. GitHub CI also
-installs WebKit and runs its desktop and mobile projects. Install it locally and set
-`PLAYWRIGHT_WEBKIT=1` when the same Safari-engine coverage is required.
+The full release matrix attempts desktop Chromium, Firefox, and WebKit plus mobile Chromium and WebKit.
+If this host cannot install or launch WebKit, record those projects as `not run` with the dependency
+reason; do not call them passed. GitHub CI must run the complete matrix for the exact release SHA.
 
-The preview is available at http://127.0.0.1:3000 and serves apps/web/out through the same
-Wrangler Pages runtime used for deployment. Local preview does not require a Cloudflare login.
+The developer server (`pnpm dev`) and developer-facing Pages preview (`pnpm cloudflare:preview`) use
+http://127.0.0.1:3000, one at a time. The Pages preview serves `apps/web/out` through the same Wrangler
+runtime used for deployment and does not require a Cloudflare login.
 
-After the preview starts, all three tracked release smokes can target it explicitly:
+After the developer-facing preview starts, all four tracked release smokes can target it explicitly:
 
 ~~~bash
+node scripts/smoke-navigation.mjs http://127.0.0.1:3000
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without an argument, each command targets https://hereisit.pages.dev. The image-watermark smoke creates a
-local 320×180 PNG, verifies the default text settings and security headers, proves that processing starts
-no download or upload, then explicitly saves the exact PNG result. The compression smoke checks the route
-and same-origin assets, then proves balanced 150DPI/JPEG quality 72, minimum 96DPI/JPEG quality 55, the
-exact 1% smaller-only guarantee, output geometry/rotation/metadata/image dimensions, explicit-only saves,
-and no-reduction guidance. The PDF-to-image smoke checks its route and the pinned parser Worker, one packed
-CMap, and one standard font; verifies the current security headers; then performs one rotated-page
-PNG/96DPI direct download and one two-page default JPG/150DPI ordered ZIP. The smokes reject redirects,
+Without an argument, each command targets https://hereisit.pages.dev. The navigation smoke checks six
+release routes, exact security headers, catalog/header/search behavior, representative detail shells, and
+read-only same-origin traffic. The image-watermark smoke creates a local 320×180 PNG, verifies the default
+text settings and security headers, proves that processing starts no download or upload, then explicitly
+downloads the exact PNG result. The compression smoke checks the route and same-origin assets, then proves
+balanced 150DPI/JPEG quality 72, minimum 96DPI/JPEG quality 55, the exact 1% smaller-only guarantee,
+output geometry/rotation/metadata/image dimensions, explicit-only downloads, and no-reduction guidance. The
+PDF-to-image smoke checks its route and pinned parser assets, then performs one rotated-page PNG/96DPI
+direct download and one two-page default JPG/150DPI ordered ZIP. The smokes reject redirects,
 cross-origin, write-method, request-body, failed-request, and page-error activity; the PDF smokes also
 reject private sentinel console/request activity.
 
@@ -65,10 +69,32 @@ do not confuse it with the developer-facing `cloudflare:preview` default on port
 
 ~~~bash
 pnpm --filter @hereisit/web preview:test
+node scripts/smoke-navigation.mjs http://127.0.0.1:4173
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:4173
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:4173
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:4173
 ~~~
+
+For a pull request, wait for Cloudflare's immutable preview for the exact HEAD SHA and repeat all four
+commands against that HTTPS origin:
+
+~~~bash
+CLOUDFLARE_PREVIEW_ORIGIN="https://<immutable-preview>.pages.dev"
+node scripts/smoke-navigation.mjs "$CLOUDFLARE_PREVIEW_ORIGIN"
+node scripts/smoke-image-watermark.mjs "$CLOUDFLARE_PREVIEW_ORIGIN"
+node scripts/smoke-pdf-compress.mjs "$CLOUDFLARE_PREVIEW_ORIGIN"
+node scripts/smoke-pdf-to-images.mjs "$CLOUDFLARE_PREVIEW_ORIGIN"
+~~~
+
+## Release evidence record
+
+For the local release preview, immutable Cloudflare preview, and production deployment, record the target
+origin, exact Git SHA, full command, and exit code for every smoke. Record manual VoiceOver/Safari and
+NVDA/Firefox-or-Chrome results from the
+[discovery accessibility checklist](testing/discovery-accessibility-checklist.md) separately. When the
+required platform or assistive technology is unavailable, write `not run` and the reason; automated tests
+are not manual-pass evidence. Never include selected filenames, file contents, thumbnails, object URLs,
+preference values, or other file-derived data in release evidence.
 
 Optional account commands:
 
@@ -114,8 +140,9 @@ GitHub Actions deploy workflow, or server runtime is required.
 - A sample image converts to WebP and downloads as a ZIP.
 - `/image/watermark` returns HTTP 200 and loads its dedicated Worker without any established image or PDF
   Worker bundle. A local 320×180 PNG receives the default `© HereIsIt` bottom-right watermark without an
-  upload or automatic download, then saves as `source-watermarked-hereisit.png` only on request. A
-  JPG/PNG/WebP logo can also be selected once, reused across a multi-image batch, and saved only on request.
+  upload or automatic download, then downloads as `source-watermarked-hereisit.png` only on request. A
+  JPG/PNG/WebP logo can also be selected once, reused across a multi-image batch, and downloaded only on
+  request.
 - Two sample PDFs merge in order, a PDF splits into a ZIP, and JPG/PNG images download as one PDF.
 - A three-page PDF can be reordered, quarter-turned, and reduced to selected pages in one organized PDF.
 - A PDF text watermark can be placed locally and the downloaded result opens with the same page count.
@@ -123,10 +150,10 @@ GitHub Actions deploy workflow, or server runtime is required.
   from the same origin with the current CSP and other security headers.
 - `/pdf/compress` returns HTTP 200 and loads only its inspection/compression Workers plus pinned,
   same-origin PDF.js assets; image, PDF editing, and PDF-to-image Worker bundles remain isolated.
-- A compressible scan produces a balanced 150DPI/JPEG quality 72 PDF only after an explicit save, at least
+- A compressible scan produces a balanced 150DPI/JPEG quality 72 PDF only after an explicit download, at least
   1% smaller than the source, with displayed page geometry preserved and output rotation normalized to 0.
 - The same scan produces a smaller minimum 96DPI/JPEG quality 55 PDF, while a tiny vector PDF shows
-  no-reduction guidance and exposes no save or download.
+  no-reduction guidance and exposes no download action.
 - A two-page PDF with a rotated second page can select page 2 and download a 1056×816 PNG at 96DPI.
 - A two-page 612×792pt PDF downloads an ordered two-entry JPG ZIP whose images are 1275×1650 at the default
   150DPI and quality 85.
@@ -136,11 +163,12 @@ GitHub Actions deploy workflow, or server runtime is required.
 After these pass, add a custom domain from the Pages project Custom domains screen if desired.
 Cloudflare provisions the TLS certificate automatically after DNS validation.
 
-For a production release, run all three tracked smokes only after the current GitHub CI and Cloudflare
-Pages checks have succeeded for the exact release commit:
+For a production release, run all four tracked smokes only after the current GitHub CI and Cloudflare
+Pages production deployment have succeeded for the exact merge SHA:
 
 ~~~bash
-node scripts/smoke-image-watermark.mjs
+node scripts/smoke-navigation.mjs https://hereisit.pages.dev
+node scripts/smoke-image-watermark.mjs https://hereisit.pages.dev
 node scripts/smoke-pdf-compress.mjs https://hereisit.pages.dev
 node scripts/smoke-pdf-to-images.mjs https://hereisit.pages.dev
 ~~~

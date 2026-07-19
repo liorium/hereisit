@@ -1,12 +1,12 @@
+import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
 import { PdfCompressWorkbench } from "../../../components/pdf-compress-workbench";
-import { PdfToolPage } from "../../../components/pdf-tool-page";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
 import { createToolMetadata } from "../../../lib/metadata";
-import { pdfTools } from "../../../lib/site";
 
-const tool = pdfTools.compress;
+const toolId = "pdf.compress-scanned" satisfies AvailableToolId;
 
-export const metadata = createToolMetadata(tool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function PdfCompressPage() {
-  return <PdfToolPage tool={tool} workbench={<PdfCompressWorkbench />} />;
+  return <ToolDetailPage toolId={toolId} workbench={<PdfCompressWorkbench toolId={toolId} />} />;
 }

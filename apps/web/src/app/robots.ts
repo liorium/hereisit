@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export const dynamic = "force-static";
 
-import { SITE_URL } from "../lib/site";
+import { SITE_URL } from "../lib/site-identity";
 
 export default function robots(): MetadataRoute.Robots {
   return {

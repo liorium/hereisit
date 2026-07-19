@@ -1,13 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from "@cantoo/pdf-lib";
+import { expect, type Page, test } from "@playwright/test";
+import { installPrivacyObserver } from "./support/privacy-observer";
 import {
-  type ConsoleMessage,
-  expect,
-  type JSHandle,
-  type Page,
-  type Route,
-  test,
-} from "@playwright/test";
+  expectWebShareUnused,
+  installAvailableWebShare,
+  installDownloadActivationController,
+  setDownloadActivationBlocked,
+} from "./support/result-download";
 
 const PDF_COMPRESSION_ROUTE = "/pdf/compress";
 const PDF_INSPECTION_TIMEOUT_MS = 60_000;
@@ -180,265 +180,6 @@ async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array>
   return new Uint8Array(await readFile(downloadPath as string));
 }
 
-async function forceDownloadFallback(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () => {
-        throw new Error("navigator.share must not be called");
-      },
-    });
-  });
-}
-
-interface ConsolePrivacyObserverOptions {
-  disposeConsoleArgument?: (argument: JSHandle) => Promise<void>;
-}
-
-async function observePrivateCompression(
-  page: Page,
-  sentinels: readonly string[] = [],
-  options: ConsolePrivacyObserverOptions = {},
-) {
-  const origin = "http://127.0.0.1:4173";
-  const violations: string[] = [];
-  const leaks: string[] = [];
-  const pendingConsoleInspections = new Set<Promise<void>>();
-  const context = page.context();
-  let parserWorkerRequests = 0;
-  let downloads = 0;
-  let failedRequests = 0;
-  let pageErrors = 0;
-  let stopped = false;
-  const disposeConsoleArgument =
-    options.disposeConsoleArgument ?? ((argument: JSHandle) => argument.dispose());
-
-  const routeHandler = async (route: Route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    if (url.origin !== origin) violations.push("cross-origin");
-    if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
-    if (request.postData() !== null) violations.push("request-body");
-    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.1.200/")) {
-      violations.push("unpinned-pdfjs");
-    }
-    if (sentinels.some((sentinel) => decodeURIComponent(request.url()).includes(sentinel))) {
-      leaks.push("request-url");
-    }
-    if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
-    await route.continue();
-  };
-  const inspectConsoleArguments = async (message: ConsoleMessage): Promise<void> => {
-    if (sentinels.length === 0) return;
-    let arguments_: ReturnType<ConsoleMessage["args"]> = [];
-    try {
-      arguments_ = message.args();
-      for (const argument of arguments_) {
-        const found = await argument.evaluate((root, expectedSentinels) => {
-          const maximumInspectedValues = 10_000;
-          const stack: unknown[] = [];
-          const visited = new WeakSet<object>();
-          let reservedValues = 0;
-          const reserve = (count: number) => {
-            if (
-              !Number.isSafeInteger(count) ||
-              count < 0 ||
-              count > maximumInspectedValues - reservedValues
-            ) {
-              throw new Error("Console argument exceeded the privacy inspection limit");
-            }
-            reservedValues += count;
-          };
-          const enqueue = (...values: unknown[]) => {
-            reserve(values.length);
-            stack.push(...values);
-          };
-          enqueue(root);
-
-          while (stack.length > 0) {
-            const value = stack.pop();
-            if (typeof value === "string") {
-              if (expectedSentinels.some((sentinel) => value.includes(sentinel))) return true;
-              continue;
-            }
-            if (value === null || (typeof value !== "object" && typeof value !== "function")) {
-              continue;
-            }
-
-            const objectValue = value as object;
-            if (visited.has(objectValue)) continue;
-            visited.add(objectValue);
-
-            if (
-              typeof File !== "undefined" &&
-              objectValue instanceof File &&
-              expectedSentinels.some((sentinel) => objectValue.name.includes(sentinel))
-            ) {
-              return true;
-            }
-
-            if (
-              (typeof Blob !== "undefined" && objectValue instanceof Blob) ||
-              (typeof ArrayBuffer !== "undefined" &&
-                (objectValue instanceof ArrayBuffer || ArrayBuffer.isView(objectValue))) ||
-              (typeof SharedArrayBuffer !== "undefined" && objectValue instanceof SharedArrayBuffer)
-            ) {
-              throw new Error("Console argument contains an uninspectable byte container");
-            }
-
-            if (Array.isArray(objectValue)) {
-              const lengthDescriptor = Reflect.getOwnPropertyDescriptor(objectValue, "length");
-              if (
-                lengthDescriptor === undefined ||
-                !("value" in lengthDescriptor) ||
-                typeof lengthDescriptor.value !== "number"
-              ) {
-                throw new Error("Console array length became unreadable");
-              }
-              reserve(lengthDescriptor.value);
-            }
-
-            if (objectValue instanceof Map) {
-              const sizeGetter = Reflect.getOwnPropertyDescriptor(Map.prototype, "size")?.get;
-              if (sizeGetter === undefined) throw new Error("Console map size became unreadable");
-              const size = Reflect.apply(sizeGetter, objectValue, []);
-              if (!Number.isSafeInteger(size) || size < 0) {
-                throw new Error("Console map size is invalid");
-              }
-              if (size > Math.floor((maximumInspectedValues - reservedValues) / 2)) {
-                throw new Error("Console map exceeded the privacy inspection limit");
-              }
-              Map.prototype.forEach.call(objectValue, (mapValue: unknown, mapKey: unknown) => {
-                enqueue(mapKey, mapValue);
-              });
-            } else if (objectValue instanceof Set) {
-              const sizeGetter = Reflect.getOwnPropertyDescriptor(Set.prototype, "size")?.get;
-              if (sizeGetter === undefined) throw new Error("Console set size became unreadable");
-              const size = Reflect.apply(sizeGetter, objectValue, []);
-              if (!Number.isSafeInteger(size) || size < 0) {
-                throw new Error("Console set size is invalid");
-              }
-              if (size > maximumInspectedValues - reservedValues) {
-                throw new Error("Console set exceeded the privacy inspection limit");
-              }
-              Set.prototype.forEach.call(objectValue, (setValue: unknown) => {
-                enqueue(setValue);
-              });
-            }
-
-            const ownKeys = Reflect.ownKeys(objectValue);
-            reserve(ownKeys.length);
-            for (const key of ownKeys) {
-              const renderedKey = typeof key === "symbol" ? key.description : key;
-              if (
-                renderedKey !== undefined &&
-                expectedSentinels.some((sentinel) => renderedKey.includes(sentinel))
-              ) {
-                return true;
-              }
-              const descriptor = Reflect.getOwnPropertyDescriptor(objectValue, key);
-              if (descriptor === undefined) {
-                throw new Error("Console argument property became unreadable");
-              }
-              if ("value" in descriptor) {
-                enqueue(descriptor.value);
-              } else {
-                throw new Error("Console argument contains an uninspectable accessor");
-              }
-            }
-          }
-          return false;
-        }, sentinels);
-        if (found) {
-          leaks.push("console-argument");
-          return;
-        }
-      }
-    } catch {
-      leaks.push("console-inspection-failed");
-    } finally {
-      const cleanupResults = await Promise.allSettled(
-        arguments_.map((argument) => disposeConsoleArgument(argument)),
-      );
-      if (cleanupResults.some((result) => result.status === "rejected")) {
-        leaks.push("console-cleanup-failed");
-      }
-    }
-  };
-  const consoleHandler = (message: ConsoleMessage) => {
-    try {
-      if (sentinels.some((sentinel) => message.text().includes(sentinel))) leaks.push("console");
-    } catch {
-      leaks.push("console-inspection-failed");
-    }
-    if (sentinels.length === 0) return;
-    const inspection = inspectConsoleArguments(message);
-    pendingConsoleInspections.add(inspection);
-    void inspection.then(
-      () => pendingConsoleInspections.delete(inspection),
-      () => pendingConsoleInspections.delete(inspection),
-    );
-  };
-  const downloadHandler = () => {
-    downloads += 1;
-  };
-  const failedRequestHandler = () => {
-    failedRequests += 1;
-  };
-  const pageErrorHandler = () => {
-    pageErrors += 1;
-  };
-
-  await context.route("**/*", routeHandler);
-  page.on("console", consoleHandler);
-  page.on("download", downloadHandler);
-  context.on("requestfailed", failedRequestHandler);
-  page.on("pageerror", pageErrorHandler);
-
-  const stopObserving = async (): Promise<void> => {
-    if (stopped) return;
-    stopped = true;
-    page.off("console", consoleHandler);
-    page.off("download", downloadHandler);
-    context.off("requestfailed", failedRequestHandler);
-    page.off("pageerror", pageErrorHandler);
-    try {
-      await context.unroute("**/*", routeHandler);
-    } catch {
-      violations.push("observer-cleanup-failed");
-    }
-  };
-
-  const flushConsoleEvents = async (): Promise<void> => {
-    try {
-      await page.evaluate(() => undefined);
-    } catch {
-      leaks.push("console-inspection-sync-failed");
-    }
-  };
-
-  const drainConsoleInspections = async (): Promise<void> => {
-    while (pendingConsoleInspections.size > 0) {
-      await Promise.allSettled([...pendingConsoleInspections]);
-    }
-  };
-
-  return {
-    async assertClean(expectedDownloads = 0, requireParserWorker = true) {
-      await flushConsoleEvents();
-      await stopObserving();
-      await drainConsoleInspections();
-      expect(violations).toEqual([]);
-      expect(leaks).toEqual([]);
-      expect(downloads).toBe(expectedDownloads);
-      expect(failedRequests).toBe(0);
-      expect(pageErrors).toBe(0);
-      if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
-    },
-  };
-}
-
 async function installObjectUrlCounters(page: Page): Promise<void> {
   await page.addInitScript(() => {
     sessionStorage.setItem("__hereisitCreatedUrls", "0");
@@ -488,8 +229,8 @@ async function uploadPdf(
 
 async function prepareCompressedResult(
   page: Page,
-): Promise<ReturnType<typeof observePrivateCompression>> {
-  const privacy = await observePrivateCompression(page);
+): Promise<Awaited<ReturnType<typeof installPrivacyObserver>>> {
+  const privacy = await installPrivacyObserver(page);
   await openReadyPdfCompression(page);
   await uploadPdf(page, "scan.pdf", await createScannedPdf(page), 1);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
@@ -508,7 +249,7 @@ async function settleRenderedState(page: Page): Promise<void> {
 
 test("detects a sentinel filename hidden in a structured console argument", async ({ page }) => {
   const sentinelFilename = "PRIVATE_STRUCTURED_CONSOLE_SENTINEL.pdf";
-  const privacy = await observePrivateCompression(page, [sentinelFilename]);
+  const privacy = await installPrivacyObserver(page, { sentinels: [sentinelFilename] });
   await openReadyPdfCompression(page);
 
   await page.evaluate((name) => {
@@ -527,19 +268,24 @@ test("detects a sentinel filename hidden in a structured console argument", asyn
 test("rejects a wide console container before enumerating it in the privacy harness", async ({
   page,
 }) => {
-  const privacy = await observePrivateCompression(page, ["PRIVATE_WIDE_CONTAINER_SENTINEL"]);
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: ["PRIVATE_WIDE_CONTAINER_SENTINEL"],
+  });
   await openReadyPdfCompression(page);
 
   await page.evaluate(() => {
     const trackedWindow = window as Window & { __hereisitWideOwnKeysCalls?: number };
     trackedWindow.__hereisitWideOwnKeysCalls = 0;
-    const wideArray = new Proxy(new Array(100_001), {
-      ownKeys(target) {
-        trackedWindow.__hereisitWideOwnKeysCalls =
-          (trackedWindow.__hereisitWideOwnKeysCalls ?? 0) + 1;
-        return Reflect.ownKeys(target);
+    const wideArray = new Proxy(
+      Array.from({ length: 100_001 }, () => null),
+      {
+        ownKeys(target) {
+          trackedWindow.__hereisitWideOwnKeysCalls =
+            (trackedWindow.__hereisitWideOwnKeysCalls ?? 0) + 1;
+          return Reflect.ownKeys(target);
+        },
       },
-    });
+    );
     console.log({ nested: wideArray });
   });
 
@@ -558,7 +304,8 @@ test("rejects a wide console container before enumerating it in the privacy harn
 });
 
 test("records a rejected console handle cleanup in the privacy harness", async ({ page }) => {
-  const privacy = await observePrivateCompression(page, ["PRIVATE_CLEANUP_SENTINEL"], {
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: ["PRIVATE_CLEANUP_SENTINEL"],
     disposeConsoleArgument: async () => {
       throw new Error("Synthetic cleanup rejection");
     },
@@ -576,6 +323,184 @@ test("records a rejected console handle cleanup in the privacy harness", async (
     detectionError = error;
   }
   expect(String(detectionError)).toContain("console-cleanup-failed");
+});
+
+test("observes deliberate privacy probes without exposing their raw values", async ({ page }) => {
+  const sentinelFilename = "PRIVATE_OBSERVER_FILENAME_SENTINEL.pdf";
+  const sentinelValue = "PRIVATE_OBSERVER_VALUE_SENTINEL";
+  const privacy = await installPrivacyObserver(page, {
+    fulfillProbePathPrefix: "/privacy-observer-",
+    origin: "http://localhost:4173",
+    sentinels: [sentinelFilename, sentinelValue],
+  });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  const probeResults = await page.evaluate(
+    async ({ filename, value }) => {
+      console.log({ filename, value });
+      window.localStorage.setItem(filename, value);
+      const objectUrl = URL.createObjectURL(new File([value], filename));
+      URL.revokeObjectURL(objectUrl);
+
+      const fetchResponse = await fetch("/privacy-observer-fetch-probe", {
+        method: "POST",
+        body: value,
+      });
+      const xhrStatus = await new Promise<number>((resolve) => {
+        const request = new XMLHttpRequest();
+        request.addEventListener("loadend", () => resolve(request.status), { once: true });
+        request.open("PUT", "/privacy-observer-xhr-probe");
+        request.send(value);
+      });
+      const beaconAccepted = navigator.sendBeacon("/privacy-observer-beacon-probe", value);
+      const externalResponse = await fetch("/privacy-observer-external-probe");
+      return {
+        beaconAccepted,
+        externalStatus: externalResponse.status,
+        fetchStatus: fetchResponse.status,
+        xhrStatus,
+      };
+    },
+    { filename: sentinelFilename, value: sentinelValue },
+  );
+  expect(probeResults).toEqual({
+    beaconAccepted: true,
+    externalStatus: 204,
+    fetchStatus: 204,
+    xhrStatus: 204,
+  });
+
+  await expect
+    .poll(async () => (await privacy.read()).writeRequests.length)
+    .toBeGreaterThanOrEqual(3);
+  const observation = await privacy.read();
+  expect(observation.externalRequests).toContain("GET cross-origin");
+  expect(observation.writeRequests).toHaveLength(3);
+  expect(
+    observation.writeRequests.filter((request) => request === "POST cross-origin"),
+  ).toHaveLength(2);
+  expect(
+    observation.writeRequests.filter((request) => request === "PUT cross-origin"),
+  ).toHaveLength(1);
+  expect(observation.consoleMessages).toContain("log");
+  expect(observation.storageWrites).toContain("localStorage:set");
+  expect(observation.objectUrls).toContain("blob-url-created");
+
+  const diagnostics = JSON.stringify(observation);
+  for (const privateValue of [
+    sentinelFilename,
+    sentinelValue,
+    "privacy-observer-fetch-probe",
+    "privacy-observer-xhr-probe",
+    "privacy-observer-beacon-probe",
+    "blob:",
+  ]) {
+    expect(diagnostics).not.toContain(privateValue);
+  }
+
+  await page.evaluate((key) => window.localStorage.removeItem(key), sentinelFilename);
+  expect(
+    await page.evaluate((key) => window.localStorage.getItem(key), sentinelFilename),
+  ).toBeNull();
+  await privacy.clear();
+  expect(await privacy.read()).toEqual({
+    requestCount: 0,
+    externalRequests: [],
+    writeRequests: [],
+    consoleMessages: [],
+    storageWrites: [],
+    objectUrls: [],
+  });
+  await privacy.assertClean(0, false);
+});
+
+test("assertClean rejects a deliberate network violation and detaches its hooks", async ({
+  page,
+}) => {
+  const privacy = await installPrivacyObserver(page, { origin: "http://localhost:4173" });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate(() => fetch("/privacy-observer-assert-probe"));
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  expect(String(detectionError)).toContain("cross-origin");
+
+  const observedBeforeCleanupCheck = (await privacy.read()).requestCount;
+  await page.evaluate(() => fetch("/privacy-observer-after-cleanup"));
+  await page.waitForTimeout(50);
+  expect((await privacy.read()).requestCount).toBe(observedBeforeCleanupCheck);
+});
+
+test("detects an encoded history sentinel without exposing it in diagnostics", async ({ page }) => {
+  const sentinel = "PRIVATE ENCODED HISTORY SENTINEL";
+  const privacy = await installPrivacyObserver(page, { sentinels: [sentinel] });
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate((privateValue) => {
+    history.pushState({ privateValue }, "", "/pdf/compress?malformed=%E0%A4%A");
+    history.replaceState(
+      { privateValue: encodeURIComponent(privateValue) },
+      "",
+      `/pdf/compress?private=${encodeURIComponent(privateValue)}`,
+    );
+  }, sentinel);
+
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  const diagnostics = String(detectionError);
+  expect(diagnostics).toContain("history-url");
+  expect(diagnostics).toContain("history-state");
+  expect(diagnostics).not.toContain(sentinel);
+  expect(diagnostics).not.toContain(encodeURIComponent(sentinel));
+});
+
+test("bounds a wide history state before enumerating its values", async ({ page }) => {
+  const privacy = await installPrivacyObserver(page);
+  await openReadyPdfCompression(page);
+  await privacy.clear();
+
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & { __hereisitHistoryOwnKeysCalls?: number };
+    trackedWindow.__hereisitHistoryOwnKeysCalls = 0;
+    const wideArray = new Proxy(new Array(100_001), {
+      ownKeys(target) {
+        trackedWindow.__hereisitHistoryOwnKeysCalls =
+          (trackedWindow.__hereisitHistoryOwnKeysCalls ?? 0) + 1;
+        return Reflect.ownKeys(target);
+      },
+    });
+    try {
+      history.pushState({ nested: wideArray }, "", "/pdf/compress?wide-history-state=1");
+    } catch {
+      // Proxies are intentionally not structured-cloneable; the observer must bound first.
+    }
+  });
+
+  let detectionError: unknown;
+  try {
+    await privacy.assertClean(0, false);
+  } catch (error) {
+    detectionError = error;
+  }
+  expect(String(detectionError)).toContain("history-state-inspection-failed");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as Window & { __hereisitHistoryOwnKeysCalls?: number })
+          .__hereisitHistoryOwnKeysCalls,
+    ),
+  ).toBe(0);
 });
 
 test("publishes the isolated compression shell with exact default copy and preset", async ({
@@ -652,18 +577,17 @@ test("explains an unsupported browser before selection without starting local wo
     .toEqual({ fileReads: 0, workerStarts: 0 });
 });
 
-test("compresses a known scan with the default preset and downloads only after one explicit save", async ({
+test("compresses a known scan with the default preset and downloads only after one explicit download", async ({
   browserName,
   page,
 }) => {
-  await forceDownloadFallback(page);
+  test.setTimeout(90_000);
+  await installAvailableWebShare(page);
   await installObjectUrlCounters(page);
   const privacySentinel = "PRIVATE_SCAN_SENTINEL";
-  const privacy = await observePrivateCompression(page, [
-    privacySentinel,
-    SOURCE_TITLE,
-    SOURCE_AUTHOR,
-  ]);
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [privacySentinel, SOURCE_TITLE, SOURCE_AUTHOR],
+  });
   await openReadyPdfCompression(page);
   let downloadCount = 0;
   page.on("download", () => {
@@ -672,6 +596,7 @@ test("compresses a known scan with the default preset and downloads only after o
   const source = await createScannedPdf(page, 2);
   await uploadPdf(page, `${privacySentinel}.pdf`, source, 2);
   await expect(page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(2);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
@@ -689,6 +614,7 @@ test("compresses a known scan with the default preset and downloads only after o
       exact: true,
     }),
   ).toBeVisible();
+  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(3);
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
@@ -700,6 +626,8 @@ test("compresses a known scan with the default preset and downloads only after o
   ]);
   expect(download.suggestedFilename()).toBe("PRIVATE_SCAN_SENTINEL-compressed-hereisit.pdf");
   expect(downloadCount).toBe(1);
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
   const output = await downloadedBytes(await download.path());
   expectCompletePdfEnvelope(output);
   expect(output.byteLength).toBeLessThanOrEqual(exactCompressionTarget(source.byteLength));
@@ -724,7 +652,7 @@ test("compresses a known scan with the default preset and downloads only after o
 test("makes the same Letter scan smaller with the minimum preset and preserves output structure", async ({
   page,
 }) => {
-  await forceDownloadFallback(page);
+  await installAvailableWebShare(page);
   await installObjectUrlCounters(page);
   await openReadyPdfCompression(page);
   const source = await createScannedPdf(page, 2);
@@ -742,6 +670,8 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
     page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
   ]);
   expect(balancedDownload.suggestedFilename()).toBe("report-compressed-hereisit.pdf");
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
   const balanced = await downloadedBytes(await balancedDownload.path());
 
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
@@ -765,6 +695,8 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
   ]);
   expect(minimumDownload.suggestedFilename()).toBe("report-compressed-hereisit.pdf");
   expect(downloadCount).toBe(2);
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
   const minimum = await downloadedBytes(await minimumDownload.path());
   expectCompletePdfEnvelope(minimum);
   expect(minimum.byteLength).toBeLessThanOrEqual(exactCompressionTarget(source.byteLength));
@@ -784,6 +716,31 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
     title: undefined,
   });
   expectPreservedPageMarkerOrder(await inspectPageMarkerColors(page, minimum));
+});
+
+test("keeps a compressed PDF result retryable when download activation fails", async ({
+  browserName,
+  page,
+}) => {
+  await installDownloadActivationController(page);
+  const privacy = await prepareCompressedResult(page);
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "PDF 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("scan-compressed-hereisit.pdf");
+  expectCompletePdfEnvelope(await downloadedBytes(await download.path()));
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await privacy.assertClean(1, browserName !== "firefox");
 });
 
 test("shows both preset-specific no-reduction messages without creating a result URL", async ({
@@ -975,34 +932,46 @@ test("invalidates and revokes results on preset change, rerun, replacement, rese
   page,
 }) => {
   await installObjectUrlCounters(page);
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
   await prepareCompressedResult(page);
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
   await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
+  expect(downloads).toBe(0);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 1 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 2 });
+  expect(downloads).toBe(0);
 
   const replacement = await createScannedPdf(page);
   await uploadPdf(page, "replacement.pdf", replacement, 1);
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
+  expect(downloads).toBe(0);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 3 });
+  expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "새 작업" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 4 });
+  expect(downloads).toBe(0);
   await uploadPdf(page, "unmount.pdf", replacement, 1);
   await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
   await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 4 });
+  expect(downloads).toBe(0);
 
   await page.evaluate(() => {
     const nextWindow = window as Window & {
@@ -1014,6 +983,7 @@ test("invalidates and revokes results on preset change, rerun, replacement, rese
   });
   await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 5 });
+  expect(downloads).toBe(0);
 });
 
 test("cancels immediately without exposing a partial result or download", async ({ page }) => {

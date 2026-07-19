@@ -1,0 +1,454 @@
+.header {
+  position: relative;
+  z-index: 20;
+  width: min(1440px, calc(100% - 48px));
+  height: 84px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.brandMark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px 8px 8px 2px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 16px;
+}
+
+.desktopActions,
+.desktopNav {
+  display: flex;
+  align-items: center;
+}
+
+.desktopNav {
+  gap: 4px;
+}
+
+.navButton,
+.navLink,
+.searchTrigger {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.navButton:hover,
+.navLink:hover,
+.searchTrigger:hover,
+.navButton[aria-expanded="true"],
+.searchTrigger[aria-expanded="true"],
+.navButton[data-active="true"],
+.navLink[aria-current="page"] {
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.comingSoon {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.searchTrigger > span {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.mega,
+.searchPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 97%, var(--paper));
+  box-shadow: 0 24px 64px rgba(23, 25, 31, 0.16);
+}
+
+.mega {
+  right: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.45fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr) minmax(
+      180px,
+      0.7fr
+    );
+  gap: 24px;
+  padding: 24px;
+}
+
+.mega h2,
+.drawer h2,
+.drawer h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.allToolsLink {
+  display: inline-flex;
+  margin-top: 12px;
+  color: var(--blue-dark);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.domainGrid,
+.toolList,
+.drawerDomainGrid {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.domainGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.domainGrid a,
+.drawerDomainGrid a {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.domainGrid a:hover,
+.drawerDomainGrid a:hover {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  color: var(--blue-dark);
+}
+
+.toolSection h2 {
+  margin-bottom: 10px;
+}
+
+.toolList {
+  display: grid;
+  gap: 4px;
+}
+
+.toolLink {
+  min-height: 42px;
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.toolLink:hover {
+  background: color-mix(in srgb, var(--blue) 8%, var(--panel));
+}
+
+.toolLink strong {
+  font-size: 12px;
+}
+
+.toolLink span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emptyRecent {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workflowTeaser {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.workflowTeaser > span {
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.workflowTeaser strong {
+  margin-top: 18px;
+  font-size: 14px;
+}
+
+.workflowTeaser p {
+  margin: 7px 0 18px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.workflowTeaser a {
+  margin-top: auto;
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.searchPanel {
+  right: 0;
+  width: min(520px, calc(100vw - 48px));
+  padding: 16px;
+}
+
+.mobileTrigger {
+  width: 44px;
+  height: 44px;
+  display: none;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.mobileTrigger > span {
+  width: 19px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--ink);
+}
+
+.drawer {
+  inset: 0 0 0 auto;
+  width: min(420px, 100%);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  margin: 0 0 0 auto;
+  overflow: hidden;
+  border: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.drawer::backdrop {
+  background: rgba(23, 25, 31, 0.5);
+}
+
+.drawerContent {
+  height: 100%;
+  padding: 0 20px calc(24px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.drawerHeader {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 -20px 18px;
+  padding: env(safe-area-inset-top) 20px 0;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 96%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.drawerHeader h2 {
+  font-size: 18px;
+}
+
+.drawerClose {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 25px;
+}
+
+.drawerDestinations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.drawerDestinations > a {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.drawerDestinations span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.drawerSection {
+  padding-top: 28px;
+}
+
+.drawerSection h3 {
+  margin-bottom: 12px;
+}
+
+.drawerDomainGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.drawerFooter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 28px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.drawerFooter > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 13%, transparent);
+}
+
+@media (max-width: 980px) {
+  .mega {
+    grid-template-columns: minmax(300px, 1.35fr) 1fr 1fr;
+  }
+
+  .workflowTeaser {
+    display: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .header {
+    width: min(100% - 32px, 640px);
+    height: 70px;
+  }
+
+  .brand {
+    gap: 7px;
+    font-size: 17px;
+  }
+
+  .brandMark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .desktopActions {
+    display: none;
+  }
+
+  .mobileTrigger {
+    display: grid;
+  }
+}
+
+@media (max-width: 600px) {
+  .brand,
+  .drawerDomainGrid a {
+    min-height: 44px;
+  }
+
+  .drawerDestinations span,
+  .drawerFooter {
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mega,
+  .searchPanel,
+  .drawer {
+    scroll-behavior: auto;
+  }
+}

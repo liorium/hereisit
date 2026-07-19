@@ -5,7 +5,7 @@ export * from "./tool-job";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;
-export const IMAGE_TOOL_VERSION = 1 as const;
+export const IMAGE_TOOL_VERSION = 2 as const;
 export const IMAGE_WATERMARK_TOOL_ID = "image.watermark" as const;
 export const IMAGE_WATERMARK_TOOL_VERSION = 1 as const;
 export const PDF_MERGE_TOOL_ID = "pdf.merge" as const;
@@ -117,33 +117,61 @@ export const lossyCompressionSchema = z.discriminatedUnion("mode", [
     }),
 ]);
 
-export const imageOutputSchema = z.discriminatedUnion("format", [
-  z.object({
-    format: z.literal("jpeg"),
-    compression: lossyCompressionSchema,
-    matte: z
-      .string()
-      .regex(/^#[0-9a-fA-F]{6}$/)
-      .default("#ffffff"),
-  }),
-  z.object({
-    format: z.literal("webp"),
-    compression: lossyCompressionSchema,
-  }),
-  z.object({
-    format: z.literal("png"),
-    compression: z.object({ mode: z.literal("lossless") }),
-  }),
+const jpegImageOutputSchema = z.object({
+  format: z.literal("jpeg"),
+  compression: lossyCompressionSchema,
+  matte: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default("#ffffff"),
+});
+const webpImageOutputSchema = z.object({
+  format: z.literal("webp"),
+  compression: lossyCompressionSchema,
+});
+const pngImageOutputSchema = z.object({
+  format: z.literal("png"),
+  compression: z.object({ mode: z.literal("lossless") }),
+});
+
+export const imageOutputV1Schema = z.discriminatedUnion("format", [
+  jpegImageOutputSchema,
+  webpImageOutputSchema,
+  pngImageOutputSchema,
 ]);
 
-export const imagePipelineSpecSchema = z.object({
+export const imageOutputSchema = z.discriminatedUnion("format", [
+  z.object({
+    format: z.literal("source"),
+    compression: z.object({ mode: z.literal("quality"), quality }),
+  }),
+  jpegImageOutputSchema,
+  webpImageOutputSchema,
+  pngImageOutputSchema,
+]);
+
+export const imagePipelineSpecV1Schema = z.object({
   version: z.literal(1),
+  resize: resizeSpecSchema,
+  output: imageOutputV1Schema,
+  sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
+  autoOrient: z.literal(true),
+  metadata: z.literal("strip"),
+});
+
+export const imagePipelineSpecV2Schema = z.object({
+  version: z.literal(2),
   resize: resizeSpecSchema,
   output: imageOutputSchema,
   sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
   autoOrient: z.literal(true),
   metadata: z.literal("strip"),
 });
+
+export const imagePipelineSpecSchema = z.discriminatedUnion("version", [
+  imagePipelineSpecV1Schema,
+  imagePipelineSpecV2Schema,
+]);
 
 export const imageWatermarkSpecSchema = z
   .object({
@@ -206,8 +234,12 @@ export const imageWatermarkSpecSchema = z
 
 export type ResizeSpec = z.input<typeof resizeSpecSchema>;
 export type ImageOutput = z.input<typeof imageOutputSchema>;
-export type ImagePipelineSpecV1 = z.input<typeof imagePipelineSpecSchema>;
-export type ParsedImagePipelineSpecV1 = z.output<typeof imagePipelineSpecSchema>;
+export type ImagePipelineSpecV1 = z.input<typeof imagePipelineSpecV1Schema>;
+export type ParsedImagePipelineSpecV1 = z.output<typeof imagePipelineSpecV1Schema>;
+export type ImagePipelineSpecV2 = z.input<typeof imagePipelineSpecV2Schema>;
+export type ParsedImagePipelineSpecV2 = z.output<typeof imagePipelineSpecV2Schema>;
+export type ImagePipelineSpec = z.input<typeof imagePipelineSpecSchema>;
+export type ParsedImagePipelineSpec = z.output<typeof imagePipelineSpecSchema>;
 export type ImageWatermarkSpecV1 = z.input<typeof imageWatermarkSpecSchema>;
 export type ParsedImageWatermarkSpecV1 = z.output<typeof imageWatermarkSpecSchema>;
 export type ImageWatermarkPosition = ImageWatermarkSpecV1["position"];
@@ -261,14 +293,14 @@ export interface ImageRunRequest {
   type: "run";
   jobId: string;
   tool: "image.pipeline";
-  toolVersion: 1;
+  toolVersion: typeof IMAGE_TOOL_VERSION;
   input: {
     name: string;
     mimeHint: string;
     byteLength: number;
     bytes: ArrayBuffer;
   };
-  spec: ImagePipelineSpecV1;
+  spec: ImagePipelineSpec;
 }
 
 export interface CancelRequest {
@@ -313,7 +345,7 @@ export type WorkerEvent =
 export interface BatchImageItem {
   itemId: string;
   file: File;
-  spec: ImagePipelineSpecV1;
+  spec: ImagePipelineSpec;
 }
 
 export type BatchItemResult =
@@ -485,7 +517,7 @@ export interface ToolPreset {
   name: string;
   description: string;
   badge: string;
-  spec: ImagePipelineSpecV1;
+  spec: ImagePipelineSpecV2;
 }
 
 const pdfPageNumbersSchema = z

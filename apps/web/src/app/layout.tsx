@@ -6,7 +6,7 @@ import {
   HOME_TITLE,
   SITE_NAME,
   SITE_URL,
-} from "../lib/site";
+} from "../lib/site-identity";
 import "./globals.css";
 
 export const metadata: Metadata = {

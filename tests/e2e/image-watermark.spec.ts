@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
+import {
+  expectWebShareUnused,
+  installAvailableWebShare,
+  installDownloadActivationController,
+  setDownloadActivationBlocked,
+} from "./support/result-download";
 
 const LOCAL_PAGES_ORIGIN = "http://127.0.0.1:4173";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
@@ -207,15 +213,11 @@ function expectPixelNear(
   }
 }
 
-test("text watermark uses the approved defaults and saves only on request", async ({ page }) => {
+test("text watermark uses the approved defaults and downloads only on request", async ({
+  page,
+}) => {
+  await installAvailableWebShare(page);
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () => {
-        throw new Error("navigator.share must not be called");
-      },
-    });
-    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     const trackedWindow = window as Window & {
       __rawWatermarkPreviewUrls?: number;
       __watermarkObjectUrls?: number;
@@ -279,7 +281,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   await expect(page.getByLabel("문구 색상")).toHaveValue("#111827");
   await expect(page.getByLabel("출력 형식")).toHaveValue("source");
   await expect(page.getByRole("slider", { name: /품질/ })).toHaveValue("90");
-  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP 다운로드/ })).toHaveCount(0);
   await expect(page.locator('img[alt*="워터마크 결과"]')).toHaveCount(0);
   expect(downloads).toBe(0);
 
@@ -316,6 +318,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
     page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("source-watermarked-hereisit.png");
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
   const path = await download.path();
   expect(path).not.toBeNull();
   const output = new Uint8Array(await readFile(path as string));
@@ -331,6 +334,7 @@ test("text watermark uses the approved defaults and saves only on request", asyn
   expect(requestViolations).toEqual([]);
   expect(failedRequests).toBe(0);
   expect(pageErrors).toEqual([]);
+  await expectWebShareUnused(page);
 });
 
 test("loads only the dedicated image watermark Worker marker", async ({ page }) => {
@@ -365,12 +369,7 @@ test("loads only the dedicated image watermark Worker marker", async ({ page }) 
 
 test("places a real logo at the top-left and preserves pixels outside it", async ({ page }) => {
   await page.addInitScript(() => {
-    Object.defineProperty(navigator, "share", {
-      configurable: true,
-      value: () => {
-        throw new Error("navigator.share must not be called");
-      },
-    });
+    Object.defineProperty(navigator, "canShare", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     const trackedWindow = window as Window & {
       __rawWatermarkPreviewUrls?: number;
@@ -494,6 +493,7 @@ test("accepts a structurally valid logo with an empty MIME hint", async ({ page 
 test("creates a collision-safe ZIP for duplicate source names only on request", async ({
   page,
 }) => {
+  await installAvailableWebShare(page);
   await page.goto("/image/watermark");
   const origin = new URL(page.url()).origin;
   const requestViolations: string[] = [];
@@ -517,45 +517,64 @@ test("creates a collision-safe ZIP for duplicate source names only on request", 
   await page.getByRole("button", { name: "2개 이미지에 워터마크 넣기 →" }).click();
   await waitForCompleted(page, 2);
   expect(downloads).toBe(0);
-  const [download] = await Promise.all([
+
+  const [selectedDownload] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" }).click(),
+    page.getByRole("button", { name: "선택 파일 다운로드 ↓" }).click(),
   ]);
-  expect(download.suggestedFilename()).toBe("hereisit-watermarked-images.zip");
-  const path = await download.path();
+  expect(selectedDownload.suggestedFilename()).toBe("duplicate-watermarked-hereisit.png");
+  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+
+  const [archiveDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(archiveDownload.suggestedFilename()).toBe("hereisit-watermarked-images.zip");
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
+  await expectWebShareUnused(page);
+
+  const path = await archiveDownload.path();
   expect(path).not.toBeNull();
   const archive = unzipSync(new Uint8Array(await readFile(path as string)));
   expect(Object.keys(archive).sort()).toEqual([
     "duplicate-watermarked-hereisit-2.png",
     "duplicate-watermarked-hereisit.png",
   ]);
-  expect(downloads).toBe(1);
+  expect(downloads).toBe(2);
   expect(requestViolations).toEqual([]);
 });
 
-test("releases an archive URL when ZIP download initiation throws", async ({ page }) => {
+test("releases a failed archive URL and retries ZIP download initiation", async ({ page }) => {
   await page.addInitScript(() => {
     const trackedWindow = window as Window & {
-      __archiveUrl?: string;
-      __archiveUrlRevoked?: boolean;
+      __archiveUrls?: string[];
+      __blockArchiveDownload?: boolean;
+      __revokedArchiveUrls?: string[];
     };
+    trackedWindow.__archiveUrls = [];
+    trackedWindow.__blockArchiveDownload = false;
+    trackedWindow.__revokedArchiveUrls = [];
     const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
     const nativeRevokeObjectUrl = URL.revokeObjectURL.bind(URL);
     URL.createObjectURL = (object) => {
       const url = nativeCreateObjectUrl(object);
       if (object instanceof Blob && object.type === "application/zip") {
-        trackedWindow.__archiveUrl = url;
-        trackedWindow.__archiveUrlRevoked = false;
+        trackedWindow.__archiveUrls?.push(url);
       }
       return url;
     };
     URL.revokeObjectURL = (url) => {
-      if (url === trackedWindow.__archiveUrl) trackedWindow.__archiveUrlRevoked = true;
+      if (trackedWindow.__archiveUrls?.includes(url)) {
+        trackedWindow.__revokedArchiveUrls?.push(url);
+      }
       nativeRevokeObjectUrl(url);
     };
     const nativeClick = HTMLAnchorElement.prototype.click;
     HTMLAnchorElement.prototype.click = function click() {
-      if (this.download === "hereisit-watermarked-images.zip") {
+      if (
+        trackedWindow.__blockArchiveDownload &&
+        this.download === "hereisit-watermarked-images.zip"
+      ) {
         throw new Error("download initiation failed");
       }
       nativeClick.call(this);
@@ -569,15 +588,44 @@ test("releases an archive URL when ZIP download initiation throws", async ({ pag
   ]);
   await page.getByRole("button", { name: "2개 이미지에 워터마크 넣기 →" }).click();
   await waitForCompleted(page, 2);
-  await page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" }).click();
-  await expect(page.getByRole("status")).toContainText("ZIP 파일을 만들지 못했어요.");
+  const archiveAction = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+  await page.evaluate(() => {
+    (window as Window & { __blockArchiveDownload?: boolean }).__blockArchiveDownload = true;
+  });
+  await archiveAction.click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(archiveAction).toBeVisible();
+  const failedArchiveUrl = await page.evaluate(() =>
+    (window as Window & { __archiveUrls?: string[] }).__archiveUrls?.at(-1),
+  );
+  expect(failedArchiveUrl).toBeTruthy();
   await expect
     .poll(() =>
       page.evaluate(
-        () => (window as Window & { __archiveUrlRevoked?: boolean }).__archiveUrlRevoked ?? false,
+        (url) =>
+          (window as Window & { __revokedArchiveUrls?: string[] }).__revokedArchiveUrls?.includes(
+            url,
+          ) ?? false,
+        failedArchiveUrl as string,
       ),
     )
     .toBe(true);
+
+  await page.evaluate(() => {
+    (window as Window & { __blockArchiveDownload?: boolean }).__blockArchiveDownload = false;
+  });
+  const [download] = await Promise.all([page.waitForEvent("download"), archiveAction.click()]);
+  expect(download.suggestedFilename()).toBe("hereisit-watermarked-images.zip");
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(path as string)));
+  expect(Object.keys(archive).sort()).toEqual([
+    "first-watermarked-hereisit.png",
+    "second-watermarked-hereisit.png",
+  ]);
+  await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
 });
 
 test("releases completed archive URLs on invalidation and rerun", async ({ page }) => {
@@ -611,7 +659,7 @@ test("releases completed archive URLs on invalidation and rerun", async ({ page 
     { name: "second.png", mimeType: "image/png", buffer: source },
   ]);
   const run = page.getByRole("button", { name: "2개 이미지에 워터마크 넣기 →" });
-  const saveArchive = page.getByRole("button", { name: "결과 2개 ZIP으로 받기 ↓" });
+  const saveArchive = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
 
   await run.click();
   await waitForCompleted(page, 2);
@@ -706,7 +754,7 @@ test("shows corrections for missing, oversize, and animated logos", async ({ pag
   await expect(page.getByRole("alert").filter({ hasText: /애니메이션|움직이는/ })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP 다운로드/ })).toHaveCount(0);
 });
 
 test("setting and logo changes revoke stale result URLs and disable saving", async ({ page }) => {
@@ -747,7 +795,7 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
   await opacity.focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP 다운로드/ })).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(
@@ -785,7 +833,7 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
     buffer: secondLogo,
   });
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /결과 다운로드|ZIP 다운로드/ })).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(
@@ -880,6 +928,33 @@ test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ p
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(1);
 });
 
+test("keeps a watermark result retryable when download activation throws", async ({ page }) => {
+  await installDownloadActivationController(page);
+  await page.goto("/image/watermark");
+  const source = await createSolidPng(page, 100, 60, "#ffffff");
+  await setSourceFiles(page, {
+    name: "retry.png",
+    mimeType: "image/png",
+    buffer: source,
+  });
+  await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
+  await waitForCompleted(page, 1);
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "결과 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("retry-watermarked-hereisit.png");
+});
+
 test("reports an unsupported runtime before reading a selected file", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, "OffscreenCanvas", { configurable: true, value: undefined });
@@ -928,7 +1003,9 @@ test("reports an unsupported runtime before reading a selected file", async ({ p
     ),
   ).toBe(0);
   await expect(page.locator('img[alt="unread.png 미리보기"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /이미지에 워터마크 넣기/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^\d+개 이미지에 워터마크 넣기 →$/ })).toHaveCount(
+    0,
+  );
 });
 
 test("moves through all nine watermark positions with the keyboard", async ({ page }) => {

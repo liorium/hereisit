@@ -1,11 +1,19 @@
-import { PdfEditingToolPage } from "../../../components/pdf-editing-tool-page";
+import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
+import { PdfWorkbench } from "../../../components/pdf-workbench";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
 import { createToolMetadata } from "../../../lib/metadata";
-import { pdfTools } from "../../../lib/site";
+import { getToolImplementation } from "../../../lib/tool-implementations";
 
-const tool = pdfTools.watermark;
+const toolId = "pdf.watermark" satisfies AvailableToolId;
+const implementation = getToolImplementation(toolId);
 
-export const metadata = createToolMetadata(tool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function WatermarkPdfPage() {
-  return <PdfEditingToolPage tool={tool} />;
+  return (
+    <ToolDetailPage
+      toolId={toolId}
+      workbench={<PdfWorkbench intent={implementation.intent} toolId={toolId} />}
+    />
+  );
 }

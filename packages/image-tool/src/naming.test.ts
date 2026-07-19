@@ -6,6 +6,15 @@ describe("suggestOutputName", () => {
     expect(suggestOutputName("holiday.photo.PNG", "webp")).toBe("holiday.photo-hereisit.webp");
   });
 
+  it.each([
+    ["portrait.jpeg", "jpeg", "portrait-hereisit.jpeg"],
+    ["holiday.photo.PNG", "png", "holiday.photo-hereisit.PNG"],
+    ["already.WEBP", "webp", "already-hereisit.WEBP"],
+    ["misleading.png", "jpeg", "misleading-hereisit.jpg"],
+  ] as const)("preserves a matching source extension for %s", (name, format, expected) => {
+    expect(suggestOutputName(name, format, { preserveMatchingExtension: true })).toBe(expected);
+  });
+
   it("removes paths, control characters, and reserved filename characters", () => {
     expect(suggestOutputName("../private\\bad:<name>\u0000.jpg", "jpeg")).toBe(
       "bad--name--hereisit.jpg",

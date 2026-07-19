@@ -16,6 +16,19 @@
   border: 0;
 }
 
+.liveStatus {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .emptyDropzone {
   width: 100%;
   color: var(--ink);
@@ -204,7 +217,7 @@
 .headerActions button,
 .secondaryButton,
 .cancelButton {
-  min-height: 42px;
+  min-height: 44px;
   padding: 0 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -421,6 +434,17 @@
   letter-spacing: 0.08em;
 }
 
+.previewTopline span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewTopline span:last-child {
+  flex: 0 0 auto;
+}
+
 .previewStage {
   min-height: 410px;
   flex: 1;
@@ -543,7 +567,7 @@
 }
 
 .inlineDownload {
-  min-height: 38px;
+  min-height: 44px;
   align-self: center;
   margin-top: 10px;
   padding: 0 16px;
@@ -1041,10 +1065,10 @@
 }
 
 .actionBar strong {
-  overflow: hidden;
+  overflow: visible;
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .actionBar span {
@@ -1300,6 +1324,108 @@
 
   .actionButtons > button {
     min-height: 48px;
+  }
+}
+
+@media (max-width: 600px) {
+  .shell {
+    width: calc(100% - 24px);
+  }
+
+  .emptyDropzone {
+    min-height: 278px;
+    padding: 18px 16px 46px;
+    gap: 12px;
+    box-shadow: 5px 5px 0 var(--yellow);
+  }
+
+  .emptyDropzone::before {
+    display: none;
+  }
+
+  .dropIcon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .dropIcon span {
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
+  }
+
+  .emptyDropzone h2 {
+    font-size: 24px;
+  }
+
+  .emptyDropzone h2 + p {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .dropActions {
+    gap: 8px;
+  }
+
+  .primaryButton {
+    min-height: 48px;
+  }
+
+  .emptyStatus {
+    min-height: 18px;
+  }
+
+  .localBadge {
+    bottom: 12px;
+  }
+
+  .workbenchHeader {
+    min-height: 72px;
+    padding: 14px;
+  }
+
+  .workbenchHeader h2 {
+    font-size: 24px;
+  }
+
+  .headerActions button {
+    font-size: 12px;
+  }
+
+  .dropEyebrow,
+  .panelTitle span,
+  .fileCopy small,
+  .previewTopline,
+  .previewStage figcaption,
+  .sourceInfoCard > span:not([aria-hidden="true"]),
+  .sourceInfoCard small,
+  .presetList button strong,
+  .presetList button small,
+  .presetList button em,
+  .segmented button,
+  .modeTabs label,
+  .textField,
+  .colorField,
+  .logoPicker button,
+  .logoPicker [data-watermark-logo-hint],
+  .positionOption,
+  .rangeValueRow,
+  .rangeValueRow strong,
+  .numberField,
+  .selectField,
+  .qualityField,
+  .pasteHint,
+  .emptyStatus,
+  .previewMemoryNotice span,
+  .qualityField strong,
+  .formatWarning,
+  .sizeGoalField strong,
+  .sizeGoalField small,
+  .privacyCopy,
+  .privacyNotice strong,
+  .actionBar span {
+    font-size: 12px;
   }
 }
 

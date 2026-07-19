@@ -10,16 +10,23 @@ import {
 } from "@hereisit/browser-runtime/pdf-compress-scanned";
 import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
-import { PDF_COMPRESS_SCANNED_WARNING } from "../lib/site";
+import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PAGE_COUNT = 100;
 const INITIAL_MESSAGE = "파일을 선택하면 페이지를 확인할게요.";
 const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
 const PAGE_LIMIT_MESSAGE = "PDF는 1페이지부터 100페이지까지 압축할 수 있어요.";
+const PDF_COMPRESS_SCANNED_WARNING = getToolImplementation("pdf.compress-scanned").notices.find(
+  ({ tone }) => tone === "warning",
+)?.text;
+if (PDF_COMPRESS_SCANNED_WARNING === undefined) {
+  throw new Error("Missing scanned PDF warning");
+}
 
 type Preset = PdfCompressScannedSpecV1["preset"];
 type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResult, "bytes">;
@@ -47,7 +54,17 @@ function progressLabel(progress: PdfCompressScannedProgress | undefined): string
   return "결과 마무리 중";
 }
 
-export function PdfCompressWorkbench() {
+export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "pdf-compress-scanned" ||
+    implementation.family !== "pdf" ||
+    implementation.intent !== "compress"
+  ) {
+    throw new Error(`PdfCompressWorkbench tool mismatch: ${toolId}`);
+  }
+  const sourceFileLimits: SourceFileLimits = implementation.sourceFileLimits;
+  const { minFiles, maxFiles, maxFileBytes } = sourceFileLimits;
   const [file, setFile] = useState<File>();
   const [inspection, setInspection] = useState<PdfInspectionResult>();
   const [hydrated, setHydrated] = useState(false);
@@ -63,16 +80,12 @@ export function PdfCompressWorkbench() {
   const inputRef = useRef<HTMLInputElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfCompressScannedJobHandle | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
-  const saveOperationRef = useRef(0);
-  const savingRef = useRef(false);
   const busy = inspecting || processing;
   const visibleMessage = hydrated && !runtimeSupported ? UNSUPPORTED_BROWSER_MESSAGE : message;
 
   const clearResult = useCallback((updateState = true) => {
-    resultBlobRef.current = undefined;
     const resultUrl = resultUrlRef.current;
     resultUrlRef.current = undefined;
     if (resultUrl !== undefined) URL.revokeObjectURL(resultUrl);
@@ -90,8 +103,6 @@ export function PdfCompressWorkbench() {
       inspectionHandleRef.current = undefined;
       jobHandleRef.current?.cancel();
       jobHandleRef.current = undefined;
-      saveOperationRef.current += 1;
-      savingRef.current = false;
       clearResult(updateState);
       if (updateState) {
         setInspecting(false);
@@ -170,7 +181,7 @@ export function PdfCompressWorkbench() {
       }
 
       const candidates = Array.from(fileList);
-      if (candidates.length !== 1) {
+      if (candidates.length < minFiles || candidates.length > maxFiles) {
         setMessage("PDF 파일 한 개만 선택해 주세요.");
         return;
       }
@@ -183,7 +194,7 @@ export function PdfCompressWorkbench() {
       if (
         !Number.isSafeInteger(nextFile.size) ||
         nextFile.size < 1 ||
-        nextFile.size > MAX_FILE_BYTES
+        nextFile.size > maxFileBytes
       ) {
         setMessage("PDF 파일은 1바이트 이상 50MB 이하여야 해요.");
         return;
@@ -191,8 +202,15 @@ export function PdfCompressWorkbench() {
 
       void inspectSelectedFile(nextFile);
     },
-    [inspectSelectedFile, runtimeSupported],
+    [inspectSelectedFile, maxFileBytes, maxFiles, minFiles, runtimeSupported],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: chooseFile,
+    onReselectRequired: setMessage,
+  });
 
   const reset = () => {
     invalidateActiveWork();
@@ -244,7 +262,6 @@ export function PdfCompressWorkbench() {
         const { bytes, ...resultMetadata } = outcome.value;
         const blob = new Blob([bytes], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResult(resultMetadata);
         setProgress({ phase: "finalizing", fraction: 1 });
@@ -294,34 +311,14 @@ export function PdfCompressWorkbench() {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = () => {
-    const blob = resultBlobRef.current;
+  const downloadResult = () => {
     const resultUrl = resultUrlRef.current;
-    if (
-      result === undefined ||
-      resultUrl === undefined ||
-      blob === undefined ||
-      savingRef.current
-    ) {
-      return;
-    }
-
-    const runId = runRef.current;
-    const saveOperation = saveOperationRef.current + 1;
-    saveOperationRef.current = saveOperation;
-    savingRef.current = true;
-    const isCurrentSave = () =>
-      saveOperationRef.current === saveOperation &&
-      runRef.current === runId &&
-      resultBlobRef.current === blob &&
-      resultUrlRef.current === resultUrl;
-
+    if (result === undefined || resultUrl === undefined) return;
     try {
-      if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
-      if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
-    } finally {
-      if (saveOperationRef.current === saveOperation) savingRef.current = false;
+      setMessage("다운로드를 시작했어요.");
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
   };
 
@@ -579,11 +576,7 @@ export function PdfCompressWorkbench() {
                 >
                   같은 설정으로 다시 실행
                 </button>
-                <button
-                  className={styles.runButton}
-                  type="button"
-                  onClick={() => void saveResult()}
-                >
+                <button className={styles.runButton} type="button" onClick={downloadResult}>
                   PDF 다운로드 ↓
                 </button>
               </>

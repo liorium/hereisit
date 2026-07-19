@@ -15,11 +15,13 @@ import {
   planPdfToImagesRasterization,
 } from "@hereisit/pdf-tool";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const UNSUPPORTED_BROWSER_MESSAGE =
   "이 브라우저에서는 PDF를 이미지로 변환할 수 없어요. 최신 Safari, Chrome, Firefox 또는 Edge를 사용해 주세요.";
 
@@ -56,7 +58,17 @@ function progressLabel(progress: PdfToImagesProgress | undefined): string {
   return "결과 마무리 중";
 }
 
-export function PdfToImageWorkbench() {
+export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "pdf-to-images" ||
+    implementation.family !== "pdf" ||
+    implementation.intent !== "to-image"
+  ) {
+    throw new Error(`PdfToImageWorkbench tool mismatch: ${toolId}`);
+  }
+  const sourceFileLimits: SourceFileLimits = implementation.sourceFileLimits;
+  const { minFiles, maxFiles, maxFileBytes } = sourceFileLimits;
   const [file, setFile] = useState<File>();
   const [inspection, setInspection] = useState<PdfInspectionResult>();
   const [hydrated, setHydrated] = useState(false);
@@ -73,16 +85,12 @@ export function PdfToImageWorkbench() {
   const [progress, setProgress] = useState<PdfToImagesProgress>();
   const [result, setResult] = useState<PdfToImagesResult>();
   const [resultUrl, setResultUrl] = useState<string>();
-  const [saving, setSaving] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfToImagesJobHandle | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
-  const saveOperationRef = useRef(0);
-  const savingRef = useRef(false);
   const busy = inspecting || processing;
 
   const parsedPageRange = useMemo(
@@ -124,7 +132,6 @@ export function PdfToImageWorkbench() {
   }, [dpi, format, inspection, parsedPageRange, quality, selectionMode]);
 
   const revokeResultUrl = useCallback(() => {
-    resultBlobRef.current = undefined;
     if (resultUrlRef.current !== undefined) {
       URL.revokeObjectURL(resultUrlRef.current);
       resultUrlRef.current = undefined;
@@ -145,9 +152,6 @@ export function PdfToImageWorkbench() {
     inspectionHandleRef.current = undefined;
     jobHandleRef.current?.cancel();
     jobHandleRef.current = undefined;
-    saveOperationRef.current += 1;
-    savingRef.current = false;
-    setSaving(false);
     setInspecting(false);
     setProcessing(false);
     clearResult();
@@ -162,11 +166,8 @@ export function PdfToImageWorkbench() {
   useEffect(
     () => () => {
       runRef.current += 1;
-      saveOperationRef.current += 1;
-      savingRef.current = false;
       inspectionHandleRef.current?.cancel();
       jobHandleRef.current?.cancel();
-      resultBlobRef.current = undefined;
       if (resultUrlRef.current !== undefined) URL.revokeObjectURL(resultUrlRef.current);
     },
     [],
@@ -222,7 +223,7 @@ export function PdfToImageWorkbench() {
       }
 
       const candidates = Array.from(fileList);
-      if (candidates.length !== 1) {
+      if (candidates.length < minFiles || candidates.length > maxFiles) {
         setMessage("PDF 파일 한 개만 선택해 주세요.");
         return;
       }
@@ -235,7 +236,7 @@ export function PdfToImageWorkbench() {
       if (
         !Number.isSafeInteger(nextFile.size) ||
         nextFile.size < 1 ||
-        nextFile.size > MAX_FILE_BYTES
+        nextFile.size > maxFileBytes
       ) {
         setMessage("PDF 파일은 1바이트 이상 50MB 이하여야 해요.");
         return;
@@ -243,8 +244,15 @@ export function PdfToImageWorkbench() {
 
       void inspectSelectedFile(nextFile);
     },
-    [inspectSelectedFile, runtimeSupported],
+    [inspectSelectedFile, maxFileBytes, maxFiles, minFiles, runtimeSupported],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: chooseFile,
+    onReselectRequired: setMessage,
+  });
 
   const reset = () => {
     invalidateActiveWork();
@@ -296,7 +304,6 @@ export function PdfToImageWorkbench() {
       if (outcome.status === "fulfilled") {
         const blob = new Blob([outcome.value.bytes], { type: outcome.value.mime });
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResultUrl(url);
         setResult({ ...outcome.value, bytes: new ArrayBuffer(0) });
@@ -337,37 +344,16 @@ export function PdfToImageWorkbench() {
     setMessage("PDF 페이지 확인을 중단했어요.");
   };
 
-  const saveResult = () => {
-    const blob = resultBlobRef.current;
-    if (
-      result === undefined ||
-      resultUrl === undefined ||
-      blob === undefined ||
-      savingRef.current
-    ) {
-      return;
-    }
-
-    const runId = runRef.current;
-    const saveOperation = saveOperationRef.current + 1;
-    saveOperationRef.current = saveOperation;
-    savingRef.current = true;
-    setSaving(true);
-    const isCurrentSave = () =>
-      saveOperationRef.current === saveOperation &&
-      runRef.current === runId &&
-      resultBlobRef.current === blob &&
-      resultUrlRef.current === resultUrl;
-
+  const downloadResult = () => {
+    const currentUrl = resultUrlRef.current;
+    if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
     try {
-      if (!isCurrentSave()) return;
       downloadUrl(resultUrl, result.suggestedName);
-      if (isCurrentSave()) setMessage("결과 파일을 저장했어요.");
-    } finally {
-      if (saveOperationRef.current === saveOperation) {
-        savingRef.current = false;
-        setSaving(false);
-      }
+      setMessage(
+        result.outputFileCount === 1 ? "다운로드를 시작했어요." : "ZIP 다운로드를 시작했어요.",
+      );
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     }
   };
 
@@ -736,15 +722,8 @@ export function PdfToImageWorkbench() {
                   >
                     같은 설정으로 다시 실행
                   </button>
-                  <button
-                    className={styles.runButton}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void saveResult()}
-                  >
-                    {result.outputFileCount === 1
-                      ? "이미지 다운로드 ↓"
-                      : `결과 ${result.outputFileCount}개 ZIP으로 받기 ↓`}
+                  <button className={styles.runButton} type="button" onClick={downloadResult}>
+                    {result.outputFileCount === 1 ? "이미지 다운로드 ↓" : "ZIP 다운로드 ↓"}
                   </button>
                 </>
               ) : (

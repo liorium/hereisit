@@ -1,9 +1,17 @@
 import type { ImageOutput } from "@hereisit/tool-contracts";
 
-const extensionByFormat: Record<ImageOutput["format"], string> = {
+type EncodableImageFormat = Exclude<ImageOutput["format"], "source">;
+
+const extensionByFormat: Record<EncodableImageFormat, string> = {
   jpeg: "jpg",
   png: "png",
   webp: "webp",
+};
+
+const matchingExtensionsByFormat: Record<EncodableImageFormat, ReadonlySet<string>> = {
+  jpeg: new Set(["jpg", "jpeg"]),
+  png: new Set(["png"]),
+  webp: new Set(["webp"]),
 };
 
 function isSafePublicFilenameCharacter(character: string): boolean {
@@ -34,8 +42,28 @@ export function safeImageBaseName(inputName: string): string {
     .join("");
 }
 
-export function suggestOutputName(inputName: string, format: ImageOutput["format"]): string {
-  return `${safeImageBaseName(inputName)}-hereisit.${extensionByFormat[format]}`;
+function matchingSourceExtension(
+  inputName: string,
+  format: EncodableImageFormat,
+): string | undefined {
+  const filename = inputName.replaceAll("\\", "/").split("/").at(-1)?.trim() ?? "";
+  const match = /\.([a-z0-9]+)$/i.exec(filename);
+  const extension = match?.[1];
+  if (extension === undefined || !matchingExtensionsByFormat[format].has(extension.toLowerCase())) {
+    return undefined;
+  }
+  return extension;
+}
+
+export function suggestOutputName(
+  inputName: string,
+  format: EncodableImageFormat,
+  options: { preserveMatchingExtension?: boolean } = {},
+): string {
+  const extension = options.preserveMatchingExtension
+    ? (matchingSourceExtension(inputName, format) ?? extensionByFormat[format])
+    : extensionByFormat[format];
+  return `${safeImageBaseName(inputName)}-hereisit.${extension}`;
 }
 
 const extensionByMime = {

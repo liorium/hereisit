@@ -1,12 +1,12 @@
+import { type AvailableToolId, getAvailableToolById } from "@hereisit/tool-registry/catalog";
 import { ImageCompressWorkbench } from "../../../components/image-compress-workbench";
-import { ImageToolPage } from "../../../components/image-tool-page";
-import { createImageToolMetadata } from "../../../lib/metadata";
-import { imageTools } from "../../../lib/site";
+import { ToolDetailPage } from "../../../components/tool-detail-page";
+import { createToolMetadata } from "../../../lib/metadata";
 
-const tool = imageTools.compress;
+const toolId = "image.compress" satisfies AvailableToolId;
 
-export const metadata = createImageToolMetadata(tool);
+export const metadata = createToolMetadata(getAvailableToolById(toolId));
 
 export default function CompressImagePage() {
-  return <ImageToolPage tool={tool} imageCompressWorkbench={<ImageCompressWorkbench />} />;
+  return <ToolDetailPage toolId={toolId} workbench={<ImageCompressWorkbench />} />;
 }

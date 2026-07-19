@@ -19,8 +19,50 @@ Every tool has a stable ID, an integer version, validated inputs, a declared exe
 resource limits, structured progress, and structured errors. Executable functions never cross a Worker
 or network boundary.
 
+### Catalog, discovery, and detail ownership
+
+`packages/tool-registry` owns user-facing identity and discovery metadata: availability, canonical route,
+search aliases, domains, purposes, launcher input, output kinds, experience, execution, contract version,
+rank, and the ordered three related tool IDs. The keyed `toolImplementationConfig` in the web app owns
+runtime-facing intent, bundle profile, source limits, eyebrow, summary, and notices. Its keys match every
+available catalog ID exactly; discovery code does not duplicate implementation data and implementation
+code does not redefine catalog identity.
+
+The discovery routes `/`, `/tools`, `/my-tools`, and `/workflows` may import catalog/discovery UI but no
+processor, codec, Worker, browser runtime, image tool, PDF tool, or tool-contract implementation. The
+export verifier enforces that processor-free import boundary. Each processor route directly imports only
+its assigned workbench and passes that route-owned node to the shared detail shell; there is no central
+workbench switch or dynamic processor registry. The shell selects `파일 작업 영역` for `file` tools and
+`편집 작업 공간` for `workspace` tools, renders the browser-execution disclosure, and reads its exactly
+three next actions from the catalog. The current inventory is ten `file` tools and one `workspace` tool
+(`/pdf/organize`); there is no placeholder `quick` route or generic quick shell.
+
+Home file recommendation reads at most the first 64 KiB of each selected file, accepts at most 100 files,
+and schedules at most two prefix reads concurrently. Every prefix lease is released after detection. A
+chosen recommendation transfers the selected `File` references through module-scoped memory only: the
+handoff is bound to one target tool ID, consumed once, and expires after exactly 60 seconds. Expiry,
+target mismatch, consumption, and reload clear the file references; the handoff is never written to
+`localStorage` or `sessionStorage`.
+
+Favorites and recent tools persist only validated available tool IDs under
+`hereisit.favorite-tools.v1` and `hereisit.recent-tools.v1`. Each list is de-duplicated and capped at 12.
+Malformed or unreadable browser storage starts with empty in-memory preferences. If a later write is
+denied, the normalized changed IDs remain available in memory while persistence switches to `memory`, so
+discovery remains usable without persisting filenames or file contents as preference data.
+
+Discovery JavaScript is checked after every production export. Each discovery route may own at most
+76,800 gzip bytes and the discovery-shared layer at most 122,880 gzip bytes. Relative to the checked-in
+baseline, each route and the shared layer may grow by only the smaller of 10% or 10 KiB. These size gates
+run alongside the processor-marker and route-import isolation checks.
+
 The initial `image.pipeline@1` tool guarantees one decode and one raster draw per item. Quality-based
 output performs one encode; target-byte mode may encode repeatedly against the already-rendered canvas.
+
+`image.pipeline@2` retains the v1 specification parser for explicit JPG, PNG, and WebP jobs and adds a
+v2 `source` output policy. The current catalog and Worker handshake advertise tool version 2, so an old
+v1 Worker cannot be mistaken for a processor that understands source-preserving compression. The
+runtime resolves `source` from inspected bytes, then validates the encoded result's signature, MIME,
+dimensions, and animation state before assigning its download name.
 
 The source-relative `smaller-only` goal is a hard postcondition. The runtime adaptively encodes against
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
@@ -40,8 +82,8 @@ Every image-watermark result is reconstructed through an output-sized `Offscreen
 EXIF, GPS, camera, and container metadata and may normalize color profiles. It is a new encode rather than
 a byte-preserving edit, so its size may increase even when `source` is selected; this contract has no
 smaller-only postcondition. The Worker draws the auto-oriented source once and the selected watermark
-once. A result is exposed in tab-owned memory and saved only after an explicit single-result or batch-ZIP
-action.
+once. A result is exposed in tab-owned memory and downloaded only after an explicit single-result or
+batch-ZIP action.
 
 The `pdf.merge@1`, `pdf.split@1`, `pdf.images-to-pdf@1`, `pdf.organize@1`, and `pdf.watermark@1` tools
 copy or embed content in a dedicated one-job Worker. The organizer creates a new document from a validated
@@ -99,7 +141,7 @@ and never offers a larger result. Only other PDF edits can make an output larger
 
 ## Resource policy
 
-`image.pipeline@1` dimensions are parsed from PNG, JPEG, and WebP structure before decode. Its runtime
+`image.pipeline@2` dimensions are parsed from PNG, JPEG, WebP, and supported HEIC structure before decode. Its runtime
 then keeps a defensive post-decode check, limits automatic concurrency to two Workers (one on low-memory
 devices), and enforces per-file, pixel, output, batch-input, and retained-result budgets. Worker creation
 errors, message decode failures, and a three-minute job watchdog settle into structured failures instead
@@ -145,6 +187,7 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
+- Generated image, PDF, and ZIP results never use Web Share; an explicit download-labelled action activates the tab-owned Blob URL.
 - Image-watermark source/logo bytes move only as transferred local buffers between the tab and its
   dedicated Workers. Source and logo `File` objects never receive object URLs and are never decoded by the
   main-thread UI; filename, size, and Worker-validated dimensions are shown as metadata instead. No remote
@@ -152,7 +195,7 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - Only Worker-validated, newly encoded image results and generated ZIP archives receive image-watermark
   object URLs. They are excluded from network and analytics payloads and remain in tab-owned memory.
 - Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
-  archive failure, and archive timeout. No save begins until the user explicitly requests one.
+  archive failure, and archive timeout. No download begins until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
 - `image.optimize@1` keeps the source `File` in the tab, checks policy twice, uploads sequentially, and
   retains only lazy authenticated download handles. Interrupted downloads stay retryable; MIME or byte
@@ -160,15 +203,20 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 ## Release proof
 
-After serving `apps/web/out` through the local Pages runtime, the tracked browser smokes prove the image
-watermark and both PDF raster paths without uploading fixtures:
+After serving `apps/web/out` through the local Pages runtime, four tracked browser smokes prove scalable
+navigation, image watermarking, and both PDF raster paths without uploading fixtures:
 
 ~~~bash
+node scripts/smoke-navigation.mjs http://127.0.0.1:3000
 node scripts/smoke-image-watermark.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without a base URL, all three scripts target the production Pages origin.
+Without a base URL, all four scripts target the production Pages origin. The navigation smoke verifies
+the six release routes, canonical security headers, approved header/search behavior, home tabs and local
+launcher, the complete and planned catalog states, non-indexed personal/workflow pages, representative
+file/workspace shells, exact next actions, and read-only same-origin browser traffic.
 The image-watermark smoke also proves the security headers, approved defaults, synthetic 320×180 PNG
-result, explicit-only save, same dimensions and PNG signature, and absence of external or write requests.
+result, explicit-only download, same dimensions and PNG signature, and absence of external or write
+requests.

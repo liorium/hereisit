@@ -40,6 +40,16 @@ export default defineConfig({
       },
       testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
     },
+    {
+      name: "mobile-firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        viewport: { width: 390, height: 844 },
+        screen: { width: 390, height: 844 },
+        hasTouch: true,
+      },
+      testMatch: /mobile\.spec\.ts/,
+    },
     ...(includeWebKit
       ? [
           {

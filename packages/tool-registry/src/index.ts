@@ -1,9 +1,9 @@
-import type { ImagePipelineSpecV1, ToolPreset } from "@hereisit/tool-contracts";
+import type { ImagePipelineSpecV2, ToolPreset } from "@hereisit/tool-contracts";
 
 export * from "./processing";
 
-const base: Pick<ImagePipelineSpecV1, "version" | "autoOrient" | "metadata" | "sizeGoal"> = {
-  version: 1,
+const base: Pick<ImagePipelineSpecV2, "version" | "autoOrient" | "metadata" | "sizeGoal"> = {
+  version: 2,
   autoOrient: true,
   metadata: "strip",
   sizeGoal: { mode: "allow-growth" },
@@ -25,12 +25,12 @@ export const imagePresets: readonly ToolPreset[] = [
   {
     id: "balanced",
     name: "용량만 줄이기",
-    description: "원본보다 작게 만들고 초고해상도만 5000px로 줄여요.",
+    description: "원본 형식과 크기를 유지하며 용량만 줄여요.",
     badge: "절약",
     spec: {
       ...base,
-      resize: { kind: "inside", maxWidth: 5000, maxHeight: 5000 },
-      output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+      resize: { kind: "none" },
+      output: { format: "source", compression: { mode: "quality", quality: 82 } },
       sizeGoal: {
         mode: "smaller-only",
         minSavingsPercent: 1,

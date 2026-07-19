@@ -20,14 +20,17 @@ import type {
   PdfPipelineResult,
   PdfPipelineSpecV1,
 } from "@hereisit/tool-contracts";
+import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
-import type { PdfEditingIntent } from "../lib/site";
+import {
+  getToolImplementation,
+  isPdfEditingIntent,
+  type PdfEditingIntent,
+  type SourceFileLimits,
+} from "../lib/tool-implementations";
+import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
-
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
-const LOW_MEMORY_TOTAL_BYTES = 60 * 1024 * 1024;
-const STANDARD_TOTAL_BYTES = 100 * 1024 * 1024;
 
 function isSafeWatermarkText(value: string): boolean {
   return Array.from(value).every((character) => {
@@ -54,7 +57,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: string;
     accept: string;
     fileDescription: string;
-    maximumFiles: number;
     multiple: boolean;
   }
 > = {
@@ -64,7 +66,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 합치기 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF · 파일당 50MB · 최대 20개",
-    maximumFiles: 20,
     multiple: true,
   },
   split: {
@@ -73,7 +74,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 페이지 분할 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 페이지별 분리 최대 200페이지",
-    maximumFiles: 1,
     multiple: false,
   },
   organize: {
@@ -82,7 +82,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 페이지 정리 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 최대 500페이지",
-    maximumFiles: 1,
     multiple: false,
   },
   watermark: {
@@ -91,7 +90,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 워터마크 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 모든 페이지 또는 지정 페이지",
-    maximumFiles: 1,
     multiple: false,
   },
   "image-to-pdf": {
@@ -100,7 +98,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "이미지 PDF 작업대",
     accept: "image/jpeg,image/png,.jpg,.jpeg,.png",
     fileDescription: "JPG·PNG · 파일당 50MB · 압축 해제 메모리 자동 제한",
-    maximumFiles: 100,
     multiple: true,
   },
 };
@@ -134,7 +131,25 @@ function resultBlob(result: PdfPipelineResult): Blob {
   return new Blob([result.bytes], { type: result.mime });
 }
 
-export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
+export function PdfWorkbench({
+  intent,
+  toolId,
+}: {
+  intent: PdfEditingIntent;
+  toolId: AvailableToolId;
+}) {
+  const implementation = getToolImplementation(toolId);
+  if (
+    implementation.bundleProfile !== "pdf-editing" ||
+    implementation.family !== "pdf" ||
+    !isPdfEditingIntent(implementation.intent) ||
+    implementation.intent !== intent
+  ) {
+    throw new Error(`PdfWorkbench tool mismatch: ${toolId}/${intent}`);
+  }
+  const sourceFileLimits: SourceFileLimits = implementation.sourceFileLimits;
+  const { minFiles, maxFiles, maxFileBytes, maxTotalBytes, constrainedMaxTotalBytes } =
+    sourceFileLimits;
   const config = INTENT_CONFIG[intent];
   const [items, setItems] = useState<PdfWorkItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -162,13 +177,12 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
     "every-page",
   );
   const [watermarkPageRange, setWatermarkPageRange] = useState("1");
-  const [inputLimit, setInputLimit] = useState(LOW_MEMORY_TOTAL_BYTES);
+  const [inputLimit, setInputLimit] = useState(constrainedMaxTotalBytes ?? maxTotalBytes);
   const inputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef(items);
   const handleRef = useRef<PdfJobHandle | undefined>(undefined);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
-  const resultBlobRef = useRef<Blob | undefined>(undefined);
   const runRef = useRef(0);
   const busy = processing || inspecting;
 
@@ -191,7 +205,6 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
   }, [items]);
 
   const revokeResultUrl = useCallback(() => {
-    resultBlobRef.current = undefined;
     if (resultUrlRef.current === undefined) return;
     URL.revokeObjectURL(resultUrlRef.current);
     resultUrlRef.current = undefined;
@@ -210,9 +223,11 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
     setRuntimeSupported(supportsBrowserPdfRuntime());
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     setInputLimit(
-      memory !== undefined && memory > 4 ? STANDARD_TOTAL_BYTES : LOW_MEMORY_TOTAL_BYTES,
+      memory !== undefined && memory > 4
+        ? maxTotalBytes
+        : (constrainedMaxTotalBytes ?? maxTotalBytes),
     );
-  }, []);
+  }, [constrainedMaxTotalBytes, maxTotalBytes]);
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -278,7 +293,7 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
         0,
         inputLimit - existing.reduce((total, item) => total + item.file.size, 0),
       );
-      const available = Math.max(0, config.maximumFiles - existing.length);
+      const available = Math.max(0, maxFiles - existing.length);
 
       for (const file of candidates) {
         const supported = intent === "image-to-pdf" ? isPdfImage(file) : isPdf(file);
@@ -286,7 +301,7 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
           accepted.length >= available ||
           !supported ||
           file.size < 1 ||
-          file.size > MAX_FILE_BYTES ||
+          file.size > maxFileBytes ||
           file.size > remainingBytes
         ) {
           continue;
@@ -314,8 +329,15 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
         );
       }
     },
-    [clearResult, config.maximumFiles, config.multiple, inputLimit, inspectOrganizerPdf, intent],
+    [clearResult, config.multiple, inputLimit, inspectOrganizerPdf, intent, maxFileBytes, maxFiles],
   );
+
+  usePendingToolFiles({
+    toolId,
+    ready: hydrated && runtimeSupported && !busy,
+    acceptFiles: addFiles,
+    onReselectRequired: setMessage,
+  });
 
   const removeItem = (id: string) => {
     if (busy) return;
@@ -465,11 +487,10 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
 
   const startProcessing = async () => {
     if (busy || !runtimeSupported) return;
-    if (intent === "merge" && itemsRef.current.length < 2) {
-      setMessage("합칠 PDF를 2개 이상 선택해 주세요.");
+    if (itemsRef.current.length < minFiles) {
+      if (intent === "merge") setMessage(`합칠 PDF를 ${minFiles}개 이상 선택해 주세요.`);
       return;
     }
-    if (itemsRef.current.length === 0) return;
     const spec = buildSpec();
     if (spec === undefined) return;
 
@@ -500,7 +521,6 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
       if (outcome.status === "fulfilled") {
         const blob = resultBlob(outcome.value);
         const url = URL.createObjectURL(blob);
-        resultBlobRef.current = blob;
         resultUrlRef.current = url;
         setResultUrl(url);
         setResult({ ...outcome.value, bytes: new ArrayBuffer(0) });
@@ -544,11 +564,17 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
     setMessage("페이지 확인을 중단했어요.");
   };
 
-  const saveResult = () => {
-    const blob = resultBlobRef.current;
-    if (result === undefined || resultUrl === undefined || blob === undefined) return;
-    downloadUrl(resultUrl, result.suggestedName);
-    setMessage("결과 파일을 저장했어요.");
+  const downloadResult = () => {
+    const currentUrl = resultUrlRef.current;
+    if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
+    try {
+      downloadUrl(resultUrl, result.suggestedName);
+      setMessage(
+        result.mime === "application/zip" ? "ZIP 다운로드를 시작했어요." : "다운로드를 시작했어요.",
+      );
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+    }
   };
 
   const changeSplitMode = (mode: "every-page" | "extract") => {
@@ -587,8 +613,7 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
   const canRun =
     runtimeSupported &&
     !busy &&
-    items.length > 0 &&
-    (intent !== "merge" || items.length >= 2) &&
+    items.length >= minFiles &&
     (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok) &&
     (intent !== "organize" || pagePlan.length > 0) &&
     (intent !== "watermark" ||
@@ -1189,14 +1214,8 @@ export function PdfWorkbench({ intent }: { intent: PdfEditingIntent }) {
                       같은 설정으로 다시 실행
                     </button>
                   ) : null}
-                  <button
-                    className={styles.runButton}
-                    type="button"
-                    onClick={() => void saveResult()}
-                  >
-                    {result.mime === "application/zip"
-                      ? `결과 ${result.outputDocumentCount}개 ZIP으로 받기 ↓`
-                      : "PDF 다운로드 ↓"}
+                  <button className={styles.runButton} type="button" onClick={downloadResult}>
+                    {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
                   </button>
                 </>
               ) : (

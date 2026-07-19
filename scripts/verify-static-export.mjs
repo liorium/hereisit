@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { toolImplementationConfig } from "../apps/web/src/lib/tool-implementations.ts";
+import {
+  availableToolEntries,
+  plannedToolEntries,
+} from "../packages/tool-registry/src/tool-catalog.ts";
 
 const PDFJS_VERSION = "6.1.200";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +18,7 @@ const pdfjsPackageRoot = path.join(
 const pdfjsOutputRoot = path.join(outputRoot, "pdfjs", PDFJS_VERSION);
 
 const IMAGE_WORKER_MARKER = "hereisit-image-worker";
-const IMAGE_COMPRESSION_SERVER_MARKER = "hereisit-server-runtime";
+const IMAGE_SERVER_RUNTIME_MARKER = "hereisit-server-runtime";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
 const PDF_WORKER_MARKER = "hereisit-pdf-worker";
 const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
@@ -25,89 +30,73 @@ const REMOTE_URL_PATTERN = /https?:\/\/[^"'`\s<>()\\]+/gi;
 const PDFJS_REMOTE_ASSET_PATTERN =
   /(?:pdfjs(?:-dist)?|pdf\.js|pdf\.worker(?:\.min)?\.mjs|\/cmaps\/|\/standard_fonts\/)/i;
 
-const toolPages = [
-  {
-    file: "image/compress.html",
-    path: "/image/compress",
-    routeClass: "image-compression-server",
-    title: "이미지 용량 줄이기",
-    description: "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요.",
-  },
-  {
-    file: "image/resize.html",
-    path: "/image/resize",
-    routeClass: "image",
-    title: "이미지 크기 조절",
-    description: "사진의 가로·세로 크기를 빠르게 바꾸세요.",
-  },
-  {
-    file: "image/convert.html",
-    path: "/image/convert",
-    routeClass: "image",
-    title: "이미지 형식 변환",
-    description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
-  },
-  {
-    file: "image/watermark.html",
-    path: "/image/watermark",
-    routeClass: "image-watermark",
-    title: "이미지에 워터마크 넣기",
-    description: "사진과 이미지에 문구 또는 로고를 넣으세요.",
-  },
-  {
-    file: "pdf/merge.html",
-    path: "/pdf/merge",
-    routeClass: "editing",
-    title: "PDF 합치기",
-    description: "여러 PDF 파일을 원하는 순서대로 하나로 합치세요.",
-  },
-  {
-    file: "pdf/split.html",
-    path: "/pdf/split",
-    routeClass: "editing",
-    title: "PDF 페이지 분할",
-    description: "PDF를 페이지별로 나누거나 필요한 페이지만 추출하세요.",
-  },
-  {
-    file: "pdf/image-to-pdf.html",
-    path: "/pdf/image-to-pdf",
-    routeClass: "editing",
-    title: "이미지를 PDF로 변환",
-    description: "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요.",
-  },
-  {
-    file: "pdf/organize.html",
-    path: "/pdf/organize",
-    routeClass: "editing",
-    title: "PDF 페이지 정리",
-    description: "PDF 페이지 순서를 바꾸고 90도씩 회전하거나 필요 없는 페이지를 빼세요.",
-  },
-  {
-    file: "pdf/watermark.html",
-    path: "/pdf/watermark",
-    routeClass: "editing",
-    title: "PDF 워터마크 넣기",
-    description: "PDF 모든 페이지 또는 지정한 페이지에 원하는 문구의 워터마크를 넣으세요.",
-  },
-  {
-    file: "pdf/to-image.html",
-    path: "/pdf/to-image",
-    routeClass: "pdf-to-images",
-    title: "PDF를 JPG·PNG로 변환",
-    description:
-      "PDF 페이지를 JPG 또는 PNG 이미지로 변환하세요. 업로드 없이 브라우저에서 처리합니다.",
-  },
-  {
-    file: "pdf/compress.html",
-    path: "/pdf/compress",
-    routeClass: "pdf-compress-scanned",
-    title: "스캔 PDF 용량 줄이기",
-    description:
-      "스캔한 PDF 페이지를 가볍게 다시 만들어 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
-  },
-];
+function routeHtmlFile(route) {
+  return `${route.replace(/^\/+|\/+$/g, "")}.html`;
+}
 
-assert.equal(toolPages.length, 11, "The static export must define exactly 11 tool pages.");
+const toolPages = availableToolEntries.map((tool) => ({
+  file: routeHtmlFile(tool.route),
+  path: tool.route,
+  title: tool.name,
+  description: tool.shortDescription,
+  bundleProfile: toolImplementationConfig[tool.id].bundleProfile,
+}));
+const discoveryPages = [
+  { file: routeHtmlFile("/tools"), path: "/tools", indexable: true },
+  { file: routeHtmlFile("/my-tools"), path: "/my-tools", indexable: false },
+  { file: routeHtmlFile("/workflows"), path: "/workflows", indexable: false },
+];
+const plannedRouteFiles = plannedToolEntries.map((tool) => ({
+  file: routeHtmlFile(`/${tool.id.replaceAll(".", "/")}`),
+  path: `/${tool.id.replaceAll(".", "/")}`,
+}));
+
+const ALL_PROCESSING_MARKERS = [
+  IMAGE_WORKER_MARKER,
+  IMAGE_SERVER_RUNTIME_MARKER,
+  IMAGE_WATERMARK_WORKER_MARKER,
+  PDF_WORKER_MARKER,
+  PDF_INSPECTION_WORKER_MARKER,
+  PDF_TO_IMAGES_WORKER_MARKER,
+  PDF_COMPRESS_SCANNED_WORKER_MARKER,
+  PDFJS_MARKER,
+];
+const DISCOVERY_PROCESSING_MARKERS = [
+  ...ALL_PROCESSING_MARKERS,
+  "ImageWorkbench",
+  "ImageWatermarkWorkbench",
+  "PdfWorkbench",
+  "PdfCompressWorkbench",
+  "PdfToImageWorkbench",
+  "pdfjs-dist",
+  "@hereisit/browser-runtime",
+  "@hereisit/image-tool",
+  "@hereisit/pdf-tool",
+  "@hereisit/tool-contracts",
+  "@cantoo/pdf-lib",
+  "fflate",
+  "/codec/",
+  ".codec.",
+  "-codec-",
+  "/editor/",
+  ".editor.",
+  "-editor-",
+  "/wasm/",
+  ".wasm",
+  "-wasm-",
+];
+const bundleProfileMarkers = {
+  image: [IMAGE_WORKER_MARKER],
+  "image-compression-server": [IMAGE_SERVER_RUNTIME_MARKER, IMAGE_WORKER_MARKER],
+  "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
+  "pdf-editing": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER],
+  "pdf-to-images": [PDF_INSPECTION_WORKER_MARKER, PDF_TO_IMAGES_WORKER_MARKER, PDFJS_MARKER],
+  "pdf-compress-scanned": [
+    PDF_INSPECTION_WORKER_MARKER,
+    PDF_COMPRESS_SCANNED_WORKER_MARKER,
+    PDFJS_MARKER,
+  ],
+};
 
 async function collectJavaScript(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -218,39 +207,21 @@ await Promise.all([
   access(path.join(outputRoot, "sitemap.xml")),
   access(path.join(outputRoot, "robots.txt")),
   access(path.join(pdfjsOutputRoot, "pdf.worker.min.mjs")),
+  ...discoveryPages.map((page) => access(path.join(outputRoot, page.file))),
   ...toolPages.map((tool) => access(path.join(outputRoot, tool.file))),
 ]);
 
-const [html, headers, sitemap, robots, ...toolHtmlPages] = await Promise.all([
+const [html, headers, sitemap, robots] = await Promise.all([
   readFile(path.join(outputRoot, "index.html"), "utf8"),
   readFile(path.join(outputRoot, "_headers"), "utf8"),
   readFile(path.join(outputRoot, "sitemap.xml"), "utf8"),
   readFile(path.join(outputRoot, "robots.txt"), "utf8"),
-  ...toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 ]);
-const exportedToolPagePaths = (
-  await Promise.all(
-    ["image", "pdf"].map(async (category) =>
-      (
-        await collectRelativeFiles(path.join(outputRoot, category))
-      )
-        .filter((relativePath) => relativePath.endsWith(".html"))
-        .map((relativePath) => {
-          const withoutExtension = relativePath.slice(0, -".html".length);
-          const routeSuffix = withoutExtension.endsWith("/index")
-            ? withoutExtension.slice(0, -"/index".length)
-            : withoutExtension;
-          return `/${category}/${routeSuffix}`;
-        }),
-    ),
-  )
-)
-  .flat()
-  .sort();
-assert.deepEqual(
-  exportedToolPagePaths,
-  toolPages.map((tool) => tool.path).sort(),
-  "The static export tool-page inventory must exactly match the 11 registered routes.",
+const discoveryHtmlPages = await Promise.all(
+  discoveryPages.map((page) => readFile(path.join(outputRoot, page.file), "utf8")),
+);
+const toolHtmlPages = await Promise.all(
+  toolPages.map((tool) => readFile(path.join(outputRoot, tool.file), "utf8")),
 );
 assert.match(html, /파일 작업/);
 assert.match(html, /href="\/image\/compress"/);
@@ -267,9 +238,45 @@ for (const [index, tool] of toolPages.entries()) {
   assert.ok(sitemap.includes(`<loc>https://hereisit.pages.dev${tool.path}</loc>`));
 }
 
+for (const [index, page] of discoveryPages.entries()) {
+  const pageHtml = discoveryHtmlPages[index];
+  assert.ok(pageHtml, `Missing exported HTML for ${page.path}`);
+  assert.ok(
+    pageHtml.includes(`rel="canonical" href="https://hereisit.pages.dev${page.path}"`),
+    `${page.path} must have one fixed canonical URL.`,
+  );
+  if (page.indexable) {
+    assert.ok(
+      sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      `${page.path} must be present in the sitemap.`,
+    );
+  } else {
+    assert.ok(
+      pageHtml.includes('name="robots" content="noindex, follow"'),
+      `${page.path} must be noindex,follow.`,
+    );
+    assert.ok(
+      !sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      `${page.path} must stay out of the sitemap.`,
+    );
+  }
+}
+assert.match(
+  sitemap,
+  /<loc>https:\/\/hereisit\.pages\.dev\/tools<\/loc>\s*<changefreq>weekly<\/changefreq>\s*<priority>0\.8<\/priority>/,
+);
+
+for (const plannedRoute of plannedRouteFiles) {
+  await assert.rejects(access(path.join(outputRoot, plannedRoute.file)), { code: "ENOENT" });
+  assert.ok(
+    !sitemap.includes(`<loc>https://hereisit.pages.dev${plannedRoute.path}</loc>`),
+    `${plannedRoute.path} must not be published before it is available.`,
+  );
+}
+
 assert.match(robots, /Sitemap: https:\/\/hereisit\.pages\.dev\/sitemap\.xml/);
 
-const exportedHtml = [html, ...toolHtmlPages].join("\n");
+const exportedHtml = [html, ...discoveryHtmlPages, ...toolHtmlPages].join("\n");
 const assetPaths = Array.from(
   new Set(
     Array.from(
@@ -323,260 +330,38 @@ assertSameRelativeFiles(sourceStandardFonts, exportedStandardFonts, "PDF.js stan
 
 const javaScriptInventory = await createJavaScriptInventory();
 const homeClosure = collectRouteClosure(html, javaScriptInventory);
+const discoveryClosures = discoveryPages.map((page, index) => {
+  const pageHtml = discoveryHtmlPages[index];
+  assert.ok(pageHtml !== undefined, `The ${page.path} route must have exported HTML.`);
+  return { page, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
+});
 const routeClosures = toolPages.map((tool, index) => {
   const pageHtml = toolHtmlPages[index];
   assert.ok(pageHtml !== undefined, `The ${tool.path} route must have exported HTML.`);
-  const initialClosure = readPageScriptPaths(pageHtml).map((scriptPath) =>
-    javaScriptInventory.get(scriptPath),
-  );
-  return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory), initialClosure };
+  return { tool, closure: collectRouteClosure(pageHtml, javaScriptInventory) };
 });
-const imageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "image");
-const imageCompressionServerClosures = routeClosures.filter(
-  ({ tool }) => tool.routeClass === "image-compression-server",
-);
-const imageWatermarkClosures = routeClosures.filter(
-  ({ tool }) => tool.routeClass === "image-watermark",
-);
-const pdfEditingClosures = routeClosures.filter(({ tool }) => tool.routeClass === "editing");
-const toImageClosures = routeClosures.filter(({ tool }) => tool.routeClass === "pdf-to-images");
-const compressionClosures = routeClosures.filter(
-  ({ tool }) => tool.routeClass === "pdf-compress-scanned",
-);
 
-assertClosureLacks(
-  homeClosure,
-  IMAGE_WATERMARK_WORKER_MARKER,
-  "The home route loaded the image watermark Worker.",
-);
-
-assert.ok(imageClosures.length > 0, "The export inventory must classify image routes.");
-assert.equal(
-  imageClosures.length,
-  2,
-  "The export inventory must classify two established image routes.",
-);
-assert.equal(
-  imageCompressionServerClosures.length,
-  1,
-  "The export inventory must classify one server-capable image compression route.",
-);
-assert.equal(
-  imageWatermarkClosures.length,
-  1,
-  "The export inventory must classify one image watermark route.",
-);
-const imageRoutePaths = [
-  ...imageClosures,
-  ...imageCompressionServerClosures,
-  ...imageWatermarkClosures,
-].map(({ tool }) => tool.path);
-assert.equal(imageRoutePaths.length, 4, "The export inventory must include four image routes.");
-assert.equal(new Set(imageRoutePaths).size, 4, "Every exported image route path must be unique.");
-assert.ok(pdfEditingClosures.length > 0, "The export inventory must classify PDF editing routes.");
-assert.equal(
-  toImageClosures.length,
-  1,
-  "The export inventory must classify one PDF-to-images route.",
-);
-assert.equal(
-  compressionClosures.length,
-  1,
-  "The export inventory must classify one scanned PDF compression route.",
-);
-assert.equal(
-  imageClosures.length +
-    imageCompressionServerClosures.length +
-    imageWatermarkClosures.length +
-    pdfEditingClosures.length +
-    toImageClosures.length +
-    compressionClosures.length,
-  toolPages.length,
-  "Every exported tool route must use a supported route class.",
-);
-
-for (const { closure } of imageClosures) {
-  assertClosureHas(closure, IMAGE_WORKER_MARKER, "An image route is missing its Worker.");
-  assertClosureLacks(
-    closure,
-    IMAGE_WATERMARK_WORKER_MARKER,
-    "An established image route loaded the image watermark Worker.",
-  );
-  assertClosureLacks(closure, PDF_WORKER_MARKER, "An image route loaded a PDF Worker.");
-  assertClosureLacks(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "An image route loaded the PDF inspection Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "An image route loaded the PDF-to-images Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "An image route loaded the scanned PDF compression Worker.",
-  );
-  assertClosureLacks(closure, PDFJS_MARKER, "An image route loaded PDF.js.");
+for (const marker of DISCOVERY_PROCESSING_MARKERS) {
+  assertClosureLacks(homeClosure, marker, `The home route loaded ${marker}.`);
 }
 
-for (const { closure, initialClosure } of imageCompressionServerClosures) {
-  assertClosureHas(
-    closure,
-    IMAGE_COMPRESSION_SERVER_MARKER,
-    "The image compression route is missing its server runtime marker.",
-  );
-  assertClosureLacks(
-    initialClosure,
-    IMAGE_WORKER_MARKER,
-    "The image compression route eagerly loaded the local image Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_WORKER_MARKER,
-    "The image compression route loaded a PDF Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "The image compression route loaded the PDF inspection Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "The image compression route loaded the PDF-to-images Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "The image compression route loaded the scanned PDF compression Worker.",
-  );
-  assertClosureLacks(closure, PDFJS_MARKER, "The image compression route loaded PDF.js.");
+for (const { page, closure } of discoveryClosures) {
+  for (const marker of DISCOVERY_PROCESSING_MARKERS) {
+    assertClosureLacks(closure, marker, `${page.path} unexpectedly loaded ${marker}.`);
+  }
 }
 
-for (const { closure } of imageWatermarkClosures) {
-  assertClosureHas(
-    closure,
-    IMAGE_WATERMARK_WORKER_MARKER,
-    "The image watermark route is missing its Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    IMAGE_WORKER_MARKER,
-    "The image watermark route loaded the established image Worker.",
-  );
-  assertClosureLacks(closure, PDF_WORKER_MARKER, "The image watermark route loaded a PDF Worker.");
-  assertClosureLacks(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "The image watermark route loaded the PDF inspection Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "The image watermark route loaded the PDF-to-images Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "The image watermark route loaded the scanned PDF compression Worker.",
-  );
-  assertClosureLacks(closure, PDFJS_MARKER, "The image watermark route loaded PDF.js.");
-}
-
-for (const { closure } of pdfEditingClosures) {
-  assertClosureHas(closure, PDF_WORKER_MARKER, "A PDF editing route is missing its Worker.");
-  assertClosureHas(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "A PDF editing route is missing its inspection Worker.",
-  );
-  assertClosureLacks(closure, IMAGE_WORKER_MARKER, "A PDF editing route loaded the image Worker.");
-  assertClosureLacks(
-    closure,
-    IMAGE_WATERMARK_WORKER_MARKER,
-    "A PDF editing route loaded the image watermark Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "A PDF editing route loaded the PDF-to-images Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "A PDF editing route loaded the scanned PDF compression Worker.",
-  );
-  assertClosureLacks(closure, PDFJS_MARKER, "A PDF editing route loaded PDF.js.");
-}
-
-for (const { closure } of toImageClosures) {
-  assertClosureLacks(
-    closure,
-    PDF_WORKER_MARKER,
-    "The PDF-to-images route loaded the PDF editing Worker.",
-  );
-  assertClosureHas(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "The PDF-to-images route is missing its inspection Worker.",
-  );
-  assertClosureHas(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "The PDF-to-images route is missing its renderer Worker.",
-  );
-  assertClosureHas(closure, PDFJS_MARKER, "The PDF-to-images route is missing PDF.js.");
-  assertClosureLacks(
-    closure,
-    IMAGE_WORKER_MARKER,
-    "The PDF-to-images route loaded the image Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    IMAGE_WATERMARK_WORKER_MARKER,
-    "The PDF-to-images route loaded the image watermark Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "The PDF-to-images route loaded the scanned PDF compression Worker.",
-  );
-}
-
-for (const { closure } of compressionClosures) {
-  assertClosureLacks(
-    closure,
-    PDF_WORKER_MARKER,
-    "The scanned PDF compression route loaded the PDF editing Worker.",
-  );
-  assertClosureHas(
-    closure,
-    PDF_INSPECTION_WORKER_MARKER,
-    "The scanned PDF compression route is missing its inspection Worker.",
-  );
-  assertClosureHas(
-    closure,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    "The scanned PDF compression route is missing its compression Worker.",
-  );
-  assertClosureHas(closure, PDFJS_MARKER, "The scanned PDF compression route is missing PDF.js.");
-  assertClosureLacks(
-    closure,
-    IMAGE_WORKER_MARKER,
-    "The scanned PDF compression route loaded the image Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    IMAGE_WATERMARK_WORKER_MARKER,
-    "The scanned PDF compression route loaded the image watermark Worker.",
-  );
-  assertClosureLacks(
-    closure,
-    PDF_TO_IMAGES_WORKER_MARKER,
-    "The scanned PDF compression route loaded the PDF-to-images Worker.",
-  );
+for (const { tool, closure } of routeClosures) {
+  const required = bundleProfileMarkers[tool.bundleProfile];
+  assert.ok(required !== undefined, `Unknown bundle profile for ${tool.path}`);
+  for (const marker of required) {
+    assertClosureHas(closure, marker, `${tool.path} is missing ${marker}.`);
+  }
+  for (const marker of ALL_PROCESSING_MARKERS.filter(
+    (candidate) => !required.includes(candidate),
+  )) {
+    assertClosureLacks(closure, marker, `${tool.path} unexpectedly loaded ${marker}.`);
+  }
 }
 
 const exportedCodeFiles = (await collectRelativeFiles(outputRoot)).filter(
