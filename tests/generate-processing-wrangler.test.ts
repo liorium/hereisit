@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256,
   generateProcessingWrangler,
   parseProcessingWranglerArguments,
   writeProcessingWrangler,
@@ -91,7 +92,7 @@ function validInput(environment: "staging" | "production" = "staging") {
     maximumProjectedMonthlyCostMicrousd: 100_000_000,
     liveCostModel: validLiveCostModel,
     liveCostModelSha256: "e".repeat(64),
-    providerUsageSchemaSha256: "f".repeat(64),
+    providerUsageSchemaSha256: CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256,
     releaseReportSha256: "1".repeat(64),
     rolloutPercent: environment === "staging" ? 0 : 5,
     maintainerSessionHashes: ["2".repeat(64)],
@@ -313,5 +314,14 @@ describe("processing Wrangler generator", () => {
     expect(() =>
       generateProcessingWrangler({ ...validInput(), maintainerSessionHashes: [] }),
     ).toThrow(/maintainer/i);
+  });
+
+  it("rejects a provider usage schema hash that differs from the checked-in contract", () => {
+    expect(() =>
+      generateProcessingWrangler({
+        ...validInput(),
+        providerUsageSchemaSha256: "f".repeat(64),
+      }),
+    ).toThrow(/provider usage schema/i);
   });
 });

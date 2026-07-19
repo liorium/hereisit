@@ -4,6 +4,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const NAMESPACE_PATTERN = /^(?:0|[1-9][0-9]*)$/;
 const MAX_STANDARD_ATTEMPT_WEIGHTED_UNITS = 2_502_994_560;
 
+export const CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 = createHash("sha256")
+  .update(JSON.stringify(providerUsageContract))
+  .digest("hex");
+
 const liveCostKeys = [
   "version",
   "containerVcpuSecondMicrousd",
@@ -262,6 +266,9 @@ function validateInput(input) {
   assertSafeInteger(value.rolloutPercent, "rolloutPercent", { maximum: 100 });
   for (const key of ["liveCostModelSha256", "providerUsageSchemaSha256", "releaseReportSha256"]) {
     assertSha256(value[key], key);
+  }
+  if (value.providerUsageSchemaSha256 !== CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256) {
+    throw new TypeError("provider usage schema hash does not match the checked-in contract");
   }
   if (!Array.isArray(value.maintainerSessionHashes)) {
     throw new TypeError("maintainerSessionHashes must be an array");
@@ -557,6 +564,10 @@ if (
   await writeProcessingWrangler({ argv: process.argv.slice(2) });
 }
 
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import providerUsageContract from "../docs/deployment/provider-usage-schema.v1.json" with {
+  type: "json",
+};
