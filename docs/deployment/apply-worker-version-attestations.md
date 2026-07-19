@@ -27,3 +27,37 @@ primary. A successful run prints only a content-free summary:
 The statement count is seven when an earlier active Worker version is retired. Do not retry a failed
 write automatically; inspect the generic error, query the attestation state, and rerun the same sealed
 attestation only after the failure mode is understood.
+
+## Reusable staging gate
+
+`.github/workflows/apply-processing-staging-attestation.yml` is the protected staging entry point. It
+accepts artifacts only from a `main` workflow in `liorium/hereisit`, requires approval through the
+`processing-staging` GitHub environment, verifies the reviewed attestation and Wrangler-config hashes,
+applies remote migrations, and only then records the Worker attestation.
+
+The downloaded artifact must contain these fixed deployment inputs at its root:
+
+- `worker-version-attestation.json`
+- `wrangler.staging.jsonc`
+
+Call the gate from the trusted staging workflow after uploading those sealed files:
+
+```yaml
+jobs:
+  apply-staging-attestation:
+    uses: ./.github/workflows/apply-processing-staging-attestation.yml
+    with:
+      artifact_name: processing-staging-attestation
+      attestation_sha256: ${{ needs.deploy.outputs.attestation_sha256 }}
+      wrangler_config_sha256: ${{ needs.deploy.outputs.wrangler_config_sha256 }}
+      database_name: hereisit-processing-staging
+      database_id: ${{ needs.provision.outputs.database_id }}
+    secrets:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+```
+
+Keep the Wrangler token limited to the permissions required for remote D1 migrations. Keep the direct
+D1 token limited to D1 read/write for the single deployment account; neither token is accepted through
+command-line input.
