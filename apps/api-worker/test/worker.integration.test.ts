@@ -142,6 +142,8 @@ const primaryKeyColumns = [
   ["worker_version_attestations", "version_id"],
   ["operational_alert_state", "kind"],
   ["artifact_presence_audit", "job_id"],
+  ["operational_cost_hourly", "accounting_epoch"],
+  ["container_activity_segments", "id"],
 ] as const;
 
 describe("Worker control-plane bindings and routes", () => {
@@ -149,7 +151,7 @@ describe("Worker control-plane bindings and routes", () => {
     const migration = await env.DB.prepare(
       "SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1",
     ).first<{ name: string }>();
-    expect(migration?.name).toBe("0003_circuit_breaker.sql");
+    expect(migration?.name).toBe("0004_live_cost_accounting.sql");
 
     for (const [table, column] of primaryKeyColumns) {
       const schema = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<D1TableColumn>();
