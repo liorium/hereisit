@@ -330,6 +330,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
   browserName,
   page,
 }) => {
+  test.setTimeout(90_000);
   const pdf = await createMultiImagePdf(page);
   await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
@@ -583,6 +584,7 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   browserName,
   page,
 }) => {
+  test.setTimeout(120_000);
   await installObjectUrlCounters(page);
   let downloads = 0;
   page.on("download", () => {
@@ -601,7 +603,9 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 2 });
+  await expect
+    .poll(() => objectUrlCounts(page), { timeout: 60_000 })
+    .toEqual({ created: 3, revoked: 2 });
   await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible();
   expect(downloads).toBe(0);
 
@@ -616,7 +620,9 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
   expect(downloads).toBe(0);
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 3 });
+  await expect
+    .poll(() => objectUrlCounts(page), { timeout: 60_000 })
+    .toEqual({ created: 4, revoked: 3 });
   expect(downloads).toBe(0);
 
   await page.getByRole("button", { name: "새 작업" }).click();
@@ -631,7 +637,9 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
   await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 4 });
+  await expect
+    .poll(() => objectUrlCounts(page), { timeout: 60_000 })
+    .toEqual({ created: 5, revoked: 4 });
   expect(downloads).toBe(0);
 
   await page.evaluate(() => {

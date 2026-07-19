@@ -116,6 +116,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const processingControllerRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<readonly WorkItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasFileSelectionRef = useRef(false);
 
   useEffect(() => {
     setRuntimeSupported(supportsBrowserImageRuntime());
@@ -125,7 +126,9 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     let active = true;
     if (config.apiOrigin === null) {
       setPolicy({ state: "local", text: "업로드 없음 · 내 기기에서 처리" });
-      setMessage("파일은 업로드하지 않고 이 기기에서 처리해요.");
+      if (!hasFileSelectionRef.current) {
+        setMessage("파일은 업로드하지 않고 이 기기에서 처리해요.");
+      }
       return () => {
         active = false;
       };
@@ -138,7 +141,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             state: "server",
             text: "선택한 이미지는 HereIsIt 처리 서버로 전송되며 입력과 결과는 자동 삭제를 시도해요.",
           });
-          setMessage("서버 처리 정책을 확인했어요.");
+          if (!hasFileSelectionRef.current) setMessage("서버 처리 정책을 확인했어요.");
         } else {
           setPolicy({
             state: "local",
@@ -147,17 +150,21 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                 ? "사용량 보호 · 업로드 없이 내 기기에서 처리"
                 : "서버 처리 중지 · 업로드 없이 내 기기에서 처리",
           });
-          setMessage(
-            value.reason === "LOCAL_FALLBACK_REQUIRED"
-              ? "사용량 보호를 위해 이 기기에서 처리해요."
-              : "현재 서버 처리가 중지되어 이 기기에서 처리해요.",
-          );
+          if (!hasFileSelectionRef.current) {
+            setMessage(
+              value.reason === "LOCAL_FALLBACK_REQUIRED"
+                ? "사용량 보호를 위해 이 기기에서 처리해요."
+                : "현재 서버 처리가 중지되어 이 기기에서 처리해요.",
+            );
+          }
         }
       })
       .catch(() => {
         if (!active) return;
         setPolicy({ state: "local", text: "서버 연결 실패 · 업로드 없이 내 기기에서 처리" });
-        setMessage("서버에 연결하지 못해 로컬 처리로 전환했어요.");
+        if (!hasFileSelectionRef.current) {
+          setMessage("서버에 연결하지 못해 로컬 처리로 전환했어요.");
+        }
       });
     return () => {
       active = false;
@@ -182,6 +189,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const chooseFiles = useCallback(async (files: FileList | readonly File[] | null) => {
     if (files === null) return;
+    hasFileSelectionRef.current = true;
     const supplied = Array.from(files);
     const selected = supplied.slice(0, MAX_FILES);
     const next: WorkItem[] = [];
