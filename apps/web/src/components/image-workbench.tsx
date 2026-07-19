@@ -28,10 +28,7 @@ import {
   formatSavings,
   resolveIfCurrent,
 } from "../lib/files";
-import {
-  getToolImplementation,
-  type ToolImplementationConfig,
-} from "../lib/tool-implementations";
+import { getToolImplementation, type ToolImplementationConfig } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
