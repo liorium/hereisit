@@ -303,18 +303,18 @@ test("rejects a wide console container before enumerating it in the privacy harn
   ).toBe(0);
 });
 
-test("records a rejected console handle cleanup in the privacy harness", async ({ page }) => {
-  const privacy = await installPrivacyObserver(page, {
-    sentinels: ["PRIVATE_CLEANUP_SENTINEL"],
-    disposeConsoleArgument: async () => {
-      throw new Error("Synthetic cleanup rejection");
-    },
-  });
+test("keeps console inspection fail-closed for accessors", async ({ page }) => {
+  const sentinel = "PRIVATE_ACCESSOR_SENTINEL";
+  const privacy = await installPrivacyObserver(page, { sentinels: [sentinel] });
   await openReadyPdfCompression(page);
 
-  await page.evaluate(() => {
-    console.log({ nested: "synthetic fixture" });
-  });
+  await page.evaluate((privateValue) => {
+    const nested = Object.defineProperty({}, "privateValue", {
+      configurable: true,
+      get: () => privateValue,
+    });
+    console.log({ nested });
+  }, sentinel);
 
   let detectionError: unknown;
   try {
@@ -322,7 +322,9 @@ test("records a rejected console handle cleanup in the privacy harness", async (
   } catch (error) {
     detectionError = error;
   }
-  expect(String(detectionError)).toContain("console-cleanup-failed");
+  const diagnostics = String(detectionError);
+  expect(diagnostics).toContain("console-inspection-failed");
+  expect(diagnostics).not.toContain(sentinel);
 });
 
 test("observes deliberate privacy probes without exposing their raw values", async ({ page }) => {

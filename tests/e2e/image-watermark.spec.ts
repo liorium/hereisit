@@ -848,21 +848,31 @@ test("setting and logo changes revoke stale result URLs and disable saving", asy
 });
 
 test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.addInitScript(() => {
     const NativeWorker = window.Worker;
-    const trackedWindow = window as Window & { __delayedWorkerTypes?: string[] };
-    trackedWindow.__delayedWorkerTypes = [];
+    const trackedWindow = window as Window & {
+      __delayedWorkerEvents?: Array<{ type: string; workerId: number }>;
+      __latestDelayedWorkerId?: number;
+    };
+    trackedWindow.__delayedWorkerEvents = [];
+    trackedWindow.__latestDelayedWorkerId = 0;
     class DelayedWorker {
       private readonly native: Worker;
+      private readonly workerId: number;
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
       onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
       onerror: ((event: ErrorEvent) => void) | null = null;
 
       constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        this.workerId = (trackedWindow.__latestDelayedWorkerId ?? 0) + 1;
+        trackedWindow.__latestDelayedWorkerId = this.workerId;
         this.native = new NativeWorker(scriptURL, options);
         this.native.onmessage = (event) => {
           const type = (event.data as { type?: unknown } | null)?.type;
-          if (typeof type === "string") trackedWindow.__delayedWorkerTypes?.push(type);
+          if (typeof type === "string") {
+            trackedWindow.__delayedWorkerEvents?.push({ type, workerId: this.workerId });
+          }
           setTimeout(() => this.onmessage?.(event), 1_500);
         };
         this.native.onmessageerror = (event) => {
@@ -892,38 +902,61 @@ test("cancel ignores a delayed Worker completion and reruns cleanly", async ({ p
     buffer: source,
   });
   await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
+  const firstWorkerId = await page.evaluate(
+    () => (window as Window & { __latestDelayedWorkerId?: number }).__latestDelayedWorkerId ?? 0,
+  );
+  expect(firstWorkerId).toBeGreaterThan(0);
   await expect
     .poll(() =>
       page.evaluate(
-        () =>
-          (window as Window & { __delayedWorkerTypes?: string[] }).__delayedWorkerTypes?.filter(
-            (type) => type === "complete",
-          ).length ?? 0,
+        (workerId) =>
+          (
+            window as Window & {
+              __delayedWorkerEvents?: Array<{ type: string; workerId: number }>;
+            }
+          ).__delayedWorkerEvents?.some(
+            (event) => event.workerId === workerId && event.type === "complete",
+          ) ?? false,
+        firstWorkerId,
       ),
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
   await page.getByRole("button", { name: "작업 중단" }).click();
   await expect(page.getByRole("status")).toContainText("작업을 중단했어요.");
   await page.waitForTimeout(1_650);
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(0);
 
-  const previousCompletes = await page.evaluate(
-    () =>
-      (window as Window & { __delayedWorkerTypes?: string[] }).__delayedWorkerTypes?.filter(
-        (type) => type === "complete",
-      ).length ?? 0,
-  );
   await page.getByRole("button", { name: "1개 이미지에 워터마크 넣기 →" }).click();
   await expect
     .poll(() =>
       page.evaluate(
-        () =>
-          (window as Window & { __delayedWorkerTypes?: string[] }).__delayedWorkerTypes?.filter(
-            (type) => type === "complete",
-          ).length ?? 0,
+        (previousId) =>
+          ((window as Window & { __latestDelayedWorkerId?: number }).__latestDelayedWorkerId ?? 0) >
+          previousId,
+        firstWorkerId,
       ),
     )
-    .toBeGreaterThan(previousCompletes);
+    .toBe(true);
+  const secondWorkerId = await page.evaluate(
+    () => (window as Window & { __latestDelayedWorkerId?: number }).__latestDelayedWorkerId ?? 0,
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          (workerId) =>
+            (
+              window as Window & {
+                __delayedWorkerEvents?: Array<{ type: string; workerId: number }>;
+              }
+            ).__delayedWorkerEvents?.some(
+              (event) => event.workerId === workerId && event.type === "complete",
+            ) ?? false,
+          secondWorkerId,
+        ),
+      { timeout: 20_000 },
+    )
+    .toBe(true);
   await waitForCompleted(page, 1);
   await expect(page.locator('img[alt="source.png 워터마크 결과"]')).toHaveCount(1);
 });

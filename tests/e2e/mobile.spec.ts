@@ -485,26 +485,20 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   expect(downloads).toBe(0);
 });
 
-test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
-  browserName,
+test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(60_000);
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
 
-  const sentinelFilename = "PRIVATE_MOBILE_PDF_SENTINEL.pdf";
-  const privacy = await installPrivacyObserver(page, {
-    sentinels: [sentinelFilename, "PRIVATE_MOBILE_PDF_BYTES"],
-  });
   await page.goto("/pdf/to-image");
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
-  await privacy.clear();
   await page.locator("input[type=file]").setInputFiles({
-    name: sentinelFilename,
+    name: "mobile-layout.pdf",
     mimeType: "application/pdf",
-    buffer: Buffer.concat([pdf, Buffer.from("\n% PRIVATE_MOBILE_PDF_BYTES")]),
+    buffer: pdf,
   });
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
 
@@ -607,6 +601,35 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});
+
+test("keeps PDF image results readable, responsive, and private", async ({ browserName, page }) => {
+  test.setTimeout(60_000);
+  const document = await PDFDocument.create();
+  document.addPage([300, 400]);
+  const pdf = Buffer.from(await document.save());
+  const sentinelFilename = "PRIVATE_MOBILE_PDF_SENTINEL.pdf";
+  const privacy = await installPrivacyObserver(page, {
+    sentinels: [sentinelFilename, "PRIVATE_MOBILE_PDF_BYTES"],
+  });
+
+  await page.goto("/pdf/to-image");
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
+  await privacy.clear();
+  await page.locator("input[type=file]").setInputFiles({
+    name: sentinelFilename,
+    mimeType: "application/pdf",
+    buffer: Buffer.concat([pdf, Buffer.from("\n% PRIVATE_MOBILE_PDF_BYTES")]),
+  });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+
+  const settings = page.getByLabel("PDF 이미지 변환 설정");
+  const result = page.getByLabel("PDF 이미지 변환 결과");
+  await settings.getByRole("radio", { name: /지정 페이지/ }).check();
+  await page.getByLabel("페이지 범위").fill("1");
+  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
+  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
+
   const selectedPages = settings.getByRole("radio", { name: /지정 페이지/ }).locator("..");
   await expectFunctionalTextFloor([
     {
