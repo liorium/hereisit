@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -48,12 +48,13 @@ export function generateHeaders({ processingApiOrigin, allowLocalProcessingOrigi
 `;
 }
 
-export async function writeGeneratedHeaders(environment = process.env) {
+export async function writeGeneratedHeaders(environment = process.env, targetPath = outputPath) {
   const contents = generateHeaders({
     processingApiOrigin: environment.NEXT_PUBLIC_PROCESSING_API_ORIGIN ?? null,
     allowLocalProcessingOrigins: environment.ALLOW_LOCAL_PROCESSING_ORIGINS === "1",
   });
-  await writeFile(outputPath, contents, "utf8");
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await writeFile(targetPath, contents, "utf8");
 }
 
 const invokedPath = process.argv[1];

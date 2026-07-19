@@ -1,5 +1,8 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateHeaders } from "../scripts/generate-web-headers.mjs";
+import { generateHeaders, writeGeneratedHeaders } from "../scripts/generate-web-headers.mjs";
 
 describe("Cloudflare Pages header generation", () => {
   it("adds only one validated HTTPS processing origin", () => {
@@ -29,5 +32,16 @@ describe("Cloudflare Pages header generation", () => {
         allowLocalProcessingOrigins: true,
       }),
     ).toContain("connect-src 'self' http://localhost:8787");
+  });
+
+  it("creates the Pages public directory on a clean checkout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-headers-"));
+    const target = join(root, "missing", "public", "_headers");
+    try {
+      await writeGeneratedHeaders({}, target);
+      expect(await readFile(target, "utf8")).toContain("Content-Security-Policy:");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
