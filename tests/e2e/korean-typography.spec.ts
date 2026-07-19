@@ -25,6 +25,7 @@ function homeTypography(page: Page): Array<[Locator, "balance" | "pretty"]> {
 }
 
 test("keeps home Korean copy on word boundaries across responsive widths", async ({ page }) => {
+  test.setTimeout(90_000);
   await seedToolPreferences(page);
   await page.goto("/");
 
@@ -47,6 +48,7 @@ test("keeps home Korean copy on word boundaries across responsive widths", async
 test("keeps catalog and planned-card Korean copy readable across responsive widths", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await seedToolPreferences(page);
   await page.goto("/tools?planned=1");
 

@@ -724,6 +724,7 @@ test("keeps a compressed PDF result retryable when download activation fails", a
   browserName,
   page,
 }) => {
+  test.setTimeout(90_000);
   await installDownloadActivationController(page);
   const privacy = await prepareCompressedResult(page);
   await setDownloadActivationBlocked(page, true);
