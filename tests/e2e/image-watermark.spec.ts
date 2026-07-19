@@ -418,7 +418,12 @@ test("places a real logo at the top-left and preserves pixels outside it", async
   ).toBe(0);
   await expect(page.getByAltText("white.png 원본")).toHaveCount(0);
   await expect(page.getByAltText("선택한 워터마크 로고")).toHaveCount(0);
-  await page.getByRole("radio", { name: "왼쪽 위", exact: true }).check();
+  const topLeftPosition = page.getByRole("radio", { name: "왼쪽 위", exact: true });
+  const hitTarget = await topLeftPosition.boundingBox();
+  expect(hitTarget).not.toBeNull();
+  expect(hitTarget?.width).toBeGreaterThanOrEqual(44);
+  expect(hitTarget?.height).toBeGreaterThanOrEqual(44);
+  await topLeftPosition.check();
   await page.getByRole("slider", { name: /로고 크기/ }).fill("20");
   await page.getByRole("slider", { name: /여백/ }).fill("0");
   await page.getByRole("slider", { name: /불투명도/ }).fill("100");
@@ -1088,13 +1093,13 @@ test("keeps text length and mode-specific size controls inside the contract", as
   const textSize = page.getByRole("slider", { name: /문구 크기/ });
   await textSize.fill("4");
   const logoMode = page.getByRole("radio", { name: "로고 이미지", exact: true });
-  await logoMode.locator("..").click();
+  await logoMode.check();
   await expect(logoMode).toBeChecked();
   const logoSize = page.getByRole("slider", { name: /로고 크기/ });
   await expect(logoSize).toHaveValue("5");
   await logoSize.fill("50");
   const textMode = page.getByRole("radio", { name: "문구", exact: true });
-  await textMode.locator("..").click();
+  await textMode.check();
   await expect(textMode).toBeChecked();
   await expect(page.getByRole("slider", { name: /문구 크기/ })).toHaveValue("30");
 
