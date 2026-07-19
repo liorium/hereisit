@@ -26,6 +26,7 @@ const rawCostRowSchema = z
     release_report_sha256: hashSchema,
     provider_usage_complete: z.union([z.literal(0), z.literal(1)]),
     complete: z.union([z.literal(0), z.literal(1)]),
+    admitted_jobs: int64StringSchema,
     provider_worker_requests: int64StringSchema,
     provider_worker_cpu_ms: int64StringSchema,
     provider_container_cpu_microseconds: int64StringSchema,
@@ -61,9 +62,29 @@ const activityRowSchema = z
     billed_until_at: nonnegativeInteger,
   })
   .strict();
+const counterRowSchema = z
+  .object({
+    admitted_jobs: int64StringSchema,
+    durable_object_requests: int64StringSchema,
+    queue_operations: int64StringSchema,
+    d1_rows_read: int64StringSchema,
+    d1_rows_written: int64StringSchema,
+    r2_class_a_operations: int64StringSchema,
+    r2_class_b_operations: int64StringSchema,
+    observability_log_events: int64StringSchema,
+  })
+  .strict();
 const sealedStateSchema = z
   .object({
     complete: z.literal(1),
+    admitted_jobs: int64StringSchema,
+    durable_object_requests: int64StringSchema,
+    queue_operations: int64StringSchema,
+    d1_rows_read: int64StringSchema,
+    d1_rows_written: int64StringSchema,
+    r2_class_a_operations: int64StringSchema,
+    r2_class_b_operations: int64StringSchema,
+    observability_log_events: int64StringSchema,
     container_active_milliseconds: int64StringSchema,
     durable_object_active_milliseconds: int64StringSchema,
     worker_cost_microusd: int64StringSchema,
@@ -151,6 +172,7 @@ function usageFromRow(
   row: z.infer<typeof rawCostRowSchema>,
   egressRows: readonly z.infer<typeof egressRowSchema>[],
   activityMilliseconds: number,
+  counters: z.infer<typeof counterRowSchema>,
 ): HourlyCostUsage {
   return {
     workerRequests: row.provider_worker_requests,
@@ -164,18 +186,18 @@ function usageFromRow(
       transmittedBytes: entry.transmitted_bytes,
     })),
     durableObjectActiveMilliseconds: String(activityMilliseconds),
-    durableObjectRequests: row.durable_object_requests,
+    durableObjectRequests: counters.durable_object_requests,
     durableObjectStorageByteMilliseconds: row.durable_object_storage_byte_milliseconds,
-    queueOperations: row.queue_operations,
-    d1RowsRead: row.d1_rows_read,
-    d1RowsWritten: row.d1_rows_written,
+    queueOperations: counters.queue_operations,
+    d1RowsRead: counters.d1_rows_read,
+    d1RowsWritten: counters.d1_rows_written,
     d1StorageByteMilliseconds: row.d1_storage_byte_milliseconds,
-    r2ClassAOperations: row.r2_class_a_operations,
-    r2ClassBOperations: row.r2_class_b_operations,
+    r2ClassAOperations: counters.r2_class_a_operations,
+    r2ClassBOperations: counters.r2_class_b_operations,
     r2StorageByteMilliseconds: row.r2_storage_byte_milliseconds,
     analyticsEngineDataPoints: row.analytics_engine_data_points,
     analyticsEngineReadQueries: row.analytics_engine_read_queries,
-    observabilityLogEvents: row.observability_log_events,
+    observabilityLogEvents: counters.observability_log_events,
     workersLogpushEvents: row.workers_logpush_events,
   };
 }
@@ -217,6 +239,7 @@ export async function sealNextHourlyCost(
     .prepare(
       `SELECT live_cost_model_sha256, provider_usage_schema_sha256, release_report_sha256,
               provider_usage_complete, complete,
+              CAST(admitted_jobs AS TEXT) AS admitted_jobs,
               CAST(provider_worker_requests AS TEXT) AS provider_worker_requests,
               CAST(provider_worker_cpu_ms AS TEXT) AS provider_worker_cpu_ms,
               CAST(provider_container_cpu_microseconds AS TEXT)
@@ -275,6 +298,29 @@ export async function sealNextHourlyCost(
   if (egressTotal.toString() !== row.data.provider_container_tx_bytes) {
     return openCostCircuit(database, input.now, hourKey, "COST_ACCOUNTING_EGRESS_MISMATCH");
   }
+  const counterRow = counterRowSchema.safeParse(
+    await session
+      .prepare(
+        `SELECT CAST(admitted_jobs AS TEXT) AS admitted_jobs,
+                CAST(durable_object_requests AS TEXT) AS durable_object_requests,
+                CAST(queue_operations AS TEXT) AS queue_operations,
+                CAST(d1_rows_read AS TEXT) AS d1_rows_read,
+                CAST(d1_rows_written AS TEXT) AS d1_rows_written,
+                CAST(r2_class_a_operations AS TEXT) AS r2_class_a_operations,
+                CAST(r2_class_b_operations AS TEXT) AS r2_class_b_operations,
+                CAST(observability_log_events AS TEXT) AS observability_log_events
+         FROM operational_counter_hourly
+         WHERE accounting_epoch = ? AND hour_key = ?`,
+      )
+      .bind(control.cost_accounting_epoch, hourKey)
+      .first(),
+  );
+  if (!counterRow.success) {
+    if (input.now >= completenessDeadline) {
+      return openCostCircuit(database, input.now, hourKey, "COST_ACCOUNTING_INCOMPLETE");
+    }
+    return { kind: "incomplete", hourKey, circuitOpen: control.circuit_open === 1 };
+  }
   const hourStart = hourKey * 3_600_000;
   const activityResult = await session
     .prepare(
@@ -301,7 +347,7 @@ export async function sealNextHourlyCost(
   } catch {
     return openCostCircuit(database, input.now, hourKey, "COST_ACTIVITY_INVALID");
   }
-  const usage = usageFromRow(row.data, egressRows, activityMilliseconds);
+  const usage = usageFromRow(row.data, egressRows, activityMilliseconds, counterRow.data);
   let costs: ReturnType<typeof calculateHourlyCosts>;
   try {
     costs = calculateHourlyCosts(input.model, usage);
@@ -318,8 +364,16 @@ export async function sealNextHourlyCost(
     session
       .prepare(
         `UPDATE operational_cost_hourly
-         SET container_active_milliseconds = CAST(? AS INTEGER),
+         SET admitted_jobs = CAST(? AS INTEGER),
+             container_active_milliseconds = CAST(? AS INTEGER),
              durable_object_active_milliseconds = CAST(? AS INTEGER),
+             durable_object_requests = CAST(? AS INTEGER),
+             queue_operations = CAST(? AS INTEGER),
+             d1_rows_read = CAST(? AS INTEGER),
+             d1_rows_written = CAST(? AS INTEGER),
+             r2_class_a_operations = CAST(? AS INTEGER),
+             r2_class_b_operations = CAST(? AS INTEGER),
+             observability_log_events = CAST(? AS INTEGER),
              worker_cost_microusd = CAST(? AS INTEGER),
              container_cost_microusd = CAST(? AS INTEGER),
              durable_object_cost_microusd = CAST(? AS INTEGER),
@@ -337,6 +391,7 @@ export async function sealNextHourlyCost(
            AND provider_usage_schema_sha256 = ?
            AND release_report_sha256 = ?
            AND provider_usage_complete = 1
+           AND CAST(admitted_jobs AS TEXT) = ?
            AND CAST(provider_worker_requests AS TEXT) = ?
            AND CAST(provider_worker_cpu_ms AS TEXT) = ?
            AND CAST(provider_container_cpu_microseconds AS TEXT) = ?
@@ -375,8 +430,16 @@ export async function sealNextHourlyCost(
            AND (
              complete = 0
              OR (
-               CAST(container_active_milliseconds AS TEXT) = ?
+               CAST(admitted_jobs AS TEXT) = ?
+               AND CAST(container_active_milliseconds AS TEXT) = ?
                AND CAST(durable_object_active_milliseconds AS TEXT) = ?
+               AND CAST(durable_object_requests AS TEXT) = ?
+               AND CAST(queue_operations AS TEXT) = ?
+               AND CAST(d1_rows_read AS TEXT) = ?
+               AND CAST(d1_rows_written AS TEXT) = ?
+               AND CAST(r2_class_a_operations AS TEXT) = ?
+               AND CAST(r2_class_b_operations AS TEXT) = ?
+               AND CAST(observability_log_events AS TEXT) = ?
                AND CAST(worker_cost_microusd AS TEXT) = ?
                AND CAST(container_cost_microusd AS TEXT) = ?
                AND CAST(durable_object_cost_microusd AS TEXT) = ?
@@ -391,8 +454,16 @@ export async function sealNextHourlyCost(
            )`,
       )
       .bind(
+        counterRow.data.admitted_jobs,
         String(activityMilliseconds),
         String(activityMilliseconds),
+        counterRow.data.durable_object_requests,
+        counterRow.data.queue_operations,
+        counterRow.data.d1_rows_read,
+        counterRow.data.d1_rows_written,
+        counterRow.data.r2_class_a_operations,
+        counterRow.data.r2_class_b_operations,
+        counterRow.data.observability_log_events,
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -409,6 +480,7 @@ export async function sealNextHourlyCost(
         input.liveCostModelSha256,
         input.providerUsageSchemaSha256,
         input.releaseReportSha256,
+        row.data.admitted_jobs,
         usage.workerRequests,
         usage.workerCpuMs,
         usage.containerCpuMicroseconds,
@@ -420,24 +492,32 @@ export async function sealNextHourlyCost(
         usage.workersLogpushEvents,
         row.data.container_active_milliseconds,
         row.data.durable_object_active_milliseconds,
-        usage.durableObjectRequests,
+        row.data.durable_object_requests,
         usage.durableObjectStorageByteMilliseconds,
-        usage.queueOperations,
-        usage.d1RowsRead,
-        usage.d1RowsWritten,
+        row.data.queue_operations,
+        row.data.d1_rows_read,
+        row.data.d1_rows_written,
         usage.d1StorageByteMilliseconds,
-        usage.r2ClassAOperations,
-        usage.r2ClassBOperations,
+        row.data.r2_class_a_operations,
+        row.data.r2_class_b_operations,
         usage.r2StorageByteMilliseconds,
-        usage.observabilityLogEvents,
+        row.data.observability_log_events,
         control.cost_accounting_epoch,
         hourKey,
         egressJson,
         egressJson,
         control.cost_accounting_epoch,
         hourKey,
+        counterRow.data.admitted_jobs,
         String(activityMilliseconds),
         String(activityMilliseconds),
+        counterRow.data.durable_object_requests,
+        counterRow.data.queue_operations,
+        counterRow.data.d1_rows_read,
+        counterRow.data.d1_rows_written,
+        counterRow.data.r2_class_a_operations,
+        counterRow.data.r2_class_b_operations,
+        counterRow.data.observability_log_events,
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -460,8 +540,16 @@ export async function sealNextHourlyCost(
            AND EXISTS (
              SELECT 1 FROM operational_cost_hourly
              WHERE accounting_epoch = ? AND hour_key = ? AND complete = 1
+               AND CAST(admitted_jobs AS TEXT) = ?
                AND CAST(container_active_milliseconds AS TEXT) = ?
                AND CAST(durable_object_active_milliseconds AS TEXT) = ?
+               AND CAST(durable_object_requests AS TEXT) = ?
+               AND CAST(queue_operations AS TEXT) = ?
+               AND CAST(d1_rows_read AS TEXT) = ?
+               AND CAST(d1_rows_written AS TEXT) = ?
+               AND CAST(r2_class_a_operations AS TEXT) = ?
+               AND CAST(r2_class_b_operations AS TEXT) = ?
+               AND CAST(observability_log_events AS TEXT) = ?
                AND CAST(worker_cost_microusd AS TEXT) = ?
                AND CAST(container_cost_microusd AS TEXT) = ?
                AND CAST(durable_object_cost_microusd AS TEXT) = ?
@@ -482,8 +570,16 @@ export async function sealNextHourlyCost(
         hourKey,
         control.cost_accounting_epoch,
         hourKey,
+        counterRow.data.admitted_jobs,
         String(activityMilliseconds),
         String(activityMilliseconds),
+        counterRow.data.durable_object_requests,
+        counterRow.data.queue_operations,
+        counterRow.data.d1_rows_read,
+        counterRow.data.d1_rows_written,
+        counterRow.data.r2_class_a_operations,
+        counterRow.data.r2_class_b_operations,
+        counterRow.data.observability_log_events,
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -519,10 +615,18 @@ export async function sealNextHourlyCost(
     session
       .prepare(
         `SELECT cost.complete,
+                CAST(cost.admitted_jobs AS TEXT) AS admitted_jobs,
                 CAST(cost.container_active_milliseconds AS TEXT)
                   AS container_active_milliseconds,
                 CAST(cost.durable_object_active_milliseconds AS TEXT)
                   AS durable_object_active_milliseconds,
+                CAST(cost.durable_object_requests AS TEXT) AS durable_object_requests,
+                CAST(cost.queue_operations AS TEXT) AS queue_operations,
+                CAST(cost.d1_rows_read AS TEXT) AS d1_rows_read,
+                CAST(cost.d1_rows_written AS TEXT) AS d1_rows_written,
+                CAST(cost.r2_class_a_operations AS TEXT) AS r2_class_a_operations,
+                CAST(cost.r2_class_b_operations AS TEXT) AS r2_class_b_operations,
+                CAST(cost.observability_log_events AS TEXT) AS observability_log_events,
                 CAST(cost.worker_cost_microusd AS TEXT) AS worker_cost_microusd,
                 CAST(cost.container_cost_microusd AS TEXT) AS container_cost_microusd,
                 CAST(cost.durable_object_cost_microusd AS TEXT) AS durable_object_cost_microusd,
@@ -546,8 +650,16 @@ export async function sealNextHourlyCost(
   if (
     !sealed.success ||
     sealed.data.last_sealed_hour_key !== hourKey ||
+    sealed.data.admitted_jobs !== counterRow.data.admitted_jobs ||
     sealed.data.container_active_milliseconds !== String(activityMilliseconds) ||
     sealed.data.durable_object_active_milliseconds !== String(activityMilliseconds) ||
+    sealed.data.durable_object_requests !== counterRow.data.durable_object_requests ||
+    sealed.data.queue_operations !== counterRow.data.queue_operations ||
+    sealed.data.d1_rows_read !== counterRow.data.d1_rows_read ||
+    sealed.data.d1_rows_written !== counterRow.data.d1_rows_written ||
+    sealed.data.r2_class_a_operations !== counterRow.data.r2_class_a_operations ||
+    sealed.data.r2_class_b_operations !== counterRow.data.r2_class_b_operations ||
+    sealed.data.observability_log_events !== counterRow.data.observability_log_events ||
     sealed.data.worker_cost_microusd !== costs.workerCostMicrousd ||
     sealed.data.container_cost_microusd !== costs.containerCostMicrousd ||
     sealed.data.durable_object_cost_microusd !== costs.durableObjectCostMicrousd ||

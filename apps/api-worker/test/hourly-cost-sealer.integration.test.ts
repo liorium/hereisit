@@ -91,10 +91,10 @@ async function seedCompleteProviderRow(hourKey: number): Promise<void> {
          CAST('1000000' AS INTEGER), CAST('1073741824000' AS INTEGER),
          CAST('1000000000000' AS INTEGER), CAST('1000000000' AS INTEGER), 1,
          1, 1, 1, 1, 1,
-         8000, 1,
-         1, 1, 1,
-         1, 1,
-         1, ?
+         8000, 99,
+         99, 99, 99,
+         99, 99,
+         99, ?
        )`,
     ).bind(
       accountingEpoch,
@@ -109,6 +109,13 @@ async function seedCompleteProviderRow(hourKey: number): Promise<void> {
          accounting_epoch, hour_key, region, transmitted_bytes
        ) VALUES (?, ?, 'enam', CAST('1000000000' AS INTEGER))`,
     ).bind(accountingEpoch, hourKey),
+    env.DB.prepare(
+      `INSERT INTO operational_counter_hourly (
+         accounting_epoch, hour_key, durable_object_requests, queue_operations,
+         d1_rows_read, d1_rows_written, r2_class_a_operations, r2_class_b_operations,
+         observability_log_events, updated_at
+       ) VALUES (?, ?, 1, 1, 1, 1, 1, 1, 1, ?)`,
+    ).bind(accountingEpoch, hourKey, firstHourStart),
   ]);
 }
 
@@ -127,6 +134,7 @@ afterEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM operational_cost_hourly"),
     env.DB.prepare("DELETE FROM container_activity_segments"),
+    env.DB.prepare("DELETE FROM operational_counter_hourly"),
   ]);
 });
 
