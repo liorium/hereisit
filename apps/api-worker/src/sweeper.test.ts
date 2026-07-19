@@ -67,6 +67,9 @@ describe("scheduled maintenance policy", () => {
         expect(olderThan).toBe(now - 10 * 60_000);
         calls.push("orphans");
       }),
+      cleanupCostHistory: vi.fn(async () => {
+        calls.push("cost-history");
+      }),
       evaluateCircuit: vi.fn(async (_env: unknown, evaluatedAt: number) => {
         expect(evaluatedAt).toBe(now);
         calls.push("circuit");
@@ -75,7 +78,15 @@ describe("scheduled maintenance policy", () => {
 
     await runScheduledMaintenanceWithDependencies({} as never, now, dependencies);
 
-    expect(calls).toEqual(["counters", "outbox", "recovery", "expiry", "orphans", "circuit"]);
+    expect(calls).toEqual([
+      "counters",
+      "outbox",
+      "recovery",
+      "expiry",
+      "orphans",
+      "cost-history",
+      "circuit",
+    ]);
     expect(dependencies.recordCounters).toHaveBeenCalledWith(expect.anything(), now);
     expect(dependencies.dispatchPendingOutbox).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.recoverStale).toHaveBeenCalledWith(expect.anything(), now, 100);
@@ -85,6 +96,7 @@ describe("scheduled maintenance policy", () => {
       now - 10 * 60_000,
       100,
     );
+    expect(dependencies.cleanupCostHistory).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.evaluateCircuit).toHaveBeenCalledWith(expect.anything(), now);
   });
 });

@@ -2,6 +2,7 @@ import type { ImageJobMessage } from "@hereisit/server-contracts";
 import { calculateSettledWeightedUnits, retentionDecision } from "@hereisit/server-job";
 import { z } from "zod";
 import { evaluateCircuitBreaker } from "./circuit-breaker";
+import { cleanupCostHistory } from "./cost-history-cleanup";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
 import { type Env, parseOperationalConfig } from "./env";
 import { prepareOperationalCounter } from "./operational-counters";
@@ -72,6 +73,7 @@ export interface ScheduledMaintenanceDependencies<Environment> {
   readonly recoverStale: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly sweepExpired: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly sweepOrphans: (env: Environment, olderThan: number, limit: number) => Promise<unknown>;
+  readonly cleanupCostHistory: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly evaluateCircuit: (env: Environment, now: number) => Promise<unknown>;
 }
 
@@ -86,6 +88,7 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
   await dependencies.recoverStale(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepExpired(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepOrphans(env, now - ORPHAN_GRACE_MS, MAINTENANCE_LIMIT);
+  await dependencies.cleanupCostHistory(env, now, MAINTENANCE_LIMIT);
   await dependencies.evaluateCircuit(env, now);
 }
 
@@ -693,6 +696,8 @@ export async function runScheduledMaintenance(env: Env, now = Date.now()): Promi
     recoverStale: recoverStaleLeasesAndLostQueueMessages,
     sweepExpired: sweepExpiredJobs,
     sweepOrphans: sweepOrphanArtifactsFromSavedCursor,
+    cleanupCostHistory: (environment, cleanupAt, limit) =>
+      cleanupCostHistory(environment.DB, environment.USAGE_LOGS, { now: cleanupAt, limit }),
     evaluateCircuit: async (environment, evaluatedAt) => {
       const config = await parseOperationalConfig(environment);
       await evaluateCircuitBreaker(environment.DB, {
