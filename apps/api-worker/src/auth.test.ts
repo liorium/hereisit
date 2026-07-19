@@ -663,6 +663,8 @@ describe("Wrangler source-of-truth and generated environment", () => {
       triggers?: { crons?: string[] };
       d1_databases: { binding: string; database_id: string }[];
       r2_buckets: { binding: string }[];
+      analytics_engine_datasets?: { binding: string; dataset: string }[];
+      version_metadata?: { binding: string };
       queues?: {
         producers?: { binding: string; queue: string }[];
         consumers?: unknown[];
@@ -689,6 +691,10 @@ describe("Wrangler source-of-truth and generated environment", () => {
       }),
     ]);
     expect(config.r2_buckets.map(({ binding }) => binding)).toEqual(["JOB_OBJECTS", "USAGE_LOGS"]);
+    expect(config.analytics_engine_datasets).toEqual([
+      { binding: "USAGE_ANALYTICS", dataset: "hereisit-processing-usage-local" },
+    ]);
+    expect(config.version_metadata).toEqual({ binding: "WORKER_VERSION" });
     expect(config.queues?.producers).toEqual([
       {
         binding: "IMAGE_JOBS",
@@ -1018,6 +1024,8 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "DB",
       "JOB_OBJECTS",
       "USAGE_LOGS",
+      "USAGE_ANALYTICS",
+      "WORKER_VERSION",
       "SESSION_JOB_RATE_LIMITER",
       "NETWORK_JOB_RATE_LIMITER",
       "JOB_READ_RATE_LIMITER",
@@ -1029,7 +1037,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     ]) {
       expect(generated).toContain(`${binding}:`);
     }
-    for (const futureBinding of ["USAGE_ANALYTICS", "WORKER_VERSION", "ALERT_EMAIL"]) {
+    for (const futureBinding of ["ALERT_EMAIL"]) {
       expect(generated).not.toContain(`${futureBinding}:`);
     }
     expect(envSource).toContain("Cloudflare.Env &");

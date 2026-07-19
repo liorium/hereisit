@@ -25,6 +25,15 @@
       "bucket_name": "hereisit-usage-logs-local"
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "USAGE_ANALYTICS",
+      "dataset": "hereisit-processing-usage-local"
+    }
+  ],
+  "version_metadata": {
+    "binding": "WORKER_VERSION"
+  },
   "queues": {
     "producers": [
       {
@@ -112,6 +121,8 @@
     "CLOUDFLARE_ACCOUNT_ID": "local-account",
     "APP_ORIGINS": "[\"http://127.0.0.1:3000\",\"http://127.0.0.1:4173\",\"http://localhost:4173\"]",
     "R2_BUCKET_NAME": "hereisit-job-objects-local",
+    "USAGE_LOG_BUCKET_NAME": "hereisit-usage-logs-local",
+    "USAGE_ANALYTICS_DATASET_NAME": "hereisit-processing-usage-local",
     "ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT": "80000000000",
     "ANONYMOUS_DAILY_WEIGHTED_UNIT_LIMIT": "8000000000",
     "NETWORK_DAILY_WEIGHTED_UNIT_LIMIT": "24000000000",
