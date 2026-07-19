@@ -8,6 +8,7 @@
     "node": ">=24.0.0 <25"
   },
   "scripts": {
+    "audit:prod": "pnpm audit --prod --audit-level moderate",
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "biome check .",
@@ -20,7 +21,7 @@
     "test:processing-stack": "node scripts/test-processing-stack.mjs",
     "prepare:image-engine:local": "node scripts/prepare-image-engine-local.mjs",
     "test:image-engine:fuzz:pr": "pnpm prepare:image-engine:local && node scripts/fuzz-image-engine.mjs --duration-seconds 60 --seed 20260716 --engine-image hereisit-image-engine:local-source",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:worker && pnpm test:image-engine:fuzz:pr && pnpm build && pnpm verify:export",
+    "verify": "pnpm audit:prod && pnpm lint && pnpm typecheck && pnpm test && pnpm test:worker && pnpm test:image-engine:fuzz:pr && pnpm build && pnpm verify:export",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "verify:all": "pnpm verify && pnpm test:processing-stack && pnpm test:e2e",
