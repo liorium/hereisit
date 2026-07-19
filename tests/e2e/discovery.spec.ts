@@ -414,6 +414,19 @@ test("shows a processor-free discovery home with search, file launch, and attach
   expect(await panel.locator("article").count()).toBeLessThanOrEqual(12);
 });
 
+test("switches the home domain with one pointer activation", async ({ page }) => {
+  await page.goto("/");
+
+  const tablist = page.getByRole("tablist", { name: "도구 분야" });
+  const imageTab = tablist.getByRole("tab", { name: "이미지", exact: true });
+  await imageTab.click();
+  await expect(imageTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tabpanel")).toContainText("이미지 도구");
+  await expect(
+    page.getByRole("tabpanel").getByRole("link", { name: "이미지 모두 보기" }),
+  ).toHaveAttribute("href", "/tools?domain=image");
+});
+
 test("keeps domain tabs roving, attached, bounded, and responsive", async ({ page }) => {
   await page.goto("/");
 
@@ -421,6 +434,7 @@ test("keeps domain tabs roving, attached, bounded, and responsive", async ({ pag
   const tabs = tablist.getByRole("tab");
   const panel = page.getByRole("tabpanel");
   const allTab = tablist.getByRole("tab", { name: "전체·추천", exact: true });
+  const imageTab = tablist.getByRole("tab", { name: "이미지", exact: true });
   const lastTab = tablist.getByRole("tab", { name: "생활·계산", exact: true });
 
   await allTab.focus();
@@ -451,7 +465,9 @@ test("keeps domain tabs roving, attached, bounded, and responsive", async ({ pag
     "/tools",
   );
 
-  await tablist.getByRole("tab", { name: "이미지", exact: true }).click();
+  await imageTab.focus();
+  await page.keyboard.press("Enter");
+  await expect(imageTab).toHaveAttribute("aria-selected", "true");
   await expect(panel.getByRole("link", { name: "이미지 모두 보기" })).toHaveAttribute(
     "href",
     "/tools?domain=image",
