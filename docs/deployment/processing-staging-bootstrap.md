@@ -13,16 +13,22 @@ artifacts, logs, or the repository.
 
 The deployment environment must provide:
 
-- `CLOUDFLARE_ACCOUNT_ID` and a least-privilege `CLOUDFLARE_API_TOKEN` for Workers, Containers, D1,
-  R2, Queues, and Pages;
+- `CLOUDFLARE_ACCOUNT_ID` as a non-secret environment variable and a least-privilege
+  `CLOUDFLARE_API_TOKEN` secret for Workers, Containers, D1, R2, Queues, and Pages;
 - `CLOUDFLARE_LOGPUSH_API_TOKEN`, limited to Logs configuration;
 - `LOGPUSH_R2_ACCESS_KEY_ID` and `LOGPUSH_R2_SECRET_ACCESS_KEY`, limited to the staging usage bucket;
 - `STAGING_ANALYTICS_READ_TOKEN` and `STAGING_LOGPUSH_STATUS_TOKEN`, both read-only and
   product-scoped;
 - `STAGING_ABUSE_HMAC_SECRET_CURRENT` and `STAGING_ABUSE_HMAC_SECRET_PREVIOUS`, each a 32-byte
   base64url secret;
-- `STAGING_MAINTAINER_HASHES_JSON`, a non-empty JSON array of SHA-256 session hashes;
+- `STAGING_MAINTAINER_SESSION_ID`, a canonical UUID reserved for the CI canary, and
+  `STAGING_MAINTAINER_HASHES_JSON`, a non-empty JSON array containing its SHA-256 hash;
 - `ALERT_DESTINATION_ADDRESS`, already verified in Cloudflare Email Routing.
+
+Store the account ID and alert address as `processing-staging` environment variables and all other
+values as environment secrets. After this workflow is present on `main`, run
+`Processing staging preflight` once. It validates the sealed inputs without printing their values and
+runs only `wrangler whoami`; it does not create or change Cloudflare resources.
 
 The finalized release-candidate job must also have restored `.artifacts/candidate`, set `ENGINE_IMAGE`
 to the immutable same-account `registry.cloudflare.com/...@sha256:...` image, and exported the signed

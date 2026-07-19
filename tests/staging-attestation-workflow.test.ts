@@ -24,13 +24,13 @@ describe("processing staging attestation workflow", () => {
     ]) {
       expect(workflow).toContain(`      ${input}:\n        required: true\n        type: string`);
     }
-    for (const secret of [
-      "CLOUDFLARE_ACCOUNT_ID",
-      "CLOUDFLARE_API_TOKEN",
-      "CLOUDFLARE_D1_API_TOKEN",
-    ]) {
+    for (const secret of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_D1_API_TOKEN"]) {
       expect(workflow).toContain(`      ${secret}:\n        required: true`);
     }
+    expect(workflow).not.toContain("      CLOUDFLARE_ACCOUNT_ID:\n        required: true");
+    expect(
+      workflow.match(/CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \}\}/g),
+    ).toHaveLength(2);
     expect(workflow).toContain("permissions:\n  actions: read\n  contents: read");
     expect(workflow).toContain("environment: processing-staging");
     expect(workflow).toContain(

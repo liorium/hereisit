@@ -57,11 +57,12 @@ jobs:
       database_name: hereisit-processing-staging
       database_id: ${{ needs.provision.outputs.database_id }}
     secrets:
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
 ```
 
+Set the non-secret `CLOUDFLARE_ACCOUNT_ID` once as a `processing-staging` environment variable. The
+workflow reads it from `vars` and keeps only authentication material in GitHub environment secrets.
 Keep the Wrangler token limited to the permissions required for remote D1 migrations. Keep the direct
 D1 token limited to D1 read/write for the single deployment account; neither token is accepted through
 command-line input.
