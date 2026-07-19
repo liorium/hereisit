@@ -428,3 +428,135 @@ export function generateProcessingWrangler(input) {
     },
   };
 }
+
+const cliScalarFields = {
+  environment: "environment",
+  "account-id": "accountId",
+  "database-id": "databaseId",
+  "bucket-name": "bucketName",
+  "usage-log-bucket-name": "usageLogBucketName",
+  "usage-analytics-dataset-name": "usageAnalyticsDatasetName",
+  "queue-name": "queueName",
+  "dlq-name": "dlqName",
+  "engine-image": "engineImage",
+  "live-cost-model-sha256": "liveCostModelSha256",
+  "provider-usage-schema-sha256": "providerUsageSchemaSha256",
+  "release-report-sha256": "releaseReportSha256",
+  "session-rate-limit-namespace-id": "sessionRateLimitNamespaceId",
+  "network-rate-limit-namespace-id": "networkRateLimitNamespaceId",
+  "job-read-rate-limit-namespace-id": "jobReadRateLimitNamespaceId",
+  "result-download-rate-limit-namespace-id": "resultDownloadRateLimitNamespaceId",
+  "policy-rate-limit-namespace-id": "policyRateLimitNamespaceId",
+  "job-api-network-rate-limit-namespace-id": "jobApiNetworkRateLimitNamespaceId",
+  "alert-destination-address": "alertDestinationAddress",
+};
+
+const cliIntegerFields = {
+  "account-daily-weighted-unit-limit": "accountDailyWeightedUnitLimit",
+  "anonymous-daily-weighted-unit-limit": "anonymousDailyWeightedUnitLimit",
+  "network-daily-weighted-unit-limit": "networkDailyWeightedUnitLimit",
+  "account-pending-job-limit": "accountPendingJobLimit",
+  "network-pending-job-limit": "networkPendingJobLimit",
+  "maximum-queued-age-seconds": "maximumQueuedAgeSeconds",
+  "max-live-median-output-ratio-bps": "maximumLiveMedianOutputRatioBasisPoints",
+  "max-live-p95-weighted-units": "maximumLiveP95WeightedUnits",
+  "max-live-original-retained-rate-bps": "maximumLiveOriginalRetainedRateBasisPoints",
+  "max-live-cost-per-1000-microusd": "maximumLiveCostPer1000Microusd",
+  "max-projected-monthly-cost-microusd": "maximumProjectedMonthlyCostMicrousd",
+  "rollout-percent": "rolloutPercent",
+};
+
+function parseCanonicalInteger(value, label) {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/.test(value)) {
+    throw new TypeError(`--${label} must be a canonical non-negative integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new RangeError(`--${label} exceeds safe integer range`);
+  return parsed;
+}
+
+export function parseProcessingWranglerArguments(argv, liveCostModel) {
+  if (!Array.isArray(argv)) throw new TypeError("CLI arguments must be an array");
+  const parsed = { appOrigins: [], liveCostModel };
+  const seen = new Set();
+  let liveCostModelPath;
+  for (let index = 0; index < argv.length; index += 2) {
+    const flag = argv[index];
+    const value = argv[index + 1];
+    if (typeof flag !== "string" || !flag.startsWith("--") || value === undefined) {
+      throw new TypeError("CLI arguments must be --name value pairs");
+    }
+    const name = flag.slice(2);
+    if (name === "app-origin") {
+      parsed.appOrigins.push(value);
+      continue;
+    }
+    if (seen.has(name)) throw new TypeError(`duplicate CLI argument --${name}`);
+    seen.add(name);
+    if (name === "live-cost-model") {
+      liveCostModelPath = value;
+    } else if (name === "maintainer-session-hashes-json") {
+      try {
+        parsed.maintainerSessionHashes = JSON.parse(value);
+      } catch {
+        throw new TypeError("--maintainer-session-hashes-json must be valid JSON");
+      }
+    } else if (Object.hasOwn(cliScalarFields, name)) {
+      parsed[cliScalarFields[name]] = value;
+    } else if (Object.hasOwn(cliIntegerFields, name)) {
+      parsed[cliIntegerFields[name]] = parseCanonicalInteger(value, name);
+    } else {
+      throw new TypeError(`unknown processing Wrangler argument --${name}`);
+    }
+  }
+  if (liveCostModel === undefined) {
+    if (liveCostModelPath === undefined) throw new TypeError("--live-cost-model is required");
+    parsed.liveCostModelPath = liveCostModelPath;
+  } else if (liveCostModelPath === undefined) {
+    parsed.liveCostModelPath = "[provided]";
+  }
+  return parsed;
+}
+
+async function readBoundedJson(path, label) {
+  const bytes = await readFile(resolve(path));
+  if (bytes.byteLength > 1024 * 1024) throw new RangeError(`${label} exceeds 1 MiB`);
+  try {
+    return JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new TypeError(`${label} must be valid JSON`);
+  }
+}
+
+export async function writeProcessingWrangler({ argv, cwd = process.cwd() }) {
+  const firstPass = parseProcessingWranglerArguments(argv, undefined);
+  const liveCostModel = await readBoundedJson(firstPass.liveCostModelPath, "live cost model");
+  const input = parseProcessingWranglerArguments(argv, liveCostModel);
+  delete input.liveCostModelPath;
+  const config = generateProcessingWrangler(input);
+  const output = resolve(cwd, `.wrangler/generated/wrangler.${input.environment}.jsonc`);
+  const temporary = `${output}.tmp-${process.pid}-${Date.now()}`;
+  await mkdir(dirname(output), { recursive: true });
+  await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  try {
+    await rename(temporary, output);
+  } catch (error) {
+    await import("node:fs/promises").then(({ unlink }) => unlink(temporary).catch(() => undefined));
+    throw error;
+  }
+  return output;
+}
+
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+) {
+  await writeProcessingWrangler({ argv: process.argv.slice(2) });
+}
+
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";

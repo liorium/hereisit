@@ -1,5 +1,12 @@
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateProcessingWrangler } from "../scripts/generate-processing-wrangler.mjs";
+import {
+  generateProcessingWrangler,
+  parseProcessingWranglerArguments,
+  writeProcessingWrangler,
+} from "../scripts/generate-processing-wrangler.mjs";
 
 const validLiveCostModel = {
   version: 1,
@@ -98,7 +105,100 @@ function validInput(environment: "staging" | "production" = "staging") {
   };
 }
 
+function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: string) {
+  return [
+    "--environment",
+    input.environment,
+    "--account-id",
+    input.accountId,
+    "--database-id",
+    input.databaseId,
+    ...input.appOrigins.flatMap((origin) => ["--app-origin", origin]),
+    "--bucket-name",
+    input.bucketName,
+    "--usage-log-bucket-name",
+    input.usageLogBucketName,
+    "--usage-analytics-dataset-name",
+    input.usageAnalyticsDatasetName,
+    "--queue-name",
+    input.queueName,
+    "--dlq-name",
+    input.dlqName,
+    "--engine-image",
+    input.engineImage,
+    "--account-daily-weighted-unit-limit",
+    String(input.accountDailyWeightedUnitLimit),
+    "--anonymous-daily-weighted-unit-limit",
+    String(input.anonymousDailyWeightedUnitLimit),
+    "--network-daily-weighted-unit-limit",
+    String(input.networkDailyWeightedUnitLimit),
+    "--account-pending-job-limit",
+    String(input.accountPendingJobLimit),
+    "--network-pending-job-limit",
+    String(input.networkPendingJobLimit),
+    "--maximum-queued-age-seconds",
+    String(input.maximumQueuedAgeSeconds),
+    "--max-live-median-output-ratio-bps",
+    String(input.maximumLiveMedianOutputRatioBasisPoints),
+    "--max-live-p95-weighted-units",
+    String(input.maximumLiveP95WeightedUnits),
+    "--max-live-original-retained-rate-bps",
+    String(input.maximumLiveOriginalRetainedRateBasisPoints),
+    "--max-live-cost-per-1000-microusd",
+    String(input.maximumLiveCostPer1000Microusd),
+    "--max-projected-monthly-cost-microusd",
+    String(input.maximumProjectedMonthlyCostMicrousd),
+    "--live-cost-model",
+    liveCostModelPath,
+    "--live-cost-model-sha256",
+    input.liveCostModelSha256,
+    "--provider-usage-schema-sha256",
+    input.providerUsageSchemaSha256,
+    "--release-report-sha256",
+    input.releaseReportSha256,
+    "--session-rate-limit-namespace-id",
+    input.sessionRateLimitNamespaceId,
+    "--network-rate-limit-namespace-id",
+    input.networkRateLimitNamespaceId,
+    "--job-read-rate-limit-namespace-id",
+    input.jobReadRateLimitNamespaceId,
+    "--result-download-rate-limit-namespace-id",
+    input.resultDownloadRateLimitNamespaceId,
+    "--policy-rate-limit-namespace-id",
+    input.policyRateLimitNamespaceId,
+    "--job-api-network-rate-limit-namespace-id",
+    input.jobApiNetworkRateLimitNamespaceId,
+    "--alert-destination-address",
+    input.alertDestinationAddress,
+    "--maintainer-session-hashes-json",
+    JSON.stringify(input.maintainerSessionHashes),
+    "--rollout-percent",
+    String(input.rolloutPercent),
+  ];
+}
+
 describe("processing Wrangler generator", () => {
+  it("supports repeated origins and atomically writes the generated environment file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-wrangler-"));
+    try {
+      const modelPath = join(root, "live-cost-model.json");
+      await writeFile(modelPath, JSON.stringify(validLiveCostModel));
+      const input = validInput();
+      const argv = cliArguments(input, modelPath);
+
+      expect(parseProcessingWranglerArguments(argv, validLiveCostModel).appOrigins).toEqual(
+        input.appOrigins,
+      );
+      const output = await writeProcessingWrangler({ argv, cwd: root });
+      expect(output).toBe(join(root, ".wrangler/generated/wrangler.staging.jsonc"));
+      const config = JSON.parse(await readFile(output, "utf8"));
+      expect(config.vars.APP_ORIGINS).toBe(JSON.stringify(input.appOrigins));
+      expect((await stat(output)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("generates an environment-bound deployment config without secrets", () => {
     const input = validInput();
     const config = generateProcessingWrangler(input);
