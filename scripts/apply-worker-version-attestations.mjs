@@ -1,9 +1,59 @@
-import { assertExactKeys, assertObject, sha256Canonical } from "./image-lab-common.mjs";
+import { open } from "node:fs/promises";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  assertExactKeys,
+  assertObject,
+  parseCliArguments,
+  sha256Canonical,
+} from "./image-lab-common.mjs";
+import { createWorkerVersionAttestationBatch } from "./verify-worker-version-chain.mjs";
 
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const maximumResponseBytes = 256 * 1024;
+const maximumAttestationBytes = 64 * 1024;
 const requiredMigrationName = "0002_worker_version_attestations.sql";
+
+async function readBoundedAttestationJson(file) {
+  let handle;
+  let bytes;
+  try {
+    handle = await open(file, "r");
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) throw new TypeError("attestation input must be a regular file");
+    if (metadata.size > maximumAttestationBytes) {
+      throw new RangeError("attestation input exceeds the maximum size");
+    }
+    bytes = new Uint8Array(maximumAttestationBytes + 1);
+    let total = 0;
+    while (total < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, total, bytes.byteLength - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maximumAttestationBytes) {
+      throw new RangeError("attestation input exceeds the maximum size");
+    }
+    bytes = bytes.subarray(0, total);
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof RangeError) throw error;
+    throw new Error("attestation input could not be opened");
+  } finally {
+    await handle?.close();
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new TypeError("attestation input is not valid UTF-8");
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new TypeError("attestation JSON is invalid");
+  }
+}
 
 function validateParams(value, label) {
   if (!Array.isArray(value)) throw new TypeError(`${label} params must be an array`);
@@ -221,4 +271,45 @@ export async function applyWorkerVersionAttestationBatch({
     statements: batch.statements.length,
     verificationQueries: batch.verification.length,
   };
+}
+
+export async function runApplyWorkerVersionAttestationsCli(
+  argv,
+  { env = process.env, fetchImpl = fetch } = {},
+) {
+  const args = parseCliArguments(argv);
+  const allowed = new Set(["attestation", "account-id", "database-id"]);
+  if (Object.keys(args).some((key) => !allowed.has(key))) {
+    throw new TypeError("unknown Worker attestation application argument");
+  }
+  for (const name of ["attestation", "account-id", "database-id"]) {
+    if (args[name] === undefined) throw new TypeError(`--${name} is required`);
+  }
+  if (typeof env.CLOUDFLARE_D1_API_TOKEN !== "string" || env.CLOUDFLARE_D1_API_TOKEN.length === 0) {
+    throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
+  }
+  const attestation = await readBoundedAttestationJson(args.attestation);
+  const batch = createWorkerVersionAttestationBatch(attestation);
+  return applyWorkerVersionAttestationBatch({
+    accountId: args["account-id"],
+    databaseId: args["database-id"],
+    apiToken: env.CLOUDFLARE_D1_API_TOKEN,
+    batch,
+    fetchImpl,
+  });
+}
+
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+) {
+  try {
+    const result = await runApplyWorkerVersionAttestationsCli(process.argv.slice(2));
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Worker attestation application failed";
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 }
