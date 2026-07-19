@@ -57,6 +57,9 @@ const inputKeys = new Set([
   "bucketName",
   "usageLogBucketName",
   "usageAnalyticsDatasetName",
+  "logpushJobId",
+  "containerApplicationId",
+  "containerInstanceId",
   "queueName",
   "dlqName",
   "engineImage",
@@ -223,6 +226,14 @@ function validateInput(input) {
   const environment = value.environment;
   if (!ACCOUNT_ID_PATTERN.test(value.accountId ?? "")) throw new TypeError("accountId is invalid");
   if (!UUID_PATTERN.test(value.databaseId ?? "")) throw new TypeError("databaseId is invalid");
+  assertSafeInteger(value.logpushJobId, "logpushJobId");
+  if (value.logpushJobId < 1) throw new RangeError("logpushJobId must be positive");
+  if (!UUID_PATTERN.test(value.containerApplicationId ?? "")) {
+    throw new TypeError("containerApplicationId is invalid");
+  }
+  if (!UUID_PATTERN.test(value.containerInstanceId ?? "")) {
+    throw new TypeError("containerInstanceId is invalid");
+  }
   const expected = {
     bucketName: `hereisit-processing-${environment}`,
     usageLogBucketName: `hereisit-processing-usage-${environment}`,
@@ -411,6 +422,11 @@ export function generateProcessingWrangler(input) {
       R2_BUCKET_NAME: value.bucketName,
       USAGE_LOG_BUCKET_NAME: value.usageLogBucketName,
       USAGE_ANALYTICS_DATASET_NAME: value.usageAnalyticsDatasetName,
+      LOGPUSH_JOB_ID: String(value.logpushJobId),
+      CONTAINER_APPLICATION_ID: value.containerApplicationId,
+      CONTAINER_INSTANCE_ID: value.containerInstanceId,
+      WORKER_SCRIPT_NAME: `hereisit-processing-${environment}`,
+      USAGE_LOG_PREFIX: `workers-trace-events/${environment}/`,
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: String(value.accountDailyWeightedUnitLimit),
       ANONYMOUS_DAILY_WEIGHTED_UNIT_LIMIT: String(value.anonymousDailyWeightedUnitLimit),
       NETWORK_DAILY_WEIGHTED_UNIT_LIMIT: String(value.networkDailyWeightedUnitLimit),
@@ -443,6 +459,8 @@ const cliScalarFields = {
   "bucket-name": "bucketName",
   "usage-log-bucket-name": "usageLogBucketName",
   "usage-analytics-dataset-name": "usageAnalyticsDatasetName",
+  "container-application-id": "containerApplicationId",
+  "container-instance-id": "containerInstanceId",
   "queue-name": "queueName",
   "dlq-name": "dlqName",
   "engine-image": "engineImage",
@@ -459,6 +477,7 @@ const cliScalarFields = {
 };
 
 const cliIntegerFields = {
+  "logpush-job-id": "logpushJobId",
   "account-daily-weighted-unit-limit": "accountDailyWeightedUnitLimit",
   "anonymous-daily-weighted-unit-limit": "anonymousDailyWeightedUnitLimit",
   "network-daily-weighted-unit-limit": "networkDailyWeightedUnitLimit",
