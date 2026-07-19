@@ -688,7 +688,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
         database_id: "00000000-0000-0000-0000-000000000001",
       }),
     ]);
-    expect(config.r2_buckets.map(({ binding }) => binding)).toEqual(["JOB_OBJECTS"]);
+    expect(config.r2_buckets.map(({ binding }) => binding)).toEqual(["JOB_OBJECTS", "USAGE_LOGS"]);
     expect(config.queues?.producers).toEqual([
       {
         binding: "IMAGE_JOBS",
@@ -1017,6 +1017,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     for (const binding of [
       "DB",
       "JOB_OBJECTS",
+      "USAGE_LOGS",
       "SESSION_JOB_RATE_LIMITER",
       "NETWORK_JOB_RATE_LIMITER",
       "JOB_READ_RATE_LIMITER",
@@ -1028,12 +1029,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     ]) {
       expect(generated).toContain(`${binding}:`);
     }
-    for (const futureBinding of [
-      "USAGE_LOGS",
-      "USAGE_ANALYTICS",
-      "WORKER_VERSION",
-      "ALERT_EMAIL",
-    ]) {
+    for (const futureBinding of ["USAGE_ANALYTICS", "WORKER_VERSION", "ALERT_EMAIL"]) {
       expect(generated).not.toContain(`${futureBinding}:`);
     }
     expect(envSource).toContain("Cloudflare.Env &");

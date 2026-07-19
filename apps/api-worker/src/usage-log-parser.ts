@@ -3,6 +3,7 @@ import { z } from "zod";
 const MAXIMUM_LINE_BYTES = 4_096;
 const MAXIMUM_RECORDS = 1_000_000;
 const MAXIMUM_HOURS = 256;
+const MAXIMUM_DECOMPRESSED_BYTES = 256 * 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HANDLER_EVENT_TYPES = new Set(["fetch", "queue", "scheduled"]);
 
@@ -34,6 +35,7 @@ export interface TraceEventParserOptions {
   readonly handlerEntrypoints: ReadonlySet<string>;
   readonly allowedVersionIds: ReadonlySet<string>;
   readonly createDigest: () => StreamingDigest;
+  readonly maximumDecompressedBytes?: number;
 }
 
 export interface TraceEventHourAggregate {
@@ -52,7 +54,16 @@ export interface ParsedTraceEvents {
 }
 
 export function createCloudflareSha256Digest(): StreamingDigest {
-  const stream = new DigestStream("SHA-256");
+  const DigestStreamConstructor = (
+    crypto as unknown as {
+      DigestStream: new (
+        algorithm: string,
+      ) => WritableStream<ArrayBuffer | ArrayBufferView> & {
+        readonly digest: Promise<ArrayBuffer>;
+      };
+    }
+  ).DigestStream;
+  const stream = new DigestStreamConstructor("SHA-256");
   const writer = stream.getWriter();
   let finished = false;
   return {
@@ -97,6 +108,14 @@ export async function parseTraceEventNdjson(
   }
   if (options.handlerEntrypoints.size < 1 || options.allowedVersionIds.size < 1) {
     throw new TypeError("Trace parser allowlists must not be empty.");
+  }
+  const maximumDecompressedBytes = options.maximumDecompressedBytes ?? MAXIMUM_DECOMPRESSED_BYTES;
+  if (
+    !Number.isSafeInteger(maximumDecompressedBytes) ||
+    maximumDecompressedBytes < 1 ||
+    maximumDecompressedBytes > MAXIMUM_DECOMPRESSED_BYTES
+  ) {
+    throw new RangeError("Trace decompression bound must be between 1 byte and 256 MiB.");
   }
 
   const reader = stream.getReader();
@@ -164,6 +183,9 @@ export async function parseTraceEventNdjson(
         value.byteLength,
         "Decompressed trace bytes",
       );
+      if (decompressedBytes > maximumDecompressedBytes) {
+        throw new RangeError("Decompressed trace payload exceeds its configured bound.");
+      }
       await digest.update(value);
       let start = 0;
       for (let index = 0; index < value.byteLength; index += 1) {

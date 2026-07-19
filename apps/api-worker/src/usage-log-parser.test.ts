@@ -90,6 +90,15 @@ describe("Workers Trace Events usage-log parser", () => {
     ).rejects.toThrow(/4 KiB/i);
   });
 
+  it("stops a decompression bomb at the configured streaming byte bound", async () => {
+    await expect(
+      parseTraceEventNdjson(chunked("123456789", 9), {
+        ...options,
+        maximumDecompressedBytes: 8,
+      }),
+    ).rejects.toThrow(/configured bound/i);
+  });
+
   it("decompresses gzip incrementally and returns the exact payload digest", async () => {
     const input = `${JSON.stringify(record())}\n`;
     const compressor = new CompressionStream("gzip") as unknown as ReadableWritablePair<

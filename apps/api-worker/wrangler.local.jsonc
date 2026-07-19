@@ -19,6 +19,10 @@
     {
       "binding": "JOB_OBJECTS",
       "bucket_name": "hereisit-job-objects-local"
+    },
+    {
+      "binding": "USAGE_LOGS",
+      "bucket_name": "hereisit-usage-logs-local"
     }
   ],
   "queues": {
