@@ -8,6 +8,7 @@ const imageCompressionServerSpec = /image-compression-server\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  failOnFlakyTests: isCI,
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
