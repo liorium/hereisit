@@ -3,6 +3,7 @@ import { applyWorkerVersionAttestationBatch } from "../scripts/apply-worker-vers
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const databaseId = "11111111-2222-3333-4444-555555555555";
+const migrationName = "0002_worker_version_attestations.sql";
 
 function queryResult({ results = [], changed = false, primary = true } = {}) {
   return {
@@ -56,6 +57,7 @@ describe("remote Worker version attestation application", () => {
   it("posts one parameterized primary batch then verifies exact persisted rows", async () => {
     const calls: Array<{ url: string; init: RequestInit; body: unknown }> = [];
     const replies = [
+      response(queryResult({ results: [{ name: migrationName }] })),
       response(queryResult({ changed: true })),
       response(queryResult({ results: [{ versionId: "v1" }] })),
     ];
@@ -74,7 +76,7 @@ describe("remote Worker version attestation application", () => {
       }),
     ).resolves.toEqual({ applied: true, statements: 1, verificationQueries: 1 });
 
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(calls[0].url).toBe(
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,
     );
@@ -86,28 +88,54 @@ describe("remote Worker version attestation application", () => {
         "content-type": "application/json",
       },
     });
-    expect(calls[0].body).toEqual({ batch: validBatch().statements });
+    expect(calls[0].body).toEqual({
+      sql: "SELECT name FROM d1_migrations WHERE name = ?",
+      params: [migrationName],
+    });
     expect(JSON.stringify(calls[0].body)).not.toContain("deployment-token-value");
-    expect(calls[1].body).toEqual({
+    expect(calls[1].body).toEqual({ batch: validBatch().statements });
+    expect(calls[2].body).toEqual({
       sql: validBatch().verification[0].sql,
       params: validBatch().verification[0].params,
     });
   });
 
   it("rejects a write response not served by the primary", async () => {
+    const replies = [
+      response(queryResult({ results: [{ name: migrationName }] })),
+      response(queryResult({ changed: true, primary: false })),
+    ];
     await expect(
       applyWorkerVersionAttestationBatch({
         accountId,
         databaseId,
         apiToken: "deployment-token-value",
         batch: validBatch(),
-        fetchImpl: async () => response(queryResult({ changed: true, primary: false })),
+        fetchImpl: async () => replies.shift() as Response,
       }),
     ).rejects.toThrow(/primary/i);
   });
 
+  it("does not write when the attestation migration is absent", async () => {
+    const calls: unknown[] = [];
+    await expect(
+      applyWorkerVersionAttestationBatch({
+        accountId,
+        databaseId,
+        apiToken: "deployment-token-value",
+        batch: validBatch(),
+        fetchImpl: async (_url, init) => {
+          calls.push(JSON.parse(String(init?.body)));
+          return response(queryResult({ results: [] }));
+        },
+      }),
+    ).rejects.toThrow(/migration/i);
+    expect(calls).toHaveLength(1);
+  });
+
   it("rejects persisted rows that differ from the attested expectation", async () => {
     const replies = [
+      response(queryResult({ results: [{ name: migrationName }] })),
       response(queryResult({ changed: true })),
       response(queryResult({ results: [{ versionId: "other" }] })),
     ];

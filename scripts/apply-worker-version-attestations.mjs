@@ -3,6 +3,7 @@ import { assertExactKeys, assertObject, sha256Canonical } from "./image-lab-comm
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const maximumResponseBytes = 256 * 1024;
+const requiredMigrationName = "0002_worker_version_attestations.sql";
 
 function validateParams(value, label) {
   if (!Array.isArray(value)) throw new TypeError(`${label} params must be an array`);
@@ -154,6 +155,27 @@ async function postD1Query({ url, apiToken, body, expectedCount, fetchImpl }) {
   return validateQueryEnvelope(envelope, expectedCount, { requirePrimary: true });
 }
 
+async function verifyAttestationMigration({ url, apiToken, fetchImpl }) {
+  let result;
+  try {
+    [result] = await postD1Query({
+      url,
+      apiToken,
+      body: {
+        sql: "SELECT name FROM d1_migrations WHERE name = ?",
+        params: [requiredMigrationName],
+      },
+      expectedCount: 1,
+      fetchImpl,
+    });
+  } catch {
+    throw new Error("Worker attestation D1 migration preflight failed");
+  }
+  if (sha256Canonical(result.results) !== sha256Canonical([{ name: requiredMigrationName }])) {
+    throw new Error("Worker attestation D1 migration is not applied");
+  }
+}
+
 export async function applyWorkerVersionAttestationBatch({
   accountId,
   databaseId,
@@ -174,6 +196,7 @@ export async function applyWorkerVersionAttestationBatch({
   const batch = validateBatch(batchValue);
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
 
+  await verifyAttestationMigration({ url, apiToken, fetchImpl });
   await postD1Query({
     url,
     apiToken,
