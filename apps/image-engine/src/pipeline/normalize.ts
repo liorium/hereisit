@@ -4,7 +4,7 @@ import { endianness } from "node:os";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import sharp from "sharp";
-import type { ImageInspection } from "./inspect";
+import { type ImageInspection, ImagePipelineError } from "./inspect";
 
 export interface NormalizedImage {
   readonly rawPath: string;
@@ -172,14 +172,23 @@ export async function normalizeImage(input: {
   if (!input.inspection.hasAlpha) transformer = transformer.removeAlpha();
   const raw = transformer.raw({ depth: sampleDepth === 16 ? "ushort" : "uchar" });
   let outputInfo: { width: number; height: number; channels: number } | null = null;
+  let decodeFailed = false;
   raw.once("info", (value) => {
     outputInfo = value;
   });
-  await pipeline(
-    raw,
-    canonicalizer,
-    createWriteStream(input.rawPath, { flags: "wx", mode: 0o600 }),
-  );
+  raw.once("error", () => {
+    decodeFailed = true;
+  });
+  try {
+    await pipeline(
+      raw,
+      canonicalizer,
+      createWriteStream(input.rawPath, { flags: "wx", mode: 0o600 }),
+    );
+  } catch (error) {
+    if (decodeFailed) throw new ImagePipelineError("UNSUPPORTED_INPUT", false, input.inspection);
+    throw error;
+  }
   const actual = outputInfo as { width: number; height: number; channels: number } | null;
   if (
     actual === null ||

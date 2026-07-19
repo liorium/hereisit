@@ -50,7 +50,7 @@ export default defineConfig({
           {
             name: "mobile-webkit",
             use: { ...devices["iPhone 15"] },
-            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec],
+            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
           },
         ]
       : []),

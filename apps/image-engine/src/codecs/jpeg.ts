@@ -28,6 +28,7 @@ export type JpegTransform =
 
 export type JpegCodecFailureReason =
   | "codec-failed"
+  | "invalid-input"
   | "invalid-output"
   | "unsafe-lossless-transform";
 
@@ -225,7 +226,11 @@ export async function encodeJpegCandidate(input: {
     });
     if (result.exitCode !== 0) {
       throw new JpegCodecError(
-        lossless && input.orientation !== 1 ? "unsafe-lossless-transform" : "codec-failed",
+        lossless && result.exitCode === 2
+          ? "invalid-input"
+          : lossless && input.orientation !== 1
+            ? "unsafe-lossless-transform"
+            : "codec-failed",
       );
     }
     await chmod(input.outputPath, 0o600);

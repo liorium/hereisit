@@ -8,8 +8,8 @@ allowBuilds:
   workerd: true
 
 minimumReleaseAgeExclude:
-  - miniflare@4.20260708.1
-  - wrangler@4.110.0
+  - miniflare@4.20260710.0
+  - wrangler@4.111.0
 
 onlyBuiltDependencies:
   - sharp

@@ -225,16 +225,23 @@ export async function runPlanningPipeline(input: {
         const outputPath = join(input.workspace, `candidate-${index}.${extension}`);
         candidatePaths.push(outputPath);
         if (currentInspection.format === "jpeg") {
-          return encodeJpegCandidate({
-            sourcePath: inputPath,
-            normalizedRgbPath: normalized.rawPath,
-            width: normalized.width,
-            height: normalized.height,
-            orientation: currentInspection.orientation,
-            candidate,
-            outputPath,
-            signal: new AbortController().signal,
-          });
+          try {
+            return await encodeJpegCandidate({
+              sourcePath: inputPath,
+              normalizedRgbPath: normalized.rawPath,
+              width: normalized.width,
+              height: normalized.height,
+              orientation: currentInspection.orientation,
+              candidate,
+              outputPath,
+              signal: new AbortController().signal,
+            });
+          } catch (error) {
+            if (error instanceof JpegCodecError && error.reason === "invalid-input") {
+              throw new ImagePipelineError("UNSUPPORTED_INPUT", false, currentInspection);
+            }
+            throw error;
+          }
         }
         if (currentInspection.format === "png") {
           return encodePngCandidate({

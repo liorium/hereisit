@@ -153,4 +153,32 @@ describe("encodeJpegCandidate", () => {
       }),
     ).rejects.toEqual(new JpegCodecError("unsafe-lossless-transform"));
   });
+
+  it("distinguishes a fatal jpegtran source rejection from an engine failure", async () => {
+    const directory = await root();
+    const sourcePath = join(directory, "source.jpg");
+    const outputPath = join(directory, "result.jpg");
+    await writeFile(sourcePath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    const run = vi.fn(
+      async (): Promise<CommandResult> => ({
+        exitCode: 2,
+        elapsedMs: 2,
+        stderrTail: "corrupt source",
+      }),
+    );
+
+    await expect(
+      encodeJpegCandidate({
+        sourcePath,
+        normalizedRgbPath: join(directory, "unused.raw"),
+        width: 9,
+        height: 17,
+        orientation: 1,
+        candidate: losslessCandidate,
+        outputPath,
+        signal: new AbortController().signal,
+        run,
+      }),
+    ).rejects.toMatchObject({ name: "JpegCodecError", reason: "invalid-input" });
+  });
 });

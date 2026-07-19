@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev -c wrangler.local.jsonc --persist-to .wrangler/state",
-    "build": "wrangler deploy -c wrangler.local.jsonc --dry-run --outdir dist",
+    "dev": "pnpm --filter @hereisit/image-engine build && wrangler dev -c wrangler.local.jsonc --persist-to .wrangler/state",
+    "build": "pnpm --filter @hereisit/image-engine build && wrangler deploy -c wrangler.local.jsonc --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
     "test:integration": "vitest run -c vitest.config.ts",
     "types": "wrangler types -c wrangler.local.jsonc src/worker-configuration.d.ts --strict-vars=false",
@@ -23,6 +23,6 @@
     "@cloudflare/vitest-pool-workers": "0.18.5",
     "typescript": "6.0.3",
     "vitest": "4.1.10",
-    "wrangler": "4.110.0"
+    "wrangler": "4.111.0"
   }
 }
