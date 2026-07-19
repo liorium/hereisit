@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planProcessingResources } from "../scripts/ensure-cloudflare-processing-resources.mjs";
+import {
+  buildProcessingProvisionManifest,
+  convergeProcessingResources,
+  planProcessingResources,
+} from "../scripts/ensure-cloudflare-processing-resources.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const config = {
@@ -52,14 +56,14 @@ function resources() {
         accountId,
         name: config.queueName,
         deliveryPaused: true,
-        deadLetterQueueName: config.dlqName,
+        consumerCount: 0,
       },
       {
         id: "2".repeat(32),
         accountId,
         name: config.dlqName,
         deliveryPaused: true,
-        deadLetterQueueName: null,
+        consumerCount: 0,
       },
     ],
     logpush: [
@@ -103,13 +107,11 @@ describe("Cloudflare processing resource planner", () => {
         {
           type: "create-queue",
           name: config.dlqName,
-          deadLetterQueueName: null,
           deliveryPaused: true,
         },
         {
           type: "create-queue",
           name: config.queueName,
-          deadLetterQueueName: config.dlqName,
           deliveryPaused: true,
         },
         {
@@ -143,6 +145,26 @@ describe("Cloudflare processing resource planner", () => {
     expect(planProcessingResources({ config, inventory: resources() }).actions).toEqual([]);
   });
 
+  it("seals a converged, credential-free provisioning manifest", () => {
+    const manifest = buildProcessingProvisionManifest({
+      config,
+      inventory: resources(),
+      verifiedAt: "2026-07-19T11:00:00.000Z",
+    });
+
+    expect(manifest).toMatchObject({
+      schema: "hereisit-processing-resource-provision@1",
+      version: 1,
+      phase: "provision",
+      environment: "staging",
+      d1: { databaseId: resources().d1[0]?.id, requestedLocationHint: "apac" },
+      analytics: { datasetName: config.usageAnalyticsDatasetName, state: "binding-deferred" },
+      logpush: { jobId: 41 },
+    });
+    expect(manifest.verificationSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(manifest)).not.toMatch(/token|secret|access-key/i);
+  });
+
   it.each([
     ["wrong account", "d1", { accountId: "f".repeat(32) }],
     ["wrong D1 location", "d1", { location: "wnam" }],
@@ -150,7 +172,7 @@ describe("Cloudflare processing resource planner", () => {
     ["R2 CORS", "r2", { cors: [{ origins: ["*"] }] }],
     ["wrong lifecycle", "r2", { lifecycleDays: 30 }],
     ["active Queue", "queues", { deliveryPaused: false }],
-    ["wrong DLQ", "queues", { deadLetterQueueName: null }],
+    ["existing consumer", "queues", { consumerCount: 1 }],
     ["Logpush logs", "logpush", { fields: ["Logs"] }],
     ["Logpush sampling", "logpush", { samplingRate: 0.1 }],
   ])("rejects %s instead of rebinding it", (_label, collection, override) => {
@@ -167,5 +189,57 @@ describe("Cloudflare processing resource planner", () => {
     const inventory = resources();
     inventory.r2.push({ ...inventory.r2[0] });
     expect(() => planProcessingResources({ config, inventory })).toThrow(/duplicate/i);
+  });
+
+  it("converges one action at a time and re-verifies the final inventory", async () => {
+    let inventory = { d1: [], r2: [], queues: [], logpush: [] } as ReturnType<typeof resources>;
+    const applied: string[] = [];
+    const finalInventory = resources();
+
+    const result = await convergeProcessingResources({
+      config,
+      readInventory: async () => inventory,
+      applyAction: async (action) => {
+        applied.push(action.type);
+        inventory = {
+          d1: applied.length >= 1 ? finalInventory.d1 : [],
+          r2: finalInventory.r2.slice(0, Math.max(0, Math.min(2, applied.length - 1))),
+          queues:
+            applied.length < 4
+              ? []
+              : applied.length === 4
+                ? [finalInventory.queues[1]]
+                : finalInventory.queues,
+          logpush: applied.length >= 6 ? finalInventory.logpush : [],
+        };
+      },
+    });
+
+    expect(applied).toEqual([
+      "create-d1",
+      "create-r2",
+      "create-r2",
+      "create-queue",
+      "create-queue",
+      "create-logpush",
+    ]);
+    expect(result).toEqual({
+      version: 1,
+      phase: "provision",
+      environment: "staging",
+      analyticsDataset: config.usageAnalyticsDatasetName,
+      inventory: finalInventory,
+    });
+  });
+
+  it("stops a non-converging or unexpectedly changed resource set", async () => {
+    const empty = { d1: [], r2: [], queues: [], logpush: [] };
+    await expect(
+      convergeProcessingResources({
+        config,
+        readInventory: async () => empty,
+        applyAction: async () => undefined,
+      }),
+    ).rejects.toThrow(/converge/i);
   });
 });

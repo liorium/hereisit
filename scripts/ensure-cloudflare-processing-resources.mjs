@@ -1,3 +1,12 @@
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createCloudflareProcessingResourceApi } from "./cloudflare-processing-resource-api.mjs";
+import {
+  parseCliArguments,
+  sha256Canonical,
+  writeCanonicalJsonAtomic,
+} from "./image-lab-common.mjs";
+
 const accountPattern = /^[0-9a-f]{32}$/;
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const queueIdPattern = /^[0-9a-f]{32}$/;
@@ -82,7 +91,7 @@ function validateR2(resource, config, lifecycleDays) {
   if (resource.sippyEnabled !== false) throw new TypeError("R2 Sippy must be disabled");
 }
 
-function validateQueue(resource, config, deadLetterQueueName) {
+function validateQueue(resource, config) {
   assertAccount(resource, config.accountId, "Queue");
   if (typeof resource.id !== "string" || !queueIdPattern.test(resource.id)) {
     throw new TypeError("Queue ID is invalid");
@@ -90,8 +99,8 @@ function validateQueue(resource, config, deadLetterQueueName) {
   if (resource.deliveryPaused !== true) {
     throw new TypeError("new processing Queues must remain paused during provisioning");
   }
-  if (resource.deadLetterQueueName !== deadLetterQueueName) {
-    throw new TypeError("Queue dead-letter role does not match");
+  if (resource.consumerCount !== 0) {
+    throw new TypeError("new processing Queues must not have consumers during provisioning");
   }
 }
 
@@ -135,14 +144,11 @@ export function planProcessingResources({ config: configValue, inventory: invent
     else validateR2(bucket, config, lifecycleDays);
   }
 
-  for (const [name, deadLetterQueueName] of [
-    [config.dlqName, null],
-    [config.queueName, config.dlqName],
-  ]) {
+  for (const name of [config.dlqName, config.queueName]) {
     const queue = exactNamed(inventory.queues, name, "Queue");
     if (queue === null) {
-      actions.push({ type: "create-queue", name, deadLetterQueueName, deliveryPaused: true });
-    } else validateQueue(queue, config, deadLetterQueueName);
+      actions.push({ type: "create-queue", name, deliveryPaused: true });
+    } else validateQueue(queue, config);
   }
 
   const logpushMatches = assertArray(inventory.logpush, "Logpush").filter((entryValue) => {
@@ -167,4 +173,175 @@ export function planProcessingResources({ config: configValue, inventory: invent
     analyticsDataset: config.usageAnalyticsDatasetName,
     actions,
   };
+}
+
+export async function convergeProcessingResources({ config, readInventory, applyAction }) {
+  if (typeof readInventory !== "function" || typeof applyAction !== "function") {
+    throw new TypeError("resource convergence dependencies are invalid");
+  }
+  const maximumActions = 16;
+  for (let applied = 0; applied <= maximumActions; applied += 1) {
+    const inventory = await readInventory();
+    const plan = planProcessingResources({ config, inventory });
+    if (plan.actions.length === 0) {
+      return {
+        version: 1,
+        phase: "provision",
+        environment: plan.environment,
+        analyticsDataset: plan.analyticsDataset,
+        inventory,
+      };
+    }
+    if (applied === maximumActions) {
+      throw new Error("resource provisioning did not converge within its action bound");
+    }
+    const action = plan.actions[0];
+    await applyAction(action);
+    const nextInventory = await readInventory();
+    const next = planProcessingResources({ config, inventory: nextInventory });
+    if (JSON.stringify(next.actions[0]) === JSON.stringify(action)) {
+      throw new Error("resource provisioning action did not converge");
+    }
+  }
+  throw new Error("resource provisioning did not converge");
+}
+
+export function buildProcessingProvisionManifest({ config, inventory, verifiedAt }) {
+  const plan = planProcessingResources({ config, inventory });
+  if (plan.actions.length !== 0) throw new Error("resource inventory is not converged");
+  if (
+    typeof verifiedAt !== "string" ||
+    !Number.isFinite(Date.parse(verifiedAt)) ||
+    new Date(verifiedAt).toISOString() !== verifiedAt
+  ) {
+    throw new TypeError("resource verification time is invalid");
+  }
+  const d1 = exactNamed(inventory.d1, config.databaseName, "D1");
+  const jobsBucket = exactNamed(inventory.r2, config.bucketName, "R2");
+  const usageBucket = exactNamed(inventory.r2, config.usageLogBucketName, "R2");
+  const primaryQueue = exactNamed(inventory.queues, config.queueName, "Queue");
+  const deadLetterQueue = exactNamed(inventory.queues, config.dlqName, "Queue");
+  const logpush = inventory.logpush.find(
+    (entry) =>
+      entry.dataset === "workers_trace_events" &&
+      entry.workerScriptName === config.workerScriptName,
+  );
+  if (
+    d1 === null ||
+    jobsBucket === null ||
+    usageBucket === null ||
+    primaryQueue === null ||
+    deadLetterQueue === null ||
+    logpush === undefined
+  ) {
+    throw new Error("resource inventory is incomplete after convergence");
+  }
+  const unsigned = {
+    schema: "hereisit-processing-resource-provision@1",
+    version: 1,
+    phase: "provision",
+    environment: config.environment,
+    accountId: config.accountId,
+    verifiedAt,
+    d1: { databaseId: d1.id, name: d1.name, requestedLocationHint: config.location },
+    r2: {
+      jobs: { name: jobsBucket.name, lifecycleDays: jobsBucket.lifecycleDays, private: true },
+      usage: { name: usageBucket.name, lifecycleDays: usageBucket.lifecycleDays, private: true },
+    },
+    queues: {
+      primary: { id: primaryQueue.id, name: primaryQueue.name, deliveryPaused: true },
+      dlq: { id: deadLetterQueue.id, name: deadLetterQueue.name, deliveryPaused: true },
+    },
+    analytics: { datasetName: config.usageAnalyticsDatasetName, state: "binding-deferred" },
+    logpush: {
+      jobId: logpush.id,
+      configSha256: sha256Canonical({
+        dataset: logpush.dataset,
+        workerScriptName: logpush.workerScriptName,
+        fields: logpush.fields,
+        samplingRate: logpush.samplingRate,
+      }),
+    },
+  };
+  return { ...unsigned, verificationSha256: sha256Canonical(unsigned) };
+}
+
+function requiredArgument(args, key) {
+  const value = args[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`--${key} is required`);
+  }
+  return value;
+}
+
+export async function runProcessingResourceProvisioner(
+  argv,
+  environment = process.env,
+  stdout = process.stdout,
+) {
+  const args = parseCliArguments(argv);
+  const keys = new Set([
+    "phase",
+    "account-id",
+    "environment",
+    "location",
+    "bucket-name",
+    "usage-log-bucket-name",
+    "usage-analytics-dataset-name",
+    "worker-script-name",
+    "database-name",
+    "queue-name",
+    "dlq-name",
+    "output",
+  ]);
+  if (Object.keys(args).some((key) => !keys.has(key))) {
+    throw new TypeError("unknown resource provisioner argument");
+  }
+  const config = validateConfig({
+    phase: requiredArgument(args, "phase"),
+    accountId: requiredArgument(args, "account-id"),
+    environment: requiredArgument(args, "environment"),
+    location: requiredArgument(args, "location"),
+    bucketName: requiredArgument(args, "bucket-name"),
+    usageLogBucketName: requiredArgument(args, "usage-log-bucket-name"),
+    usageAnalyticsDatasetName: requiredArgument(args, "usage-analytics-dataset-name"),
+    workerScriptName: requiredArgument(args, "worker-script-name"),
+    databaseName: requiredArgument(args, "database-name"),
+    queueName: requiredArgument(args, "queue-name"),
+    dlqName: requiredArgument(args, "dlq-name"),
+  });
+  const api = createCloudflareProcessingResourceApi({
+    config,
+    apiToken: environment.CLOUDFLARE_API_TOKEN,
+    logpushApiToken: environment.CLOUDFLARE_LOGPUSH_API_TOKEN,
+    logpushR2AccessKeyId: environment.LOGPUSH_R2_ACCESS_KEY_ID,
+    logpushR2SecretAccessKey: environment.LOGPUSH_R2_SECRET_ACCESS_KEY,
+  });
+  const result = await convergeProcessingResources({
+    config,
+    readInventory: api.readInventory,
+    applyAction: api.applyAction,
+  });
+  const manifest = buildProcessingProvisionManifest({
+    config,
+    inventory: result.inventory,
+    verifiedAt: new Date().toISOString(),
+  });
+  await writeCanonicalJsonAtomic(resolve(requiredArgument(args, "output")), manifest, {
+    refuseOverwrite: true,
+  });
+  stdout.write(`${manifest.d1.databaseId}\n`);
+}
+
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+) {
+  try {
+    await runProcessingResourceProvisioner(process.argv.slice(2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "resource provisioning failed";
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 }
