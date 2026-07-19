@@ -32,6 +32,10 @@ import styles from "./image-compress-workbench.module.css";
 const MAX_FILES = 20;
 const MAX_FILE_BYTES = 30 * 1024 * 1024;
 const ACCEPTED = new Set<ImageOptimizeMime>(["image/jpeg", "image/png", "image/webp"]);
+const HEIC_GUIDANCE =
+  "HEIC·HEIF는 같은 형식으로 압축할 수 없어요. 이미지 형식 변환 도구를 이용해 주세요.";
+const SUPPORTED_IMAGE_GUIDANCE =
+  "JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.";
 
 type Preset = "recommended" | "smallest" | "lossless";
 type PolicyView =
@@ -178,17 +182,28 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const chooseFiles = useCallback(async (files: FileList | readonly File[] | null) => {
     if (files === null) return;
-    const selected = Array.from(files).slice(0, MAX_FILES);
+    const supplied = Array.from(files);
+    const selected = supplied.slice(0, MAX_FILES);
     const next: WorkItem[] = [];
+    let heicCount = 0;
+    let unsupportedCount = Math.max(0, supplied.length - selected.length);
     for (const file of selected) {
-      if (file.size < 1 || file.size > MAX_FILE_BYTES) continue;
+      if (file.size < 1 || file.size > MAX_FILE_BYTES) {
+        unsupportedCount += 1;
+        continue;
+      }
       try {
         const inspected = inspectImageHeader(await file.arrayBuffer());
+        if (inspected.mime === "image/heic") {
+          heicCount += 1;
+          continue;
+        }
         if (
           inspected.animated ||
           inspected.width * inspected.height > 40_000_000 ||
           !ACCEPTED.has(inspected.mime as ImageOptimizeMime)
         ) {
+          unsupportedCount += 1;
           continue;
         }
         next.push({
@@ -203,18 +218,30 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           message: "처리할 준비가 됐어요.",
         });
       } catch {
-        // Invalid files are omitted and disclosed in the aggregate message below.
+        unsupportedCount += 1;
       }
     }
     const previousItems = itemsRef.current;
     itemsRef.current = next;
     setItems(next);
     void disposeRemoteItems(previousItems);
-    setMessage(
-      next.length === selected.length
-        ? `${next.length}개 이미지를 확인했어요.`
-        : `지원되는 정지 이미지 ${next.length}개를 확인했어요.`,
-    );
+    const prefix =
+      next.length === 0
+        ? "지원되는 이미지를 찾지 못했어요."
+        : `${next.length}개 이미지를 확인했어요.`;
+    const rejected = [
+      heicCount > 0
+        ? next.length === 0 && unsupportedCount === 0
+          ? HEIC_GUIDANCE
+          : `HEIC·HEIF는 같은 형식으로 압축할 수 없어 ${heicCount}개를 제외했어요. 이미지 형식 변환 도구를 이용해 주세요.`
+        : null,
+      unsupportedCount > 0
+        ? next.length === 0
+          ? SUPPORTED_IMAGE_GUIDANCE
+          : `지원 조건에 맞지 않는 ${unsupportedCount}개를 제외했어요. ${SUPPORTED_IMAGE_GUIDANCE}`
+        : null,
+    ].filter((value): value is string => value !== null);
+    setMessage([prefix, ...rejected].join(" "));
   }, []);
 
   const executionReady =
@@ -612,7 +639,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
         <section className={styles.panel} aria-labelledby="compress-settings-title">
           <h2 id="compress-settings-title">2. 압축 설정</h2>
-          <div className={styles.presets}>
+          <div className={styles.presets} role="radiogroup" aria-label="압축 프리셋">
             {(
               [
                 ["recommended", "추천", "품질과 용량의 균형"],
@@ -641,7 +668,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
         <section className={styles.panel} aria-labelledby="compress-results-title">
           <h2 id="compress-results-title">3. 결과</h2>
-          <p aria-live="polite" data-testid="image-workbench-status">
+          <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
           </p>
           <ul className={styles.results}>
