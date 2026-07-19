@@ -7047,6 +7047,12 @@ Every later staging/production/rollback command reads the report only from
 
 - [ ] **Step 6: Document and execute staging provisioning**
 
+> Operational note: this section records the original implementation plan. Use
+> [`docs/deployment/processing-staging-bootstrap.md`](../../deployment/processing-staging-bootstrap.md)
+> as the canonical executable first-deployment sequence; it includes the sealed provision manifest,
+> bootstrap-to-active Container application ID transition, and Queue resume verification added during
+> implementation.
+
 Before creating resources, verify `wrangler whoami`, an active Workers paid plan that supports
 Containers, Workers Trace Events Logpush, Analytics Engine, the required GraphQL usage fields, and at
 least 30 MiB request bodies; a registered Workers.dev subdomain; Docker `linux/amd64`; Email Routing with the alert

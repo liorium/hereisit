@@ -1,5 +1,9 @@
 # Apply Worker version attestations
 
+For the complete first-deployment order, including resource convergence, rollout-zero Container
+bootstrap, provider-scope discovery, and Queue resume verification, follow
+[`processing-staging-bootstrap.md`](processing-staging-bootstrap.md).
+
 Apply the D1 migrations before recording a deployment. The application command verifies that
 `0002_worker_version_attestations.sql` is present in the remote `d1_migrations` table and stops before
 all writes when it is absent.
