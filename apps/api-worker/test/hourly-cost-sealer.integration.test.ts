@@ -124,7 +124,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await env.DB.prepare("DELETE FROM operational_cost_hourly").run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM operational_cost_hourly"),
+    env.DB.prepare("DELETE FROM container_activity_segments"),
+  ]);
 });
 
 describe("hourly cost sealing", () => {
@@ -136,7 +139,7 @@ describe("hourly cost sealing", () => {
     ).resolves.toEqual({
       kind: "sealed",
       hourKey: firstHourKey,
-      totalCostMicrousd: "6000013",
+      totalCostMicrousd: "5000013",
       circuitOpen: false,
     });
     await expect(
@@ -153,8 +156,8 @@ describe("hourly cost sealing", () => {
     ).resolves.toEqual({
       worker: "2",
       container: "5000000",
-      durable_object: "1000001",
-      total: "6000013",
+      durable_object: "1",
+      total: "5000013",
       complete: 1,
     });
     await expect(
@@ -226,7 +229,7 @@ describe("hourly cost sealing", () => {
     await seedCompleteProviderRow(firstHourKey);
     await env.DB.prepare(
       `UPDATE operational_cost_hourly
-       SET complete = 1, worker_cost_microusd = 999, total_cost_microusd = 6000013
+       SET complete = 1, worker_cost_microusd = 999, total_cost_microusd = 5000013
        WHERE accounting_epoch = ? AND hour_key = ?`,
     )
       .bind(accountingEpoch, firstHourKey)
@@ -245,5 +248,31 @@ describe("hourly cost sealing", () => {
         "SELECT last_sealed_hour_key, circuit_open FROM rollout_control WHERE id = 1",
       ).first(),
     ).resolves.toEqual({ last_sealed_hour_key: null, circuit_open: 1 });
+  });
+
+  it("derives Container and Durable Object active time from the interval union", async () => {
+    await seedCompleteProviderRow(firstHourKey);
+    await env.DB.prepare(
+      `INSERT INTO container_activity_segments (id, started_at, billed_until_at)
+       VALUES ('00000000-0000-4000-8000-000000000010', ?, ?)`,
+    )
+      .bind(firstHourStart + 1_000, firstHourStart + 61_000)
+      .run();
+
+    await expect(
+      sealNextHourlyCost(env.DB, input(firstHourStart + 3_600_000 + 50 * 60_000)),
+    ).resolves.toMatchObject({ kind: "sealed", totalCostMicrousd: "12500013" });
+    await expect(
+      env.DB.prepare(
+        `SELECT container_active_milliseconds, durable_object_active_milliseconds
+         FROM operational_cost_hourly
+         WHERE accounting_epoch = ? AND hour_key = ?`,
+      )
+        .bind(accountingEpoch, firstHourKey)
+        .first(),
+    ).resolves.toEqual({
+      container_active_milliseconds: 60_000,
+      durable_object_active_milliseconds: 60_000,
+    });
   });
 });

@@ -19,6 +19,7 @@ import {
   imageOptimizeSpecV1Schema,
   type ToolJobErrorCode,
 } from "@hereisit/tool-contracts";
+import { recordContainerActivity } from "./container-activity";
 import {
   createContainerEngineClient,
   type EngineClient,
@@ -313,6 +314,7 @@ export interface QueueConsumerDependencies {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   leaseHeartbeat?: boolean;
+  recordEngineActivity?: (contactedAt: number) => Promise<void>;
 }
 
 function d1Changed(result: D1Result<unknown> | undefined): number {
@@ -1256,6 +1258,17 @@ export async function consumeImageJob(
   const engine = dependencies.engine ?? createContainerEngineClient(env);
   const store = dependencies.store ?? new D1QueueJobStore(env);
   const artifacts = dependencies.artifacts ?? new R2QueueArtifactStore(env.JOB_OBJECTS);
+  const recordEngineActivity =
+    dependencies.recordEngineActivity ??
+    ((contactedAt: number) =>
+      recordContainerActivity(env.DB, {
+        segmentId: crypto.randomUUID(),
+        contactedAt,
+      }));
+  const contactEngine = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    await recordEngineActivity(now());
+    return operation();
+  };
   const context = await store.claim(message, now());
   if (context === null) return "duplicate";
   const exactMessage = messageMatchesContext(message, context);
@@ -1287,7 +1300,7 @@ export async function consumeImageJob(
       let recoveredStatus: EngineJobStatus | null = existingOutput.recoveryStatus ?? null;
       if (recoveredStatus === null) {
         try {
-          recoveredStatus = await engine.status(context.jobId);
+          recoveredStatus = await contactEngine(() => engine.status(context.jobId));
         } catch (error) {
           if (!(error instanceof EngineHttpError && error.status === 404)) throw error;
         }
@@ -1329,33 +1342,37 @@ export async function consumeImageJob(
     heartbeat.assertCurrent();
     if (!(await store.markEngineContact(context, now()))) throw new StaleLeaseError();
     workspaceMayExist = true;
-    const startup = await engine.create({
-      protocol: 1,
-      jobId: context.jobId,
-      attempt: context.attempt,
-      tool: "image.optimize",
-      toolVersion: 1,
-      spec: context.spec,
-      specHash: context.specHash,
-      input: {
-        byteLength: context.declaredBytes,
-        etag: context.inputEtag,
-        mimeHint: context.declaredMime,
-      },
-      resourceClass: context.resourceClass,
-    });
+    const startup = await contactEngine(() =>
+      engine.create({
+        protocol: 1,
+        jobId: context.jobId,
+        attempt: context.attempt,
+        tool: "image.optimize",
+        toolVersion: 1,
+        spec: context.spec,
+        specHash: context.specHash,
+        input: {
+          byteLength: context.declaredBytes,
+          etag: context.inputEtag,
+          mimeHint: context.declaredMime,
+        },
+        resourceClass: context.resourceClass,
+      }),
+    );
     if (!(await store.recordStartup(context, now(), startup))) throw new StaleLeaseError();
     await ensureLease(context, store, now);
-    await engine.upload(context.jobId, input.body, context.declaredBytes, context.declaredMime);
+    await contactEngine(() =>
+      engine.upload(context.jobId, input.body, context.declaredBytes, context.declaredMime),
+    );
     await ensureLease(context, store, now);
-    await engine.run(context.jobId);
+    await contactEngine(() => engine.run(context.jobId));
 
     let terminal: Extract<EngineJobStatus, { state: "succeeded" | "failed" | "cancelled" }> | null =
       null;
     for (let poll = 0; poll < MAX_POLL_COUNT; poll += 1) {
       await ensureLease(context, store, now);
       heartbeat.assertCurrent();
-      const status = await engine.status(context.jobId);
+      const status = await contactEngine(() => engine.status(context.jobId));
       if (status.jobId !== context.jobId) throw new VerificationFailureError();
       if (status.state === "running") {
         if (!(await store.mirrorProgress(context, status, now()))) throw new StaleLeaseError();
@@ -1393,7 +1410,7 @@ export async function consumeImageJob(
         throw new VerificationFailureError();
       }
       await ensureLease(context, store, now);
-      const output = await engine.output(context.jobId);
+      const output = await contactEngine(() => engine.output(context.jobId));
       if (!output.ok || output.body === null) {
         await output.body?.cancel();
         throw new EngineCrashError();
@@ -1449,7 +1466,9 @@ export async function consumeImageJob(
     return "completed";
   } catch (error) {
     if (error instanceof StaleLeaseError) {
-      if (workspaceMayExist) await engine.cancel(context.jobId).catch(() => undefined);
+      if (workspaceMayExist) {
+        await contactEngine(() => engine.cancel(context.jobId)).catch(() => undefined);
+      }
       return "duplicate";
     }
     const classification = classifyQueueFailure(error, {
@@ -1489,7 +1508,9 @@ export async function consumeImageJob(
     return "completed";
   } finally {
     await heartbeat.stop();
-    if (workspaceMayExist) await engine.remove(context.jobId).catch(() => undefined);
+    if (workspaceMayExist) {
+      await contactEngine(() => engine.remove(context.jobId)).catch(() => undefined);
+    }
     if (deleteOutput) await artifacts.deleteOutput(context.outputKey).catch(() => undefined);
     if (deleteInput) await artifacts.deleteInput(context.inputKey).catch(() => undefined);
   }

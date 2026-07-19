@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { unionActivityMilliseconds } from "./container-activity";
 import type { LiveCostModelV1 } from "./env";
 import { calculateHourlyCosts, type HourlyCostUsage } from "./hourly-cost";
 
@@ -34,6 +35,7 @@ const rawCostRowSchema = z
     analytics_engine_data_points: int64StringSchema,
     analytics_engine_read_queries: int64StringSchema,
     workers_logpush_events: int64StringSchema,
+    container_active_milliseconds: int64StringSchema,
     durable_object_active_milliseconds: int64StringSchema,
     durable_object_requests: int64StringSchema,
     durable_object_storage_byte_milliseconds: int64StringSchema,
@@ -53,9 +55,17 @@ const egressRowSchema = z
     transmitted_bytes: int64StringSchema,
   })
   .strict();
+const activityRowSchema = z
+  .object({
+    started_at: nonnegativeInteger,
+    billed_until_at: nonnegativeInteger,
+  })
+  .strict();
 const sealedStateSchema = z
   .object({
     complete: z.literal(1),
+    container_active_milliseconds: int64StringSchema,
+    durable_object_active_milliseconds: int64StringSchema,
     worker_cost_microusd: int64StringSchema,
     container_cost_microusd: int64StringSchema,
     durable_object_cost_microusd: int64StringSchema,
@@ -98,6 +108,7 @@ export type SealNextHourlyCostResult =
         | "COST_ACCOUNTING_INCOMPLETE"
         | "COST_ACCOUNTING_HASH_MISMATCH"
         | "COST_ACCOUNTING_EGRESS_MISMATCH"
+        | "COST_ACTIVITY_INVALID"
         | "COST_MODEL_INVALID"
         | "COST_SEAL_RACE";
       readonly circuitOpen: true;
@@ -139,6 +150,7 @@ function validateInput(input: SealNextHourlyCostInput): void {
 function usageFromRow(
   row: z.infer<typeof rawCostRowSchema>,
   egressRows: readonly z.infer<typeof egressRowSchema>[],
+  activityMilliseconds: number,
 ): HourlyCostUsage {
   return {
     workerRequests: row.provider_worker_requests,
@@ -151,7 +163,7 @@ function usageFromRow(
       region: entry.region,
       transmittedBytes: entry.transmitted_bytes,
     })),
-    durableObjectActiveMilliseconds: row.durable_object_active_milliseconds,
+    durableObjectActiveMilliseconds: String(activityMilliseconds),
     durableObjectRequests: row.durable_object_requests,
     durableObjectStorageByteMilliseconds: row.durable_object_storage_byte_milliseconds,
     queueOperations: row.queue_operations,
@@ -217,6 +229,7 @@ export async function sealNextHourlyCost(
               CAST(analytics_engine_data_points AS TEXT) AS analytics_engine_data_points,
               CAST(analytics_engine_read_queries AS TEXT) AS analytics_engine_read_queries,
               CAST(workers_logpush_events AS TEXT) AS workers_logpush_events,
+              CAST(container_active_milliseconds AS TEXT) AS container_active_milliseconds,
               CAST(durable_object_active_milliseconds AS TEXT)
                 AS durable_object_active_milliseconds,
               CAST(durable_object_requests AS TEXT) AS durable_object_requests,
@@ -262,7 +275,33 @@ export async function sealNextHourlyCost(
   if (egressTotal.toString() !== row.data.provider_container_tx_bytes) {
     return openCostCircuit(database, input.now, hourKey, "COST_ACCOUNTING_EGRESS_MISMATCH");
   }
-  const usage = usageFromRow(row.data, egressRows);
+  const hourStart = hourKey * 3_600_000;
+  const activityResult = await session
+    .prepare(
+      `SELECT started_at, billed_until_at
+       FROM container_activity_segments
+       WHERE started_at < ? AND billed_until_at > ?
+       ORDER BY started_at, billed_until_at
+       LIMIT 129`,
+    )
+    .bind(hourEnd, hourStart)
+    .all();
+  const activityRows = z.array(activityRowSchema).max(128).safeParse(activityResult.results);
+  let activityMilliseconds: number;
+  try {
+    if (!activityRows.success) throw new TypeError("Container activity set is invalid.");
+    activityMilliseconds = unionActivityMilliseconds(
+      activityRows.data.map((entry) => ({
+        startedAt: entry.started_at,
+        billedUntilAt: entry.billed_until_at,
+      })),
+      hourStart,
+      hourEnd,
+    );
+  } catch {
+    return openCostCircuit(database, input.now, hourKey, "COST_ACTIVITY_INVALID");
+  }
+  const usage = usageFromRow(row.data, egressRows, activityMilliseconds);
   let costs: ReturnType<typeof calculateHourlyCosts>;
   try {
     costs = calculateHourlyCosts(input.model, usage);
@@ -279,7 +318,9 @@ export async function sealNextHourlyCost(
     session
       .prepare(
         `UPDATE operational_cost_hourly
-         SET worker_cost_microusd = CAST(? AS INTEGER),
+         SET container_active_milliseconds = CAST(? AS INTEGER),
+             durable_object_active_milliseconds = CAST(? AS INTEGER),
+             worker_cost_microusd = CAST(? AS INTEGER),
              container_cost_microusd = CAST(? AS INTEGER),
              durable_object_cost_microusd = CAST(? AS INTEGER),
              queue_cost_microusd = CAST(? AS INTEGER),
@@ -305,6 +346,7 @@ export async function sealNextHourlyCost(
            AND CAST(analytics_engine_data_points AS TEXT) = ?
            AND CAST(analytics_engine_read_queries AS TEXT) = ?
            AND CAST(workers_logpush_events AS TEXT) = ?
+           AND CAST(container_active_milliseconds AS TEXT) = ?
            AND CAST(durable_object_active_milliseconds AS TEXT) = ?
            AND CAST(durable_object_requests AS TEXT) = ?
            AND CAST(durable_object_storage_byte_milliseconds AS TEXT) = ?
@@ -333,7 +375,9 @@ export async function sealNextHourlyCost(
            AND (
              complete = 0
              OR (
-               CAST(worker_cost_microusd AS TEXT) = ?
+               CAST(container_active_milliseconds AS TEXT) = ?
+               AND CAST(durable_object_active_milliseconds AS TEXT) = ?
+               AND CAST(worker_cost_microusd AS TEXT) = ?
                AND CAST(container_cost_microusd AS TEXT) = ?
                AND CAST(durable_object_cost_microusd AS TEXT) = ?
                AND CAST(queue_cost_microusd AS TEXT) = ?
@@ -347,6 +391,8 @@ export async function sealNextHourlyCost(
            )`,
       )
       .bind(
+        String(activityMilliseconds),
+        String(activityMilliseconds),
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -372,7 +418,8 @@ export async function sealNextHourlyCost(
         usage.analyticsEngineDataPoints,
         usage.analyticsEngineReadQueries,
         usage.workersLogpushEvents,
-        usage.durableObjectActiveMilliseconds,
+        row.data.container_active_milliseconds,
+        row.data.durable_object_active_milliseconds,
         usage.durableObjectRequests,
         usage.durableObjectStorageByteMilliseconds,
         usage.queueOperations,
@@ -389,6 +436,8 @@ export async function sealNextHourlyCost(
         egressJson,
         control.cost_accounting_epoch,
         hourKey,
+        String(activityMilliseconds),
+        String(activityMilliseconds),
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -411,6 +460,8 @@ export async function sealNextHourlyCost(
            AND EXISTS (
              SELECT 1 FROM operational_cost_hourly
              WHERE accounting_epoch = ? AND hour_key = ? AND complete = 1
+               AND CAST(container_active_milliseconds AS TEXT) = ?
+               AND CAST(durable_object_active_milliseconds AS TEXT) = ?
                AND CAST(worker_cost_microusd AS TEXT) = ?
                AND CAST(container_cost_microusd AS TEXT) = ?
                AND CAST(durable_object_cost_microusd AS TEXT) = ?
@@ -431,6 +482,8 @@ export async function sealNextHourlyCost(
         hourKey,
         control.cost_accounting_epoch,
         hourKey,
+        String(activityMilliseconds),
+        String(activityMilliseconds),
         costs.workerCostMicrousd,
         costs.containerCostMicrousd,
         costs.durableObjectCostMicrousd,
@@ -466,6 +519,10 @@ export async function sealNextHourlyCost(
     session
       .prepare(
         `SELECT cost.complete,
+                CAST(cost.container_active_milliseconds AS TEXT)
+                  AS container_active_milliseconds,
+                CAST(cost.durable_object_active_milliseconds AS TEXT)
+                  AS durable_object_active_milliseconds,
                 CAST(cost.worker_cost_microusd AS TEXT) AS worker_cost_microusd,
                 CAST(cost.container_cost_microusd AS TEXT) AS container_cost_microusd,
                 CAST(cost.durable_object_cost_microusd AS TEXT) AS durable_object_cost_microusd,
@@ -489,6 +546,8 @@ export async function sealNextHourlyCost(
   if (
     !sealed.success ||
     sealed.data.last_sealed_hour_key !== hourKey ||
+    sealed.data.container_active_milliseconds !== String(activityMilliseconds) ||
+    sealed.data.durable_object_active_milliseconds !== String(activityMilliseconds) ||
     sealed.data.worker_cost_microusd !== costs.workerCostMicrousd ||
     sealed.data.container_cost_microusd !== costs.containerCostMicrousd ||
     sealed.data.durable_object_cost_microusd !== costs.durableObjectCostMicrousd ||

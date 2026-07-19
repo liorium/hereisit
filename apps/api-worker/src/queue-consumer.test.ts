@@ -87,6 +87,7 @@ function dependencies(): QueueConsumerDependencies {
     now: () => 1_000,
     sleep: vi.fn(async () => undefined),
     leaseHeartbeat: false,
+    recordEngineActivity: vi.fn(async () => undefined),
     store: {
       claim: vi.fn().mockResolvedValueOnce(context).mockResolvedValue(null),
       renew: vi.fn(async () => true),
@@ -168,6 +169,7 @@ describe("image queue consumer", () => {
     await expect(consumeImageJob(message, {} as never, deps)).resolves.toBe("completed");
     await expect(consumeImageJob(message, {} as never, deps)).resolves.toBe("duplicate");
     expect(deps.engine?.run).toHaveBeenCalledTimes(1);
+    expect(deps.recordEngineActivity).toHaveBeenCalledTimes(5);
     expect(deps.artifacts?.deleteInput).toHaveBeenCalledWith(message.inputKey);
   });
 
