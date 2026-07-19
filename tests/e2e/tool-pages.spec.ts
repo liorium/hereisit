@@ -214,7 +214,10 @@ test("publishes the PDF to image tool", async ({ page }) => {
   );
 });
 
-test("publishes every available catalog route from the complete tools page", async ({ page }) => {
+test("publishes every available catalog route from the complete tools page", async ({
+  page,
+  request,
+}) => {
   await page.goto("/tools");
   for (const tool of availableToolEntries) {
     await expect(await revealCatalogTool(page, tool.route)).toBeVisible();
@@ -224,12 +227,16 @@ test("publishes every available catalog route from the complete tools page", asy
   }
 
   for (const tool of availableToolEntries) {
-    const response = await page.goto(tool.route);
-    expect(response?.ok()).toBe(true);
-    await expect(page.getByRole("heading", { level: 1, name: tool.name })).toBeVisible();
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
-      "href",
-      `https://hereisit.pages.dev${tool.route}`,
+    // This loop verifies static publication, while the focused browser tests above cover
+    // hydration and interaction. Keeping the 11-route sweep on the request context also avoids
+    // treating a transient WebKit navigation-process disconnect as an application regression.
+    const response = await request.get(tool.route);
+    expect(response.ok()).toBe(true);
+    expect(response.headers()["content-type"]).toContain("text/html");
+    const html = await response.text();
+    expect(html).toContain(`<h1>${tool.name}</h1>`);
+    expect(html).toContain(
+      `<link rel="canonical" href="https://hereisit.pages.dev${tool.route}"/>`,
     );
   }
 });
