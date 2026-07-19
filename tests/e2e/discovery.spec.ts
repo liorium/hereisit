@@ -570,17 +570,16 @@ test("honors reduced motion and avoids overflow at 200 percent zoom", async ({ p
   expect(maximumDurationSeconds(motion.transitionDuration)).toBeLessThanOrEqual(0.000_01);
   expect(motion.scrollBehavior).toBe("auto");
 
-  await page.evaluate(() => {
-    document.documentElement.style.zoom = "2";
-  });
+  // A 200% browser zoom halves the available CSS layout viewport. Using the equivalent viewport
+  // exercises real responsive reflow without relying on the non-interoperable CSS `zoom` property.
+  await page.setViewportSize({ width: 640, height: 720 });
   await expect(page.getByRole("button", { name: "파일 선택" })).toBeVisible();
   await expect(page.getByRole("tablist", { name: "도구 분야" })).toBeVisible();
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
-    zoom: getComputedStyle(document.documentElement).zoom,
   }));
-  expect(layout.zoom).toBe("2");
+  expect(layout.clientWidth).toBe(640);
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
