@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  postcss: 8.5.16
+
 allowBuilds:
   esbuild: true
   sharp: true
