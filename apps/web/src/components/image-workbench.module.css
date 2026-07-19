@@ -716,9 +716,9 @@
 
 .modeTabs input {
   position: absolute;
-  inset: -1px;
-  width: auto;
-  height: auto;
+  inset: -1px auto auto -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
   margin: 0;
   opacity: 0;
   cursor: pointer;
@@ -726,9 +726,9 @@
 
 .positionOption input {
   position: absolute;
-  inset: -1px;
-  width: auto;
-  height: auto;
+  inset: -1px auto auto -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
   margin: 0;
   opacity: 0;
   cursor: pointer;
