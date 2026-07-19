@@ -18,7 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "test:worker": "pnpm --filter @hereisit/api-worker test:integration",
     "test:processing-stack": "node scripts/test-processing-stack.mjs",
-    "prepare:image-engine:local": "pnpm --filter @hereisit/image-engine build && docker build --file apps/image-engine/Dockerfile.local-reuse --tag hereisit-image-engine:local-source apps/image-engine",
+    "prepare:image-engine:local": "node scripts/prepare-image-engine-local.mjs",
     "test:image-engine:fuzz:pr": "pnpm prepare:image-engine:local && node scripts/fuzz-image-engine.mjs --duration-seconds 60 --seed 20260716 --engine-image hereisit-image-engine:local-source",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:worker && pnpm test:image-engine:fuzz:pr && pnpm build && pnpm verify:export",
     "test:e2e": "playwright test",
