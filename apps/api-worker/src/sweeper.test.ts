@@ -48,7 +48,7 @@ describe("scheduled maintenance policy", () => {
     expect(nextArtifactCursor({ truncated: false, cursor: "ignored" })).toBeNull();
   });
 
-  it("runs outbox, recovery, expiry, and orphan work in the required order", async () => {
+  it("runs cleanup before evaluating the circuit breaker", async () => {
     const calls: string[] = [];
     const dependencies = {
       dispatchPendingOutbox: vi.fn(async () => {
@@ -64,11 +64,15 @@ describe("scheduled maintenance policy", () => {
         expect(olderThan).toBe(now - 10 * 60_000);
         calls.push("orphans");
       }),
+      evaluateCircuit: vi.fn(async (_env: unknown, evaluatedAt: number) => {
+        expect(evaluatedAt).toBe(now);
+        calls.push("circuit");
+      }),
     };
 
     await runScheduledMaintenanceWithDependencies({} as never, now, dependencies);
 
-    expect(calls).toEqual(["outbox", "recovery", "expiry", "orphans"]);
+    expect(calls).toEqual(["outbox", "recovery", "expiry", "orphans", "circuit"]);
     expect(dependencies.dispatchPendingOutbox).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.recoverStale).toHaveBeenCalledWith(expect.anything(), now, 100);
     expect(dependencies.sweepExpired).toHaveBeenCalledWith(expect.anything(), now, 100);
@@ -77,5 +81,6 @@ describe("scheduled maintenance policy", () => {
       now - 10 * 60_000,
       100,
     );
+    expect(dependencies.evaluateCircuit).toHaveBeenCalledWith(expect.anything(), now);
   });
 });

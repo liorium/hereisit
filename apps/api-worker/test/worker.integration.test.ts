@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { imageJobMessageSchema } from "@hereisit/server-contracts";
 import { imageOptimizeCreateResponseSchema } from "@hereisit/tool-contracts/image-optimize";
 import { afterEach, describe, expect, it } from "vitest";
+import { evaluateCircuitBreaker } from "../src/circuit-breaker";
 import { createD1JobRepository } from "../src/d1-job-repository";
 import { dispatchJobOutbox } from "../src/outbox";
 import { deleteAuthorizedArtifact, storeExactInputArtifact } from "../src/r2-artifacts";
@@ -114,6 +115,15 @@ afterEach(async () => {
     }
   }
   createdJobIds.clear();
+  await env.DB.prepare(
+    `UPDATE rollout_control
+     SET circuit_open = 0,
+         reason = NULL,
+         opened_at = NULL,
+         deletion_overdue_count = 0,
+         last_evaluated_at = NULL
+     WHERE id = 1`,
+  ).run();
 });
 
 interface D1TableColumn {
@@ -149,6 +159,78 @@ describe("Worker control-plane bindings and routes", () => {
         pk: 1,
       });
     }
+  });
+
+  it("opens the singleton circuit once for a hard deletion invariant", async () => {
+    const now = Date.parse("2026-07-19T08:00:00.000Z");
+    await env.DB.prepare(
+      "UPDATE rollout_control SET deletion_overdue_count = 1 WHERE id = 1",
+    ).run();
+
+    const opened = await evaluateCircuitBreaker(env.DB, {
+      now,
+      maximumQueuedAgeSeconds: 600,
+    });
+    expect(opened).toEqual({
+      open: true,
+      reason: "DELETION_OVERDUE",
+      openedAt: now,
+      evaluatedAt: now,
+    });
+
+    await env.DB.prepare(
+      "UPDATE rollout_control SET deletion_overdue_count = 0 WHERE id = 1",
+    ).run();
+    const stillOpen = await evaluateCircuitBreaker(env.DB, {
+      now: now + 60_000,
+      maximumQueuedAgeSeconds: 600,
+    });
+    expect(stillOpen).toEqual({
+      open: true,
+      reason: "DELETION_OVERDUE",
+      openedAt: now,
+      evaluatedAt: now + 60_000,
+    });
+  });
+
+  it("opens immediately for a recent native verification failure", async () => {
+    const now = Date.parse("2026-07-19T08:15:00.000Z");
+    const created = await rememberCreatedJob(
+      await createJobRequest({
+        anonymousSessionId: crypto.randomUUID(),
+        clientRequestId: crypto.randomUUID(),
+        ip: "203.0.116.77",
+      }),
+    );
+    await env.DB.prepare(
+      `UPDATE jobs
+       SET status = 'failed', error_code = 'VERIFICATION_FAILED', finished_at = ?
+       WHERE id = ?`,
+    )
+      .bind(now, created.jobId)
+      .run();
+
+    await expect(
+      evaluateCircuitBreaker(env.DB, { now, maximumQueuedAgeSeconds: 600 }),
+    ).resolves.toMatchObject({ open: true, reason: "VERIFICATION_FAILED", openedAt: now });
+  });
+
+  it("opens when a queued job exceeds the configured maximum age", async () => {
+    const now = Date.parse("2026-07-19T08:30:00.000Z");
+    const created = await rememberCreatedJob(
+      await createJobRequest({
+        anonymousSessionId: crypto.randomUUID(),
+        clientRequestId: crypto.randomUUID(),
+        ip: "203.0.117.77",
+      }),
+    );
+    await env.DB.prepare("UPDATE jobs SET status = 'queued', queued_at = ? WHERE id = ?")
+      .bind(now - 600_001, created.jobId)
+      .run();
+
+    await expect(
+      evaluateCircuitBreaker(env.DB, { now, maximumQueuedAgeSeconds: 600 }),
+    ).resolves.toMatchObject({ open: true, reason: "QUEUE_AGE_EXCEEDED", openedAt: now });
   });
 
   it("streams an R2 object through put, head, and delete", async () => {

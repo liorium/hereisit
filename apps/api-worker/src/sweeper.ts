@@ -1,8 +1,9 @@
 import type { ImageJobMessage } from "@hereisit/server-contracts";
 import { calculateSettledWeightedUnits, retentionDecision } from "@hereisit/server-job";
 import { z } from "zod";
+import { evaluateCircuitBreaker } from "./circuit-breaker";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
-import type { Env } from "./env";
+import { type Env, parseOperationalConfig } from "./env";
 import { dispatchJobOutbox, dispatchPendingOutbox } from "./outbox";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
 
@@ -69,6 +70,7 @@ export interface ScheduledMaintenanceDependencies<Environment> {
   readonly recoverStale: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly sweepExpired: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly sweepOrphans: (env: Environment, olderThan: number, limit: number) => Promise<unknown>;
+  readonly evaluateCircuit: (env: Environment, now: number) => Promise<unknown>;
 }
 
 export async function runScheduledMaintenanceWithDependencies<Environment>(
@@ -81,6 +83,7 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
   await dependencies.recoverStale(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepExpired(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepOrphans(env, now - ORPHAN_GRACE_MS, MAINTENANCE_LIMIT);
+  await dependencies.evaluateCircuit(env, now);
 }
 
 const recoveryRowSchema = z
@@ -678,6 +681,13 @@ export async function runScheduledMaintenance(env: Env, now = Date.now()): Promi
     recoverStale: recoverStaleLeasesAndLostQueueMessages,
     sweepExpired: sweepExpiredJobs,
     sweepOrphans: sweepOrphanArtifactsFromSavedCursor,
+    evaluateCircuit: async (environment, evaluatedAt) => {
+      const config = await parseOperationalConfig(environment);
+      await evaluateCircuitBreaker(environment.DB, {
+        now: evaluatedAt,
+        maximumQueuedAgeSeconds: config.maximumQueuedAgeSeconds,
+      });
+    },
   });
 }
 
