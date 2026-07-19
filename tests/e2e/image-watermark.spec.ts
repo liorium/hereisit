@@ -1054,11 +1054,15 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await textInput.fill("© HereIsIt");
   const textSize = page.getByRole("slider", { name: /문구 크기/ });
   await textSize.fill("4");
-  await page.getByRole("radio", { name: "로고 이미지", exact: true }).check();
+  const logoMode = page.getByRole("radio", { name: "로고 이미지", exact: true });
+  await logoMode.locator("..").click();
+  await expect(logoMode).toBeChecked();
   const logoSize = page.getByRole("slider", { name: /로고 크기/ });
   await expect(logoSize).toHaveValue("5");
   await logoSize.fill("50");
-  await page.getByRole("radio", { name: "문구", exact: true }).check();
+  const textMode = page.getByRole("radio", { name: "문구", exact: true });
+  await textMode.locator("..").click();
+  await expect(textMode).toBeChecked();
   await expect(page.getByRole("slider", { name: /문구 크기/ })).toHaveValue("30");
 
   await page.getByRole("button", { name: "처음부터" }).click();

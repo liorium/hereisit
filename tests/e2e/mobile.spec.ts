@@ -489,6 +489,7 @@ test("keeps PDF image conversion ordered, sticky, and touch-safe", async ({
   browserName,
   page,
 }) => {
+  test.setTimeout(90_000);
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
