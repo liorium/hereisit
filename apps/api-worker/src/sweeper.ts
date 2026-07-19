@@ -4,6 +4,7 @@ import { z } from "zod";
 import { evaluateCircuitBreaker } from "./circuit-breaker";
 import {
   createCostAccountingRuntime,
+  parseCostAccountingMode,
   parseCostAccountingRuntimeConfig,
 } from "./cost-accounting-runtime";
 import { runCostAccountingSchedule } from "./cost-accounting-scheduler";
@@ -704,6 +705,7 @@ export async function runScheduledMaintenance(env: Env, now = Date.now()): Promi
     sweepExpired: sweepExpiredJobs,
     sweepOrphans: sweepOrphanArtifactsFromSavedCursor,
     reconcileCostAccounting: async (environment, reconciledAt) => {
+      if (parseCostAccountingMode(environment) === "bootstrap") return;
       const operational = await parseOperationalConfig(environment);
       const config = parseCostAccountingRuntimeConfig(environment, operational);
       await runCostAccountingSchedule(

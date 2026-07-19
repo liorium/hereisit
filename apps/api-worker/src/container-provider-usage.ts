@@ -68,7 +68,6 @@ export interface ContainerUsageHourQueryInput {
   readonly accountId: string;
   readonly token: string;
   readonly applicationId: string;
-  readonly instanceId: string;
   readonly hourKey: number;
   readonly expectedSchemaSha256: string;
 }
@@ -191,7 +190,7 @@ function validateInput(input: ContainerUsageHourQueryInput): void {
   if (!ACCOUNT_ID_PATTERN.test(input.accountId))
     throw new TypeError("Cloudflare account ID is invalid.");
   if (!TOKEN_PATTERN.test(input.token)) throw new TypeError("Analytics read token is invalid.");
-  if (!UUID_PATTERN.test(input.applicationId) || !UUID_PATTERN.test(input.instanceId)) {
+  if (!UUID_PATTERN.test(input.applicationId)) {
     throw new TypeError("Container provider resource ID is invalid.");
   }
   if (!Number.isSafeInteger(input.hourKey) || input.hourKey < 0) {
@@ -220,7 +219,6 @@ export async function queryContainerUsageHour(
     datetimeStart: new Date(hourStart).toISOString(),
     datetimeEnd: new Date(hourEnd).toISOString(),
     applicationId: input.applicationId,
-    instanceId: input.instanceId,
   };
   const response = await fetcher(providerUsageContract.endpoint, {
     method: providerUsageContract.method,
@@ -255,20 +253,20 @@ export async function queryContainerUsageHour(
   let allocatedMemoryByteMilliseconds = "0";
   let allocatedDiskByteMilliseconds = "0";
   let transmittedBytes = "0";
-  let previousRegion: string | null = null;
-  const transmittedBytesByRegion: { region: string; transmittedBytes: string }[] = [];
+  let previousResourceKey: string | null = null;
+  const transmittedBytesByRegion = new Map<string, string>();
   for (const row of rows) {
     if (
       parseHourTimestamp(row.dimensions.datetimeHour) !== hourStart ||
-      row.dimensions.applicationId !== input.applicationId ||
-      row.dimensions.instanceId !== input.instanceId
+      row.dimensions.applicationId !== input.applicationId
     ) {
       throw new Error("Container provider resource envelope is invalid.");
     }
-    if (previousRegion !== null && row.dimensions.region <= previousRegion) {
-      throw new Error("Container provider region ordering is invalid.");
+    const resourceKey = `${row.dimensions.region}\0${row.dimensions.instanceId}`;
+    if (previousResourceKey !== null && resourceKey <= previousResourceKey) {
+      throw new Error("Container provider resource ordering is invalid.");
     }
-    previousRegion = row.dimensions.region;
+    previousResourceKey = resourceKey;
     const rowCpuMicroseconds = fixedInteger(
       row.sum.cpuTimeSec.source,
       providerUsageContract.integerScales.cpuTimeSecToMicroseconds,
@@ -305,16 +303,23 @@ export async function queryContainerUsageHour(
       rowTransmittedBytes,
       "Container transmitted bytes",
     );
-    transmittedBytesByRegion.push({
-      region: row.dimensions.region,
-      transmittedBytes: rowTransmittedBytes,
-    });
+    transmittedBytesByRegion.set(
+      row.dimensions.region,
+      checkedInt64Sum(
+        transmittedBytesByRegion.get(row.dimensions.region) ?? "0",
+        rowTransmittedBytes,
+        "Container regional transmitted bytes",
+      ),
+    );
   }
   return {
     cpuMicroseconds,
     allocatedMemoryByteMilliseconds,
     allocatedDiskByteMilliseconds,
     transmittedBytes,
-    transmittedBytesByRegion,
+    transmittedBytesByRegion: Array.from(
+      transmittedBytesByRegion,
+      ([region, transmittedBytes]) => ({ region, transmittedBytes }),
+    ),
   };
 }

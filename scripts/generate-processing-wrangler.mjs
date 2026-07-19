@@ -2,6 +2,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const NAMESPACE_PATTERN = /^(?:0|[1-9][0-9]*)$/;
+const BOOTSTRAP_CONTAINER_APPLICATION_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_STANDARD_ATTEMPT_WEIGHTED_UNITS = 2_502_994_560;
 
 export const CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 = createHash("sha256")
@@ -57,9 +58,9 @@ const inputKeys = new Set([
   "bucketName",
   "usageLogBucketName",
   "usageAnalyticsDatasetName",
+  "costAccountingMode",
   "logpushJobId",
   "containerApplicationId",
-  "containerInstanceId",
   "queueName",
   "dlqName",
   "engineImage",
@@ -231,8 +232,17 @@ function validateInput(input) {
   if (!UUID_PATTERN.test(value.containerApplicationId ?? "")) {
     throw new TypeError("containerApplicationId is invalid");
   }
-  if (!UUID_PATTERN.test(value.containerInstanceId ?? "")) {
-    throw new TypeError("containerInstanceId is invalid");
+  if (value.costAccountingMode !== "bootstrap" && value.costAccountingMode !== "active") {
+    throw new TypeError("costAccountingMode is invalid");
+  }
+  if (
+    (value.costAccountingMode === "bootstrap") !==
+    (value.containerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID)
+  ) {
+    throw new TypeError("Container application ID must match the cost accounting mode");
+  }
+  if (value.costAccountingMode === "bootstrap" && value.rolloutPercent !== 0) {
+    throw new TypeError("cost accounting bootstrap requires rollout zero");
   }
   const expected = {
     bucketName: `hereisit-processing-${environment}`,
@@ -422,9 +432,9 @@ export function generateProcessingWrangler(input) {
       R2_BUCKET_NAME: value.bucketName,
       USAGE_LOG_BUCKET_NAME: value.usageLogBucketName,
       USAGE_ANALYTICS_DATASET_NAME: value.usageAnalyticsDatasetName,
+      COST_ACCOUNTING_MODE: value.costAccountingMode,
       LOGPUSH_JOB_ID: String(value.logpushJobId),
       CONTAINER_APPLICATION_ID: value.containerApplicationId,
-      CONTAINER_INSTANCE_ID: value.containerInstanceId,
       WORKER_SCRIPT_NAME: `hereisit-processing-${environment}`,
       USAGE_LOG_PREFIX: `workers-trace-events/${environment}/`,
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: String(value.accountDailyWeightedUnitLimit),
@@ -459,8 +469,8 @@ const cliScalarFields = {
   "bucket-name": "bucketName",
   "usage-log-bucket-name": "usageLogBucketName",
   "usage-analytics-dataset-name": "usageAnalyticsDatasetName",
+  "cost-accounting-mode": "costAccountingMode",
   "container-application-id": "containerApplicationId",
-  "container-instance-id": "containerInstanceId",
   "queue-name": "queueName",
   "dlq-name": "dlqName",
   "engine-image": "engineImage",

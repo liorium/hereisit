@@ -42,7 +42,6 @@ export interface CostAccountingRuntimeConfig {
   readonly accountId: string;
   readonly logpushJobId: number;
   readonly containerApplicationId: string;
-  readonly containerInstanceId: string;
   readonly workerScriptName: string;
   readonly usageLogPrefix: string;
   readonly analyticsDatasetName: string;
@@ -62,13 +61,19 @@ export interface CostAccountingRuntimeEnvironment {
 }
 
 export interface CostAccountingRuntimeSettings {
+  readonly COST_ACCOUNTING_MODE: string;
   readonly CLOUDFLARE_ACCOUNT_ID: string;
   readonly LOGPUSH_JOB_ID: string;
   readonly CONTAINER_APPLICATION_ID: string;
-  readonly CONTAINER_INSTANCE_ID: string;
   readonly WORKER_SCRIPT_NAME: string;
   readonly USAGE_LOG_PREFIX: string;
   readonly USAGE_ANALYTICS_DATASET_NAME: string;
+}
+
+export function parseCostAccountingMode(
+  settings: Pick<CostAccountingRuntimeSettings, "COST_ACCOUNTING_MODE">,
+): "bootstrap" | "active" {
+  return z.enum(["bootstrap", "active"]).parse(settings.COST_ACCOUNTING_MODE);
 }
 
 export function parseCostAccountingRuntimeConfig(
@@ -82,6 +87,9 @@ export function parseCostAccountingRuntimeConfig(
     | "releaseReportSha256"
   >,
 ): CostAccountingRuntimeConfig {
+  if (parseCostAccountingMode(settings) !== "active") {
+    throw new TypeError("Cost accounting runtime cannot start in bootstrap mode.");
+  }
   const prefix = usageLogPrefixSchema.parse(settings.USAGE_LOG_PREFIX);
   if (prefix !== `workers-trace-events/${operational.environment}/`) {
     throw new TypeError("USAGE_LOG_PREFIX must match ENVIRONMENT.");
@@ -97,7 +105,6 @@ export function parseCostAccountingRuntimeConfig(
     accountId: accountIdSchema.parse(settings.CLOUDFLARE_ACCOUNT_ID),
     logpushJobId: canonicalPositiveIntegerSchema.parse(settings.LOGPUSH_JOB_ID),
     containerApplicationId: z.string().uuid().parse(settings.CONTAINER_APPLICATION_ID),
-    containerInstanceId: z.string().uuid().parse(settings.CONTAINER_INSTANCE_ID),
     workerScriptName,
     usageLogPrefix: prefix,
     analyticsDatasetName: analyticsDatasetNameSchema.parse(settings.USAGE_ANALYTICS_DATASET_NAME),
@@ -242,7 +249,6 @@ export function createCostAccountingRuntime(
           accountId: config.accountId,
           token: env.ANALYTICS_READ_TOKEN,
           applicationId: config.containerApplicationId,
-          instanceId: config.containerInstanceId,
           hourKey,
           expectedSchemaSha256: config.providerUsageSchemaSha256,
         });

@@ -74,9 +74,9 @@ function validInput(environment: "staging" | "production" = "staging") {
     bucketName: `hereisit-processing-${suffix}`,
     usageLogBucketName: `hereisit-processing-usage-${suffix}`,
     usageAnalyticsDatasetName: `hereisit_processing_usage_${suffix}`,
+    costAccountingMode: "active" as const,
     logpushJobId: 123,
     containerApplicationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    containerInstanceId: "ffffffff-1111-4222-8333-444444444444",
     queueName: `hereisit-image-jobs-${suffix}`,
     dlqName: `hereisit-image-jobs-dlq-${suffix}`,
     engineImage:
@@ -124,12 +124,12 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
     input.usageLogBucketName,
     "--usage-analytics-dataset-name",
     input.usageAnalyticsDatasetName,
+    "--cost-accounting-mode",
+    input.costAccountingMode,
     "--logpush-job-id",
     String(input.logpushJobId),
     "--container-application-id",
     input.containerApplicationId,
-    "--container-instance-id",
-    input.containerInstanceId,
     "--queue-name",
     input.queueName,
     "--dlq-name",
@@ -266,9 +266,9 @@ describe("processing Wrangler generator", () => {
       R2_BUCKET_NAME: input.bucketName,
       USAGE_LOG_BUCKET_NAME: input.usageLogBucketName,
       USAGE_ANALYTICS_DATASET_NAME: input.usageAnalyticsDatasetName,
+      COST_ACCOUNTING_MODE: "active",
       LOGPUSH_JOB_ID: "123",
       CONTAINER_APPLICATION_ID: input.containerApplicationId,
-      CONTAINER_INSTANCE_ID: input.containerInstanceId,
       WORKER_SCRIPT_NAME: "hereisit-processing-staging",
       USAGE_LOG_PREFIX: "workers-trace-events/staging/",
       IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "0",
@@ -295,6 +295,20 @@ describe("processing Wrangler generator", () => {
     });
   });
 
+  it("permits a rollout-zero bootstrap before Cloudflare assigns the Container application ID", () => {
+    const input = {
+      ...validInput(),
+      costAccountingMode: "bootstrap" as const,
+      containerApplicationId: "00000000-0000-4000-8000-000000000000",
+    };
+
+    expect(generateProcessingWrangler(input).vars).toMatchObject({
+      COST_ACCOUNTING_MODE: "bootstrap",
+      CONTAINER_APPLICATION_ID: input.containerApplicationId,
+      IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "0",
+    });
+  });
+
   it.each([
     ["mutable image", { engineImage: "registry.cloudflare.com/account/repo:latest" }],
     [
@@ -308,6 +322,10 @@ describe("processing Wrangler generator", () => {
     ["negative quota", { accountDailyWeightedUnitLimit: -1 }],
     ["zero Logpush job id", { logpushJobId: 0 }],
     ["invalid Container application id", { containerApplicationId: "not-a-uuid" }],
+    [
+      "active placeholder Container application id",
+      { containerApplicationId: "00000000-0000-4000-8000-000000000000" },
+    ],
     ["wrong bucket", { bucketName: "hereisit-processing-production" }],
     ["wrong dataset", { usageAnalyticsDatasetName: "hereisit_processing_usage_production" }],
   ])("rejects %s", (_label, override) => {

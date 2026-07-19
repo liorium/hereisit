@@ -21,7 +21,6 @@ describe("Container provider usage in workerd", () => {
         accountId: "a".repeat(32),
         token: "analytics-read-token",
         applicationId,
-        instanceId,
         hourKey: 495_672,
         expectedSchemaSha256: await providerUsageContractSha256(),
       }),

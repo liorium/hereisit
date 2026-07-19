@@ -39,7 +39,6 @@ async function validInput() {
     accountId,
     token,
     applicationId,
-    instanceId,
     hourKey,
     expectedSchemaSha256: await providerUsageContractSha256(),
   };
@@ -63,13 +62,13 @@ describe("Cloudflare Container provider usage", () => {
     expect(init).toMatchObject({ method: "POST", redirect: "error" });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
     const request = JSON.parse(String(init?.body));
-    expect(request.query).toContain("containersUsageAdaptiveGroups(limit: 33");
+    expect(request.query).toContain("containersUsageAdaptiveGroups(limit: 257");
+    expect(request.query).not.toContain("instanceId: $instanceId");
     expect(request.variables).toEqual({
       accountTag: accountId,
       datetimeStart: "2026-07-19T00:00:00.000Z",
       datetimeEnd: "2026-07-19T01:00:00.000Z",
       applicationId,
-      instanceId,
     });
   });
 
@@ -92,14 +91,14 @@ describe("Cloudflare Container provider usage", () => {
     });
   });
 
-  it("sums resource units while preserving exact regional transmission totals", async () => {
+  it("sums every application instance and preserves exact regional transmission totals", async () => {
     const first = usageBody();
     const secondRow = `{
       "dimensions":{
         "datetimeHour":"2026-07-19T00:00:00Z",
         "applicationId":"${applicationId}",
-        "instanceId":"${instanceId}",
-        "region":"weur"
+        "instanceId":"123e4567-e89b-42d3-a456-426614174002",
+        "region":"enam"
       },
       "sum":{
         "cpuTimeSec":0.000001,
@@ -116,10 +115,7 @@ describe("Cloudflare Container provider usage", () => {
       allocatedMemoryByteMilliseconds: "6442450945000",
       allocatedDiskByteMilliseconds: "12000000002000",
       transmittedBytes: "130",
-      transmittedBytesByRegion: [
-        { region: "enam", transmittedBytes: "123" },
-        { region: "weur", transmittedBytes: "7" },
-      ],
+      transmittedBytesByRegion: [{ region: "enam", transmittedBytes: "130" }],
     });
   });
 
@@ -135,7 +131,7 @@ describe("Cloudflare Container provider usage", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("rejects GraphQL errors and a row outside the exact resource envelope", async () => {
+  it("rejects GraphQL errors and a row outside the exact application envelope", async () => {
     const graphqlError = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       response('{"data":null,"errors":[{"message":"unavailable"}]}'),
     );
@@ -143,10 +139,10 @@ describe("Cloudflare Container provider usage", () => {
       /GraphQL/i,
     );
 
-    const wrongInstance = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      response(usageBody().replace(instanceId, "123e4567-e89b-42d3-a456-426614174002")),
+    const wrongApplication = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      response(usageBody().replace(applicationId, "123e4567-e89b-42d3-a456-426614174002")),
     );
-    await expect(queryContainerUsageHour(wrongInstance, await validInput())).rejects.toThrow(
+    await expect(queryContainerUsageHour(wrongApplication, await validInput())).rejects.toThrow(
       /resource/i,
     );
   });
