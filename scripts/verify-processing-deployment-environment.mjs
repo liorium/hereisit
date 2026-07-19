@@ -28,14 +28,6 @@ const tokenKeys = Object.freeze([
   "STAGING_LOGPUSH_STATUS_TOKEN",
 ]);
 
-function requiredValue(environment, key) {
-  const value = environment[key];
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${key} is required`);
-  }
-  return value;
-}
-
 function validateOpaqueValue(value, key) {
   if (value.length < 20 || value.length > 512 || /\s/.test(value)) {
     throw new TypeError(`${key} has an invalid credential envelope`);
@@ -77,7 +69,12 @@ export function validateProcessingDeploymentEnvironment(environment) {
   if (environment === null || typeof environment !== "object" || Array.isArray(environment)) {
     throw new TypeError("deployment environment must be an object");
   }
-  for (const key of requiredKeys) requiredValue(environment, key);
+  const missingKeys = requiredKeys.filter(
+    (key) => typeof environment[key] !== "string" || environment[key].length === 0,
+  );
+  if (missingKeys.length > 0) {
+    throw new TypeError(`missing required deployment values: ${missingKeys.join(", ")}`);
+  }
 
   if (!/^[0-9a-f]{32}$/.test(environment.CLOUDFLARE_ACCOUNT_ID)) {
     throw new TypeError("CLOUDFLARE_ACCOUNT_ID must be a lowercase 32-character account ID");

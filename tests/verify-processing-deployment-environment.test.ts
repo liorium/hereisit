@@ -51,6 +51,28 @@ describe("processing deployment environment verifier", () => {
     }
   });
 
+  it("reports every missing deployment value together without revealing configured values", () => {
+    const environment = validEnvironment();
+    delete environment.CLOUDFLARE_API_TOKEN;
+    environment.CLOUDFLARE_D1_API_TOKEN = "";
+    delete environment.ALERT_DESTINATION_ADDRESS;
+
+    let error: unknown;
+    try {
+      validateProcessingDeploymentEnvironment(environment);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(TypeError);
+    const message = (error as TypeError).message;
+    expect(message).toContain("CLOUDFLARE_API_TOKEN");
+    expect(message).toContain("CLOUDFLARE_D1_API_TOKEN");
+    expect(message).toContain("ALERT_DESTINATION_ADDRESS");
+    expect(message).not.toContain(environment.CLOUDFLARE_LOGPUSH_API_TOKEN);
+    expect(message).not.toContain(environment.LOGPUSH_R2_SECRET_ACCESS_KEY);
+  });
+
   it("requires canonical 32-byte base64url abuse secrets", () => {
     const environment = validEnvironment();
     environment.STAGING_ABUSE_HMAC_SECRET_CURRENT = "not-base64url";
