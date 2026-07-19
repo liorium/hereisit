@@ -1,6 +1,10 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalPassThroughEnv": ["CLOUDFLARE_API_TOKEN", "HEREISIT_FULL_CLOUDFLARE_LOCAL"],
+  "globalPassThroughEnv": [
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_API_TOKEN",
+    "HEREISIT_FULL_CLOUDFLARE_LOCAL"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
