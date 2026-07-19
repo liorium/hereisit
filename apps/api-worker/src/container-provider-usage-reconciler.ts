@@ -12,6 +12,12 @@ const int64StringSchema = z
     (value) => BigInt(value) <= INT64_MAXIMUM,
     "Provider integer exceeds signed 64-bit storage.",
   );
+const regionUsageSchema = z
+  .object({
+    region: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+    transmittedBytes: int64StringSchema,
+  })
+  .strict();
 const inputSchema = z
   .object({
     hourKey: nonnegativeInteger,
@@ -22,8 +28,29 @@ const inputSchema = z
         allocatedMemoryByteMilliseconds: int64StringSchema,
         allocatedDiskByteMilliseconds: int64StringSchema,
         transmittedBytes: int64StringSchema,
+        transmittedBytesByRegion: z.array(regionUsageSchema).max(32),
       })
-      .strict(),
+      .strict()
+      .superRefine((usage, context) => {
+        let total = 0n;
+        let previousRegion: string | null = null;
+        for (const entry of usage.transmittedBytesByRegion) {
+          if (previousRegion !== null && entry.region <= previousRegion) {
+            context.addIssue({
+              code: "custom",
+              message: "Provider regions must be strictly ordered.",
+            });
+          }
+          previousRegion = entry.region;
+          total += BigInt(entry.transmittedBytes);
+        }
+        if (total > INT64_MAXIMUM || total.toString() !== usage.transmittedBytes) {
+          context.addIssue({
+            code: "custom",
+            message: "Regional transmission totals must reconcile.",
+          });
+        }
+      }),
     liveCostModelSha256: hashSchema,
     providerUsageSchemaSha256: hashSchema,
     releaseReportSha256: hashSchema,
@@ -46,6 +73,12 @@ const storedSchema = z
     transmitted_bytes: int64StringSchema,
     provider_container_usage_complete: z.union([z.literal(0), z.literal(1)]),
     provider_usage_complete: z.union([z.literal(0), z.literal(1)]),
+  })
+  .strict();
+const storedRegionSchema = z
+  .object({
+    region: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+    transmitted_bytes: int64StringSchema,
   })
   .strict();
 
@@ -123,6 +156,7 @@ export async function reconcileContainerProviderHour(
       circuitOpen: control.circuit_open === 1,
     };
   }
+  const regionsJson = JSON.stringify(input.usage.transmittedBytesByRegion);
 
   const results = await session.batch([
     session
@@ -143,6 +177,35 @@ export async function reconcileContainerProviderHour(
         input.releaseReportSha256,
         input.observedAt,
         control.cost_accounting_epoch,
+      ),
+    session
+      .prepare(
+        `INSERT INTO container_provider_egress_hourly (
+           accounting_epoch, hour_key, region, transmitted_bytes
+         )
+         SELECT ?, ?,
+                json_extract(value, '$.region'),
+                CAST(json_extract(value, '$.transmittedBytes') AS INTEGER)
+         FROM json_each(?)
+         WHERE EXISTS (
+           SELECT 1 FROM operational_cost_hourly
+           WHERE accounting_epoch = ? AND hour_key = ?
+             AND live_cost_model_sha256 = ?
+             AND provider_usage_schema_sha256 = ?
+             AND release_report_sha256 = ?
+             AND provider_container_usage_complete = 0
+         )
+         ON CONFLICT(accounting_epoch, hour_key, region) DO NOTHING`,
+      )
+      .bind(
+        control.cost_accounting_epoch,
+        input.hourKey,
+        regionsJson,
+        control.cost_accounting_epoch,
+        input.hourKey,
+        input.liveCostModelSha256,
+        input.providerUsageSchemaSha256,
+        input.releaseReportSha256,
       ),
     session
       .prepare(
@@ -170,6 +233,29 @@ export async function reconcileContainerProviderHour(
                AND CAST(provider_container_allocated_disk_byte_milliseconds AS TEXT) = ?
                AND CAST(provider_container_tx_bytes AS TEXT) = ?
              )
+           )
+           AND (
+             SELECT COUNT(*) FROM container_provider_egress_hourly
+             WHERE accounting_epoch = ? AND hour_key = ?
+           ) = json_array_length(?)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM json_each(?) AS requested
+             LEFT JOIN container_provider_egress_hourly AS stored
+               ON stored.accounting_epoch = ? AND stored.hour_key = ?
+              AND stored.region = json_extract(requested.value, '$.region')
+             WHERE stored.region IS NULL
+                OR CAST(stored.transmitted_bytes AS TEXT) <>
+                   json_extract(requested.value, '$.transmittedBytes')
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM container_provider_egress_hourly AS stored
+             WHERE stored.accounting_epoch = ? AND stored.hour_key = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM json_each(?) AS requested
+                 WHERE json_extract(requested.value, '$.region') = stored.region
+               )
            )`,
       )
       .bind(
@@ -187,6 +273,15 @@ export async function reconcileContainerProviderHour(
         input.usage.allocatedMemoryByteMilliseconds,
         input.usage.allocatedDiskByteMilliseconds,
         input.usage.transmittedBytes,
+        control.cost_accounting_epoch,
+        input.hourKey,
+        regionsJson,
+        regionsJson,
+        control.cost_accounting_epoch,
+        input.hourKey,
+        control.cost_accounting_epoch,
+        input.hourKey,
+        regionsJson,
       ),
     session
       .prepare(
@@ -202,10 +297,34 @@ export async function reconcileContainerProviderHour(
          WHERE accounting_epoch = ? AND hour_key = ?`,
       )
       .bind(control.cost_accounting_epoch, input.hourKey),
+    session
+      .prepare(
+        `SELECT region, CAST(transmitted_bytes AS TEXT) AS transmitted_bytes
+         FROM container_provider_egress_hourly
+         WHERE accounting_epoch = ? AND hour_key = ?
+         ORDER BY region`,
+      )
+      .bind(control.cost_accounting_epoch, input.hourKey),
   ]);
-  const stored = storedSchema.safeParse(results[2]?.results[0]);
+  const stored = storedSchema.safeParse(results[3]?.results[0]);
+  const storedRegions = z
+    .array(storedRegionSchema)
+    .max(32)
+    .safeParse(results[4]?.results ?? []);
+  const regionsMatch =
+    storedRegions.success &&
+    storedRegions.data.length === input.usage.transmittedBytesByRegion.length &&
+    storedRegions.data.every((storedRegion, index) => {
+      const expected = input.usage.transmittedBytesByRegion[index];
+      return (
+        expected !== undefined &&
+        storedRegion.region === expected.region &&
+        storedRegion.transmitted_bytes === expected.transmittedBytes
+      );
+    });
   const matches =
     stored.success &&
+    regionsMatch &&
     stored.data.live_cost_model_sha256 === input.liveCostModelSha256 &&
     stored.data.provider_usage_schema_sha256 === input.providerUsageSchemaSha256 &&
     stored.data.release_report_sha256 === input.releaseReportSha256 &&

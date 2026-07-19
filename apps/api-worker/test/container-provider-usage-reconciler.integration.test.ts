@@ -14,6 +14,10 @@ const usage = {
   allocatedMemoryByteMilliseconds: "23192823398400000",
   allocatedDiskByteMilliseconds: "43200000000000000",
   transmittedBytes: "9007199254740991",
+  transmittedBytesByRegion: [
+    { region: "enam", transmittedBytes: "100" },
+    { region: "weur", transmittedBytes: "9007199254740891" },
+  ],
 };
 
 const input = (overrides: Record<string, unknown> = {}) => ({
@@ -91,6 +95,20 @@ describe("Container provider-hour reconciliation", () => {
       provider_container_usage_complete: 1,
       provider_usage_complete: 1,
       complete: 0,
+    });
+    await expect(
+      env.DB.prepare(
+        `SELECT region, CAST(transmitted_bytes AS TEXT) AS transmitted_bytes
+         FROM container_provider_egress_hourly
+         WHERE accounting_epoch = ? AND hour_key = ? ORDER BY region`,
+      )
+        .bind(accountingEpoch, hourKey)
+        .all(),
+    ).resolves.toMatchObject({
+      results: usage.transmittedBytesByRegion.map(({ region, transmittedBytes }) => ({
+        region,
+        transmitted_bytes: transmittedBytes,
+      })),
     });
   });
 

@@ -26,6 +26,7 @@ const providerRowSchema = z
         datetimeHour: z.string().min(1).max(64),
         applicationId: z.string().regex(UUID_PATTERN),
         instanceId: z.string().regex(UUID_PATTERN),
+        region: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
       })
       .strict(),
     sum: z
@@ -48,7 +49,9 @@ const envelopeSchema = z
               .array(
                 z
                   .object({
-                    containersUsageAdaptiveGroups: z.array(providerRowSchema).max(2),
+                    containersUsageAdaptiveGroups: z
+                      .array(providerRowSchema)
+                      .max(providerUsageContract.limit),
                   })
                   .strict(),
               )
@@ -75,6 +78,10 @@ export interface ContainerUsageHourResult {
   readonly allocatedMemoryByteMilliseconds: string;
   readonly allocatedDiskByteMilliseconds: string;
   readonly transmittedBytes: string;
+  readonly transmittedBytesByRegion: readonly {
+    readonly region: string;
+    readonly transmittedBytes: string;
+  }[];
 }
 
 let contractHashPromise: Promise<string> | undefined;
@@ -168,6 +175,12 @@ function fixedInteger(source: string, scale: number, label: string): string {
   return result.toString();
 }
 
+function checkedInt64Sum(left: string, right: string, label: string): string {
+  const sum = BigInt(left) + BigInt(right);
+  if (sum > INT64_MAXIMUM) throw new RangeError(`${label} exceeds signed 64-bit storage.`);
+  return sum.toString();
+}
+
 function parseHourTimestamp(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:00:00(?:\.000)?Z$/.test(value)) return null;
   const milliseconds = Date.parse(value);
@@ -232,38 +245,76 @@ export async function queryContainerUsageHour(
       allocatedMemoryByteMilliseconds: "0",
       allocatedDiskByteMilliseconds: "0",
       transmittedBytes: "0",
+      transmittedBytesByRegion: [],
     };
   }
-  if (rows.length !== 1) throw new Error("Container provider pagination envelope is invalid.");
-  const row = rows[0];
-  if (
-    row === undefined ||
-    parseHourTimestamp(row.dimensions.datetimeHour) !== hourStart ||
-    row.dimensions.applicationId !== input.applicationId ||
-    row.dimensions.instanceId !== input.instanceId
-  ) {
-    throw new Error("Container provider resource envelope is invalid.");
+  if (rows.length >= providerUsageContract.limit) {
+    throw new Error("Container provider pagination envelope is invalid.");
   }
-  return {
-    cpuMicroseconds: fixedInteger(
+  let cpuMicroseconds = "0";
+  let allocatedMemoryByteMilliseconds = "0";
+  let allocatedDiskByteMilliseconds = "0";
+  let transmittedBytes = "0";
+  let previousRegion: string | null = null;
+  const transmittedBytesByRegion: { region: string; transmittedBytes: string }[] = [];
+  for (const row of rows) {
+    if (
+      parseHourTimestamp(row.dimensions.datetimeHour) !== hourStart ||
+      row.dimensions.applicationId !== input.applicationId ||
+      row.dimensions.instanceId !== input.instanceId
+    ) {
+      throw new Error("Container provider resource envelope is invalid.");
+    }
+    if (previousRegion !== null && row.dimensions.region <= previousRegion) {
+      throw new Error("Container provider region ordering is invalid.");
+    }
+    previousRegion = row.dimensions.region;
+    const rowCpuMicroseconds = fixedInteger(
       row.sum.cpuTimeSec.source,
       providerUsageContract.integerScales.cpuTimeSecToMicroseconds,
       "Container CPU time",
-    ),
-    allocatedMemoryByteMilliseconds: fixedInteger(
+    );
+    const rowMemoryByteMilliseconds = fixedInteger(
       row.sum.allocatedMemory.source,
       providerUsageContract.integerScales.allocatedMemoryToByteMilliseconds,
       "Container allocated memory",
-    ),
-    allocatedDiskByteMilliseconds: fixedInteger(
+    );
+    const rowDiskByteMilliseconds = fixedInteger(
       row.sum.allocatedDisk.source,
       providerUsageContract.integerScales.allocatedDiskToByteMilliseconds,
       "Container allocated disk",
-    ),
-    transmittedBytes: fixedInteger(
+    );
+    const rowTransmittedBytes = fixedInteger(
       row.sum.txBytes.source,
       providerUsageContract.integerScales.txBytes,
       "Container transmitted bytes",
-    ),
+    );
+    cpuMicroseconds = checkedInt64Sum(cpuMicroseconds, rowCpuMicroseconds, "Container CPU time");
+    allocatedMemoryByteMilliseconds = checkedInt64Sum(
+      allocatedMemoryByteMilliseconds,
+      rowMemoryByteMilliseconds,
+      "Container allocated memory",
+    );
+    allocatedDiskByteMilliseconds = checkedInt64Sum(
+      allocatedDiskByteMilliseconds,
+      rowDiskByteMilliseconds,
+      "Container allocated disk",
+    );
+    transmittedBytes = checkedInt64Sum(
+      transmittedBytes,
+      rowTransmittedBytes,
+      "Container transmitted bytes",
+    );
+    transmittedBytesByRegion.push({
+      region: row.dimensions.region,
+      transmittedBytes: rowTransmittedBytes,
+    });
+  }
+  return {
+    cpuMicroseconds,
+    allocatedMemoryByteMilliseconds,
+    allocatedDiskByteMilliseconds,
+    transmittedBytes,
+    transmittedBytesByRegion,
   };
 }

@@ -11,7 +11,7 @@ describe("Container provider usage in workerd", () => {
     const fetcher = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
-          `{"data":{"viewer":{"accounts":[{"containersUsageAdaptiveGroups":[{"dimensions":{"datetimeHour":"2026-07-19T00:00:00Z","applicationId":"${applicationId}","instanceId":"${instanceId}"},"sum":{"cpuTimeSec":0.000001,"allocatedMemory":23192823398400,"allocatedDisk":43200000000000,"txBytes":9007199254740991}}]}]}},"errors":null}`,
+          `{"data":{"viewer":{"accounts":[{"containersUsageAdaptiveGroups":[{"dimensions":{"datetimeHour":"2026-07-19T00:00:00Z","applicationId":"${applicationId}","instanceId":"${instanceId}","region":"weur"},"sum":{"cpuTimeSec":0.000001,"allocatedMemory":23192823398400,"allocatedDisk":43200000000000,"txBytes":9007199254740991}}]}]}},"errors":null}`,
           { headers: { "content-type": "application/json" } },
         ),
     );
@@ -30,6 +30,7 @@ describe("Container provider usage in workerd", () => {
       allocatedMemoryByteMilliseconds: "23192823398400000",
       allocatedDiskByteMilliseconds: "43200000000000000",
       transmittedBytes: "9007199254740991",
+      transmittedBytesByRegion: [{ region: "weur", transmittedBytes: "9007199254740991" }],
     });
   });
 });

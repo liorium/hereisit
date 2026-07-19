@@ -3,9 +3,9 @@
   "endpoint": "https://api.cloudflare.com/client/v4/graphql",
   "method": "POST",
   "dataset": "containersUsageAdaptiveGroups",
-  "limit": 2,
+  "limit": 33,
   "timeFilters": ["datetime_geq", "datetime_lt"],
-  "dimensions": ["datetimeHour", "applicationId", "instanceId"],
+  "dimensions": ["datetimeHour", "applicationId", "instanceId", "region"],
   "sumFields": ["cpuTimeSec", "allocatedMemory", "allocatedDisk", "txBytes"],
   "maximumResponseBytes": 65536,
   "integerScales": {
@@ -14,5 +14,5 @@
     "allocatedDiskToByteMilliseconds": 3,
     "txBytes": 0
   },
-  "query": "query HereIsItContainerUsageV1($accountTag: String, $datetimeStart: Time, $datetimeEnd: Time, $applicationId: String, $instanceId: String) { viewer { accounts(filter: { accountTag: $accountTag }) { containersUsageAdaptiveGroups(limit: 2 filter: { datetime_geq: $datetimeStart datetime_lt: $datetimeEnd applicationId: $applicationId instanceId: $instanceId } orderBy: [datetimeHour_ASC]) { dimensions { datetimeHour applicationId instanceId } sum { cpuTimeSec allocatedMemory allocatedDisk txBytes } } } } }"
+  "query": "query HereIsItContainerUsageV1($accountTag: String, $datetimeStart: Time, $datetimeEnd: Time, $applicationId: String, $instanceId: String) { viewer { accounts(filter: { accountTag: $accountTag }) { containersUsageAdaptiveGroups(limit: 33 filter: { datetime_geq: $datetimeStart datetime_lt: $datetimeEnd applicationId: $applicationId instanceId: $instanceId } orderBy: [datetimeHour_ASC, region_ASC]) { dimensions { datetimeHour applicationId instanceId region } sum { cpuTimeSec allocatedMemory allocatedDisk txBytes } } } } }"
 }
