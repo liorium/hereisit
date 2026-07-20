@@ -150,7 +150,7 @@ function validateEngine(value, gitSha) {
 
 function validateReleaseAssets(value, state, releaseId, web) {
   const assets = assertObject(value, "candidate release assets");
-  const builtKeys = ["engine", "worker", "web"];
+  const builtKeys = ["engine", "worker", "web", "releaseInputs", "costModel"];
   const finalizedKeys = ["report", ...builtKeys, "evidence"];
   assertExactKeys(
     assets,
@@ -167,6 +167,12 @@ function validateReleaseAssets(value, state, releaseId, web) {
     "image-engine-linux-amd64.docker.tar",
   );
   validateArtifact(assets.worker, "candidate Worker release asset", "api-worker.mjs");
+  validateArtifact(
+    assets.releaseInputs,
+    "candidate release inputs asset",
+    "processing-release-inputs.json",
+  );
+  validateArtifact(assets.costModel, "candidate live cost model asset", "live-cost-model.json");
 
   const webAssets = assertObject(assets.web, "candidate web release assets");
   assertExactKeys(webAssets, environments, "candidate web release assets");
@@ -210,6 +216,8 @@ export function validateProcessingCandidate(value) {
       "web",
       "security",
       "providerUsage",
+      "releaseInputs",
+      "costModel",
       "releaseAssets",
       "verificationSha256",
     ],
@@ -242,13 +250,35 @@ export function validateProcessingCandidate(value) {
   assertExactKeys(providerUsage, ["schemaSha256"], "candidate provider usage identity");
   assertSha256(providerUsage.schemaSha256, "candidate provider usage schema hash");
 
+  const releaseInputs = assertObject(manifest.releaseInputs, "candidate release inputs identity");
+  assertExactKeys(releaseInputs, ["sha256"], "candidate release inputs identity");
+  assertSha256(releaseInputs.sha256, "candidate release inputs hash");
+  const costModel = assertObject(manifest.costModel, "candidate live cost model identity");
+  assertExactKeys(costModel, ["sha256"], "candidate live cost model identity");
+  assertSha256(costModel.sha256, "candidate live cost model hash");
+
   const releaseAssets = validateReleaseAssets(
     manifest.releaseAssets,
     manifest.state,
     manifest.releaseId,
     web,
   );
-  return { ...manifest, engine, web, security, providerUsage, releaseAssets };
+  if (releaseAssets.releaseInputs.sha256 !== releaseInputs.sha256) {
+    throw new TypeError("candidate release inputs asset does not match its identity");
+  }
+  if (releaseAssets.costModel.sha256 !== costModel.sha256) {
+    throw new TypeError("candidate live cost model asset does not match its identity");
+  }
+  return {
+    ...manifest,
+    engine,
+    web,
+    security,
+    providerUsage,
+    releaseInputs,
+    costModel,
+    releaseAssets,
+  };
 }
 
 const fieldReaders = Object.freeze({
@@ -259,6 +289,8 @@ const fieldReaders = Object.freeze({
   "engine.oci.configDigest": (candidate) => candidate.engine.oci.configDigest,
   "security.trivyDbDigest": (candidate) => candidate.security.trivyDbDigest,
   "providerUsage.schemaSha256": (candidate) => candidate.providerUsage.schemaSha256,
+  "releaseInputs.sha256": (candidate) => candidate.releaseInputs.sha256,
+  "costModel.sha256": (candidate) => candidate.costModel.sha256,
   "web.staging.archiveSha256": (candidate) => candidate.web.staging.archiveSha256,
   "web.staging.treeSha256": (candidate) => candidate.web.staging.treeSha256,
   "web.staging.processingApiOrigin": (candidate) => candidate.web.staging.processingApiOrigin,

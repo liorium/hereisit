@@ -14,6 +14,8 @@
     "web",
     "security",
     "providerUsage",
+    "releaseInputs",
+    "costModel",
     "releaseAssets",
     "verificationSha256"
   ],
@@ -46,6 +48,8 @@
       "required": ["schemaSha256"],
       "properties": { "schemaSha256": { "$ref": "#/$defs/sha256" } }
     },
+    "releaseInputs": { "$ref": "#/$defs/hashedIdentity" },
+    "costModel": { "$ref": "#/$defs/hashedIdentity" },
     "releaseAssets": {},
     "verificationSha256": { "$ref": "#/$defs/sha256" }
   },
@@ -65,6 +69,12 @@
       "minItems": 1,
       "maxItems": 128,
       "items": { "$ref": "#/$defs/digest" }
+    },
+    "hashedIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": { "sha256": { "$ref": "#/$defs/sha256" } }
     },
     "ociImageIdentity": {
       "type": "object",
@@ -159,22 +169,26 @@
     "builtReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "worker", "web"],
+      "required": ["engine", "worker", "web", "releaseInputs", "costModel"],
       "properties": {
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
         "worker": { "$ref": "#/$defs/artifact" },
-        "web": { "$ref": "#/$defs/webReleaseAssets" }
+        "web": { "$ref": "#/$defs/webReleaseAssets" },
+        "releaseInputs": { "$ref": "#/$defs/artifact" },
+        "costModel": { "$ref": "#/$defs/artifact" }
       }
     },
     "finalizedReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["report", "engine", "worker", "web", "evidence"],
+      "required": ["report", "engine", "worker", "web", "releaseInputs", "costModel", "evidence"],
       "properties": {
         "report": { "$ref": "#/$defs/artifact" },
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
         "worker": { "$ref": "#/$defs/artifact" },
         "web": { "$ref": "#/$defs/webReleaseAssets" },
+        "releaseInputs": { "$ref": "#/$defs/artifact" },
+        "costModel": { "$ref": "#/$defs/artifact" },
         "evidence": { "$ref": "#/$defs/evidenceReleaseAssets" }
       }
     }

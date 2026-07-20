@@ -59,6 +59,8 @@ function candidateDocument() {
     },
     security: { trivyDbDigest: `sha256:${"9".repeat(64)}` },
     providerUsage: { schemaSha256: "a".repeat(64) },
+    releaseInputs: { sha256: "7".repeat(64) },
+    costModel: { sha256: "8".repeat(64) },
     releaseAssets: {
       report: {
         path: "processing-release-report.json",
@@ -78,6 +80,12 @@ function candidateDocument() {
         },
       },
       worker: { path: "api-worker.mjs", sizeBytes: 1105, sha256: "f".repeat(64) },
+      releaseInputs: {
+        path: "processing-release-inputs.json",
+        sizeBytes: 1110,
+        sha256: "7".repeat(64),
+      },
+      costModel: { path: "live-cost-model.json", sizeBytes: 1111, sha256: "8".repeat(64) },
       web: {
         staging: {
           path: "web-staging.tar",
@@ -132,6 +140,8 @@ function releaseManifest(candidateBytes: Uint8Array) {
       docker: asset(104, "image-engine-linux-amd64.docker.tar", "e".repeat(64)),
     },
     worker: asset(105, "api-worker.mjs", "f".repeat(64)),
+    releaseInputs: asset(110, "processing-release-inputs.json", "7".repeat(64)),
+    costModel: asset(111, "live-cost-model.json", "8".repeat(64)),
     web: {
       staging: {
         ...asset(106, "web-staging.tar", "1".repeat(64)),

@@ -50,6 +50,8 @@ function candidate() {
     },
     security: { trivyDbDigest: `sha256:${"e".repeat(64)}` },
     providerUsage: { schemaSha256: "f".repeat(64) },
+    releaseInputs: { sha256: "a".repeat(64) },
+    costModel: { sha256: "b".repeat(64) },
     releaseAssets: {
       report: artifact("processing-release-report.json", "5".repeat(64), 101),
       engine: {
@@ -57,6 +59,8 @@ function candidate() {
         docker: artifact("image-engine-linux-amd64.docker.tar", "7".repeat(64), 103),
       },
       worker: artifact("api-worker.mjs", "8".repeat(64), 104),
+      releaseInputs: artifact("processing-release-inputs.json", "a".repeat(64), 109),
+      costModel: artifact("live-cost-model.json", "b".repeat(64), 110),
       web: {
         staging: {
           path: "web-staging.tar",

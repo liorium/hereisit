@@ -265,6 +265,8 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
     generic("engine.oci", "image-engine-linux-amd64.oci.tar", engine.oci),
     generic("engine.docker", "image-engine-linux-amd64.docker.tar", engine.docker),
     generic("worker", "api-worker.mjs", assets.worker),
+    generic("releaseInputs", "processing-release-inputs.json", assets.releaseInputs),
+    generic("costModel", "live-cost-model.json", assets.costModel),
     webAsset("staging", web.staging),
     webAsset("production", web.production),
     evidenceAsset(
@@ -390,6 +392,8 @@ function buildManifest({ releaseTag, targetSha, releaseIdNumber, resolved }) {
     report: get("report"),
     engine: { oci: get("engine.oci"), docker: get("engine.docker") },
     worker: get("worker"),
+    releaseInputs: get("releaseInputs"),
+    costModel: get("costModel"),
     web: { staging: get("web.staging"), production: get("web.production") },
     evidence: { bundle: get("evidence.bundle"), signature: get("evidence.signature") },
   };
