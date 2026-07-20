@@ -422,10 +422,7 @@ try {
   );
   assert.equal(routeResponse.url(), `${baseUrl}${ROUTE_PATH}`, "The smoke route redirected.");
   assertSecurityHeaders(routeResponse.headers());
-  await page
-    .getByRole("button", { name: "PDF 선택" })
-    .waitFor({ state: "visible", timeout: 60_000 });
-  assert.ok(await page.getByRole("button", { name: "PDF 선택" }).isEnabled());
+  await page.getByRole("button", { name: "PDF 선택" }).click({ trial: true, timeout: 60_000 });
 
   const source = await createScannedPdf(page);
   assert.deepEqual(await inspectSourceMetadata(source), {
