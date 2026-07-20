@@ -16,6 +16,7 @@ const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const relativePathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[a-zA-Z0-9][a-zA-Z0-9._/-]*$/;
+const workersSubdomainLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const environments = Object.freeze(["staging", "production"]);
 
 function assertPattern(value, pattern, label) {
@@ -25,10 +26,19 @@ function assertPattern(value, pattern, label) {
   return value;
 }
 
-function assertHttpsOrigin(value, expected, label) {
-  if (value !== expected) throw new TypeError(`${label} does not match the canonical origin`);
+function assertProcessingApiOrigin(value, environment, label) {
+  if (typeof value !== "string") throw new TypeError(`${label} is invalid`);
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.origin !== value || url.username || url.password) {
+  const hostnamePattern = new RegExp(
+    `^hereisit-processing-${environment}\\.${workersSubdomainLabel}\\.workers\\.dev$`,
+  );
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== value ||
+    url.username ||
+    url.password ||
+    !hostnamePattern.test(url.hostname)
+  ) {
     throw new TypeError(`${label} must be an HTTPS origin`);
   }
   return value;
@@ -45,19 +55,15 @@ function validateArtifact(value, label, expectedPath) {
   return artifact;
 }
 
-function expectedOrigin(environment) {
-  return `https://hereisit-processing-${environment}.liorium.workers.dev`;
-}
-
 function validateWebIdentity(value, environment) {
   const label = `${environment} web identity`;
   const identity = assertObject(value, label);
   assertExactKeys(identity, ["archiveSha256", "treeSha256", "processingApiOrigin"], label);
   assertSha256(identity.archiveSha256, `${label} archive hash`);
   assertSha256(identity.treeSha256, `${label} tree hash`);
-  assertHttpsOrigin(
+  assertProcessingApiOrigin(
     identity.processingApiOrigin,
-    expectedOrigin(environment),
+    environment,
     `${label} processing API origin`,
   );
   return identity;
@@ -77,9 +83,9 @@ function validateWebReleaseAsset(value, environment, identity) {
   if (asset.sizeBytes < 1) throw new TypeError(`${label} size must be positive`);
   assertSha256(asset.archiveSha256, `${label} archive hash`);
   assertSha256(asset.treeSha256, `${label} tree hash`);
-  assertHttpsOrigin(
+  assertProcessingApiOrigin(
     asset.processingApiOrigin,
-    expectedOrigin(environment),
+    environment,
     `${label} processing API origin`,
   );
   if (

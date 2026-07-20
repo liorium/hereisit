@@ -202,6 +202,52 @@ describe("processing candidate reader", () => {
     ).toThrow(/match|identity/i);
   });
 
+  it("accepts an account-selected Workers subdomain but rejects a cross-environment script", () => {
+    const original = candidate();
+    const changedOrigin = "https://hereisit-processing-staging.example.workers.dev";
+    const payload = {
+      ...original,
+      web: {
+        ...original.web,
+        staging: { ...original.web.staging, processingApiOrigin: changedOrigin },
+      },
+      releaseAssets: {
+        ...original.releaseAssets,
+        web: {
+          ...original.releaseAssets.web,
+          staging: {
+            ...original.releaseAssets.web.staging,
+            processingApiOrigin: changedOrigin,
+          },
+        },
+      },
+    };
+    const { verificationSha256: _verificationSha256, ...unsigned } = payload;
+    expect(
+      readProcessingCandidateField(
+        { ...unsigned, verificationSha256: sha256Canonical(unsigned) },
+        "web.staging.processingApiOrigin",
+      ),
+    ).toBe(changedOrigin);
+
+    const invalid = {
+      ...unsigned,
+      web: {
+        ...unsigned.web,
+        staging: {
+          ...unsigned.web.staging,
+          processingApiOrigin: "https://hereisit-processing-production.example.workers.dev",
+        },
+      },
+    };
+    expect(() =>
+      readProcessingCandidateField(
+        { ...invalid, verificationSha256: sha256Canonical(invalid) },
+        "web.staging.processingApiOrigin",
+      ),
+    ).toThrow(/origin|HTTPS/i);
+  });
+
   it("rejects a Docker export whose config or ordered layers differ from the OCI archive", () => {
     const original = candidate();
     const { verificationSha256: _verificationSha256, ...payload } = {
