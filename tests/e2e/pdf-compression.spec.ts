@@ -724,25 +724,43 @@ test("keeps a compressed PDF result retryable when download activation fails", a
   browserName,
   page,
 }) => {
+  test.setTimeout(90_000);
   await installDownloadActivationController(page);
-  const privacy = await prepareCompressedResult(page);
-  await setDownloadActivationBlocked(page, true);
-  await page.getByRole("button", { name: "PDF 다운로드 ↓" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
-  );
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+  const privacy = await test.step("prepare compressed result", () => prepareCompressedResult(page));
+  await test.step("keep the result after blocked activation", async () => {
+    await setDownloadActivationBlocked(page, true);
+    await page.getByRole("button", { name: "PDF 다운로드 ↓" }).click();
+    await expect(page.getByRole("status")).toContainText(
+      "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+    );
+    await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible();
+    await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+  });
 
-  await setDownloadActivationBlocked(page, false);
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
-  ]);
-  expect(download.suggestedFilename()).toBe("scan-compressed-hereisit.pdf");
-  expectCompletePdfEnvelope(await downloadedBytes(await download.path()));
-  await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
-  await privacy.assertClean(1, browserName !== "firefox");
+  const download = await test.step(
+    "activate the retry download",
+    async () => {
+      await setDownloadActivationBlocked(page, false);
+      const [activatedDownload] = await Promise.all([
+        page.waitForEvent("download"),
+        page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+      ]);
+      expect(activatedDownload.suggestedFilename()).toBe("scan-compressed-hereisit.pdf");
+      await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+      return activatedDownload;
+    },
+    { timeout: 20_000 },
+  );
+  await test.step(
+    "read the completed retry download",
+    async () => expectCompletePdfEnvelope(await downloadedBytes(await download.path())),
+    { timeout: 20_000 },
+  );
+  await test.step(
+    "verify retry privacy invariants",
+    () => privacy.assertClean(1, browserName !== "firefox"),
+    { timeout: 20_000 },
+  );
 });
 
 test("shows both preset-specific no-reduction messages without creating a result URL", async ({

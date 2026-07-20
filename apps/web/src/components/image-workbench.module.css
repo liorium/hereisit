@@ -716,9 +716,9 @@
 
 .modeTabs input {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  inset: -1px auto auto -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
   margin: 0;
   opacity: 0;
   cursor: pointer;
@@ -726,9 +726,12 @@
 
 .positionOption input {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: -1px auto auto -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  margin: 0;
   opacity: 0;
+  cursor: pointer;
 }
 
 .modeTabs label:focus-within,

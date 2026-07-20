@@ -384,6 +384,14 @@ export async function installPrivacyObserver(
   );
 
   const routeHandler = async (route: Route) => {
+    if (stopped) {
+      try {
+        await route.continue();
+      } catch {
+        // The per-test browser context may close while a final request is still in flight.
+      }
+      return;
+    }
     const request = route.request();
     const url = new URL(request.url());
     requestCount += 1;
@@ -412,7 +420,11 @@ export async function installPrivacyObserver(
       await route.fulfill({ status: 204 });
       return;
     }
-    await route.continue();
+    try {
+      await route.continue();
+    } catch (error) {
+      if (!stopped) throw error;
+    }
   };
 
   const consoleHandler = (message: ConsoleMessage) => {
@@ -454,11 +466,8 @@ export async function installPrivacyObserver(
     page.off("download", downloadHandler);
     context.off("requestfailed", failedRequestHandler);
     page.off("pageerror", pageErrorHandler);
-    try {
-      await context.unroute("**/*", routeHandler);
-    } catch {
-      violations.push("observer-cleanup-failed");
-    }
+    // Keep the context-scoped route in pass-through mode until fixture teardown. Explicitly
+    // unrouting while Chromium finalizes a blob download can leave the protocol call pending.
   };
 
   return {
