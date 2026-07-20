@@ -6956,14 +6956,16 @@ At the end of `build-candidate`, create only the immutable built root:
 
 ~~~bash
 node scripts/create-processing-candidate.mjs \
-  --root .artifacts/build \
-  --state built \
-  --release-inputs "$RELEASE_INPUTS" \
-  --staging-api-origin "$STAGING_PROCESSING_API_ORIGIN" \
-  --production-api-origin "$PRODUCTION_PROCESSING_API_ORIGIN" \
-  --staging-web-archive .artifacts/build/web-staging.tar \
-  --production-web-archive .artifacts/build/web-production.tar \
-  --output .artifacts/built-candidate
+  --source-root .artifacts/build \
+  --output-root .artifacts/built-candidate \
+  --release-id "$RELEASE_ID" \
+  --git-sha "$RELEASE_SHA" \
+  --staging-processing-api-origin "$STAGING_PROCESSING_API_ORIGIN" \
+  --production-processing-api-origin "$PRODUCTION_PROCESSING_API_ORIGIN" \
+  --staging-web-tree-sha256 "$STAGING_WEB_TREE_SHA256" \
+  --production-web-tree-sha256 "$PRODUCTION_WEB_TREE_SHA256" \
+  --trivy-db-digest "$TRIVY_DB_DIGEST" \
+  --provider-usage-schema docs/deployment/provider-usage-schema.v1.json
 node scripts/verify-processing-candidate.mjs \
   --manifest .artifacts/built-candidate/processing-candidate.json \
   --root .artifacts/built-candidate \
@@ -7033,10 +7035,10 @@ node scripts/verify-processing-release-report.mjs \
   --evidence-root .artifacts/evidence
 node scripts/finalize-processing-candidate.mjs \
   --built-root .artifacts/built-candidate \
-  --release-report .artifacts/finalize/reports/release-report.json \
-  --evidence .artifacts/evidence/processing-evidence.json \
-  --evidence-signature .artifacts/evidence/processing-evidence.sig \
-  --output .artifacts/candidate
+  --output-root .artifacts/candidate \
+  --report .artifacts/finalize/reports/release-report.json \
+  --evidence-bundle .artifacts/evidence/processing-evidence.json \
+  --evidence-signature .artifacts/evidence/processing-evidence.sig
 node scripts/verify-processing-candidate.mjs \
   --manifest .artifacts/candidate/processing-candidate.json \
   --root .artifacts/candidate \
@@ -7046,7 +7048,7 @@ node scripts/verify-processing-candidate.mjs \
 
 Neither candidate producer invokes a compiler, package manager, Docker build, or network.
 Every later staging/production/rollback command reads the report only from
-`.artifacts/candidate/reports/release-report.json`, whose hash is in the candidate manifest.
+`.artifacts/candidate/processing-release-report.json`, whose hash is in the candidate manifest.
 
 - [ ] **Step 6: Document and execute staging provisioning**
 

@@ -235,7 +235,7 @@ function descriptorEntry(entries, descriptor, label) {
   return entry;
 }
 
-function validateConfig(config, expectedIdentity, label) {
+function readConfigDiffIds(config, label) {
   const value = assertObject(config, `${label} config`);
   if (value.os !== "linux" || value.architecture !== "amd64") {
     throw new TypeError(`${label} config platform must be linux/amd64`);
@@ -245,13 +245,23 @@ function validateConfig(config, expectedIdentity, label) {
     throw new TypeError(`${label} config rootfs DiffIDs are invalid`);
   }
   const diffIds = rootfs.diff_ids.map((digest) => assertDigest(digest, `${label} rootfs DiffID`));
-  if (
-    diffIds.length !== expectedIdentity.diffIds.length ||
-    diffIds.some((digest, index) => digest !== expectedIdentity.diffIds[index])
-  ) {
-    throw new TypeError(`${label} config rootfs DiffIDs do not match the candidate`);
-  }
   return diffIds;
+}
+
+function assertOrderedIdentity(actual, expected, fields, label) {
+  for (const field of fields) {
+    if (Array.isArray(actual[field])) {
+      if (
+        !Array.isArray(expected[field]) ||
+        actual[field].length !== expected[field].length ||
+        actual[field].some((value, index) => value !== expected[field][index])
+      ) {
+        throw new TypeError(`${label} ${field} do not match the candidate`);
+      }
+    } else if (actual[field] !== expected[field]) {
+      throw new TypeError(`${label} ${field} does not match the candidate`);
+    }
+  }
 }
 
 function selectOciManifestDescriptor(index) {
@@ -294,7 +304,7 @@ function layerTransform(mediaType) {
   throw new TypeError("OCI layer media type is unsupported");
 }
 
-export async function verifyOciImageArchive({ archivePath, asset, expectedIdentity }) {
+export async function inspectOciImageArchive({ archivePath, asset }) {
   const scanned = await scanVerifiedTarArchive({ archivePath, asset, label: "engine OCI asset" });
   try {
     const layout = await readJsonEntry(
@@ -331,11 +341,8 @@ export async function verifyOciImageArchive({ archivePath, asset, expectedIdenti
     }
     const configEntry = descriptorEntry(scanned.entries, manifest.config, "OCI config descriptor");
     const configDigest = `sha256:${configEntry.sha256}`;
-    if (configDigest !== expectedIdentity.configDigest) {
-      throw new TypeError("OCI config digest does not match the candidate");
-    }
     const config = await readJsonEntry(scanned.handle, configEntry, "OCI image config");
-    const configDiffIds = validateConfig(config, expectedIdentity, "OCI image");
+    const configDiffIds = readConfigDiffIds(config, "OCI image");
     if (!Array.isArray(manifest.layers) || manifest.layers.length !== configDiffIds.length) {
       throw new TypeError("OCI manifest layers do not align with the config rootfs");
     }
@@ -354,14 +361,6 @@ export async function verifyOciImageArchive({ archivePath, asset, expectedIdenti
       );
       derivedDiffIds.push(`sha256:${diffId}`);
     }
-    if (
-      distributionLayerDigests.length !== expectedIdentity.distributionLayerDigests.length ||
-      distributionLayerDigests.some(
-        (digest, indexValue) => digest !== expectedIdentity.distributionLayerDigests[indexValue],
-      )
-    ) {
-      throw new TypeError("OCI distribution layer identity does not match the candidate");
-    }
     if (derivedDiffIds.some((digest, indexValue) => digest !== configDiffIds[indexValue])) {
       throw new TypeError("OCI layer content does not match the config rootfs DiffIDs");
     }
@@ -371,12 +370,18 @@ export async function verifyOciImageArchive({ archivePath, asset, expectedIdenti
   }
 }
 
-export async function verifyDockerImageArchive({
-  archivePath,
-  asset,
-  expectedIdentity,
-  expectedRepoTag,
-}) {
+export async function verifyOciImageArchive({ archivePath, asset, expectedIdentity }) {
+  const identity = await inspectOciImageArchive({ archivePath, asset });
+  assertOrderedIdentity(
+    identity,
+    expectedIdentity,
+    ["configDigest", "distributionLayerDigests", "diffIds"],
+    "OCI image identity",
+  );
+  return identity;
+}
+
+export async function inspectDockerImageArchive({ archivePath, asset, expectedRepoTag }) {
   const scanned = await scanVerifiedTarArchive({
     archivePath,
     asset,
@@ -410,11 +415,8 @@ export async function verifyDockerImageArchive({
     }
     const configEntry = scanned.entries.get(image.Config);
     const configDigest = `sha256:${configEntry.sha256}`;
-    if (configDigest !== expectedIdentity.configDigest) {
-      throw new TypeError("Docker config digest does not match the candidate");
-    }
     const config = await readJsonEntry(scanned.handle, configEntry, "Docker image config");
-    const configDiffIds = validateConfig(config, expectedIdentity, "Docker image");
+    const configDiffIds = readConfigDiffIds(config, "Docker image");
     if (!Array.isArray(image.Layers) || image.Layers.length !== configDiffIds.length) {
       throw new TypeError("Docker manifest layers do not align with the config rootfs");
     }
@@ -432,4 +434,20 @@ export async function verifyDockerImageArchive({
   } finally {
     await scanned.handle.close();
   }
+}
+
+export async function verifyDockerImageArchive({
+  archivePath,
+  asset,
+  expectedIdentity,
+  expectedRepoTag,
+}) {
+  const identity = await inspectDockerImageArchive({ archivePath, asset, expectedRepoTag });
+  assertOrderedIdentity(
+    identity,
+    expectedIdentity,
+    ["configDigest", "diffIds"],
+    "Docker image identity",
+  );
+  return identity;
 }
