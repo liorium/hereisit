@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import {
   chmod,
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
+  open,
   realpath,
   rename,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -206,11 +206,30 @@ export async function verifyAndExtractTreeArchive({
   assertSha256(expectedArchiveSha256, "expected archive SHA-256");
   assertSha256(expectedTreeSha256, "expected tree SHA-256");
   const archivePath = resolve(archive);
-  const archiveMetadata = await stat(archivePath);
-  if (!archiveMetadata.isFile() || archiveMetadata.size > MAX_ARCHIVE_BYTES) {
-    throw new RangeError("archive is not a bounded regular file");
+  let archiveHandle;
+  try {
+    archiveHandle = await open(archivePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") throw new TypeError("archive must not be a symbolic link");
+    throw error;
   }
-  const bytes = await readFile(archivePath);
+  let bytes;
+  try {
+    const archiveMetadata = await archiveHandle.stat();
+    if (
+      !archiveMetadata.isFile() ||
+      archiveMetadata.size < BLOCK_SIZE * 3 ||
+      archiveMetadata.size > MAX_ARCHIVE_BYTES
+    ) {
+      throw new RangeError("archive is not a bounded regular file");
+    }
+    bytes = await archiveHandle.readFile();
+    if (bytes.byteLength !== archiveMetadata.size) {
+      throw new TypeError("archive changed while reading");
+    }
+  } finally {
+    await archiveHandle.close();
+  }
   const archiveSha256 = createHash("sha256").update(bytes).digest("hex");
   if (archiveSha256 !== expectedArchiveSha256) throw new Error("archive SHA-256 mismatch");
 

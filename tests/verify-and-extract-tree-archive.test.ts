@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -117,6 +127,19 @@ describe("deterministic tree archive verifier", () => {
     await expect(
       runVerifier(archive, output, result.archiveSha256, "0".repeat(64)),
     ).rejects.toMatchObject({ stderr: expect.stringContaining("tree SHA-256 mismatch") });
+    await expect(lstat(output)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects an archive path that is a symbolic link", async () => {
+    const temporary = await temporaryDirectory();
+    const { archive, result } = await makeFixture(temporary);
+    const link = join(temporary, "tree-link.tar");
+    const output = join(temporary, "extracted");
+    await symlink(archive, link);
+
+    await expect(
+      runVerifier(link, output, result.archiveSha256, result.treeSha256),
+    ).rejects.toMatchObject({ stderr: expect.stringMatching(/symbolic|regular/i) });
     await expect(lstat(output)).rejects.toMatchObject({ code: "ENOENT" });
   });
 

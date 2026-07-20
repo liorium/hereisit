@@ -6006,7 +6006,8 @@ Add table tests for the other deployment helpers before implementing them:
   and emits the strict release-request manifest. It refuses an ambient root-level report, source rebuild,
   missing candidate file, or value override.
 - `verify-processing-candidate.test.ts` validates the candidate manifest and every exact artifact hash:
-  linux/amd64 canonical OCI archive plus loadable Docker archive with identical config/layer digests,
+  linux/amd64 canonical OCI archive plus loadable Docker archive with identical config digest and
+  ordered rootfs DiffIDs; OCI distribution-layer digests are recorded separately,
   no-bundle Worker module, staging and production Pages directories plus their deterministic USTAR
   release assets, and the distinct validated API origins that the later evidence signs. It recomputes
   each archive SHA-256 and unpacked tree SHA-256, plus the provider-usage schema,
@@ -6740,7 +6741,8 @@ node scripts/benchmark-image-engine.mjs \
 `create-processing-evidence-bundle.mjs` validates and embeds only bounded, content-free JSON
 reports—metrics and input/output SHA-256 values, not input/output bytes, filenames, paths, thumbnails, or
 reproducer files—together with the operator's explicit release limits. It binds the built-candidate
-manifest SHA-256, Actions artifact digest, git SHA, engine config/layer digest, Worker hash, and both
+manifest SHA-256, Actions artifact digest, git SHA, engine config digest, OCI distribution-layer
+digests, ordered rootfs DiffIDs, Worker hash, and both
 validated API origins, Pages archive hashes, and unpacked tree hashes, then creates a detached Ed25519
 signature using a mode-0600 private key outside the repository. During implementation, generate that key
 once under `umask 077` with OpenSSL Ed25519, store
@@ -6891,7 +6893,8 @@ use the caller's ambient checkout identity.
 
 `build-candidate` performs one BuildKit solve with two exporters: a canonical linux/amd64 OCI archive for
 SBOM/digest provenance and a Docker archive for `docker load`. It verifies both exports have the same
-image config and layer digests, bundles the Worker once, and
+image config digest and ordered rootfs DiffIDs, records OCI distribution-layer digests separately,
+bundles the Worker once, and
 builds two exact static Pages directories from the validated immutable staging and production API-origin
 inputs. It creates dependency-free deterministic USTAR files for both Pages trees, hashes/scans those
 deployment artifacts, and stores their archive hashes plus unpacked tree hashes with a strict
