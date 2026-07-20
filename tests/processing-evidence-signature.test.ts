@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import {
+  runProcessingEvidenceSignatureCli,
   signCanonicalProcessingEvidence,
   verifyCanonicalProcessingEvidenceSignature,
 } from "../scripts/processing-evidence-signature.mjs";
@@ -42,6 +43,44 @@ afterEach(async () => {
 });
 
 describe("processing evidence Ed25519 signatures", () => {
+  it("signs and verifies through explicit CLI modes", async () => {
+    const value = await fixture();
+    let output = "";
+    await runProcessingEvidenceSignatureCli(
+      [
+        "--mode",
+        "sign",
+        "--bundle",
+        value.bundlePath,
+        "--signature",
+        value.signaturePath,
+        "--private-key",
+        value.privateKeyPath,
+        "--repository-root",
+        resolve("."),
+      ],
+      { write: (text: string) => (output += text) },
+    );
+    expect(JSON.parse(output).signatureSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(output).not.toContain("PRIVATE KEY");
+
+    output = "";
+    await runProcessingEvidenceSignatureCli(
+      [
+        "--mode",
+        "verify",
+        "--bundle",
+        value.bundlePath,
+        "--signature",
+        value.signaturePath,
+        "--public-key",
+        value.publicKeyPath,
+      ],
+      { write: (text: string) => (output += text) },
+    );
+    expect(JSON.parse(output).bundleSha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
   it("writes one detached signature and verifies the exact canonical JSON bytes", async () => {
     const value = await fixture();
     const signed = await signCanonicalProcessingEvidence({

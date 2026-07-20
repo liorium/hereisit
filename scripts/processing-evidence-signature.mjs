@@ -7,7 +7,13 @@ import {
 import { constants } from "node:fs";
 import { link, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { canonicalJson, sha256Bytes } from "./image-lab-common.mjs";
+import { pathToFileURL } from "node:url";
+import {
+  assertExactKeys,
+  canonicalJson,
+  parseCliArguments,
+  sha256Bytes,
+} from "./image-lab-common.mjs";
 
 const maximumBundleBytes = 8 * 1024 * 1024;
 const maximumKeyBytes = 16 * 1024;
@@ -172,4 +178,49 @@ export async function verifyCanonicalProcessingEvidenceSignature({
     bundleSha256: sha256Bytes(bundle),
     signatureSha256: sha256Bytes(signature),
   };
+}
+
+export async function runProcessingEvidenceSignatureCli(argv, stdout = process.stdout) {
+  const args = parseCliArguments(argv);
+  let result;
+  if (args.mode === "sign") {
+    assertExactKeys(
+      args,
+      ["mode", "bundle", "signature", "private-key", "repository-root"],
+      "evidence signing arguments",
+    );
+    result = await signCanonicalProcessingEvidence({
+      bundlePath: args.bundle,
+      signaturePath: args.signature,
+      privateKeyPath: args["private-key"],
+      repositoryRoot: args["repository-root"],
+    });
+  } else if (args.mode === "verify") {
+    assertExactKeys(
+      args,
+      ["mode", "bundle", "signature", "public-key"],
+      "evidence verification arguments",
+    );
+    result = await verifyCanonicalProcessingEvidenceSignature({
+      bundlePath: args.bundle,
+      signaturePath: args.signature,
+      publicKeyPath: args["public-key"],
+    });
+  } else {
+    throw new TypeError("evidence signature mode must be sign or verify");
+  }
+  stdout.write(canonicalJson(result));
+}
+
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+) {
+  try {
+    await runProcessingEvidenceSignatureCli(process.argv.slice(2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "processing evidence signature failed";
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
 }
