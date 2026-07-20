@@ -12,6 +12,7 @@ import {
   inspectOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
 import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
+import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
 
 const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
@@ -24,6 +25,8 @@ const sourceNames = Object.freeze({
   worker: "api-worker.mjs",
   stagingWeb: "web-staging.tar",
   productionWeb: "web-production.tar",
+  releaseInputs: "processing-release-inputs.json",
+  costModel: "live-cost-model.json",
 });
 
 async function pathExists(path) {
@@ -36,7 +39,12 @@ async function pathExists(path) {
   }
 }
 
-async function copyAndHashRegularFile(source, destination, destinationName) {
+async function copyAndHashRegularFile(
+  source,
+  destination,
+  destinationName,
+  maximumBytes = maximumAssetBytes,
+) {
   let sourceHandle;
   let destinationHandle;
   try {
@@ -48,7 +56,7 @@ async function copyAndHashRegularFile(source, destination, destinationName) {
   }
   try {
     const metadata = await sourceHandle.stat();
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumAssetBytes) {
+    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
       throw new TypeError(`${destinationName} source must be a non-empty regular file`);
     }
     destinationHandle = await open(
@@ -183,6 +191,9 @@ export async function createBuiltProcessingCandidate({
         join(canonicalSourceRoot, name),
         join(temporaryRoot, name),
         name,
+        key === "releaseInputs" || key === "costModel"
+          ? maximumProviderSchemaBytes
+          : maximumAssetBytes,
       );
     }
 
@@ -221,6 +232,11 @@ export async function createBuiltProcessingCandidate({
       maximumProviderSchemaBytes,
       "provider usage schema",
     );
+    const financialInputs = await verifyProcessingReleaseInputBindings({
+      releaseInputsPath: join(temporaryRoot, sourceNames.releaseInputs),
+      liveCostModelPath: join(temporaryRoot, sourceNames.costModel),
+      expectedReleaseId: releaseId,
+    });
 
     const webReleaseAsset = (asset, identity) => ({
       path: asset.path,
@@ -239,9 +255,12 @@ export async function createBuiltProcessingCandidate({
       web: { staging: stagingWeb, production: productionWeb },
       security: { trivyDbDigest },
       providerUsage: { schemaSha256: providerUsageSchemaSha256 },
+      ...financialInputs,
       releaseAssets: {
         engine: { oci: copied.oci, docker: copied.docker },
         worker: copied.worker,
+        releaseInputs: copied.releaseInputs,
+        costModel: copied.costModel,
         web: {
           staging: webReleaseAsset(copied.stagingWeb, stagingWeb),
           production: webReleaseAsset(copied.productionWeb, productionWeb),

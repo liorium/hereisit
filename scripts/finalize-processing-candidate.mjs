@@ -159,6 +159,11 @@ export async function finalizeProcessingCandidate({
     const copiedOci = await copyBuilt(built.releaseAssets.engine.oci, "OCI asset");
     const copiedDocker = await copyBuilt(built.releaseAssets.engine.docker, "Docker asset");
     const copiedWorker = await copyBuilt(built.releaseAssets.worker, "Worker asset");
+    const copiedReleaseInputs = await copyBuilt(
+      built.releaseAssets.releaseInputs,
+      "processing release inputs asset",
+    );
+    const copiedCostModel = await copyBuilt(built.releaseAssets.costModel, "live cost model asset");
     await copyBuilt(built.releaseAssets.web.staging, "staging web asset", "archiveSha256");
     await copyBuilt(built.releaseAssets.web.production, "production web asset", "archiveSha256");
 
@@ -188,6 +193,8 @@ export async function finalizeProcessingCandidate({
         report,
         engine: { oci: copiedOci, docker: copiedDocker },
         worker: copiedWorker,
+        releaseInputs: copiedReleaseInputs,
+        costModel: copiedCostModel,
         web: built.releaseAssets.web,
         evidence: { bundle: evidenceBundle, signature: evidenceSignature },
       },

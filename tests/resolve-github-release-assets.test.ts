@@ -48,6 +48,8 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     "image-engine-linux-amd64.oci.tar": Buffer.from("canonical-oci\n"),
     "image-engine-linux-amd64.docker.tar": Buffer.from("loadable-docker\n"),
     "api-worker.mjs": Buffer.from('export default {fetch(){return new Response("ok")}};\n'),
+    "processing-release-inputs.json": Buffer.from('{"release":true}\n'),
+    "live-cost-model.json": Buffer.from('{"cost":true}\n'),
     "web-staging.tar": stagingWeb.bytes,
     "web-production.tar": productionWeb.bytes,
     [`evidence-v1--${releaseId}--processing-evidence.json`]: Buffer.from('{"signed":true}\n'),
@@ -90,6 +92,8 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     },
     security: { trivyDbDigest: `sha256:${"a".repeat(64)}` },
     providerUsage: { schemaSha256: "b".repeat(64) },
+    releaseInputs: { sha256: identity("processing-release-inputs.json").sha256 },
+    costModel: { sha256: identity("live-cost-model.json").sha256 },
     releaseAssets: {
       report: identity("processing-release-report.json"),
       engine: {
@@ -97,6 +101,8 @@ async function createFixture({ wrongStagingTree = false } = {}) {
         docker: identity("image-engine-linux-amd64.docker.tar"),
       },
       worker: identity("api-worker.mjs"),
+      releaseInputs: identity("processing-release-inputs.json"),
+      costModel: identity("live-cost-model.json"),
       web: {
         staging: {
           path: "web-staging.tar",
@@ -145,6 +151,8 @@ async function startGitHubServer(
     "image-engine-linux-amd64.oci.tar",
     "image-engine-linux-amd64.docker.tar",
     "api-worker.mjs",
+    "processing-release-inputs.json",
+    "live-cost-model.json",
     "web-staging.tar",
     "web-production.tar",
     `evidence-v1--${releaseId}--processing-evidence.json`,

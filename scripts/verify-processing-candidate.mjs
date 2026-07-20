@@ -11,6 +11,7 @@ import {
   verifyDockerImageArchive,
   verifyOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
+import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
 
 const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
@@ -71,7 +72,11 @@ async function verifyAsset(root, asset, label, hashField = "sha256") {
 
 function releaseAssetEntries(candidate) {
   const assets = candidate.releaseAssets;
-  const entries = [[assets.worker, "Worker asset"]];
+  const entries = [
+    [assets.worker, "Worker asset"],
+    [assets.releaseInputs, "processing release inputs asset"],
+    [assets.costModel, "live cost model asset"],
+  ];
   if (candidate.state === "finalized") {
     entries.unshift([assets.report, "release report asset"]);
     entries.push(
@@ -153,6 +158,17 @@ export async function verifyProcessingCandidate({
 
   const entries = releaseAssetEntries(candidate);
   for (const [asset, label] of entries) await verifyAsset(canonicalRoot, asset, label);
+  const financialInputs = await verifyProcessingReleaseInputBindings({
+    releaseInputsPath: join(canonicalRoot, candidate.releaseAssets.releaseInputs.path),
+    liveCostModelPath: join(canonicalRoot, candidate.releaseAssets.costModel.path),
+    expectedReleaseId: candidate.releaseId,
+  });
+  if (
+    financialInputs.releaseInputs.sha256 !== candidate.releaseInputs.sha256 ||
+    financialInputs.costModel.sha256 !== candidate.costModel.sha256
+  ) {
+    throw new TypeError("candidate financial input identities do not match verified bytes");
+  }
   const staging = await verifyWebAsset(
     canonicalRoot,
     candidate.releaseAssets.web.staging,

@@ -115,6 +115,8 @@ export function validateProcessingReleaseAssets(value) {
       "report",
       "engine",
       "worker",
+      "releaseInputs",
+      "costModel",
       "web",
       "evidence",
       "verificationSha256",
@@ -176,6 +178,18 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `${prefix}api-worker.mjs`,
   );
+  const releaseInputs = validateAsset(
+    manifest.releaseInputs,
+    "processing release inputs asset",
+    context,
+    `${prefix}processing-release-inputs.json`,
+  );
+  const costModel = validateAsset(
+    manifest.costModel,
+    "live cost model asset",
+    context,
+    `${prefix}live-cost-model.json`,
+  );
   const web = assertObject(manifest.web, "web release assets");
   assertExactKeys(web, ["staging", "production"], "web release assets");
   const webStaging = validateWebAsset(web.staging, "staging", context);
@@ -205,6 +219,8 @@ export function validateProcessingReleaseAssets(value) {
     engineOci,
     engineDocker,
     worker,
+    releaseInputs,
+    costModel,
     webStaging,
     webProduction,
     evidenceBundle,
@@ -299,6 +315,8 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   const engineOci = releaseAssets.engine.oci;
   const engineDocker = releaseAssets.engine.docker;
   const worker = releaseAssets.worker;
+  const releaseInputs = releaseAssets.releaseInputs;
+  const costModel = releaseAssets.costModel;
   const webStaging = releaseAssets.web.staging;
   const webProduction = releaseAssets.web.production;
   const evidenceBundle = releaseAssets.evidence.bundle;
@@ -308,6 +326,8 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   assertAssetMatch(engineOci, manifest.engine.oci, "engine OCI");
   assertAssetMatch(engineDocker, manifest.engine.docker, "engine Docker");
   assertAssetMatch(worker, manifest.worker, "Worker");
+  assertAssetMatch(releaseInputs, manifest.releaseInputs, "processing release inputs");
+  assertAssetMatch(costModel, manifest.costModel, "live cost model");
   assertAssetMatch(webStaging, manifest.web.staging, "staging web", "archiveSha256");
   assertAssetMatch(webProduction, manifest.web.production, "production web", "archiveSha256");
   if (
@@ -326,7 +346,7 @@ const allowedFields = new Map([
   ["release.id", (manifest) => manifest.release.id],
   ["release.tag", (manifest) => manifest.release.tag],
   ["release.targetSha", (manifest) => manifest.release.targetSha],
-  ...["candidate", "report", "worker"].flatMap((section) =>
+  ...["candidate", "report", "worker", "releaseInputs", "costModel"].flatMap((section) =>
     genericAssetFields.map((field) => [
       `${section}.${field}`,
       (manifest) => manifest[section][field],

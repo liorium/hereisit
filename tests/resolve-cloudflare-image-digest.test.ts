@@ -44,6 +44,8 @@ function finalizedCandidate() {
     web: { staging, production },
     security: { trivyDbDigest: `sha256:${"5".repeat(64)}` },
     providerUsage: { schemaSha256: "6".repeat(64) },
+    releaseInputs: { sha256: "d".repeat(64) },
+    costModel: { sha256: "e".repeat(64) },
     releaseAssets: {
       report: artifact("processing-release-report.json", "7".repeat(64)),
       engine: {
@@ -51,6 +53,8 @@ function finalizedCandidate() {
         docker: artifact("image-engine-linux-amd64.docker.tar", "9".repeat(64)),
       },
       worker: artifact("api-worker.mjs", "a".repeat(64)),
+      releaseInputs: artifact("processing-release-inputs.json", "d".repeat(64)),
+      costModel: artifact("live-cost-model.json", "e".repeat(64)),
       web: {
         staging: { path: "web-staging.tar", sizeBytes: 1, ...staging },
         production: { path: "web-production.tar", sizeBytes: 1, ...production },

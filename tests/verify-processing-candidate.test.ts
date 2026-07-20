@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -14,10 +15,12 @@ import { join, resolve } from "node:path";
 import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
+import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import {
   createBuiltProcessingCandidate,
   runProcessingCandidateCreator,
 } from "../scripts/create-processing-candidate.mjs";
+import { createProcessingReleaseInputs } from "../scripts/create-processing-release-inputs.mjs";
 import {
   finalizeProcessingCandidate,
   runProcessingCandidateFinalizer,
@@ -148,6 +151,43 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   await createDeterministicTreeArchive({ root: dockerTree, output: dockerArchive });
 
   const fileBytes = {
+    "live-cost-model.json": Buffer.from(
+      canonicalJson(
+        createLiveCostModel(
+          JSON.parse(await readFile("tests/fixtures/live-cost-model-pr-input.json", "utf8")),
+        ),
+      ),
+    ),
+    "processing-release-inputs.json": Buffer.from(
+      canonicalJson(
+        createProcessingReleaseInputs({
+          version: 1,
+          releaseId,
+          baseSourceSha256: "1".repeat(64),
+          reviewedAt: "2026-07-20T00:00:00.000Z",
+          reviewerIdHash: "2".repeat(64),
+          pricesAndResources: {
+            version: 1,
+            artifactSha256: "3".repeat(64),
+            modelInput: (() => {
+              const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
+                readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"),
+              );
+              return modelInput;
+            })(),
+          },
+          ceilings: {
+            maxCostPer1000JobsMicrousd: 500_000,
+            maxProjectedMonthlyCostMicrousd: 5_000_000,
+          },
+          routeCpuBenchmark: {
+            artifactSha256: "4".repeat(64),
+            ...JSON.parse(readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"))
+              .routeCpuBenchmark,
+          },
+        }),
+      ),
+    ),
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": await readFile(ociArchive),
     "image-engine-linux-amd64.docker.tar": await readFile(dockerArchive),
@@ -191,6 +231,8 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
     web: { staging: stagingIdentity, production: productionIdentity },
     security: { trivyDbDigest: `sha256:${"d".repeat(64)}` },
     providerUsage: { schemaSha256: "e".repeat(64) },
+    releaseInputs: { sha256: artifact("processing-release-inputs.json").sha256 },
+    costModel: { sha256: artifact("live-cost-model.json").sha256 },
     releaseAssets: {
       report: artifact("processing-release-report.json"),
       engine: {
@@ -198,6 +240,8 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
         docker: artifact("image-engine-linux-amd64.docker.tar"),
       },
       worker: artifact("api-worker.mjs"),
+      releaseInputs: artifact("processing-release-inputs.json"),
+      costModel: artifact("live-cost-model.json"),
       web: {
         staging: {
           path: "web-staging.tar",
@@ -294,7 +338,7 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 8 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 10 });
   });
 
   it("finalizes through an exact content-free CLI boundary", async () => {
@@ -382,7 +426,21 @@ describe("processing candidate verifier", () => {
       providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
     });
 
-    expect(created).toMatchObject({ state: "built", releaseId, gitSha });
+    expect(created).toMatchObject({
+      state: "built",
+      releaseId,
+      gitSha,
+      releaseInputs: {
+        sha256: sha256Bytes(await readFile(join(fixture.root, "processing-release-inputs.json"))),
+      },
+      costModel: {
+        sha256: sha256Bytes(await readFile(join(fixture.root, "live-cost-model.json"))),
+      },
+      releaseAssets: {
+        releaseInputs: { path: "processing-release-inputs.json" },
+        costModel: { path: "live-cost-model.json" },
+      },
+    });
     await expect(
       verifyProcessingCandidate({
         manifestPath: join(outputRoot, "processing-candidate.json"),
@@ -390,7 +448,7 @@ describe("processing candidate verifier", () => {
         requiredState: "built",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "built", assetCount: 5 });
+    ).resolves.toMatchObject({ state: "built", assetCount: 7 });
     await expect(lstat(join(outputRoot, "processing-release-report.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -521,6 +579,74 @@ describe("processing candidate verifier", () => {
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("rejects a live cost model that does not reproduce the reviewed release inputs", async () => {
+    const fixture = await createFixture();
+    const outputRoot = join(fixture.parent, "drifted-cost-built-candidate");
+    const costPath = join(fixture.root, "live-cost-model.json");
+    const costModel = JSON.parse(await readFile(costPath, "utf8"));
+    await writeFile(
+      costPath,
+      canonicalJson({ ...costModel, projectedMonthlyJobs: costModel.projectedMonthlyJobs + 1 }),
+    );
+
+    await expect(
+      createBuiltProcessingCandidate({
+        sourceRoot: fixture.root,
+        outputRoot,
+        releaseId,
+        gitSha,
+        stagingProcessingApiOrigin: fixture.candidate.web.staging.processingApiOrigin,
+        productionProcessingApiOrigin: fixture.candidate.web.production.processingApiOrigin,
+        stagingWebTreeSha256: fixture.candidate.web.staging.treeSha256,
+        productionWebTreeSha256: fixture.candidate.web.production.treeSha256,
+        trivyDbDigest: fixture.candidate.security.trivyDbDigest,
+        providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+      }),
+    ).rejects.toThrow(/cost model.*release inputs|reviewed/i);
+    await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects non-canonical or oversized financial input documents", async () => {
+    const nonCanonical = await createFixture();
+    await writeFile(
+      join(nonCanonical.root, "processing-release-inputs.json"),
+      `${await readFile(join(nonCanonical.root, "processing-release-inputs.json"), "utf8")} `,
+    );
+    await expect(
+      createBuiltProcessingCandidate({
+        sourceRoot: nonCanonical.root,
+        outputRoot: join(nonCanonical.parent, "noncanonical-built-candidate"),
+        releaseId,
+        gitSha,
+        stagingProcessingApiOrigin: nonCanonical.candidate.web.staging.processingApiOrigin,
+        productionProcessingApiOrigin: nonCanonical.candidate.web.production.processingApiOrigin,
+        stagingWebTreeSha256: nonCanonical.candidate.web.staging.treeSha256,
+        productionWebTreeSha256: nonCanonical.candidate.web.production.treeSha256,
+        trivyDbDigest: nonCanonical.candidate.security.trivyDbDigest,
+        providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+      }),
+    ).rejects.toThrow(/canonical/i);
+
+    const oversized = await createFixture();
+    const releaseInputs = await open(join(oversized.root, "processing-release-inputs.json"), "w");
+    await releaseInputs.truncate(1024 * 1024 + 1);
+    await releaseInputs.close();
+    await expect(
+      createBuiltProcessingCandidate({
+        sourceRoot: oversized.root,
+        outputRoot: join(oversized.parent, "oversized-input-built-candidate"),
+        releaseId,
+        gitSha,
+        stagingProcessingApiOrigin: oversized.candidate.web.staging.processingApiOrigin,
+        productionProcessingApiOrigin: oversized.candidate.web.production.processingApiOrigin,
+        stagingWebTreeSha256: oversized.candidate.web.staging.treeSha256,
+        productionWebTreeSha256: oversized.candidate.web.production.treeSha256,
+        trivyDbDigest: oversized.candidate.security.trivyDbDigest,
+        providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+      }),
+    ).rejects.toThrow(/processing-release-inputs|regular|size/i);
+  });
+
   it("derives OCI and Docker identities from the unsigned archive bytes", async () => {
     const fixture = await createFixture({ ociCompression: "zstd" });
 
@@ -555,7 +681,7 @@ describe("processing candidate verifier", () => {
       state: "finalized",
       releaseId,
       gitSha,
-      assetCount: 8,
+      assetCount: 10,
       web: {
         staging: expect.objectContaining({ treeSha256: fixture.candidate.web.staging.treeSha256 }),
         production: expect.objectContaining({
@@ -578,7 +704,7 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 8 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 10 });
   });
 
   it.each([
@@ -770,7 +896,7 @@ describe("processing candidate verifier", () => {
     );
     expect(writes).toHaveLength(1);
     const summary = JSON.parse(writes[0]);
-    expect(summary).toMatchObject({ state: "finalized", assetCount: 8 });
+    expect(summary).toMatchObject({ state: "finalized", assetCount: 10 });
     expect(writes[0]).not.toContain("api-worker.mjs");
     expect(writes[0]).not.toContain(fixture.root);
   });
