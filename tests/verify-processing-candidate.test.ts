@@ -18,6 +18,10 @@ import {
   createBuiltProcessingCandidate,
   runProcessingCandidateCreator,
 } from "../scripts/create-processing-candidate.mjs";
+import {
+  finalizeProcessingCandidate,
+  runProcessingCandidateFinalizer,
+} from "../scripts/finalize-processing-candidate.mjs";
 import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
 import {
   inspectDockerImageArchive,
@@ -254,6 +258,113 @@ afterEach(async () => {
 });
 
 describe("processing candidate verifier", () => {
+  it("atomically finalizes a verified built candidate with report and evidence bytes", async () => {
+    const fixture = await createFixture();
+    const builtRoot = join(fixture.parent, "built-for-finalization");
+    const finalizedRoot = join(fixture.parent, "finalized-candidate");
+    await createBuiltProcessingCandidate({
+      sourceRoot: fixture.root,
+      outputRoot: builtRoot,
+      releaseId,
+      gitSha,
+      stagingProcessingApiOrigin: fixture.candidate.web.staging.processingApiOrigin,
+      productionProcessingApiOrigin: fixture.candidate.web.production.processingApiOrigin,
+      stagingWebTreeSha256: fixture.candidate.web.staging.treeSha256,
+      productionWebTreeSha256: fixture.candidate.web.production.treeSha256,
+      trivyDbDigest: fixture.candidate.security.trivyDbDigest,
+      providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+    });
+
+    const finalized = await finalizeProcessingCandidate({
+      builtRoot,
+      outputRoot: finalizedRoot,
+      reportPath: join(fixture.root, "processing-release-report.json"),
+      evidenceBundlePath: join(fixture.root, `evidence-v1--${releaseId}--processing-evidence.json`),
+      evidenceSignaturePath: join(
+        fixture.root,
+        `evidence-v1--${releaseId}--processing-evidence.sig`,
+      ),
+    });
+
+    expect(finalized).toMatchObject({ state: "finalized", releaseId, gitSha });
+    await expect(
+      verifyProcessingCandidate({
+        manifestPath: join(finalizedRoot, "processing-candidate.json"),
+        root: finalizedRoot,
+        requiredState: "finalized",
+        expectedGitSha: gitSha,
+      }),
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 8 });
+  });
+
+  it("finalizes through an exact content-free CLI boundary", async () => {
+    const fixture = await createFixture();
+    const builtRoot = join(fixture.parent, "cli-built-for-finalization");
+    const finalizedRoot = join(fixture.parent, "cli-finalized-candidate");
+    await createBuiltProcessingCandidate({
+      sourceRoot: fixture.root,
+      outputRoot: builtRoot,
+      releaseId,
+      gitSha,
+      stagingProcessingApiOrigin: fixture.candidate.web.staging.processingApiOrigin,
+      productionProcessingApiOrigin: fixture.candidate.web.production.processingApiOrigin,
+      stagingWebTreeSha256: fixture.candidate.web.staging.treeSha256,
+      productionWebTreeSha256: fixture.candidate.web.production.treeSha256,
+      trivyDbDigest: fixture.candidate.security.trivyDbDigest,
+      providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+    });
+    const writes: string[] = [];
+
+    await runProcessingCandidateFinalizer(
+      [
+        "--built-root",
+        builtRoot,
+        "--output-root",
+        finalizedRoot,
+        "--report",
+        join(fixture.root, "processing-release-report.json"),
+        "--evidence-bundle",
+        join(fixture.root, `evidence-v1--${releaseId}--processing-evidence.json`),
+        "--evidence-signature",
+        join(fixture.root, `evidence-v1--${releaseId}--processing-evidence.sig`),
+      ],
+      {
+        write(value: string) {
+          writes.push(value);
+        },
+      },
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0])).toEqual({
+      schema: "hereisit-processing-candidate-finalization@1",
+      version: 1,
+      state: "finalized",
+      releaseId,
+      gitSha,
+    });
+    expect(writes[0]).not.toContain(fixture.root);
+    expect(writes[0]).not.toContain("evidence-v1");
+  });
+
+  it("rejects candidate outputs nested inside their immutable source roots", async () => {
+    const fixture = await createFixture();
+    await expect(
+      createBuiltProcessingCandidate({
+        sourceRoot: fixture.root,
+        outputRoot: join(fixture.root, "nested-built"),
+        releaseId,
+        gitSha,
+        stagingProcessingApiOrigin: fixture.candidate.web.staging.processingApiOrigin,
+        productionProcessingApiOrigin: fixture.candidate.web.production.processingApiOrigin,
+        stagingWebTreeSha256: fixture.candidate.web.staging.treeSha256,
+        productionWebTreeSha256: fixture.candidate.web.production.treeSha256,
+        trivyDbDigest: fixture.candidate.security.trivyDbDigest,
+        providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
+      }),
+    ).rejects.toThrow(/outside|source root/i);
+  });
+
   it("atomically creates a minimal built candidate from verified source archives", async () => {
     const fixture = await createFixture({ ociCompression: "zstd" });
     const outputRoot = join(fixture.parent, "built-candidate");
