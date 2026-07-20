@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/processing-release-assets-v1.json",
+  "title": "HereIsIt immutable processing release assets v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "apiOrigin",
+    "repository",
+    "release",
+    "candidate",
+    "report",
+    "engine",
+    "worker",
+    "web",
+    "evidence",
+    "verificationSha256"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-processing-release-assets@1" },
+    "version": { "const": 1 },
+    "apiOrigin": { "const": "https://api.github.com" },
+    "repository": { "const": "liorium/hereisit" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tag", "targetSha"],
+      "properties": {
+        "id": { "$ref": "#/$defs/positiveInteger" },
+        "tag": {
+          "type": "string",
+          "pattern": "^processing-release-[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
+        },
+        "targetSha": { "$ref": "#/$defs/gitSha" }
+      }
+    },
+    "candidate": { "$ref": "#/$defs/asset" },
+    "report": { "$ref": "#/$defs/asset" },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oci", "docker"],
+      "properties": {
+        "oci": { "$ref": "#/$defs/asset" },
+        "docker": { "$ref": "#/$defs/asset" }
+      }
+    },
+    "worker": { "$ref": "#/$defs/asset" },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging", "production"],
+      "properties": {
+        "staging": { "$ref": "#/$defs/webAsset" },
+        "production": { "$ref": "#/$defs/webAsset" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle", "signature"],
+      "properties": {
+        "bundle": { "$ref": "#/$defs/asset" },
+        "signature": { "$ref": "#/$defs/asset" }
+      }
+    },
+    "verificationSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetId", "name", "sizeBytes", "sha256", "apiUrl"],
+      "properties": {
+        "assetId": { "$ref": "#/$defs/positiveInteger" },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$" },
+        "sizeBytes": { "$ref": "#/$defs/positiveInteger" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "apiUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "webAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId",
+        "name",
+        "sizeBytes",
+        "sha256",
+        "apiUrl",
+        "archiveSha256",
+        "treeSha256",
+        "processingApiOrigin"
+      ],
+      "properties": {
+        "assetId": { "$ref": "#/$defs/positiveInteger" },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$" },
+        "sizeBytes": { "$ref": "#/$defs/positiveInteger" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "apiUrl": { "type": "string", "format": "uri" },
+        "archiveSha256": { "$ref": "#/$defs/sha256" },
+        "treeSha256": { "$ref": "#/$defs/sha256" },
+        "processingApiOrigin": { "type": "string", "format": "uri" }
+      }
+    }
+  }
+}
