@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdtemp, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -170,16 +171,30 @@ async function loadCandidate(candidateRoot, expectedReleaseId) {
   if ((await realpath(root)) !== root)
     throw new TypeError("candidate root must not be a symbolic link");
   const path = join(root, "processing-candidate.json");
-  const metadata = await lstat(path);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new TypeError("processing candidate manifest must be a regular file");
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") {
+      throw new TypeError("processing candidate manifest must not be a symbolic link");
+    }
+    throw error;
   }
-  if (metadata.size < 1 || metadata.size > MAXIMUM_CANDIDATE_BYTES) {
-    throw new RangeError("processing candidate manifest exceeds the size limit");
-  }
-  const bytes = await readFile(path);
-  if (bytes.byteLength !== metadata.size) {
-    throw new TypeError("processing candidate manifest changed while reading");
+  let bytes;
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new TypeError("processing candidate manifest must be a regular file");
+    }
+    if (metadata.size < 1 || metadata.size > MAXIMUM_CANDIDATE_BYTES) {
+      throw new RangeError("processing candidate manifest exceeds the size limit");
+    }
+    bytes = await handle.readFile();
+    if (bytes.byteLength !== metadata.size) {
+      throw new TypeError("processing candidate manifest changed while reading");
+    }
+  } finally {
+    await handle.close();
   }
   let candidate;
   try {

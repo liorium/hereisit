@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -369,5 +369,24 @@ describe("GitHub release asset resolver", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("rejects a symbolic-link candidate manifest before any network request", async () => {
+    const fixture = await createFixture();
+    const manifestPath = join(fixture.candidateRoot, "processing-candidate.json");
+    const backupPath = join(fixture.root, "candidate-backup.json");
+    await writeFile(backupPath, await readFile(manifestPath));
+    await rm(manifestPath);
+    await symlink(backupPath, manifestPath);
+    await expect(
+      resolveGitHubReleaseAssets({
+        repository,
+        releaseTag,
+        candidateRoot: fixture.candidateRoot,
+        output: join(fixture.root, "manifest.json"),
+        apiOrigin: "http://127.0.0.1:9",
+        token: "test-token",
+      }),
+    ).rejects.toThrow(/symbolic link/i);
   });
 });
