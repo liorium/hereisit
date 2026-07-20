@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { link, mkdir, open, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export function isPlainObject(value) {
@@ -76,20 +77,45 @@ export function decimalUsdToMicrousd(value, label) {
   return Number(micros);
 }
 
-export async function writeCanonicalJsonAtomic(path, value, { refuseOverwrite = false } = {}) {
+export async function readBoundedRegularFile(path, maximumBytes, label) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") throw new TypeError(`${label} must not be symbolic`);
+    throw new Error(`${label} could not be read`);
+  }
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
+      throw new RangeError(`${label} is not a bounded regular file`);
+    }
+    const bytes = await handle.readFile();
+    if (bytes.byteLength !== metadata.size) throw new TypeError(`${label} changed while reading`);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function writeCanonicalJsonAtomic(
+  path,
+  value,
+  { refuseOverwrite = false, mode } = {},
+) {
   const bytes = canonicalJson(value);
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, bytes, { encoding: "utf8", flag: refuseOverwrite ? "wx" : "w" });
+  await writeFile(temporary, bytes, { encoding: "utf8", flag: "wx", mode });
   try {
     if (refuseOverwrite) {
-      await writeFile(path, bytes, { encoding: "utf8", flag: "wx" });
-      await import("node:fs/promises").then(({ unlink }) => unlink(temporary));
+      await link(temporary, path);
+      await unlink(temporary);
     } else {
       await rename(temporary, path);
     }
   } catch (error) {
-    await import("node:fs/promises").then(({ unlink }) => unlink(temporary).catch(() => undefined));
+    await unlink(temporary).catch(() => undefined);
     throw error;
   }
   return sha256Bytes(bytes);

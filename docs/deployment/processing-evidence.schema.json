@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/processing-evidence-v1.json",
+  "title": "HereIsIt processing evidence bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "releaseId",
+    "gitSha",
+    "candidateVerificationSha256",
+    "createdAt",
+    "expiresAt",
+    "reports"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-processing-evidence@1" },
+    "version": { "const": 1 },
+    "releaseId": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$" },
+    "gitSha": { "$ref": "#/$defs/gitSha" },
+    "candidateVerificationSha256": { "$ref": "#/$defs/sha256" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "reports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fullCorpusBenchmark",
+        "competitorComparison",
+        "blindedHumanReview",
+        "commercialReview",
+        "privacyReview",
+        "deviceMatrix"
+      ],
+      "properties": {
+        "fullCorpusBenchmark": { "$ref": "#/$defs/report" },
+        "competitorComparison": { "$ref": "#/$defs/report" },
+        "blindedHumanReview": { "$ref": "#/$defs/report" },
+        "commercialReview": { "$ref": "#/$defs/report" },
+        "privacyReview": { "$ref": "#/$defs/report" },
+        "deviceMatrix": { "$ref": "#/$defs/report" }
+      }
+    }
+  },
+  "$defs": {
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "document"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "document": {}
+      }
+    }
+  }
+}
