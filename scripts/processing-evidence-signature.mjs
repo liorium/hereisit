@@ -52,6 +52,9 @@ async function readCanonicalBundle(path) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("processing evidence bundle must be an object");
   }
+  if (value.schema !== "hereisit-processing-evidence@1" || value.version !== 1) {
+    throw new TypeError("processing evidence bundle schema or version is invalid");
+  }
   if (!bytes.equals(Buffer.from(canonicalJson(value)))) {
     throw new TypeError("processing evidence bundle is not canonical JSON");
   }

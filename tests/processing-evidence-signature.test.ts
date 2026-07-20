@@ -93,6 +93,16 @@ describe("processing evidence Ed25519 signatures", () => {
     ).rejects.toThrow(/Ed25519/i);
   });
 
+  it("refuses to sign canonical JSON outside the processing evidence schema", async () => {
+    const value = await fixture();
+    await writeFile(value.bundlePath, canonicalJson({ schema: "other@1", version: 1 }));
+
+    await expect(
+      signCanonicalProcessingEvidence({ ...value, repositoryRoot: resolve(".") }),
+    ).rejects.toThrow(/schema|version/i);
+    await expect(lstat(value.signaturePath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("requires an external mode-0600 regular private key without symbolic indirection", async () => {
     const value = await fixture();
     await chmod(value.privateKeyPath, 0o640);
