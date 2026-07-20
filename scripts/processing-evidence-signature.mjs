@@ -1,0 +1,172 @@
+import {
+  createPrivateKey,
+  createPublicKey,
+  sign as createSignature,
+  verify as verifySignature,
+} from "node:crypto";
+import { constants } from "node:fs";
+import { link, open, realpath, rm } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { canonicalJson, sha256Bytes } from "./image-lab-common.mjs";
+
+const maximumBundleBytes = 8 * 1024 * 1024;
+const maximumKeyBytes = 16 * 1024;
+const signatureBytes = 64;
+
+async function readBoundedRegularFile(path, maximumBytes, label, expectedMode) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") throw new TypeError(`${label} must not be symbolic`);
+    throw new Error(`${label} could not be read`);
+  }
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
+      throw new RangeError(`${label} is not a bounded regular file`);
+    }
+    if (expectedMode !== undefined && (metadata.mode & 0o777) !== expectedMode) {
+      throw new TypeError(`${label} permissions must be 0600`);
+    }
+    const bytes = await handle.readFile();
+    if (bytes.byteLength !== metadata.size) throw new TypeError(`${label} changed while reading`);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readCanonicalBundle(path) {
+  const bytes = await readBoundedRegularFile(
+    resolve(path),
+    maximumBundleBytes,
+    "processing evidence bundle",
+  );
+  let value;
+  try {
+    value = JSON.parse(bytes);
+  } catch {
+    throw new TypeError("processing evidence bundle is not valid JSON");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("processing evidence bundle must be an object");
+  }
+  if (!bytes.equals(Buffer.from(canonicalJson(value)))) {
+    throw new TypeError("processing evidence bundle is not canonical JSON");
+  }
+  return bytes;
+}
+
+async function assertExternalPrivateKey(privateKeyPath, repositoryRoot) {
+  const requestedKey = resolve(privateKeyPath);
+  const requestedRepository = resolve(repositoryRoot);
+  const [canonicalKey, canonicalRepository] = await Promise.all([
+    realpath(requestedKey),
+    realpath(requestedRepository),
+  ]);
+  if (canonicalKey !== requestedKey) {
+    throw new TypeError("processing evidence private key must not be symbolic");
+  }
+  const relation = relative(canonicalRepository, canonicalKey);
+  if (
+    relation === "" ||
+    (!relation.startsWith(`..${sep}`) && relation !== ".." && !isAbsolute(relation))
+  ) {
+    throw new TypeError("processing evidence private key must be outside the repository");
+  }
+  return readBoundedRegularFile(
+    canonicalKey,
+    maximumKeyBytes,
+    "processing evidence private key",
+    0o600,
+  );
+}
+
+function assertEd25519Key(key, label) {
+  if (key.asymmetricKeyType !== "ed25519") throw new TypeError(`${label} must be Ed25519`);
+  return key;
+}
+
+async function writeDetachedSignature(path, bytes) {
+  const requested = resolve(path);
+  const parent = await realpath(dirname(requested));
+  const destination = join(parent, basename(requested));
+  if (destination !== requested) throw new TypeError("signature output parent must be canonical");
+  const temporary = join(parent, `.${basename(destination)}.${process.pid}.${Date.now()}.tmp`);
+  let handle;
+  try {
+    handle = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      0o600,
+    );
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await link(temporary, destination);
+  } catch (error) {
+    if (error?.code === "EEXIST")
+      throw new Error("signature output already exists; overwrite refused");
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(temporary, { force: true });
+  }
+}
+
+export async function signCanonicalProcessingEvidence({
+  bundlePath,
+  signaturePath,
+  privateKeyPath,
+  repositoryRoot,
+}) {
+  const [bundle, privateKeyBytes] = await Promise.all([
+    readCanonicalBundle(bundlePath),
+    assertExternalPrivateKey(privateKeyPath, repositoryRoot),
+  ]);
+  const privateKey = assertEd25519Key(
+    createPrivateKey(privateKeyBytes),
+    "processing evidence private key",
+  );
+  const signature = createSignature(null, bundle, privateKey);
+  if (signature.byteLength !== signatureBytes) {
+    throw new TypeError("processing evidence signature length is invalid");
+  }
+  await writeDetachedSignature(signaturePath, signature);
+  return {
+    bundleSha256: sha256Bytes(bundle),
+    signatureSha256: sha256Bytes(signature),
+  };
+}
+
+export async function verifyCanonicalProcessingEvidenceSignature({
+  bundlePath,
+  signaturePath,
+  publicKeyPath,
+}) {
+  const [bundle, signature, publicKeyBytes] = await Promise.all([
+    readCanonicalBundle(bundlePath),
+    readBoundedRegularFile(resolve(signaturePath), signatureBytes, "processing evidence signature"),
+    readBoundedRegularFile(
+      resolve(publicKeyPath),
+      maximumKeyBytes,
+      "processing evidence public key",
+    ),
+  ]);
+  if (signature.byteLength !== signatureBytes) {
+    throw new TypeError("processing evidence signature length is invalid");
+  }
+  const publicKey = assertEd25519Key(
+    createPublicKey(publicKeyBytes),
+    "processing evidence public key",
+  );
+  if (!verifySignature(null, bundle, publicKey, signature)) {
+    throw new TypeError("processing evidence signature is invalid");
+  }
+  return {
+    bundleSha256: sha256Bytes(bundle),
+    signatureSha256: sha256Bytes(signature),
+  };
+}
