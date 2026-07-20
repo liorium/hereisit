@@ -7,6 +7,10 @@ import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
+import {
+  verifyDockerImageArchive,
+  verifyOciImageArchive,
+} from "./verify-image-archive-identities.mjs";
 
 const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
@@ -67,11 +71,7 @@ async function verifyAsset(root, asset, label, hashField = "sha256") {
 
 function releaseAssetEntries(candidate) {
   const assets = candidate.releaseAssets;
-  const entries = [
-    [assets.engine.oci, "engine OCI asset"],
-    [assets.engine.docker, "engine Docker asset"],
-    [assets.worker, "Worker asset"],
-  ];
+  const entries = [[assets.worker, "Worker asset"]];
   if (candidate.state === "finalized") {
     entries.unshift([assets.report, "release report asset"]);
     entries.push(
@@ -139,6 +139,18 @@ export async function verifyProcessingCandidate({
     throw new TypeError("processing candidate source SHA does not match");
   }
 
+  await verifyOciImageArchive({
+    archivePath: join(canonicalRoot, candidate.releaseAssets.engine.oci.path),
+    asset: candidate.releaseAssets.engine.oci,
+    expectedIdentity: candidate.engine.oci,
+  });
+  await verifyDockerImageArchive({
+    archivePath: join(canonicalRoot, candidate.releaseAssets.engine.docker.path),
+    asset: candidate.releaseAssets.engine.docker,
+    expectedIdentity: candidate.engine.docker,
+    expectedRepoTag: candidate.engine.loadedImage,
+  });
+
   const entries = releaseAssetEntries(candidate);
   for (const [asset, label] of entries) await verifyAsset(canonicalRoot, asset, label);
   const staging = await verifyWebAsset(
@@ -157,7 +169,7 @@ export async function verifyProcessingCandidate({
     state: candidate.state,
     releaseId: candidate.releaseId,
     gitSha: candidate.gitSha,
-    assetCount: entries.length + 2,
+    assetCount: entries.length + 4,
     web: {
       staging: {
         archiveSha256: staging.archiveSha256,
