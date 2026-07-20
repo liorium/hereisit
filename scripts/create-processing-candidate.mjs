@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdtemp, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments, sha256Canonical } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
@@ -164,6 +164,15 @@ export async function createBuiltProcessingCandidate({
 
   const outputParent = await realpath(dirname(resolve(outputRoot)));
   const finalOutputRoot = join(outputParent, basename(resolve(outputRoot)));
+  const outputRelative = relative(canonicalSourceRoot, finalOutputRoot);
+  if (
+    outputRelative === "" ||
+    (!outputRelative.startsWith(`..${sep}`) &&
+      outputRelative !== ".." &&
+      !isAbsolute(outputRelative))
+  ) {
+    throw new TypeError("built candidate output must be outside the source root");
+  }
   if (await pathExists(finalOutputRoot)) throw new Error("built candidate output already exists");
   const temporaryRoot = await mkdtemp(join(outputParent, ".hereisit-built-candidate-"));
   let published = false;
