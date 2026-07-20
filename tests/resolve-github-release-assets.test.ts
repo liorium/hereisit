@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
-import { canonicalJson } from "../scripts/image-lab-common.mjs";
+import { canonicalJson, sha256Canonical } from "../scripts/image-lab-common.mjs";
 import { resolveGitHubReleaseAssets } from "../scripts/resolve-github-release-assets.mjs";
 
 const repository = "liorium/hereisit";
@@ -58,12 +58,38 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     sizeBytes: files[path].byteLength,
     sha256: sha256(files[path]),
   });
-  const candidate = {
+  const candidatePayload = {
     schema: "hereisit-processing-candidate@1",
     version: 1,
     state: "finalized",
     releaseId,
     gitSha: targetSha,
+    engine: {
+      loadedImage: `hereisit-image-engine:${targetSha}`,
+      oci: {
+        configDigest: `sha256:${"7".repeat(64)}`,
+        distributionLayerDigests: [`sha256:${"8".repeat(64)}`],
+        diffIds: [`sha256:${"9".repeat(64)}`],
+      },
+      docker: {
+        configDigest: `sha256:${"7".repeat(64)}`,
+        diffIds: [`sha256:${"9".repeat(64)}`],
+      },
+    },
+    web: {
+      staging: {
+        archiveSha256: stagingWeb.archiveSha256,
+        treeSha256: wrongStagingTree ? "9".repeat(64) : stagingWeb.treeSha256,
+        processingApiOrigin: "https://hereisit-processing-staging.liorium.workers.dev",
+      },
+      production: {
+        archiveSha256: productionWeb.archiveSha256,
+        treeSha256: productionWeb.treeSha256,
+        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+      },
+    },
+    security: { trivyDbDigest: `sha256:${"a".repeat(64)}` },
+    providerUsage: { schemaSha256: "b".repeat(64) },
     releaseAssets: {
       report: identity("processing-release-report.json"),
       engine: {
@@ -92,6 +118,10 @@ async function createFixture({ wrongStagingTree = false } = {}) {
         signature: identity(`evidence-v1--${releaseId}--processing-evidence.sig`),
       },
     },
+  };
+  const candidate = {
+    ...candidatePayload,
+    verificationSha256: sha256Canonical(candidatePayload),
   };
   const candidateBytes = Buffer.from(canonicalJson(candidate));
   await writeFile(join(candidateRoot, "processing-candidate.json"), candidateBytes);

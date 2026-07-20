@@ -10,6 +10,7 @@ import {
   sha256Bytes,
   sha256Canonical,
 } from "./image-lab-common.mjs";
+import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
 const MAXIMUM_MANIFEST_BYTES = 512 * 1024;
 const MAXIMUM_CANDIDATE_MANIFEST_BYTES = 1024 * 1024;
@@ -269,17 +270,13 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   }
   let candidate;
   try {
-    candidate = assertObject(JSON.parse(bytes), "processing candidate manifest");
+    candidate = validateProcessingCandidate(JSON.parse(bytes));
   } catch (error) {
     if (error instanceof SyntaxError)
       throw new TypeError("processing candidate manifest is invalid JSON");
     throw error;
   }
-  if (
-    candidate.schema !== "hereisit-processing-candidate@1" ||
-    candidate.version !== 1 ||
-    candidate.state !== "finalized"
-  ) {
+  if (candidate.state !== "finalized") {
     throw new TypeError("processing candidate must be finalized");
   }
   if (candidate.releaseId !== releaseId) {
@@ -288,21 +285,7 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   if (candidate.gitSha !== manifest.release.targetSha) {
     throw new TypeError("processing candidate source SHA does not match");
   }
-  const releaseAssets = assertObject(candidate.releaseAssets, "candidate release assets");
-  assertExactKeys(
-    releaseAssets,
-    ["report", "engine", "worker", "web", "evidence"],
-    "candidate release assets",
-  );
-
-  const validateCandidateAsset = (value, label, expectedPath) => {
-    const asset = assertObject(value, label);
-    assertExactKeys(asset, ["path", "sizeBytes", "sha256"], label);
-    if (asset.path !== expectedPath) throw new TypeError(`${label} path does not match`);
-    assertPositiveSafeInteger(asset.sizeBytes, `${label} size`);
-    assertSha256(asset.sha256, `${label} SHA-256`);
-    return asset;
-  };
+  const releaseAssets = candidate.releaseAssets;
   const assertAssetMatch = (candidateAsset, releaseAsset, label, hashField = "sha256") => {
     if (
       candidateAsset.sizeBytes !== releaseAsset.sizeBytes ||
@@ -312,60 +295,14 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
     }
   };
 
-  const report = validateCandidateAsset(
-    releaseAssets.report,
-    "candidate release report",
-    "processing-release-report.json",
-  );
-  const engine = assertObject(releaseAssets.engine, "candidate engine release assets");
-  assertExactKeys(engine, ["oci", "docker"], "candidate engine release assets");
-  const engineOci = validateCandidateAsset(
-    engine.oci,
-    "candidate engine OCI asset",
-    "image-engine-linux-amd64.oci.tar",
-  );
-  const engineDocker = validateCandidateAsset(
-    engine.docker,
-    "candidate engine Docker asset",
-    "image-engine-linux-amd64.docker.tar",
-  );
-  const worker = validateCandidateAsset(
-    releaseAssets.worker,
-    "candidate Worker asset",
-    "api-worker.mjs",
-  );
-  const web = assertObject(releaseAssets.web, "candidate web release assets");
-  assertExactKeys(web, ["staging", "production"], "candidate web release assets");
-  const validateCandidateWeb = (value, environment) => {
-    const asset = assertObject(value, `candidate ${environment} web asset`);
-    assertExactKeys(
-      asset,
-      ["path", "sizeBytes", "archiveSha256", "treeSha256", "processingApiOrigin"],
-      `candidate ${environment} web asset`,
-    );
-    if (asset.path !== `web-${environment}.tar`) {
-      throw new TypeError(`candidate ${environment} web asset path does not match`);
-    }
-    assertPositiveSafeInteger(asset.sizeBytes, `candidate ${environment} web asset size`);
-    assertSha256(asset.archiveSha256, `candidate ${environment} web archive SHA-256`);
-    assertSha256(asset.treeSha256, `candidate ${environment} web tree SHA-256`);
-    validateProcessingApiOrigin(asset.processingApiOrigin, environment);
-    return asset;
-  };
-  const webStaging = validateCandidateWeb(web.staging, "staging");
-  const webProduction = validateCandidateWeb(web.production, "production");
-  const evidence = assertObject(releaseAssets.evidence, "candidate release evidence assets");
-  assertExactKeys(evidence, ["bundle", "signature"], "candidate release evidence assets");
-  const evidenceBundle = validateCandidateAsset(
-    evidence.bundle,
-    "candidate release evidence bundle",
-    `evidence-v1--${releaseId}--processing-evidence.json`,
-  );
-  const evidenceSignature = validateCandidateAsset(
-    evidence.signature,
-    "candidate release evidence signature",
-    `evidence-v1--${releaseId}--processing-evidence.sig`,
-  );
+  const report = releaseAssets.report;
+  const engineOci = releaseAssets.engine.oci;
+  const engineDocker = releaseAssets.engine.docker;
+  const worker = releaseAssets.worker;
+  const webStaging = releaseAssets.web.staging;
+  const webProduction = releaseAssets.web.production;
+  const evidenceBundle = releaseAssets.evidence.bundle;
+  const evidenceSignature = releaseAssets.evidence.signature;
 
   assertAssetMatch(report, manifest.report, "release report");
   assertAssetMatch(engineOci, manifest.engine.oci, "engine OCI");

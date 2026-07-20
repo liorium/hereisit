@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseCliArguments } from "./image-lab-common.mjs";
+import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
 const accountPattern = /^[0-9a-f]{32}$/;
 const sha256Pattern = /^sha256:[0-9a-f]{64}$/;
@@ -65,16 +66,16 @@ function selectRunnableDescriptor(manifest) {
 function validateCandidateIdentity(value) {
   const identity = assertObject(value, "finalized candidate image identity");
   const configDigest = assertDigest(identity.configDigest, "candidate config digest");
-  if (!Array.isArray(identity.layerDigests) || identity.layerDigests.length === 0) {
-    throw new TypeError("candidate layer digests must be a non-empty array");
+  if (
+    !Array.isArray(identity.distributionLayerDigests) ||
+    identity.distributionLayerDigests.length === 0
+  ) {
+    throw new TypeError("candidate distribution layer digests must be a non-empty array");
   }
-  const layerDigests = identity.layerDigests.map((digest) =>
-    assertDigest(digest, "candidate layer digest"),
+  const distributionLayerDigests = identity.distributionLayerDigests.map((digest) =>
+    assertDigest(digest, "candidate distribution layer digest"),
   );
-  if (new Set(layerDigests).size !== layerDigests.length) {
-    throw new TypeError("candidate layer digests must be unique and ordered");
-  }
-  return { configDigest, layerDigests };
+  return { configDigest, distributionLayerDigests };
 }
 
 export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, candidateIdentity }) {
@@ -102,19 +103,23 @@ export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, ca
     assertDigest(assertObject(layer, "registry image layer").digest, "registry layer digest"),
   );
   if (
-    layerDigests.length !== expected.layerDigests.length ||
-    layerDigests.some((layerDigest, index) => layerDigest !== expected.layerDigests[index])
+    layerDigests.length !== expected.distributionLayerDigests.length ||
+    layerDigests.some(
+      (layerDigest, index) => layerDigest !== expected.distributionLayerDigests[index],
+    )
   ) {
     throw new TypeError("registry image ordered layers do not match the finalized candidate");
   }
   return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
 }
 
-function candidateIdentityFromManifest(candidate) {
-  const root = assertObject(candidate, "candidate manifest");
+export function candidateIdentityFromManifest(candidate) {
+  const root = validateProcessingCandidate(candidate);
   if (root.state !== "finalized") throw new TypeError("candidate manifest must be finalized");
-  const engine = assertObject(root.engine, "candidate engine");
-  return validateCandidateIdentity(assertObject(engine.oci, "candidate engine OCI identity"));
+  return validateCandidateIdentity({
+    configDigest: root.engine.oci.configDigest,
+    distributionLayerDigests: root.engine.oci.distributionLayerDigests,
+  });
 }
 
 async function main() {
