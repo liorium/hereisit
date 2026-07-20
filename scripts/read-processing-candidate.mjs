@@ -92,29 +92,40 @@ function validateWebReleaseAsset(value, environment, identity) {
   return asset;
 }
 
+function validateImageIdentity(value, label) {
+  const identity = assertObject(value, label);
+  assertExactKeys(identity, ["configDigest", "layerDigests"], label);
+  assertPattern(identity.configDigest, digestPattern, `${label} configuration digest`);
+  if (
+    !Array.isArray(identity.layerDigests) ||
+    identity.layerDigests.length < 1 ||
+    identity.layerDigests.length > 128
+  ) {
+    throw new TypeError(`${label} layer digests are invalid`);
+  }
+  const seen = new Set();
+  for (const digest of identity.layerDigests) {
+    assertPattern(digest, digestPattern, `${label} layer digest`);
+    if (seen.has(digest)) throw new TypeError(`${label} layer digests must be unique`);
+    seen.add(digest);
+  }
+  return identity;
+}
+
 function validateEngine(value, gitSha) {
   const engine = assertObject(value, "candidate engine identity");
-  assertExactKeys(
-    engine,
-    ["loadedImage", "configDigest", "layerDigests"],
-    "candidate engine identity",
-  );
+  assertExactKeys(engine, ["loadedImage", "oci", "docker"], "candidate engine identity");
   if (engine.loadedImage !== `hereisit-image-engine:${gitSha}`) {
     throw new TypeError("candidate loaded image is malformed or does not match the git SHA");
   }
-  assertPattern(engine.configDigest, digestPattern, "candidate engine configuration digest");
+  const oci = validateImageIdentity(engine.oci, "candidate OCI image identity");
+  const docker = validateImageIdentity(engine.docker, "candidate Docker image identity");
   if (
-    !Array.isArray(engine.layerDigests) ||
-    engine.layerDigests.length < 1 ||
-    engine.layerDigests.length > 128
+    oci.configDigest !== docker.configDigest ||
+    oci.layerDigests.length !== docker.layerDigests.length ||
+    oci.layerDigests.some((digest, index) => digest !== docker.layerDigests[index])
   ) {
-    throw new TypeError("candidate engine layer digests are invalid");
-  }
-  const seen = new Set();
-  for (const digest of engine.layerDigests) {
-    assertPattern(digest, digestPattern, "candidate engine layer digest");
-    if (seen.has(digest)) throw new TypeError("candidate engine layer digests must be unique");
-    seen.add(digest);
+    throw new TypeError("candidate OCI and Docker image identities do not match");
   }
   return engine;
 }
@@ -227,7 +238,7 @@ const fieldReaders = Object.freeze({
   releaseId: (candidate) => candidate.releaseId,
   gitSha: (candidate) => candidate.gitSha,
   "engine.loadedImage": (candidate) => candidate.engine.loadedImage,
-  "engine.configDigest": (candidate) => candidate.engine.configDigest,
+  "engine.oci.configDigest": (candidate) => candidate.engine.oci.configDigest,
   "security.trivyDbDigest": (candidate) => candidate.security.trivyDbDigest,
   "providerUsage.schemaSha256": (candidate) => candidate.providerUsage.schemaSha256,
   "web.staging.archiveSha256": (candidate) => candidate.web.staging.archiveSha256,

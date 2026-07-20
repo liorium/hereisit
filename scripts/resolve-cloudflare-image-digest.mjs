@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseCliArguments } from "./image-lab-common.mjs";
+import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
 const accountPattern = /^[0-9a-f]{32}$/;
 const sha256Pattern = /^sha256:[0-9a-f]{64}$/;
@@ -110,11 +111,10 @@ export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, ca
   return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
 }
 
-function candidateIdentityFromManifest(candidate) {
-  const root = assertObject(candidate, "candidate manifest");
+export function candidateIdentityFromManifest(candidate) {
+  const root = validateProcessingCandidate(candidate);
   if (root.state !== "finalized") throw new TypeError("candidate manifest must be finalized");
-  const engine = assertObject(root.engine, "candidate engine");
-  return validateCandidateIdentity(assertObject(engine.oci, "candidate engine OCI identity"));
+  return validateCandidateIdentity(root.engine.oci);
 }
 
 async function main() {

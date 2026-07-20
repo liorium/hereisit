@@ -26,8 +26,14 @@ function candidate() {
     gitSha,
     engine: {
       loadedImage: `hereisit-image-engine:${gitSha}`,
-      configDigest: `sha256:${"b".repeat(64)}`,
-      layerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+      oci: {
+        configDigest: `sha256:${"b".repeat(64)}`,
+        layerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+      },
+      docker: {
+        configDigest: `sha256:${"b".repeat(64)}`,
+        layerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+      },
     },
     web: {
       staging: {
@@ -194,6 +200,26 @@ describe("processing candidate reader", () => {
         "web.staging.treeSha256",
       ),
     ).toThrow(/match|identity/i);
+  });
+
+  it("rejects a Docker export whose config or ordered layers differ from the OCI archive", () => {
+    const original = candidate();
+    const { verificationSha256: _verificationSha256, ...payload } = {
+      ...original,
+      engine: {
+        ...original.engine,
+        docker: {
+          ...original.engine.docker,
+          layerDigests: [...original.engine.docker.layerDigests].reverse(),
+        },
+      },
+    };
+    expect(() =>
+      readProcessingCandidateField(
+        { ...payload, verificationSha256: sha256Canonical(payload) },
+        "engine.loadedImage",
+      ),
+    ).toThrow(/OCI.*Docker|match/i);
   });
 
   it("reads a bounded regular file and rejects a symbolic-link manifest", async () => {

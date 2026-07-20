@@ -26,17 +26,11 @@
     "engine": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["loadedImage", "configDigest", "layerDigests"],
+      "required": ["loadedImage", "oci", "docker"],
       "properties": {
         "loadedImage": { "type": "string", "pattern": "^hereisit-image-engine:[a-f0-9]{40}$" },
-        "configDigest": { "$ref": "#/$defs/digest" },
-        "layerDigests": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 128,
-          "uniqueItems": true,
-          "items": { "$ref": "#/$defs/digest" }
-        }
+        "oci": { "$ref": "#/$defs/imageIdentity" },
+        "docker": { "$ref": "#/$defs/imageIdentity" }
       }
     },
     "web": { "$ref": "#/$defs/webIdentities" },
@@ -66,6 +60,21 @@
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "imageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configDigest", "layerDigests"],
+      "properties": {
+        "configDigest": { "$ref": "#/$defs/digest" },
+        "layerDigests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/digest" }
+        }
+      }
+    },
     "webIdentity": {
       "type": "object",
       "additionalProperties": false,
