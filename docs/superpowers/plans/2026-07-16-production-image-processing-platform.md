@@ -7035,10 +7035,10 @@ node scripts/verify-processing-release-report.mjs \
   --evidence-root .artifacts/evidence
 node scripts/finalize-processing-candidate.mjs \
   --built-root .artifacts/built-candidate \
-  --release-report .artifacts/finalize/reports/release-report.json \
-  --evidence .artifacts/evidence/processing-evidence.json \
-  --evidence-signature .artifacts/evidence/processing-evidence.sig \
-  --output .artifacts/candidate
+  --output-root .artifacts/candidate \
+  --report .artifacts/finalize/reports/release-report.json \
+  --evidence-bundle .artifacts/evidence/processing-evidence.json \
+  --evidence-signature .artifacts/evidence/processing-evidence.sig
 node scripts/verify-processing-candidate.mjs \
   --manifest .artifacts/candidate/processing-candidate.json \
   --root .artifacts/candidate \
@@ -7048,7 +7048,7 @@ node scripts/verify-processing-candidate.mjs \
 
 Neither candidate producer invokes a compiler, package manager, Docker build, or network.
 Every later staging/production/rollback command reads the report only from
-`.artifacts/candidate/reports/release-report.json`, whose hash is in the candidate manifest.
+`.artifacts/candidate/processing-release-report.json`, whose hash is in the candidate manifest.
 
 - [ ] **Step 6: Document and execute staging provisioning**
 
