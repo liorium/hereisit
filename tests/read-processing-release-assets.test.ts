@@ -27,12 +27,31 @@ function asset(assetId: number, suffix: string, sha256 = "b".repeat(64)) {
 }
 
 function candidateDocument() {
-  return {
+  const payload = {
     schema: "hereisit-processing-candidate@1",
     version: 1,
     state: "finalized",
     releaseId,
     gitSha: targetSha,
+    engine: {
+      loadedImage: `hereisit-image-engine:${targetSha}`,
+      configDigest: `sha256:${"7".repeat(64)}`,
+      layerDigests: [`sha256:${"8".repeat(64)}`],
+    },
+    web: {
+      staging: {
+        archiveSha256: "1".repeat(64),
+        treeSha256: "2".repeat(64),
+        processingApiOrigin: "https://hereisit-processing-staging.liorium.workers.dev",
+      },
+      production: {
+        archiveSha256: "3".repeat(64),
+        treeSha256: "4".repeat(64),
+        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+      },
+    },
+    security: { trivyDbDigest: `sha256:${"9".repeat(64)}` },
+    providerUsage: { schemaSha256: "a".repeat(64) },
     releaseAssets: {
       report: {
         path: "processing-release-report.json",
@@ -82,6 +101,7 @@ function candidateDocument() {
       },
     },
   };
+  return { ...payload, verificationSha256: sha256Canonical(payload) };
 }
 
 function releaseManifest(candidateBytes: Uint8Array) {
