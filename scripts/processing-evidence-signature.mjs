@@ -12,36 +12,13 @@ import {
   assertExactKeys,
   canonicalJson,
   parseCliArguments,
+  readBoundedRegularFile,
   sha256Bytes,
 } from "./image-lab-common.mjs";
 
 const maximumBundleBytes = 8 * 1024 * 1024;
 const maximumKeyBytes = 16 * 1024;
 const signatureBytes = 64;
-
-async function readBoundedRegularFile(path, maximumBytes, label, expectedMode) {
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch (error) {
-    if (error?.code === "ELOOP") throw new TypeError(`${label} must not be symbolic`);
-    throw new Error(`${label} could not be read`);
-  }
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
-      throw new RangeError(`${label} is not a bounded regular file`);
-    }
-    if (expectedMode !== undefined && (metadata.mode & 0o777) !== expectedMode) {
-      throw new TypeError(`${label} permissions must be 0600`);
-    }
-    const bytes = await handle.readFile();
-    if (bytes.byteLength !== metadata.size) throw new TypeError(`${label} changed while reading`);
-    return bytes;
-  } finally {
-    await handle.close();
-  }
-}
 
 async function readCanonicalBundle(path) {
   const bytes = await readBoundedRegularFile(

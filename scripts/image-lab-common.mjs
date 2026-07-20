@@ -77,7 +77,7 @@ export function decimalUsdToMicrousd(value, label) {
   return Number(micros);
 }
 
-export async function readBoundedRegularFile(path, maximumBytes, label) {
+export async function readBoundedRegularFile(path, maximumBytes, label, expectedMode) {
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -86,12 +86,40 @@ export async function readBoundedRegularFile(path, maximumBytes, label) {
     throw new Error(`${label} could not be read`);
   }
   try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || metadata.size < 1n || metadata.size > BigInt(maximumBytes)) {
       throw new RangeError(`${label} is not a bounded regular file`);
     }
-    const bytes = await handle.readFile();
-    if (bytes.byteLength !== metadata.size) throw new TypeError(`${label} changed while reading`);
+    if (expectedMode !== undefined && (metadata.mode & 0o777n) !== BigInt(expectedMode)) {
+      throw new TypeError(`${label} permissions must be 0600`);
+    }
+    const size = Number(metadata.size);
+    const bytes = Buffer.allocUnsafe(size);
+    let offset = 0;
+    while (offset < size) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        Math.min(64 * 1024, size - offset),
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    const [{ bytesRead: extraBytes }, finalMetadata] = await Promise.all([
+      handle.read(probe, 0, 1, size),
+      handle.stat({ bigint: true }),
+    ]);
+    if (
+      offset !== size ||
+      extraBytes !== 0 ||
+      finalMetadata.size !== metadata.size ||
+      finalMetadata.mtimeNs !== metadata.mtimeNs ||
+      finalMetadata.ctimeNs !== metadata.ctimeNs
+    ) {
+      throw new TypeError(`${label} changed while reading`);
+    }
     return bytes;
   } finally {
     await handle.close();

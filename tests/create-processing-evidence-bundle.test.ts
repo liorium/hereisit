@@ -131,6 +131,26 @@ describe("processing evidence bundle creation", () => {
     }
   });
 
+  it("rejects array and object coercion for approval reference href", () => {
+    const approval = {
+      kind: "approval-reference",
+      href: "https://approvals.example.test/reviews/42",
+      sha256: "c".repeat(64),
+    };
+
+    for (const href of [[approval.href], { toString: () => approval.href }]) {
+      expect(() =>
+        createProcessingEvidenceBundle({
+          ...inputs(),
+          reports: {
+            ...inputs().reports,
+            commercialReview: { approval: { ...approval, href } },
+          },
+        }),
+      ).toThrow(/approval|URL|string/i);
+    }
+  });
+
   it("rejects deep, sparse, non-finite, and prototype-bearing documents", () => {
     let deep: unknown = "leaf";
     for (let index = 0; index < 33; index++) deep = { nested: deep };

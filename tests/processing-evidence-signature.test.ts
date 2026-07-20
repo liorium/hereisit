@@ -1,10 +1,19 @@
 import { spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { chmod, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  lstat,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { canonicalJson } from "../scripts/image-lab-common.mjs";
+import { canonicalJson, readBoundedRegularFile } from "../scripts/image-lab-common.mjs";
 import {
   runProcessingEvidenceSignatureCli,
   signCanonicalProcessingEvidence,
@@ -44,6 +53,23 @@ afterEach(async () => {
 });
 
 describe("processing evidence Ed25519 signatures", () => {
+  it("bounds allocation and rejects oversized or concurrently growing files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-evidence-bounded-read-"));
+    temporaryRoots.push(root);
+    const oversized = join(root, "oversized.bin");
+    await writeFile(oversized, Buffer.alloc(65));
+    await expect(readBoundedRegularFile(oversized, 64, "bounded fixture")).rejects.toThrow(
+      /bounded|size/i,
+    );
+
+    const growing = join(root, "growing.bin");
+    const maximumBytes = 8 * 1024 * 1024;
+    await writeFile(growing, Buffer.alloc(maximumBytes));
+    const read = readBoundedRegularFile(growing, maximumBytes, "growing fixture");
+    await appendFile(growing, Buffer.from([1]));
+    await expect(read).rejects.toThrow(/bounded|changed/i);
+  });
+
   it("does not expose missing paths through direct-execution errors", async () => {
     const value = await fixture();
     const missingPrivateKeyPath = join(value.root, "must-not-appear-private.pem");

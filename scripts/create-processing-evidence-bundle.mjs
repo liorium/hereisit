@@ -57,6 +57,7 @@ function validateApprovalReference(value, label) {
     throw new TypeError(`${label} must be a plain object`);
   }
   assertExactKeys(value, ["kind", "href", "sha256"], label);
+  if (typeof value.href !== "string") throw new TypeError(`${label} URL must be a string`);
   assertSha256(value.sha256, `${label} hash`);
   let url;
   try {
