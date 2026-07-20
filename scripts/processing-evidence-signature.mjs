@@ -219,7 +219,10 @@ if (
   try {
     await runProcessingEvidenceSignatureCli(process.argv.slice(2));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "processing evidence signature failed";
+    const message =
+      error instanceof Error && !("code" in error)
+        ? error.message
+        : "processing evidence signature failed";
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }

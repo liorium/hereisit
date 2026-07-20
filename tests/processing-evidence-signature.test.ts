@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { chmod, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -43,6 +44,45 @@ afterEach(async () => {
 });
 
 describe("processing evidence Ed25519 signatures", () => {
+  it("does not expose missing paths through direct-execution errors", async () => {
+    const value = await fixture();
+    const missingPrivateKeyPath = join(value.root, "must-not-appear-private.pem");
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (finish) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "scripts/processing-evidence-signature.mjs",
+            "--mode",
+            "sign",
+            "--bundle",
+            value.bundlePath,
+            "--signature",
+            value.signaturePath,
+            "--private-key",
+            missingPrivateKeyPath,
+            "--repository-root",
+            resolve("."),
+          ],
+          { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8").on("data", (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.setEncoding("utf8").on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("close", (code) => finish({ code, stdout, stderr }));
+      },
+    );
+
+    expect(result).toMatchObject({ code: 1, stdout: "" });
+    expect(result.stderr).not.toContain(missingPrivateKeyPath);
+    expect(result.stderr).not.toContain("must-not-appear-private.pem");
+  });
+
   it("signs and verifies through explicit CLI modes", async () => {
     const value = await fixture();
     let output = "";
