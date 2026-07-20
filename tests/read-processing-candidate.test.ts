@@ -28,11 +28,12 @@ function candidate() {
       loadedImage: `hereisit-image-engine:${gitSha}`,
       oci: {
         configDigest: `sha256:${"b".repeat(64)}`,
-        layerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+        distributionLayerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+        diffIds: [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`],
       },
       docker: {
         configDigest: `sha256:${"b".repeat(64)}`,
-        layerDigests: [`sha256:${"c".repeat(64)}`, `sha256:${"d".repeat(64)}`],
+        diffIds: [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`],
       },
     },
     web: {
@@ -133,7 +134,7 @@ describe("processing candidate reader", () => {
 
   it.each([
     "engine",
-    "engine.layerDigests",
+    "engine.distributionLayerDigests",
     "releaseAssets",
     "verificationSha256",
     "__proto__.polluted",
@@ -248,7 +249,7 @@ describe("processing candidate reader", () => {
     ).toThrow(/origin|HTTPS/i);
   });
 
-  it("rejects a Docker export whose config or ordered layers differ from the OCI archive", () => {
+  it("rejects a Docker export whose config or ordered rootfs DiffIDs differ from OCI", () => {
     const original = candidate();
     const { verificationSha256: _verificationSha256, ...payload } = {
       ...original,
@@ -256,7 +257,7 @@ describe("processing candidate reader", () => {
         ...original.engine,
         docker: {
           ...original.engine.docker,
-          layerDigests: [...original.engine.docker.layerDigests].reverse(),
+          diffIds: [...original.engine.docker.diffIds].reverse(),
         },
       },
     };
@@ -266,6 +267,34 @@ describe("processing candidate reader", () => {
         "engine.loadedImage",
       ),
     ).toThrow(/OCI.*Docker|match/i);
+  });
+
+  it("accepts repeated layer content identities without losing their order", () => {
+    const original = candidate();
+    const repeatedDistributionDigest = original.engine.oci.distributionLayerDigests[0];
+    const repeatedDiffId = original.engine.oci.diffIds[0];
+    const { verificationSha256: _verificationSha256, ...payload } = {
+      ...original,
+      engine: {
+        ...original.engine,
+        oci: {
+          ...original.engine.oci,
+          distributionLayerDigests: [repeatedDistributionDigest, repeatedDistributionDigest],
+          diffIds: [repeatedDiffId, repeatedDiffId],
+        },
+        docker: {
+          ...original.engine.docker,
+          diffIds: [repeatedDiffId, repeatedDiffId],
+        },
+      },
+    };
+
+    expect(
+      readProcessingCandidateField(
+        { ...payload, verificationSha256: sha256Canonical(payload) },
+        "engine.oci.configDigest",
+      ),
+    ).toBe(original.engine.oci.configDigest);
   });
 
   it("reads a bounded regular file and rejects a symbolic-link manifest", async () => {

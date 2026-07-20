@@ -68,11 +68,12 @@ async function createFixture({ wrongStagingTree = false } = {}) {
       loadedImage: `hereisit-image-engine:${targetSha}`,
       oci: {
         configDigest: `sha256:${"7".repeat(64)}`,
-        layerDigests: [`sha256:${"8".repeat(64)}`],
+        distributionLayerDigests: [`sha256:${"8".repeat(64)}`],
+        diffIds: [`sha256:${"9".repeat(64)}`],
       },
       docker: {
         configDigest: `sha256:${"7".repeat(64)}`,
-        layerDigests: [`sha256:${"8".repeat(64)}`],
+        diffIds: [`sha256:${"9".repeat(64)}`],
       },
     },
     web: {

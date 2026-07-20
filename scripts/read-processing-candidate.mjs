@@ -98,23 +98,35 @@ function validateWebReleaseAsset(value, environment, identity) {
   return asset;
 }
 
-function validateImageIdentity(value, label) {
+function validateDigestArray(value, label) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 128) {
+    throw new TypeError(`${label} are invalid`);
+  }
+  for (const digest of value) {
+    assertPattern(digest, digestPattern, `${label} entry`);
+  }
+  return value;
+}
+
+function validateOciImageIdentity(value) {
+  const label = "candidate OCI image identity";
   const identity = assertObject(value, label);
-  assertExactKeys(identity, ["configDigest", "layerDigests"], label);
+  assertExactKeys(identity, ["configDigest", "distributionLayerDigests", "diffIds"], label);
   assertPattern(identity.configDigest, digestPattern, `${label} configuration digest`);
-  if (
-    !Array.isArray(identity.layerDigests) ||
-    identity.layerDigests.length < 1 ||
-    identity.layerDigests.length > 128
-  ) {
-    throw new TypeError(`${label} layer digests are invalid`);
+  validateDigestArray(identity.distributionLayerDigests, `${label} distribution layer digests`);
+  validateDigestArray(identity.diffIds, `${label} rootfs DiffIDs`);
+  if (identity.distributionLayerDigests.length !== identity.diffIds.length) {
+    throw new TypeError(`${label} distribution layers and rootfs DiffIDs do not align`);
   }
-  const seen = new Set();
-  for (const digest of identity.layerDigests) {
-    assertPattern(digest, digestPattern, `${label} layer digest`);
-    if (seen.has(digest)) throw new TypeError(`${label} layer digests must be unique`);
-    seen.add(digest);
-  }
+  return identity;
+}
+
+function validateDockerImageIdentity(value) {
+  const label = "candidate Docker image identity";
+  const identity = assertObject(value, label);
+  assertExactKeys(identity, ["configDigest", "diffIds"], label);
+  assertPattern(identity.configDigest, digestPattern, `${label} configuration digest`);
+  validateDigestArray(identity.diffIds, `${label} rootfs DiffIDs`);
   return identity;
 }
 
@@ -124,12 +136,12 @@ function validateEngine(value, gitSha) {
   if (engine.loadedImage !== `hereisit-image-engine:${gitSha}`) {
     throw new TypeError("candidate loaded image is malformed or does not match the git SHA");
   }
-  const oci = validateImageIdentity(engine.oci, "candidate OCI image identity");
-  const docker = validateImageIdentity(engine.docker, "candidate Docker image identity");
+  const oci = validateOciImageIdentity(engine.oci);
+  const docker = validateDockerImageIdentity(engine.docker);
   if (
     oci.configDigest !== docker.configDigest ||
-    oci.layerDigests.length !== docker.layerDigests.length ||
-    oci.layerDigests.some((digest, index) => digest !== docker.layerDigests[index])
+    oci.diffIds.length !== docker.diffIds.length ||
+    oci.diffIds.some((digest, index) => digest !== docker.diffIds[index])
   ) {
     throw new TypeError("candidate OCI and Docker image identities do not match");
   }

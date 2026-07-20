@@ -9,8 +9,9 @@ const accountId = "0123456789abcdef0123456789abcdef";
 const imageRef = `registry.cloudflare.com/${accountId}/hereisit-image-engine:${"a".repeat(40)}`;
 const manifestDigest = `sha256:${"b".repeat(64)}`;
 const configDigest = `sha256:${"c".repeat(64)}`;
-const layerDigests = [`sha256:${"d".repeat(64)}`, `sha256:${"e".repeat(64)}`];
-const candidateIdentity = { configDigest, layerDigests };
+const distributionLayerDigests = [`sha256:${"d".repeat(64)}`, `sha256:${"e".repeat(64)}`];
+const diffIds = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
+const candidateIdentity = { configDigest, distributionLayerDigests };
 
 function artifact(path: string, sha256: string) {
   return { path, sizeBytes: 1, sha256 };
@@ -37,8 +38,8 @@ function finalizedCandidate() {
     gitSha,
     engine: {
       loadedImage: `hereisit-image-engine:${gitSha}`,
-      oci: candidateIdentity,
-      docker: candidateIdentity,
+      oci: { ...candidateIdentity, diffIds },
+      docker: { configDigest, diffIds },
     },
     web: { staging, production },
     security: { trivyDbDigest: `sha256:${"5".repeat(64)}` },
@@ -69,7 +70,7 @@ function descriptor({
   architecture = "amd64",
   ref = `${imageRef}@${digest}`,
   config = configDigest,
-  layers = layerDigests,
+  layers = distributionLayerDigests,
 } = {}) {
   return {
     Ref: ref,
@@ -167,7 +168,7 @@ describe("Cloudflare image digest resolver", () => {
       descriptor({ ref: `${imageRef}@sha256:${"9".repeat(64)}` }),
       descriptor({ digest: "sha512:bad" }),
       descriptor({ config: `sha256:${"7".repeat(64)}` }),
-      descriptor({ layers: [...layerDigests].reverse() }),
+      descriptor({ layers: [...distributionLayerDigests].reverse() }),
     ]) {
       expect(() =>
         resolveCloudflareImageDigest({

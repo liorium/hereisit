@@ -29,8 +29,8 @@
       "required": ["loadedImage", "oci", "docker"],
       "properties": {
         "loadedImage": { "type": "string", "pattern": "^hereisit-image-engine:[a-f0-9]{40}$" },
-        "oci": { "$ref": "#/$defs/imageIdentity" },
-        "docker": { "$ref": "#/$defs/imageIdentity" }
+        "oci": { "$ref": "#/$defs/ociImageIdentity" },
+        "docker": { "$ref": "#/$defs/dockerImageIdentity" }
       }
     },
     "web": { "$ref": "#/$defs/webIdentities" },
@@ -60,19 +60,29 @@
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
-    "imageIdentity": {
+    "digestList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/digest" }
+    },
+    "ociImageIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["configDigest", "layerDigests"],
+      "required": ["configDigest", "distributionLayerDigests", "diffIds"],
       "properties": {
         "configDigest": { "$ref": "#/$defs/digest" },
-        "layerDigests": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 128,
-          "uniqueItems": true,
-          "items": { "$ref": "#/$defs/digest" }
-        }
+        "distributionLayerDigests": { "$ref": "#/$defs/digestList" },
+        "diffIds": { "$ref": "#/$defs/digestList" }
+      }
+    },
+    "dockerImageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configDigest", "diffIds"],
+      "properties": {
+        "configDigest": { "$ref": "#/$defs/digest" },
+        "diffIds": { "$ref": "#/$defs/digestList" }
       }
     },
     "webIdentity": {
