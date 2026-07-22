@@ -37,7 +37,7 @@ describe("processing staging workflow", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("type: choice");
     expect(workflow).toMatch(/options:\s*(?:\[build,\s*deploy\]|\n\s+- build\n\s+- deploy)/);
-    expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).toContain("permissions:\n  actions: read\n  contents: read");
     expect(workflow).not.toMatch(/^\s+(?:push|pull_request|schedule):/m);
 
     expectMainRepositoryGate(jobBody("build"), "build");
@@ -57,6 +57,27 @@ describe("processing staging workflow", () => {
     expect(workflow.indexOf("  verify-release:\n")).toBeLessThan(workflow.indexOf("  deploy:\n"));
     expect(deploy).toContain("needs: verify-release");
     expect(deploy).toContain("environment: processing-staging");
+    expect(deploy.slice(0, deploy.indexOf("    steps:"))).not.toContain("secrets.");
+  });
+
+  it("binds same-run artifact bytes through native and independent exact-ID downloads", () => {
+    const deploy = jobBody("deploy");
+    const native = actionStep(deploy, "actions/download-artifact@");
+    const independent = deploy.indexOf("node scripts/download-and-verify-github-artifact.mjs");
+
+    expect(native).toContain(`artifact-ids: \${{ needs.verify-release.outputs.artifact_id }}`);
+    expect(native).toContain("path: .artifacts/native-download");
+    expect(independent).toBeGreaterThan(deploy.indexOf("actions/download-artifact@"));
+    for (const binding of [
+      '--repo "$GITHUB_REPOSITORY"',
+      '--run-id "$GITHUB_RUN_ID"',
+      '--expected-head-sha "$GITHUB_SHA"',
+      '--expected-artifact-id "$ARTIFACT_ID"',
+      "--allow-in-progress true",
+      "--output-dir .artifacts/candidate",
+    ]) {
+      expect(deploy.slice(independent)).toContain(binding);
+    }
   });
 
   it("resolves and verifies the complete finalized signed release before mutation", () => {
@@ -106,7 +127,7 @@ describe("processing staging workflow", () => {
     const deployments = [...deploy.matchAll(/pnpm exec wrangler deploy/g)];
     const finalDeployment = deploy.lastIndexOf("pnpm exec wrangler deploy");
     const secretVerification = deploy.indexOf("node scripts/verify-worker-secret-list.mjs");
-    const versionAttestation = deploy.indexOf("node scripts/verify-worker-version-chain.mjs");
+    const versionAttestation = deploy.lastIndexOf("node scripts/verify-worker-version-chain.mjs");
     const attestationApplication = deploy.indexOf(
       "node scripts/apply-worker-version-attestations.mjs",
     );
@@ -121,7 +142,9 @@ describe("processing staging workflow", () => {
     expect(provision).toBeGreaterThan(resolveDigest);
     expect(deploy).toContain(".artifacts/deployment/cloudflare-image-digest.txt");
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
-    expect(deploy.match(/--rollout-percent 0/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(deploy).toContain("generate_config bootstrap");
+    expect(deploy).toContain("generate_config active");
+    expect(deploy).toContain("--rollout-percent 0");
     expect(deploy).not.toMatch(/--rollout-percent (?!0\b)\d+/);
     expect(deployments.length).toBeGreaterThanOrEqual(2);
     expect(secretVerification).toBeGreaterThanOrEqual(0);
@@ -148,6 +171,41 @@ describe("processing staging workflow", () => {
       `STAGING_MAINTAINER_SESSION_ID: \${{ secrets.STAGING_MAINTAINER_SESSION_ID }}`,
     );
     expect(deploy.slice(smoke)).toContain("--output .artifacts/deployment/smoke-result.json");
+  });
+
+  it("resolves D1 active state and keeps all mutation gates ahead of primary resume", () => {
+    const deploy = jobBody("deploy");
+    const migrations = deploy.indexOf("wrangler d1 migrations apply");
+    const versionsBefore = deploy.indexOf("versions-before.json");
+    const previous = deploy.indexOf("resolve-previous-active-worker-version.mjs");
+    const bootstrap = deploy.indexOf("bootstrap-deploy.ndjson");
+    const pages = deploy.indexOf("node scripts/verify-pages-alias.mjs");
+    const gate = deploy.indexOf("node scripts/verify-deployment-gate-artifacts.mjs");
+    const playwright = deploy.indexOf("pnpm exec playwright install --with-deps chromium");
+    const resume = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
+
+    expect(versionsBefore).toBeGreaterThan(migrations);
+    expect(previous).toBeGreaterThan(versionsBefore);
+    expect(bootstrap).toBeGreaterThan(previous);
+    expect(pages).toBeGreaterThan(bootstrap);
+    expect(gate).toBeGreaterThan(pages);
+    expect(playwright).toBeGreaterThan(gate);
+    expect(resume).toBeGreaterThan(playwright);
+    expect(deploy).not.toContain("STAGING_PREVIOUS_ACTIVE_VERSION_ID");
+  });
+
+  it("re-pauses and verifies both queues only after a successful primary resume", () => {
+    const deploy = jobBody("deploy");
+    expect(deploy).toContain("id: resume-primary");
+    expect(
+      deploy.match(/if: failure\(\) && steps\.resume-primary\.outcome == 'success'/g)?.length,
+    ).toBe(2);
+    const cleanup = deploy.indexOf('pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"');
+    expect(cleanup).toBeGreaterThan(
+      deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"'),
+    );
+    expect(deploy.slice(cleanup)).toContain('--queue "$QUEUE_NAME" --expected paused');
+    expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
   });
 
   it("publishes only sanitized deployment evidence for seven days", () => {
