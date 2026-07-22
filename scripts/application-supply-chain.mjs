@@ -25,7 +25,7 @@ const NOTICES_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SBOM_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SCOPES = ["engine", "web-staging", "web-production", "worker", "lockfile"];
 const APPLICATION_SCOPES = new Set(["web-staging", "web-production", "worker"]);
-const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.2.4"];
+const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.3.2"];
 const PNPM_VERSION = "11.11.0";
 const SYFT_VERSION = "1.44.0";
 const SYFT_IMAGE =
@@ -46,7 +46,7 @@ const EXPECTED_FALLBACKS = {
     path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
     sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
   },
-  "@img/sharp-libvips-linux-x64@1.2.4": { kind: "root-readme", path: "README.md" },
+  "@img/sharp-libvips-linux-x64@1.3.2": { kind: "root-readme", path: "README.md" },
   "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
     kind: "package",
     package: "@napi-rs/canvas@1.0.2",

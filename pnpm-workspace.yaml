@@ -4,6 +4,7 @@ packages:
 
 overrides:
   postcss: 8.5.16
+  'sharp@<0.35.0': 0.35.3
 
 allowBuilds:
   esbuild: true

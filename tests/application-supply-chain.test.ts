@@ -31,7 +31,7 @@ const policy = {
       path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
       sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
     },
-    "@img/sharp-libvips-linux-x64@1.2.4": { kind: "root-readme", path: "README.md" },
+    "@img/sharp-libvips-linux-x64@1.3.2": { kind: "root-readme", path: "README.md" },
     "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
       kind: "package",
       package: "@napi-rs/canvas@1.0.2",
@@ -40,7 +40,7 @@ const policy = {
     "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "next@16.2.10" },
     "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
   },
-  mustNotShip: ["@img/sharp-libvips-linux-x64@1.2.4"],
+  mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2"],
   pnpm: { version: "11.11.0" },
   schemaVersion: 1,
   syft: { image: syftImage, version: "1.44.0" },
@@ -67,7 +67,7 @@ const packageSpecs: PackageSpec[] = [
   { name: "@cloudflare/containers", version: "0.3.7", license: "MIT OR Apache-2.0", text: null },
   {
     name: "@img/sharp-libvips-linux-x64",
-    version: "1.2.4",
+    version: "1.3.2",
     license: "LGPL-3.0-or-later",
     text: "libvips distribution terms\n",
   },
@@ -217,8 +217,8 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "6be23cf852e8f029d8584facf29dd7e9bcaa794785a1e3b195295d5c983bea69",
-      packageCount: 44,
+      noticeSha256: "af6bc3c322a72cf1c621b4c86db77b39ef7708851ec9c3908e89e3022c69f97d",
+      packageCount: 46,
     });
   });
 
