@@ -96,7 +96,13 @@ export function createProcessingReleaseInputs(rawInput) {
   const ceilings = assertObject(input.ceilings, "ceilings");
   assertExactKeys(
     ceilings,
-    ["maxCostPer1000JobsMicrousd", "maxProjectedMonthlyCostMicrousd"],
+    [
+      "maxCostPer1000JobsMicrousd",
+      "maxLiveMedianOutputRatioBps",
+      "maxLiveP95WeightedUnits",
+      "maxLiveOriginalRetainedRateBps",
+      "maxProjectedMonthlyCostMicrousd",
+    ],
     "ceilings",
   );
   assertNonNegativeSafeInteger(
@@ -107,6 +113,17 @@ export function createProcessingReleaseInputs(rawInput) {
     ceilings.maxProjectedMonthlyCostMicrousd,
     "ceilings.maxProjectedMonthlyCostMicrousd",
   );
+  for (const field of ["maxLiveMedianOutputRatioBps", "maxLiveP95WeightedUnits"]) {
+    assertNonNegativeSafeInteger(ceilings[field], `ceilings.${field}`);
+    if (ceilings[field] === 0) throw new TypeError(`ceilings.${field} must be positive`);
+  }
+  assertNonNegativeSafeInteger(
+    ceilings.maxLiveOriginalRetainedRateBps,
+    "ceilings.maxLiveOriginalRetainedRateBps",
+  );
+  if (ceilings.maxLiveOriginalRetainedRateBps > 10_000) {
+    throw new TypeError("ceilings.maxLiveOriginalRetainedRateBps must not exceed 10000");
+  }
   const routeInput = assertObject(input.routeCpuBenchmark, "routeCpuBenchmark");
   assertExactKeys(
     routeInput,
@@ -141,17 +158,8 @@ export async function writeProcessingReleaseInputs(path, rawInput) {
   return writeCanonicalJsonAtomic(path, document, { refuseOverwrite: true });
 }
 
-export async function verifyProcessingReleaseInputs(path) {
-  const pathReleaseId = releaseInputPathPattern.exec(path)?.[1];
-  if (pathReleaseId === undefined) {
-    throw new TypeError("processing release inputs must use their canonical repository path");
-  }
-  const requestedPath = resolve(path);
-  const bytes = await readBoundedRegularFile(
-    requestedPath,
-    maximumReleaseInputBytes,
-    "processing release inputs",
-  );
+export function validateCanonicalProcessingReleaseInputs(bytes) {
+  if (!Buffer.isBuffer(bytes)) throw new TypeError("processing release inputs must be bytes");
   let parsed;
   try {
     parsed = JSON.parse(bytes);
@@ -164,11 +172,26 @@ export async function verifyProcessingReleaseInputs(path) {
     ...rawInput
   } = assertObject(parsed, "processing release inputs");
   const document = createProcessingReleaseInputs(rawInput);
-  if (document.releaseId !== pathReleaseId) {
-    throw new TypeError("processing release ID does not match its repository path");
-  }
   if (!bytes.equals(Buffer.from(canonicalJson(document)))) {
     throw new TypeError("processing release inputs are not canonical JSON");
+  }
+  return document;
+}
+
+export async function verifyProcessingReleaseInputs(path) {
+  const pathReleaseId = releaseInputPathPattern.exec(path)?.[1];
+  if (pathReleaseId === undefined) {
+    throw new TypeError("processing release inputs must use their canonical repository path");
+  }
+  const requestedPath = resolve(path);
+  const bytes = await readBoundedRegularFile(
+    requestedPath,
+    maximumReleaseInputBytes,
+    "processing release inputs",
+  );
+  const document = validateCanonicalProcessingReleaseInputs(bytes);
+  if (document.releaseId !== pathReleaseId) {
+    throw new TypeError("processing release ID does not match its repository path");
   }
   return sha256Bytes(bytes);
 }

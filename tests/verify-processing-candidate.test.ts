@@ -190,6 +190,9 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
           },
           ceilings: {
             maxCostPer1000JobsMicrousd: 500_000,
+            maxLiveMedianOutputRatioBps: 8_000,
+            maxLiveP95WeightedUnits: 12_000,
+            maxLiveOriginalRetainedRateBps: 2_500,
             maxProjectedMonthlyCostMicrousd: 5_000_000,
           },
           routeCpuBenchmark: {

@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import * as processingReleaseInputModule from "../scripts/create-processing-release-inputs.mjs";
 import {
   createProcessingReleaseInputs,
   processingReleaseInputsSha256,
@@ -27,7 +28,13 @@ const reviewed = {
   reviewedAt: "2026-07-16T00:00:00.000Z",
   reviewerIdHash: sha("b"),
   pricesAndResources: { version: 1, artifactSha256: sha("c"), modelInput },
-  ceilings: { maxCostPer1000JobsMicrousd: 500_000, maxProjectedMonthlyCostMicrousd: 5_000_000 },
+  ceilings: {
+    maxCostPer1000JobsMicrousd: 500_000,
+    maxLiveMedianOutputRatioBps: 8_000,
+    maxLiveP95WeightedUnits: 12_000,
+    maxLiveOriginalRetainedRateBps: 2_500,
+    maxProjectedMonthlyCostMicrousd: 5_000_000,
+  },
   routeCpuBenchmark: {
     version: 1,
     artifactSha256: sha("d"),
@@ -74,6 +81,13 @@ describe("immutable processing release inputs", () => {
       "upload",
     ]);
     expect(result.routeCpuEnvelopeMs.policy).toBe(2);
+    expect(result.ceilings).toEqual({
+      maxCostPer1000JobsMicrousd: 500_000,
+      maxLiveMedianOutputRatioBps: 8_000,
+      maxLiveOriginalRetainedRateBps: 2_500,
+      maxLiveP95WeightedUnits: 12_000,
+      maxProjectedMonthlyCostMicrousd: 5_000_000,
+    });
     expect(processingReleaseInputsSha256(result)).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -90,12 +104,36 @@ describe("immutable processing release inputs", () => {
     expect(() => createProcessingReleaseInputs(value)).toThrow();
   });
 
+  it.each([
+    ["zero median ratio", "maxLiveMedianOutputRatioBps", 0],
+    ["unsafe median ratio", "maxLiveMedianOutputRatioBps", Number.MAX_SAFE_INTEGER + 1],
+    ["zero weighted units", "maxLiveP95WeightedUnits", 0],
+    ["negative retained rate", "maxLiveOriginalRetainedRateBps", -1],
+    ["retained rate above 10000", "maxLiveOriginalRetainedRateBps", 10_001],
+  ])("rejects %s", (_label, field, value) => {
+    expect(() =>
+      createProcessingReleaseInputs({
+        ...reviewed,
+        ceilings: { ...reviewed.ceilings, [field]: value },
+      }),
+    ).toThrow();
+  });
+
   it("produces stable content", () => {
     const first = createProcessingReleaseInputs(reviewed);
     const second = createProcessingReleaseInputs(
       Object.fromEntries(Object.entries(reviewed).reverse()),
     );
     expect(processingReleaseInputsSha256(first)).toBe(processingReleaseInputsSha256(second));
+  });
+
+  it("validates canonical release-input bytes through one shared document validator", () => {
+    const document = createProcessingReleaseInputs(reviewed);
+    expect(
+      processingReleaseInputModule.validateCanonicalProcessingReleaseInputs(
+        Buffer.from(canonicalJson(document)),
+      ),
+    ).toEqual(document);
   });
 
   it("writes once and refuses to overwrite an immutable release input", async () => {
@@ -324,5 +362,75 @@ describe("immutable processing release inputs", () => {
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
+  });
+
+  it("preserves the reviewed component-file creation mode with all five ceilings", async () => {
+    const fixture = await createVerificationRoot();
+    const priceInput = join(fixture.root, "reviewed-prices.json");
+    const routeInput = join(fixture.root, "reviewed-routes.json");
+    const ceilingInput = join(fixture.root, "reviewed-ceilings.json");
+    const { artifactSha256: _artifactSha256, ...routeCpuBenchmark } = reviewed.routeCpuBenchmark;
+    try {
+      await writeFile(
+        priceInput,
+        JSON.stringify({
+          version: 1,
+          reviewedAt: reviewed.reviewedAt,
+          reviewerIdHash: reviewed.reviewerIdHash,
+          modelInput: reviewed.pricesAndResources.modelInput,
+        }),
+      );
+      await writeFile(routeInput, JSON.stringify(routeCpuBenchmark));
+      await writeFile(ceilingInput, JSON.stringify(reviewed.ceilings));
+
+      const result = runCli(fixture.root, [
+        "--base-source-sha",
+        reviewed.baseSourceSha256,
+        "--price-input",
+        priceInput,
+        "--route-cpu-benchmark",
+        routeInput,
+        "--quality-cost-ceilings",
+        ceilingInput,
+        "--schema",
+        fixture.schemaPath,
+        "--output",
+        fixture.inputPath,
+      ]);
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(await readFile(fixture.inputPath, "utf8")).ceilings).toEqual(
+        reviewed.ceilings,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes the exact v1 ceiling constraints in the trusted schema", () => {
+    const schema = JSON.parse(trustedSchema.toString("utf8"));
+    expect(schema.properties.ceilings).toMatchObject({
+      additionalProperties: false,
+      required: [
+        "maxCostPer1000JobsMicrousd",
+        "maxLiveMedianOutputRatioBps",
+        "maxLiveP95WeightedUnits",
+        "maxLiveOriginalRetainedRateBps",
+        "maxProjectedMonthlyCostMicrousd",
+      ],
+      properties: {
+        maxLiveMedianOutputRatioBps: {
+          type: "integer",
+          minimum: 1,
+          maximum: Number.MAX_SAFE_INTEGER,
+        },
+        maxLiveP95WeightedUnits: {
+          type: "integer",
+          minimum: 1,
+          maximum: Number.MAX_SAFE_INTEGER,
+        },
+        maxLiveOriginalRetainedRateBps: { type: "integer", minimum: 0, maximum: 10_000 },
+      },
+    });
   });
 });

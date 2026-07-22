@@ -6,7 +6,7 @@ import {
   liveCostInputFromReleaseDocument,
   validateLiveCostModelDocument,
 } from "./create-live-cost-model.mjs";
-import { createProcessingReleaseInputs } from "./create-processing-release-inputs.mjs";
+import { validateCanonicalProcessingReleaseInputs } from "./create-processing-release-inputs.mjs";
 import { sha256Bytes } from "./image-lab-common.mjs";
 
 const maximumDocumentBytes = 1024 * 1024;
@@ -49,20 +49,10 @@ export async function verifyProcessingReleaseInputBindings({
     readBoundedRegularFile(releaseInputsPath, "processing release inputs"),
     readBoundedRegularFile(liveCostModelPath, "live cost model"),
   ]);
-  const parsedReleaseInputs = parseJson(releaseBytes, "processing release inputs");
-  const {
-    routeCpuBenchmarkSha256: _routeCpuBenchmarkSha256,
-    routeCpuEnvelopeMs: _routeCpuEnvelopeMs,
-    ...rawReleaseInputs
-  } = parsedReleaseInputs;
-  const releaseInputs = createProcessingReleaseInputs(rawReleaseInputs);
+  const releaseInputs = validateCanonicalProcessingReleaseInputs(releaseBytes);
   if (releaseInputs.releaseId !== expectedReleaseId) {
     throw new TypeError("processing release inputs do not match the candidate release ID");
   }
-  if (!releaseBytes.equals(Buffer.from(canonicalJson(releaseInputs)))) {
-    throw new TypeError("processing release inputs are not canonical");
-  }
-
   const liveCostModel = validateLiveCostModelDocument(parseJson(costBytes, "live cost model"));
   if (!costBytes.equals(Buffer.from(canonicalJson(liveCostModel)))) {
     throw new TypeError("live cost model is not canonical");
