@@ -165,6 +165,8 @@ describe("GitHub artifact downloader", () => {
         runDownloader(server.origin, join(temporary, "allowed"), sha256(zip), [
           "--allow-in-progress",
           "true",
+          "--expected-artifact-id",
+          String(artifactId),
         ]),
       ).resolves.toBeDefined();
       await expect(
@@ -187,8 +189,30 @@ describe("GitHub artifact downloader", () => {
         runDownloader(server.origin, join(temporary, runStatus), sha256(zip), [
           "--allow-in-progress",
           "true",
+          "--expected-artifact-id",
+          String(artifactId),
         ]),
       ).rejects.toMatchObject({ stderr: expect.stringContaining("completed successfully") });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requires an exact artifact ID for in-progress handoffs", async () => {
+    const temporary = await temporaryDirectory();
+    const zip = defaultZip();
+    const server = await startGitHubServer({
+      zip,
+      runStatus: "in_progress",
+      runConclusion: null,
+    });
+    try {
+      await expect(
+        runDownloader(server.origin, join(temporary, "candidate"), sha256(zip), [
+          "--allow-in-progress",
+          "true",
+        ]),
+      ).rejects.toMatchObject({ stderr: expect.stringContaining("exact artifact ID") });
     } finally {
       await server.close();
     }

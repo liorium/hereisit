@@ -517,6 +517,9 @@ export async function downloadAndVerifyGitHubArtifact({
   if (typeof allowInProgress !== "boolean") {
     throw new TypeError("allow-in-progress must be boolean");
   }
+  if (allowInProgress && expectedArtifactId === undefined) {
+    throw new TypeError("in-progress artifact verification requires an exact artifact ID");
+  }
   const origin = assertApiOrigin(apiOrigin);
   const headers = apiHeaders(token);
   if (await pathExists(resolve(outputDir))) throw new Error("output directory already exists");
