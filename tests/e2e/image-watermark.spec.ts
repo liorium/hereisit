@@ -1100,7 +1100,8 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await logoSize.fill("50");
   await expect(logoSize).toHaveValue("50");
   const textMode = page.getByRole("radio", { name: "문구", exact: true });
-  await textMode.check();
+  await textMode.focus();
+  await page.keyboard.press("Space");
   await expect(textMode).toBeChecked();
   await expect(page.getByRole("slider", { name: /문구 크기/ })).toHaveValue("30");
 
