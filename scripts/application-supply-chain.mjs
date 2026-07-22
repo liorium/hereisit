@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
-import { lstat, mkdir, readdir, realpath, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -18,6 +19,8 @@ import {
 const INVENTORY_MAXIMUM_BYTES = 2 * 1024 * 1024;
 const PACKAGE_JSON_MAXIMUM_BYTES = 128 * 1024;
 const LICENSE_TEXT_MAXIMUM_BYTES = 256 * 1024;
+const PACKAGE_DIRECTORY_MAXIMUM_ENTRIES = 4096;
+const PACKAGE_LICENSE_MAXIMUM_FILES = 64;
 const NOTICES_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SBOM_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SCOPES = ["engine", "web-staging", "web-production", "worker", "lockfile"];
@@ -37,6 +40,21 @@ const ALLOWED_LICENSES = [
   "MIT OR Apache-2.0",
   "(MIT AND Zlib)",
 ];
+const EXPECTED_FALLBACKS = {
+  "@cloudflare/containers@0.3.7": {
+    kind: "checked-in",
+    path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
+    sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
+  },
+  "@img/sharp-libvips-linux-x64@1.2.4": { kind: "root-readme", path: "README.md" },
+  "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
+    kind: "package",
+    package: "@napi-rs/canvas@1.0.2",
+  },
+  "@next/env@16.2.10": { kind: "package", package: "next@16.2.10" },
+  "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "next@16.2.10" },
+  "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
+};
 const PNPM_REQUEST = Object.freeze({
   command: "pnpm",
   args: [
@@ -77,11 +95,11 @@ function decodeUtf8(bytes, label) {
   }
   for (const character of text) {
     const code = character.charCodeAt(0);
-    if ((code < 32 && code !== 9 && code !== 10) || code === 127) {
+    if ((code < 32 && code !== 9 && code !== 10) || code === 127 || (code >= 128 && code <= 159)) {
       throw new TypeError(`${label} contains prohibited control characters`);
     }
   }
-  return text;
+  return text.replace(/[ \t]+$/gmu, "");
 }
 
 function parseJson(bytes, label) {
@@ -160,7 +178,43 @@ async function loadPolicy(path) {
       throw new TypeError(`fallback ${identity} kind is invalid`);
     }
   }
+  if (canonicalJson(fallbacks) !== canonicalJson(EXPECTED_FALLBACKS)) {
+    throw new TypeError("application license fallback definitions drifted");
+  }
   return { policy, bytes, mustNotShip: new Set(mustNotShip), fallbacks };
+}
+
+async function withPinnedPackageRoot(root, task) {
+  let handle;
+  try {
+    handle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") throw new TypeError("inventory package root must not be symbolic");
+    throw new Error("inventory package root could not be opened");
+  }
+  try {
+    const descriptorRoot =
+      process.platform === "linux"
+        ? `/proc/self/fd/${handle.fd}`
+        : process.platform === "darwin"
+          ? `/dev/fd/${handle.fd}`
+          : undefined;
+    if (descriptorRoot === undefined) {
+      throw new TypeError("application supply-chain package reads require a supported platform");
+    }
+    const openedRoot = await realpath(descriptorRoot).catch(() => {
+      throw new TypeError("inventory package root changed while reading");
+    });
+    if (openedRoot !== root) throw new TypeError("inventory package root changed while reading");
+    const result = await task(descriptorRoot);
+    const finalRoot = await realpath(descriptorRoot).catch(() => {
+      throw new TypeError("inventory package root changed while reading");
+    });
+    if (finalRoot !== root) throw new TypeError("inventory package root changed while reading");
+    return result;
+  } finally {
+    await handle.close();
+  }
 }
 
 async function assertRepository(root) {
@@ -259,10 +313,12 @@ async function collectInventory(repository, rawInventory) {
           throw new TypeError("inventory package path must not be symbolic");
         }
         ensureInside(canonicalPath, repository.nodeModules, "inventory package path");
-        const packageBytes = await readBoundedRegularFile(
-          join(canonicalPath, "package.json"),
-          PACKAGE_JSON_MAXIMUM_BYTES,
-          "inventory package manifest",
+        const packageBytes = await withPinnedPackageRoot(canonicalPath, (pinnedRoot) =>
+          readBoundedRegularFile(
+            join(pinnedRoot, "package.json"),
+            PACKAGE_JSON_MAXIMUM_BYTES,
+            "inventory package manifest",
+          ),
         );
         const manifest = assertObject(
           parseJson(packageBytes, "inventory package manifest"),
@@ -295,29 +351,48 @@ async function collectInventory(repository, rawInventory) {
   return packages;
 }
 
-async function directLicenseTexts(packageValue) {
-  const entries = await readdir(packageValue.root, { withFileTypes: true });
-  const candidates = entries
-    .filter((entry) => /^(?:license|copying|notice)(?:[._-].*)?$/i.test(entry.name))
-    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
-  const texts = [];
-  for (const candidate of candidates) {
-    if (!candidate.isFile()) throw new TypeError("package license text must be a regular file");
-    const bytes = await readBoundedRegularFile(
-      join(packageValue.root, candidate.name),
-      LICENSE_TEXT_MAXIMUM_BYTES,
-      "package license text",
-    );
-    texts.push({ label: candidate.name, text: decodeUtf8(bytes, "package license text") });
-  }
-  return texts;
+async function directLicenseTexts(packageValue, budget) {
+  return withPinnedPackageRoot(packageValue.root, async (pinnedRoot) => {
+    const candidates = [];
+    const directory = await opendir(pinnedRoot);
+    let entryCount = 0;
+    try {
+      for await (const entry of directory) {
+        entryCount += 1;
+        if (entryCount > PACKAGE_DIRECTORY_MAXIMUM_ENTRIES) {
+          throw new RangeError("package directory has too many entries");
+        }
+        if (!/^(?:license|copying|notice)(?:[._-].*)?$/i.test(entry.name)) continue;
+        if (!entry.isFile()) throw new TypeError("package license text must be a regular file");
+        candidates.push(entry.name);
+        if (candidates.length > PACKAGE_LICENSE_MAXIMUM_FILES) {
+          throw new RangeError("package has too many license files");
+        }
+      }
+    } finally {
+      await directory.close().catch(() => undefined);
+    }
+    candidates.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    const texts = [];
+    for (const name of candidates) {
+      const bytes = await readBoundedRegularFile(
+        join(pinnedRoot, name),
+        Math.min(LICENSE_TEXT_MAXIMUM_BYTES, budget.remainingBytes),
+        "package license text",
+      );
+      budget.remainingBytes -= bytes.byteLength;
+      texts.push({ label: name, text: decodeUtf8(bytes, "package license text") });
+    }
+    return texts;
+  });
 }
 
 async function buildNotices(repository, policyState, packages) {
+  const budget = { remainingBytes: NOTICES_MAXIMUM_BYTES };
   const packageMap = new Map(packages.map((entry) => [entry.identity, entry]));
   const direct = new Map();
   for (const packageValue of packages)
-    direct.set(packageValue.identity, await directLicenseTexts(packageValue));
+    direct.set(packageValue.identity, await directLicenseTexts(packageValue, budget));
   const usedFallbacks = new Set();
   const checkedInHashes = new Set();
 
@@ -346,9 +421,10 @@ async function buildNotices(repository, policyState, packages) {
       ensureInside(fallbackPath, repository.root, "checked-in license text");
       const bytes = await readBoundedRegularFile(
         fallbackPath,
-        LICENSE_TEXT_MAXIMUM_BYTES,
+        Math.min(LICENSE_TEXT_MAXIMUM_BYTES, budget.remainingBytes),
         "checked-in license text",
       );
+      budget.remainingBytes -= bytes.byteLength;
       const digest = sha256Bytes(bytes);
       if (digest !== fallback.sha256)
         throw new TypeError("checked-in license text SHA-256 changed");
@@ -362,16 +438,22 @@ async function buildNotices(repository, policyState, packages) {
     }
     const readmePath = resolve(packageValue.root, fallback.path);
     ensureInside(readmePath, packageValue.root, "fallback README");
-    const bytes = await readBoundedRegularFile(
-      readmePath,
-      LICENSE_TEXT_MAXIMUM_BYTES,
-      "fallback README",
+    const bytes = await withPinnedPackageRoot(packageValue.root, (pinnedRoot) =>
+      readBoundedRegularFile(
+        join(pinnedRoot, fallback.path),
+        Math.min(LICENSE_TEXT_MAXIMUM_BYTES, budget.remainingBytes),
+        "fallback README",
+      ),
     );
+    budget.remainingBytes -= bytes.byteLength;
     return [{ label: fallback.path, text: decodeUtf8(bytes, "fallback README") }];
   }
 
   const thirdParty = packages.filter((entry) => !entry.name.startsWith("@hereisit/"));
   const sections = [];
+  const header =
+    "HereIsIt Third-Party Notices\n\nGenerated deterministically from the reviewed production dependency inventory.\n\n";
+  let noticeBytes = Buffer.byteLength(header);
   for (const packageValue of thirdParty) {
     const mustNotShip = policyState.mustNotShip.has(packageValue.identity);
     if (!ALLOWED_LICENSES.includes(packageValue.license)) {
@@ -381,18 +463,21 @@ async function buildNotices(repository, policyState, packages) {
     }
     const texts = await resolveTexts(packageValue.identity);
     texts.sort((left, right) => (left.label < right.label ? -1 : left.label > right.label ? 1 : 0));
-    sections.push(
-      `${"=".repeat(72)}\nPackage: ${packageValue.name}\nVersion: ${packageValue.version}\nLicense: ${packageValue.license}\n${texts
-        .map((entry) => `\n--- ${entry.label} ---\n${entry.text.trimEnd()}\n`)
-        .join("")}`,
-    );
+    const section = `${"=".repeat(72)}\nPackage: ${packageValue.name}\nVersion: ${packageValue.version}\nLicense: ${packageValue.license}\n${texts
+      .map((entry) => `\n--- ${entry.label} ---\n${entry.text.trimEnd()}\n`)
+      .join("")}`;
+    noticeBytes += Buffer.byteLength(`${sections.length === 0 ? "" : "\n"}${section}`);
+    if (noticeBytes > NOTICES_MAXIMUM_BYTES) {
+      throw new RangeError("third-party notices are oversized");
+    }
+    sections.push(section);
   }
   const unused = Object.keys(policyState.fallbacks).filter(
     (identity) => !usedFallbacks.has(identity),
   );
   if (unused.length > 0)
     throw new TypeError("application license policy contains an unused fallback");
-  const text = `HereIsIt Third-Party Notices\n\nGenerated deterministically from the reviewed production dependency inventory.\n\n${sections.join("\n")}`;
+  const text = `${header}${sections.join("\n")}`;
   if (Buffer.byteLength(text) > NOTICES_MAXIMUM_BYTES)
     throw new RangeError("third-party notices are oversized");
   return {

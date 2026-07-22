@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -217,7 +217,7 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "e833a0609b666b386f49f76ec5266d3cb744669bbcec7a5b72766dfff6bc3d62",
+      noticeSha256: "6be23cf852e8f029d8584facf29dd7e9bcaa794785a1e3b195295d5c983bea69",
       packageCount: 44,
     });
   });
@@ -390,6 +390,11 @@ describe("application supply-chain gate", () => {
     inventory.MIT = inventory.MIT.slice(1);
     record.license = license;
     inventory[license || "missing"] = [record];
+    await writeCanonical(join(record.paths[0], "package.json"), {
+      name: record.name,
+      version: record.versions[0],
+      license,
+    });
     await expect(
       runApplicationSupplyChain(
         { mode: "notices", ...fixture.options },
@@ -419,6 +424,13 @@ describe("application supply-chain gate", () => {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
+          "@next/env@16.2.10": { kind: "package", package: "react@19.2.7" },
+        },
+      },
+      {
+        ...policy,
+        fallbacks: {
+          ...policy.fallbacks,
           "@next/env@16.2.10": { kind: "package", package: "@next/swc-linux-x64-gnu@16.2.10" },
           "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "@next/env@16.2.10" },
         },
@@ -440,6 +452,37 @@ describe("application supply-chain gate", () => {
         runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
       ).rejects.toThrow(/fallback|license text|SHA-256|package/i);
     }
+  });
+
+  it("rejects oversized inventory and package manifests", async () => {
+    const oversizedInventory = await makeFixture();
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "notices", ...oversizedInventory.options },
+        { listProductionLicenses: async () => " ".repeat(2 * 1024 * 1024 + 1) },
+      ),
+    ).rejects.toThrow(/inventory|oversized/i);
+
+    const oversizedManifest = await makeFixture();
+    const first = Object.values(oversizedManifest.inventory)[0][0];
+    const handle = await open(join(first.paths[0], "package.json"), "w");
+    await handle.truncate(128 * 1024 + 1);
+    await handle.close();
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "notices", ...oversizedManifest.options },
+        oversizedManifest.adapters,
+      ),
+    ).rejects.toThrow(/manifest|bounded|package/i);
+  });
+
+  it("rejects C1 controls in license text", async () => {
+    const fixture = await makeFixture();
+    const record = fixture.inventory.MIT[0];
+    await writeFile(join(record.paths[0], "LICENSE"), "license\u0085text\n");
+    await expect(
+      runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
+    ).rejects.toThrow(/control|license text/i);
   });
 
   it("allows must-not-ship inventory but rejects it from application SBOMs", async () => {
@@ -477,6 +520,14 @@ describe("application supply-chain gate", () => {
       (sbom: ReturnType<typeof makeSbom>) => {
         sbom.components.push(structuredClone(sbom.components[0]));
       },
+      (sbom: ReturnType<typeof makeSbom>) => {
+        sbom.metadata.tools.components.push({
+          type: "application",
+          author: "other",
+          name: "other",
+          version: "1.0.0",
+        });
+      },
     ]) {
       const fixture = await makeFixture();
       await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
@@ -500,6 +551,24 @@ describe("application supply-chain gate", () => {
         fixture.adapters,
       ),
     ).rejects.toThrow(/bounded|SBOM/i);
+
+    const driftedHash = await makeFixture();
+    await runApplicationSupplyChain(
+      { mode: "notices", ...driftedHash.options },
+      driftedHash.adapters,
+    );
+    driftedHash.sboms.engine.artifactSha256 = sha("9");
+    await expect(
+      runApplicationSupplyChain(
+        {
+          mode: "verify",
+          ...driftedHash.options,
+          sboms: driftedHash.sboms,
+          gatePath: driftedHash.gatePath,
+        },
+        driftedHash.adapters,
+      ),
+    ).rejects.toThrow(/source|identity|artifact/i);
   });
 
   it("rejects notices mismatch and refuses gate overwrite", async () => {
