@@ -99,11 +99,23 @@ describe("processing staging workflow", () => {
     expect(workflow).not.toMatch(/PRIVATE(?:_|-)KEY/);
   });
 
-  it("deploys only an immutable resolved image at zero rollout with paused queues", () => {
+  it("deploys at zero rollout and resumes only the primary queue after attestation", () => {
     const deploy = jobBody("deploy");
     const resolveDigest = deploy.indexOf("node scripts/resolve-cloudflare-image-digest.mjs");
     const provision = deploy.indexOf("node scripts/ensure-cloudflare-processing-resources.mjs");
     const deployments = [...deploy.matchAll(/pnpm exec wrangler deploy/g)];
+    const finalDeployment = deploy.lastIndexOf("pnpm exec wrangler deploy");
+    const secretVerification = deploy.indexOf("node scripts/verify-worker-secret-list.mjs");
+    const versionAttestation = deploy.indexOf("node scripts/verify-worker-version-chain.mjs");
+    const attestationApplication = deploy.indexOf(
+      "node scripts/apply-worker-version-attestations.mjs",
+    );
+    const resumePrimary = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
+    const verifyPrimary = deploy.indexOf('--queue "$QUEUE_NAME" --expected resumed');
+    const verifyDlq = deploy.indexOf('--queue "$DLQ_NAME" --expected paused');
+    const resumeCommands = [
+      ...workflow.matchAll(/^\s*pnpm exec wrangler queues resume-delivery .+$/gm),
+    ].map(([command]) => command.trim());
 
     expect(resolveDigest).toBeGreaterThanOrEqual(0);
     expect(provision).toBeGreaterThan(resolveDigest);
@@ -112,17 +124,26 @@ describe("processing staging workflow", () => {
     expect(deploy.match(/--rollout-percent 0/g)?.length).toBeGreaterThanOrEqual(2);
     expect(deploy).not.toMatch(/--rollout-percent (?!0\b)\d+/);
     expect(deployments.length).toBeGreaterThanOrEqual(2);
-    expect(deploy).toContain("node scripts/verify-queue-delivery-state.mjs");
-    expect(deploy).toContain("--expected paused");
-    expect(workflow).not.toContain("queues resume-delivery");
+    expect(secretVerification).toBeGreaterThanOrEqual(0);
+    expect(versionAttestation).toBeGreaterThan(finalDeployment);
+    expect(attestationApplication).toBeGreaterThan(versionAttestation);
+    expect(resumePrimary).toBeGreaterThan(finalDeployment);
+    expect(resumePrimary).toBeGreaterThan(secretVerification);
+    expect(resumePrimary).toBeGreaterThan(attestationApplication);
+    expect(verifyPrimary).toBeGreaterThan(resumePrimary);
+    expect(verifyDlq).toBeGreaterThan(resumePrimary);
+    expect(resumeCommands).toEqual(['pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"']);
+    expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
   });
 
-  it("runs the authenticated staging smoke after deployment", () => {
+  it("runs the authenticated staging smoke after both queue-state verifications", () => {
     const deploy = jobBody("deploy");
-    const lastDeployment = deploy.lastIndexOf("pnpm exec wrangler deploy");
+    const verifyPrimary = deploy.indexOf('--queue "$QUEUE_NAME" --expected resumed');
+    const verifyDlq = deploy.indexOf('--queue "$DLQ_NAME" --expected paused');
     const smoke = deploy.indexOf("node scripts/smoke-image-compress-server.mjs");
 
-    expect(smoke).toBeGreaterThan(lastDeployment);
+    expect(smoke).toBeGreaterThan(verifyPrimary);
+    expect(smoke).toBeGreaterThan(verifyDlq);
     expect(deploy).toContain(
       `STAGING_MAINTAINER_SESSION_ID: \${{ secrets.STAGING_MAINTAINER_SESSION_ID }}`,
     );
