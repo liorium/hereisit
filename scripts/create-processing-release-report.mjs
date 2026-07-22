@@ -255,18 +255,53 @@ function cloneSecurity(security, trivyDbDigest) {
   return canonicalize({ trivyDbDigest, ...security });
 }
 
-async function deriveProcessingReleaseReport({
-  candidateRoot,
-  candidateManifestPath,
-  evidenceBundlePath,
-  evidenceSignaturePath,
-  publicKeyPath,
-  now,
-}) {
+function reconstructBuiltCandidate(candidate) {
+  const { report: _report, evidence: _evidence, ...releaseAssets } = candidate.releaseAssets;
+  const { verificationSha256: _verificationSha256, ...finalizedPayload } = candidate;
+  const payload = canonicalize({ ...finalizedPayload, state: "built", releaseAssets });
+  return validateProcessingCandidate({
+    ...payload,
+    verificationSha256: sha256Canonical(payload),
+  });
+}
+
+function assertFinalizedAssetPath(root, path, asset, label) {
+  if (resolve(path) !== resolve(root, ...asset.path.split("/"))) {
+    throw new TypeError(`${label} path does not match the finalized candidate`);
+  }
+}
+
+function assertFinalizedAssetBytes(bytes, asset, label) {
+  if (bytes.byteLength !== asset.sizeBytes || sha256Bytes(bytes) !== asset.sha256) {
+    throw new TypeError(`${label} does not match the finalized candidate`);
+  }
+}
+
+async function readFinalizedAsset(root, asset, maximumBytes, label) {
+  const bytes = await readBoundedRegularFile(
+    resolve(root, ...asset.path.split("/")),
+    maximumBytes,
+    label,
+  );
+  assertFinalizedAssetBytes(bytes, asset, label);
+  return bytes;
+}
+
+async function deriveProcessingReleaseReport(
+  {
+    candidateRoot,
+    candidateManifestPath,
+    evidenceBundlePath,
+    evidenceSignaturePath,
+    publicKeyPath,
+    now,
+  },
+  { candidateState = "built", reportBytes, verifiedReportPath } = {},
+) {
   const candidateVerification = await verifyProcessingCandidate({
     manifestPath: candidateManifestPath,
     root: candidateRoot,
-    requiredState: "built",
+    requiredState: candidateState,
   });
   const { bytes: candidateBytes, value: candidate } = await readCanonicalJson(
     candidateManifestPath,
@@ -274,19 +309,47 @@ async function deriveProcessingReleaseReport({
     "processing candidate manifest",
     validateProcessingCandidate,
   );
-  if (candidate.state !== "built") throw new TypeError("processing candidate must be built");
+  if (candidate.state !== candidateState) {
+    throw new TypeError(`processing candidate must be ${candidateState}`);
+  }
   assertVerifiedProcessingCandidateManifest({
     verification: candidateVerification,
     manifestBytes: candidateBytes,
     candidate,
   });
+  let builtCandidate = candidate;
+  if (candidate.state === "finalized") {
+    if (!Buffer.isBuffer(reportBytes)) {
+      throw new TypeError("finalized candidate verification requires release report bytes");
+    }
+    assertFinalizedAssetPath(
+      candidateRoot,
+      verifiedReportPath,
+      candidate.releaseAssets.report,
+      "release report",
+    );
+    assertFinalizedAssetPath(
+      candidateRoot,
+      evidenceBundlePath,
+      candidate.releaseAssets.evidence.bundle,
+      "processing evidence bundle",
+    );
+    assertFinalizedAssetPath(
+      candidateRoot,
+      evidenceSignaturePath,
+      candidate.releaseAssets.evidence.signature,
+      "processing evidence signature",
+    );
+    assertFinalizedAssetBytes(reportBytes, candidate.releaseAssets.report, "release report");
+    builtCandidate = reconstructBuiltCandidate(candidate);
+  }
   const evidenceIdentity = await verifyProcessingEvidenceBundle({
     bundlePath: evidenceBundlePath,
     signaturePath: evidenceSignaturePath,
     publicKeyPath,
-    expectedReleaseId: candidate.releaseId,
-    expectedGitSha: candidate.gitSha,
-    expectedCandidateVerificationSha256: candidate.verificationSha256,
+    expectedReleaseId: builtCandidate.releaseId,
+    expectedGitSha: builtCandidate.gitSha,
+    expectedCandidateVerificationSha256: builtCandidate.verificationSha256,
     now,
   });
   const { bytes: evidenceBytes, value: evidence } = await readCanonicalJson(
@@ -297,6 +360,22 @@ async function deriveProcessingReleaseReport({
   );
   if (sha256Bytes(evidenceBytes) !== evidenceIdentity.bundleSha256) {
     throw new TypeError("processing evidence bundle changed after verification");
+  }
+  if (candidate.state === "finalized") {
+    assertFinalizedAssetBytes(
+      evidenceBytes,
+      candidate.releaseAssets.evidence.bundle,
+      "processing evidence bundle",
+    );
+    const signatureBytes = await readFinalizedAsset(
+      candidateRoot,
+      candidate.releaseAssets.evidence.signature,
+      64,
+      "processing evidence signature",
+    );
+    if (sha256Bytes(signatureBytes) !== evidenceIdentity.signatureSha256) {
+      throw new TypeError("processing evidence signature changed after verification");
+    }
   }
   const applicationAsset = candidate.releaseAssets.security.gates.applicationSupplyChain;
   const { bytes: applicationBytes, value: applicationGate } = await readCanonicalJson(
@@ -322,10 +401,57 @@ async function deriveProcessingReleaseReport({
   if (!candidateAfterRead.equals(candidateBytes)) {
     throw new TypeError("processing candidate changed during report creation");
   }
+  if (candidate.state === "finalized") {
+    for (const [groupName, group] of Object.entries(candidate.releaseAssets.security)) {
+      for (const [name, asset] of Object.entries(group)) {
+        await readFinalizedAsset(
+          candidateRoot,
+          asset,
+          groupName === "gates" ? 1024 * 1024 : 8 * 1024 * 1024,
+          `${name} security ${groupName} asset`,
+        );
+      }
+    }
+    const finalReportBytes = await readFinalizedAsset(
+      candidateRoot,
+      candidate.releaseAssets.report,
+      maximumReportBytes,
+      "release report",
+    );
+    if (!finalReportBytes.equals(reportBytes)) {
+      throw new TypeError("processing release report changed during verification");
+    }
+    const [finalEvidenceBytes, finalSignatureBytes, finalCandidateBytes] = await Promise.all([
+      readFinalizedAsset(
+        candidateRoot,
+        candidate.releaseAssets.evidence.bundle,
+        8 * 1024 * 1024,
+        "processing evidence bundle",
+      ),
+      readFinalizedAsset(
+        candidateRoot,
+        candidate.releaseAssets.evidence.signature,
+        64,
+        "processing evidence signature",
+      ),
+      readBoundedRegularFile(
+        resolve(candidateManifestPath),
+        maximumReportBytes,
+        "processing candidate manifest",
+      ),
+    ]);
+    if (
+      !finalEvidenceBytes.equals(evidenceBytes) ||
+      sha256Bytes(finalSignatureBytes) !== evidenceIdentity.signatureSha256 ||
+      !finalCandidateBytes.equals(candidateBytes)
+    ) {
+      throw new TypeError("finalized release inputs changed during verification");
+    }
+  }
   return createProcessingReleaseReport({
-    releaseId: candidate.releaseId,
-    gitSha: candidate.gitSha,
-    candidateVerificationSha256: candidate.verificationSha256,
+    releaseId: builtCandidate.releaseId,
+    gitSha: builtCandidate.gitSha,
+    candidateVerificationSha256: builtCandidate.verificationSha256,
     verifiedAt: now,
     expiresAt: evidence.expiresAt,
     evidence: {
@@ -341,12 +467,15 @@ async function deriveProcessingReleaseReport({
         ]),
       ),
     },
-    security: cloneSecurity(candidate.releaseAssets.security, candidate.security.trivyDbDigest),
+    security: cloneSecurity(
+      builtCandidate.releaseAssets.security,
+      builtCandidate.security.trivyDbDigest,
+    ),
     artifacts: {
-      engineDockerConfigDigest: candidate.engine.docker.configDigest,
-      webStagingArchiveSha256: candidate.web.staging.archiveSha256,
-      webProductionArchiveSha256: candidate.web.production.archiveSha256,
-      workerSha256: candidate.releaseAssets.worker.sha256,
+      engineDockerConfigDigest: builtCandidate.engine.docker.configDigest,
+      webStagingArchiveSha256: builtCandidate.web.staging.archiveSha256,
+      webProductionArchiveSha256: builtCandidate.web.production.archiveSha256,
+      workerSha256: builtCandidate.releaseAssets.worker.sha256,
       lockfileSha256: applicationGate.lockfileSha256,
     },
   });
@@ -374,7 +503,17 @@ export async function verifyProcessingReleaseReport({ reportPath, ...inputs }) {
     throw new TypeError("processing release report is not canonical JSON");
   }
   validateProcessingReleaseReport(report);
-  const expected = await deriveProcessingReleaseReport(inputs);
+  const { value: candidate } = await readCanonicalJson(
+    inputs.candidateManifestPath,
+    maximumReportBytes,
+    "processing candidate manifest",
+    validateProcessingCandidate,
+  );
+  const expected = await deriveProcessingReleaseReport(inputs, {
+    candidateState: candidate.state,
+    reportBytes: bytes,
+    verifiedReportPath: reportPath,
+  });
   if (!bytes.equals(Buffer.from(canonicalJson(expected)))) {
     throw new TypeError("processing release report does not match verified release inputs");
   }

@@ -13,7 +13,8 @@ import {
   createAndWriteProcessingReleaseReport,
   runProcessingReleaseReportCreatorCli,
 } from "../scripts/create-processing-release-report.mjs";
-import { canonicalJson, sha256Bytes } from "../scripts/image-lab-common.mjs";
+import { finalizeProcessingCandidate } from "../scripts/finalize-processing-candidate.mjs";
+import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
 import { signCanonicalProcessingEvidence } from "../scripts/processing-evidence-signature.mjs";
 import {
   assertVerifiedProcessingCandidateManifest,
@@ -145,6 +146,9 @@ async function fixture() {
     },
     ceilings: {
       maxCostPer1000JobsMicrousd: 500_000,
+      maxLiveMedianOutputRatioBps: 8_000,
+      maxLiveOriginalRetainedRateBps: 2_500,
+      maxLiveP95WeightedUnits: 12_000,
       maxProjectedMonthlyCostMicrousd: 5_000_000,
     },
     routeCpuBenchmark: {
@@ -309,6 +313,28 @@ function options(value: Awaited<ReturnType<typeof fixture>>) {
   };
 }
 
+async function finalizedFixture() {
+  const value = await fixture();
+  await createAndWriteProcessingReleaseReport(options(value));
+  const candidateRoot = join(value.parent, "finalized");
+  const candidate = await finalizeProcessingCandidate({
+    builtRoot: value.candidateRoot,
+    outputRoot: candidateRoot,
+    reportPath: value.reportPath,
+    evidenceBundlePath: value.evidenceBundlePath,
+    evidenceSignaturePath: value.evidenceSignaturePath,
+  });
+  return {
+    ...value,
+    candidateRoot,
+    candidateManifestPath: join(candidateRoot, "processing-candidate.json"),
+    candidate,
+    reportPath: join(candidateRoot, candidate.releaseAssets.report.path),
+    evidenceBundlePath: join(candidateRoot, candidate.releaseAssets.evidence.bundle.path),
+    evidenceSignaturePath: join(candidateRoot, candidate.releaseAssets.evidence.signature.path),
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -373,6 +399,135 @@ describe("processing release report verification", () => {
       evidenceBundleSha256: created.evidence.bundleSha256,
       evidenceSignatureSha256: created.evidence.signatureSha256,
     });
+  });
+
+  it("verifies a finalized candidate by reconstructing its unique built projection", async () => {
+    const value = await finalizedFixture();
+    const report = JSON.parse(await readFile(value.reportPath, "utf8"));
+
+    await expect(verifyProcessingReleaseReport(options(value))).resolves.toMatchObject({
+      schema: "hereisit-processing-release-report-verification@1",
+      releaseId,
+      gitSha,
+      reportSha256: value.candidate.releaseAssets.report.sha256,
+      evidenceBundleSha256: value.candidate.releaseAssets.evidence.bundle.sha256,
+      evidenceSignatureSha256: value.candidate.releaseAssets.evidence.signature.sha256,
+    });
+    expect(report.candidateVerificationSha256).not.toBe(value.candidate.verificationSha256);
+
+    const writes: string[] = [];
+    await runProcessingReleaseReportVerifierCli(
+      [
+        "--candidate-root",
+        value.candidateRoot,
+        "--candidate-manifest",
+        value.candidateManifestPath,
+        "--evidence-bundle",
+        value.evidenceBundlePath,
+        "--evidence-signature",
+        value.evidenceSignaturePath,
+        "--public-key",
+        value.publicKeyPath,
+        "--now",
+        now,
+        "--report",
+        value.reportPath,
+      ],
+      { write: (text: string) => writes.push(text) },
+    );
+    expect(JSON.parse(writes[0])).toMatchObject({ releaseId, gitSha });
+  });
+
+  it("keeps report creation built-only", async () => {
+    const value = await finalizedFixture();
+    const reportPath = join(value.parent, "second-report.json");
+    await expect(
+      createAndWriteProcessingReleaseReport({
+        ...options(value),
+        reportPath,
+      }),
+    ).rejects.toThrow(/built|state/i);
+    await expect(
+      createAndWriteProcessingReleaseReport({
+        ...options(value),
+        reportPath,
+        candidateState: "finalized",
+        reportBytes: await readFile(value.reportPath),
+        verifiedReportPath: value.reportPath,
+      }),
+    ).rejects.toThrow(/built|state/i);
+  });
+
+  it("requires the finalized candidate's exact report path", async () => {
+    const value = await finalizedFixture();
+    const externalReportPath = join(value.parent, "external-report.json");
+    await writeFile(externalReportPath, await readFile(value.reportPath));
+
+    await expect(
+      verifyProcessingReleaseReport({
+        ...options(value),
+        reportPath: externalReportPath,
+      }),
+    ).rejects.toThrow(/report path|finalized candidate/i);
+  });
+
+  it("rejects a finalized candidate whose reconstructed built projection is not signed", async () => {
+    const value = await finalizedFixture();
+    const candidate = JSON.parse(await readFile(value.candidateManifestPath, "utf8"));
+    const changedOrigin = "https://hereisit-processing-staging.changed.workers.dev";
+    candidate.web.staging.processingApiOrigin = changedOrigin;
+    candidate.releaseAssets.web.staging.processingApiOrigin = changedOrigin;
+    const { verificationSha256: _verificationSha256, ...payload } = candidate;
+    candidate.verificationSha256 = sha256Canonical(payload);
+    await writeFile(value.candidateManifestPath, canonicalJson(candidate));
+
+    await expect(verifyProcessingReleaseReport(options(value))).rejects.toThrow(
+      /evidence|candidate|verified release inputs/i,
+    );
+  });
+
+  it("rejects finalized report, evidence, security, candidate, and evidence-path drift", async () => {
+    for (const mutate of [
+      async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
+        writeFile(
+          value.reportPath,
+          Buffer.concat([await readFile(value.reportPath), Buffer.from(" ")]),
+        ),
+      async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
+        writeFile(
+          value.evidenceBundlePath,
+          Buffer.concat([await readFile(value.evidenceBundlePath), Buffer.from(" ")]),
+        ),
+      async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
+        writeFile(value.evidenceSignaturePath, Buffer.alloc(64)),
+      async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
+        writeFile(join(value.candidateRoot, "security-trivy-engine.json"), "{}\n"),
+      async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
+        writeFile(value.candidateManifestPath, "{}\n"),
+    ]) {
+      const value = await finalizedFixture();
+      await mutate(value);
+      await expect(verifyProcessingReleaseReport(options(value))).rejects.toThrow();
+    }
+
+    const external = await finalizedFixture();
+    const externalBundlePath = join(external.parent, "external-evidence.json");
+    await writeFile(externalBundlePath, await readFile(external.evidenceBundlePath));
+    await expect(
+      verifyProcessingReleaseReport({
+        ...options(external),
+        evidenceBundlePath: externalBundlePath,
+      }),
+    ).rejects.toThrow(/evidence bundle path|finalized candidate/i);
+
+    const externalSignaturePath = join(external.parent, "external-evidence.sig");
+    await writeFile(externalSignaturePath, await readFile(external.evidenceSignaturePath));
+    await expect(
+      verifyProcessingReleaseReport({
+        ...options(external),
+        evidenceSignaturePath: externalSignaturePath,
+      }),
+    ).rejects.toThrow(/evidence signature path|finalized candidate/i);
   });
 
   it("has exact creator and verifier CLI boundaries with compact canonical output", async () => {
