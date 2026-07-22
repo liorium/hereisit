@@ -19,6 +19,29 @@ function sha256(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function securityAssets() {
+  const descriptor = (path: string, hash: string) => ({ path, sizeBytes: 1, sha256: hash });
+  const scoped = (prefix: string, suffix: string) => ({
+    engine: descriptor(`${prefix}engine${suffix}`, "1".repeat(64)),
+    webStaging: descriptor(`${prefix}web-staging${suffix}`, "2".repeat(64)),
+    webProduction: descriptor(`${prefix}web-production${suffix}`, "3".repeat(64)),
+    worker: descriptor(`${prefix}worker${suffix}`, "4".repeat(64)),
+    lockfile: descriptor(`${prefix}lockfile${suffix}`, "5".repeat(64)),
+  });
+  return {
+    gates: {
+      imageEngine: descriptor("security-image-engine-license-gate.json", "6".repeat(64)),
+      applicationSupplyChain: descriptor(
+        "security-application-supply-chain-gate.json",
+        "7".repeat(64),
+      ),
+      vulnerability: descriptor("security-vulnerability-gate.json", "8".repeat(64)),
+    },
+    sboms: scoped("security-sbom-", ".cdx.json"),
+    vulnerabilityReports: scoped("security-trivy-", ".json"),
+  };
+}
+
 async function temporaryDirectory() {
   const root = await mkdtemp(join(tmpdir(), "hereisit-release-resolver-"));
   temporaryRoots.push(root);
@@ -119,6 +142,7 @@ async function createFixture({ wrongStagingTree = false } = {}) {
           processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
         },
       },
+      security: securityAssets(),
       evidence: {
         bundle: identity(`evidence-v1--${releaseId}--processing-evidence.json`),
         signature: identity(`evidence-v1--${releaseId}--processing-evidence.sig`),

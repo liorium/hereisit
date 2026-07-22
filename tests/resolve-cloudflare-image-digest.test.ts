@@ -17,6 +17,28 @@ function artifact(path: string, sha256: string) {
   return { path, sizeBytes: 1, sha256 };
 }
 
+function securityAssets() {
+  const scoped = (prefix: string, suffix: string) => ({
+    engine: artifact(`${prefix}engine${suffix}`, "1".repeat(64)),
+    webStaging: artifact(`${prefix}web-staging${suffix}`, "2".repeat(64)),
+    webProduction: artifact(`${prefix}web-production${suffix}`, "3".repeat(64)),
+    worker: artifact(`${prefix}worker${suffix}`, "4".repeat(64)),
+    lockfile: artifact(`${prefix}lockfile${suffix}`, "5".repeat(64)),
+  });
+  return {
+    gates: {
+      imageEngine: artifact("security-image-engine-license-gate.json", "6".repeat(64)),
+      applicationSupplyChain: artifact(
+        "security-application-supply-chain-gate.json",
+        "7".repeat(64),
+      ),
+      vulnerability: artifact("security-vulnerability-gate.json", "8".repeat(64)),
+    },
+    sboms: scoped("security-sbom-", ".cdx.json"),
+    vulnerabilityReports: scoped("security-trivy-", ".json"),
+  };
+}
+
 function finalizedCandidate() {
   const releaseId = "2026-07-20.1";
   const gitSha = "a".repeat(40);
@@ -59,6 +81,7 @@ function finalizedCandidate() {
         staging: { path: "web-staging.tar", sizeBytes: 1, ...staging },
         production: { path: "web-production.tar", sizeBytes: 1, ...production },
       },
+      security: securityAssets(),
       evidence: {
         bundle: artifact(`evidence-v1--${releaseId}--processing-evidence.json`, "b".repeat(64)),
         signature: artifact(`evidence-v1--${releaseId}--processing-evidence.sig`, "c".repeat(64)),

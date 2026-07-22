@@ -19,6 +19,8 @@ const gitShaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const maximumProviderSchemaBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
+const maximumSecurityGateBytes = 1024 * 1024;
+const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
 const sourceNames = Object.freeze({
   oci: "image-engine-linux-amd64.oci.tar",
   docker: "image-engine-linux-amd64.docker.tar",
@@ -27,7 +29,37 @@ const sourceNames = Object.freeze({
   productionWeb: "web-production.tar",
   releaseInputs: "processing-release-inputs.json",
   costModel: "live-cost-model.json",
+  imageEngineGate: "security-image-engine-license-gate.json",
+  applicationSupplyChainGate: "security-application-supply-chain-gate.json",
+  vulnerabilityGate: "security-vulnerability-gate.json",
+  sbomEngine: "security-sbom-engine.cdx.json",
+  sbomWebStaging: "security-sbom-web-staging.cdx.json",
+  sbomWebProduction: "security-sbom-web-production.cdx.json",
+  sbomWorker: "security-sbom-worker.cdx.json",
+  sbomLockfile: "security-sbom-lockfile.cdx.json",
+  trivyEngine: "security-trivy-engine.json",
+  trivyWebStaging: "security-trivy-web-staging.json",
+  trivyWebProduction: "security-trivy-web-production.json",
+  trivyWorker: "security-trivy-worker.json",
+  trivyLockfile: "security-trivy-lockfile.json",
 });
+const securityGateKeys = new Set([
+  "imageEngineGate",
+  "applicationSupplyChainGate",
+  "vulnerabilityGate",
+]);
+const securityEvidenceKeys = new Set([
+  "sbomEngine",
+  "sbomWebStaging",
+  "sbomWebProduction",
+  "sbomWorker",
+  "sbomLockfile",
+  "trivyEngine",
+  "trivyWebStaging",
+  "trivyWebProduction",
+  "trivyWorker",
+  "trivyLockfile",
+]);
 
 async function pathExists(path) {
   try {
@@ -187,13 +219,18 @@ export async function createBuiltProcessingCandidate({
   try {
     const copied = {};
     for (const [key, name] of Object.entries(sourceNames)) {
+      const maximumBytes = securityGateKeys.has(key)
+        ? maximumSecurityGateBytes
+        : securityEvidenceKeys.has(key)
+          ? maximumSecurityEvidenceBytes
+          : key === "releaseInputs" || key === "costModel"
+            ? maximumProviderSchemaBytes
+            : maximumAssetBytes;
       copied[key] = await copyAndHashRegularFile(
         join(canonicalSourceRoot, name),
         join(temporaryRoot, name),
         name,
-        key === "releaseInputs" || key === "costModel"
-          ? maximumProviderSchemaBytes
-          : maximumAssetBytes,
+        maximumBytes,
       );
     }
 
@@ -264,6 +301,27 @@ export async function createBuiltProcessingCandidate({
         web: {
           staging: webReleaseAsset(copied.stagingWeb, stagingWeb),
           production: webReleaseAsset(copied.productionWeb, productionWeb),
+        },
+        security: {
+          gates: {
+            imageEngine: copied.imageEngineGate,
+            applicationSupplyChain: copied.applicationSupplyChainGate,
+            vulnerability: copied.vulnerabilityGate,
+          },
+          sboms: {
+            engine: copied.sbomEngine,
+            webStaging: copied.sbomWebStaging,
+            webProduction: copied.sbomWebProduction,
+            worker: copied.sbomWorker,
+            lockfile: copied.sbomLockfile,
+          },
+          vulnerabilityReports: {
+            engine: copied.trivyEngine,
+            webStaging: copied.trivyWebStaging,
+            webProduction: copied.trivyWebProduction,
+            worker: copied.trivyWorker,
+            lockfile: copied.trivyLockfile,
+          },
         },
       },
     };

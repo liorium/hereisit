@@ -18,6 +18,15 @@ const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const relativePathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[a-zA-Z0-9][a-zA-Z0-9._/-]*$/;
 const workersSubdomainLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const environments = Object.freeze(["staging", "production"]);
+const securityScopes = Object.freeze([
+  ["engine", "engine"],
+  ["webStaging", "web-staging"],
+  ["webProduction", "web-production"],
+  ["worker", "worker"],
+  ["lockfile", "lockfile"],
+]);
+const maximumSecurityGateBytes = 1024 * 1024;
+const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
 
 function assertPattern(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -44,15 +53,71 @@ function assertProcessingApiOrigin(value, environment, label) {
   return value;
 }
 
-function validateArtifact(value, label, expectedPath) {
+function validateArtifact(value, label, expectedPath, maximumBytes) {
   const artifact = assertObject(value, label);
   assertExactKeys(artifact, ["path", "sizeBytes", "sha256"], label);
   assertPattern(artifact.path, relativePathPattern, `${label} path`);
   if (artifact.path !== expectedPath) throw new TypeError(`${label} path does not match`);
   assertNonNegativeSafeInteger(artifact.sizeBytes, `${label} size`);
   if (artifact.sizeBytes < 1) throw new TypeError(`${label} size must be positive`);
+  if (maximumBytes !== undefined && artifact.sizeBytes > maximumBytes) {
+    throw new TypeError(`${label} size exceeds the limit`);
+  }
   assertSha256(artifact.sha256, `${label} hash`);
   return artifact;
+}
+
+function validateSecurityReleaseAssets(value) {
+  const security = assertObject(value, "candidate security release assets");
+  assertExactKeys(
+    security,
+    ["gates", "sboms", "vulnerabilityReports"],
+    "candidate security release assets",
+  );
+  const gates = assertObject(security.gates, "candidate security gate assets");
+  assertExactKeys(
+    gates,
+    ["imageEngine", "applicationSupplyChain", "vulnerability"],
+    "candidate security gate assets",
+  );
+  validateArtifact(
+    gates.imageEngine,
+    "candidate image-engine license gate asset",
+    "security-image-engine-license-gate.json",
+    maximumSecurityGateBytes,
+  );
+  validateArtifact(
+    gates.applicationSupplyChain,
+    "candidate application supply-chain gate asset",
+    "security-application-supply-chain-gate.json",
+    maximumSecurityGateBytes,
+  );
+  validateArtifact(
+    gates.vulnerability,
+    "candidate vulnerability gate asset",
+    "security-vulnerability-gate.json",
+    maximumSecurityGateBytes,
+  );
+  for (const [groupName, filenamePrefix, filenameSuffix] of [
+    ["sboms", "security-sbom-", ".cdx.json"],
+    ["vulnerabilityReports", "security-trivy-", ".json"],
+  ]) {
+    const group = assertObject(security[groupName], `candidate security ${groupName} assets`);
+    assertExactKeys(
+      group,
+      securityScopes.map(([key]) => key),
+      `candidate security ${groupName} assets`,
+    );
+    for (const [key, scope] of securityScopes) {
+      validateArtifact(
+        group[key],
+        `candidate ${scope} security ${groupName} asset`,
+        `${filenamePrefix}${scope}${filenameSuffix}`,
+        maximumSecurityEvidenceBytes,
+      );
+    }
+  }
+  return security;
 }
 
 function validateWebIdentity(value, environment) {
@@ -150,7 +215,7 @@ function validateEngine(value, gitSha) {
 
 function validateReleaseAssets(value, state, releaseId, web) {
   const assets = assertObject(value, "candidate release assets");
-  const builtKeys = ["engine", "worker", "web", "releaseInputs", "costModel"];
+  const builtKeys = ["engine", "worker", "web", "releaseInputs", "costModel", "security"];
   const finalizedKeys = ["report", ...builtKeys, "evidence"];
   assertExactKeys(
     assets,
@@ -173,6 +238,7 @@ function validateReleaseAssets(value, state, releaseId, web) {
     "processing-release-inputs.json",
   );
   validateArtifact(assets.costModel, "candidate live cost model asset", "live-cost-model.json");
+  validateSecurityReleaseAssets(assets.security);
 
   const webAssets = assertObject(assets.web, "candidate web release assets");
   assertExactKeys(webAssets, environments, "candidate web release assets");

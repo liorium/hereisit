@@ -26,6 +26,29 @@ function asset(assetId: number, suffix: string, sha256 = "b".repeat(64)) {
   };
 }
 
+function securityAssets() {
+  const descriptor = (path: string, sha256: string) => ({ path, sizeBytes: 1, sha256 });
+  const scoped = (prefix: string, suffix: string) => ({
+    engine: descriptor(`${prefix}engine${suffix}`, "1".repeat(64)),
+    webStaging: descriptor(`${prefix}web-staging${suffix}`, "2".repeat(64)),
+    webProduction: descriptor(`${prefix}web-production${suffix}`, "3".repeat(64)),
+    worker: descriptor(`${prefix}worker${suffix}`, "4".repeat(64)),
+    lockfile: descriptor(`${prefix}lockfile${suffix}`, "5".repeat(64)),
+  });
+  return {
+    gates: {
+      imageEngine: descriptor("security-image-engine-license-gate.json", "6".repeat(64)),
+      applicationSupplyChain: descriptor(
+        "security-application-supply-chain-gate.json",
+        "7".repeat(64),
+      ),
+      vulnerability: descriptor("security-vulnerability-gate.json", "8".repeat(64)),
+    },
+    sboms: scoped("security-sbom-", ".cdx.json"),
+    vulnerabilityReports: scoped("security-trivy-", ".json"),
+  };
+}
+
 function candidateDocument() {
   const payload = {
     schema: "hereisit-processing-candidate@1",
@@ -102,6 +125,7 @@ function candidateDocument() {
           processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
         },
       },
+      security: securityAssets(),
       evidence: {
         bundle: {
           path: `evidence-v1--${releaseId}--processing-evidence.json`,

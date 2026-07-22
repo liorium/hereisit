@@ -166,6 +166,11 @@ export async function finalizeProcessingCandidate({
     const copiedCostModel = await copyBuilt(built.releaseAssets.costModel, "live cost model asset");
     await copyBuilt(built.releaseAssets.web.staging, "staging web asset", "archiveSha256");
     await copyBuilt(built.releaseAssets.web.production, "production web asset", "archiveSha256");
+    for (const [groupName, group] of Object.entries(built.releaseAssets.security)) {
+      for (const [name, asset] of Object.entries(group)) {
+        await copyBuilt(asset, `${name} security ${groupName} asset`);
+      }
+    }
 
     const report = await copyAndHash(
       resolve(reportPath),
@@ -196,6 +201,7 @@ export async function finalizeProcessingCandidate({
         releaseInputs: copiedReleaseInputs,
         costModel: copiedCostModel,
         web: built.releaseAssets.web,
+        security: built.releaseAssets.security,
         evidence: { bundle: evidenceBundle, signature: evidenceSignature },
       },
     };
