@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -322,6 +322,10 @@ describe("processing release report verification", () => {
       workerSha256: value.candidate.releaseAssets.worker.sha256,
       lockfileSha256: "6".repeat(64),
     });
+    const originalBytes = await readFile(value.reportPath);
+    expect((await stat(value.reportPath)).mode & 0o777).toBe(0o600);
+    await expect(createAndWriteProcessingReleaseReport(options(value))).rejects.toThrow();
+    expect(await readFile(value.reportPath)).toEqual(originalBytes);
     await expect(verifyProcessingReleaseReport(options(value))).resolves.toEqual({
       schema: "hereisit-processing-release-report-verification@1",
       releaseId,

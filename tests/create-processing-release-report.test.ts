@@ -1,15 +1,9 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  createProcessingReleaseReport,
-  validateProcessingReleaseReport,
-  writeProcessingReleaseReport,
-} from "../scripts/create-processing-release-report.mjs";
-import { canonicalJson, sha256Canonical } from "../scripts/image-lab-common.mjs";
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+import * as releaseReportModule from "../scripts/create-processing-release-report.mjs";
+import { validateProcessingReleaseReport } from "../scripts/create-processing-release-report.mjs";
+import { canonicalize, canonicalJson, sha256Canonical } from "../scripts/image-lab-common.mjs";
 
-const temporaryRoots: string[] = [];
 const names = [
   "fullCorpusBenchmark",
   "competitorComparison",
@@ -77,13 +71,28 @@ function inputs() {
   };
 }
 
-afterEach(async () => {
-  await Promise.all(
-    temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
-  );
-});
+function report() {
+  const payload = canonicalize({
+    schema: "hereisit-processing-release-report@1",
+    version: 1,
+    passed: true,
+    ...inputs(),
+  });
+  return canonicalize({ ...payload, verificationSha256: sha256Canonical(payload) });
+}
 
 describe("processing release report creation", () => {
+  it("does not export unverified report creation or writing", () => {
+    expect(Object.keys(releaseReportModule).sort()).toEqual(
+      [
+        "createAndWriteProcessingReleaseReport",
+        "runProcessingReleaseReportCreatorCli",
+        "validateProcessingReleaseReport",
+        "verifyProcessingReleaseReport",
+      ].sort(),
+    );
+  });
+
   it("publishes a strict schema for the exact report contract", async () => {
     const schema = JSON.parse(
       await readFile("docs/deployment/processing-release-report.schema.json", "utf8"),
@@ -116,9 +125,9 @@ describe("processing release report creation", () => {
     );
   });
 
-  it("creates one deterministic canonical report with an exact verification hash", () => {
-    const first = createProcessingReleaseReport(inputs());
-    const second = createProcessingReleaseReport(inputs());
+  it("validates a deterministic canonical report with an exact verification hash", () => {
+    const first = report();
+    const second = report();
 
     expect(first).toEqual(second);
     expect(first).toMatchObject({
@@ -138,7 +147,7 @@ describe("processing release report creation", () => {
   });
 
   it("rejects unknown fields and mutation in every major binding group", () => {
-    const base = createProcessingReleaseReport(inputs());
+    const base = report();
     const changes = [
       { ...base, releaseId: "2026-07-20.2" },
       { ...base, evidence: { ...base.evidence, bundleSha256: "0".repeat(64) } },
@@ -186,36 +195,36 @@ describe("processing release report creation", () => {
   });
 
   it("enforces candidate security descriptor size ceilings", () => {
-    const report = createProcessingReleaseReport(inputs());
+    const value = report();
     for (const changed of [
       {
-        ...report,
+        ...value,
         security: {
-          ...report.security,
+          ...value.security,
           gates: {
-            ...report.security.gates,
-            imageEngine: { ...report.security.gates.imageEngine, sizeBytes: 1024 * 1024 + 1 },
+            ...value.security.gates,
+            imageEngine: { ...value.security.gates.imageEngine, sizeBytes: 1024 * 1024 + 1 },
           },
         },
       },
       {
-        ...report,
+        ...value,
         security: {
-          ...report.security,
+          ...value.security,
           sboms: {
-            ...report.security.sboms,
-            engine: { ...report.security.sboms.engine, sizeBytes: 8 * 1024 * 1024 + 1 },
+            ...value.security.sboms,
+            engine: { ...value.security.sboms.engine, sizeBytes: 8 * 1024 * 1024 + 1 },
           },
         },
       },
       {
-        ...report,
+        ...value,
         security: {
-          ...report.security,
+          ...value.security,
           vulnerabilityReports: {
-            ...report.security.vulnerabilityReports,
+            ...value.security.vulnerabilityReports,
             engine: {
-              ...report.security.vulnerabilityReports.engine,
+              ...value.security.vulnerabilityReports.engine,
               sizeBytes: 8 * 1024 * 1024 + 1,
             },
           },
@@ -232,28 +241,8 @@ describe("processing release report creation", () => {
     }
   });
 
-  it("writes mode-0600 canonical bytes atomically and refuses overwrite", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hereisit-release-report-create-"));
-    temporaryRoots.push(root);
-    const output = join(root, "processing-release-report.json");
-    const report = createProcessingReleaseReport(inputs());
-
-    await expect(writeProcessingReleaseReport({ output, report })).resolves.toBe(
-      report.verificationSha256,
-    );
-    expect(await readFile(output, "utf8")).toBe(canonicalJson(report));
-    expect((await stat(output)).mode & 0o777).toBe(0o600);
-    await expect(writeProcessingReleaseReport({ output, report })).rejects.toThrow();
-    expect(await readFile(output, "utf8")).toBe(canonicalJson(report));
-  });
-
-  it("rejects a report larger than one MiB", async () => {
-    const value = { ...createProcessingReleaseReport(inputs()), padding: "x".repeat(1024 * 1024) };
+  it("rejects a report larger than one MiB", () => {
+    const value = { ...report(), padding: "x".repeat(1024 * 1024) };
     expect(() => validateProcessingReleaseReport(value)).toThrow(/field|size|exact/i);
-
-    const root = await mkdtemp(join(tmpdir(), "hereisit-release-report-size-"));
-    temporaryRoots.push(root);
-    const output = join(root, "processing-release-report.json");
-    await writeFile(output, JSON.stringify(value));
   });
 });
