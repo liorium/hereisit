@@ -12,8 +12,9 @@ describe("Worker integration test runner", () => {
 
     const { createWorkerTestOutputGuard } = await import(runnerPath);
     const guard = createWorkerTestOutputGuard();
-    guard.observe("Containers have not been enabled for this Durable Object ");
-    guard.observe("class");
+    guard.observe("stderr", "Containers have not been enabled for this Durable Object ");
+    guard.observe("stdout", "interleaved test progress");
+    guard.observe("stderr", "class");
 
     expect(guard.failed()).toBe(true);
   });

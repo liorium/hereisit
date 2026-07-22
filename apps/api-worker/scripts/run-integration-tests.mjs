@@ -5,13 +5,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const BOOTSTRAP_FAILURE = "Containers have not been enabled for this Durable Object class";
 
 export function createWorkerTestOutputGuard() {
-  let tail = "";
+  const tails = { stdout: "", stderr: "" };
   let bootstrapFailed = false;
   return {
-    observe(chunk) {
-      const output = tail + chunk.toString();
+    observe(stream, chunk) {
+      const output = tails[stream] + chunk.toString();
       bootstrapFailed ||= output.includes(BOOTSTRAP_FAILURE);
-      tail = output.slice(1 - BOOTSTRAP_FAILURE.length);
+      tails[stream] = output.slice(1 - BOOTSTRAP_FAILURE.length);
     },
     failed() {
       return bootstrapFailed;
@@ -34,11 +34,11 @@ async function run() {
     },
   );
   child.stdout.on("data", (chunk) => {
-    guard.observe(chunk);
+    guard.observe("stdout", chunk);
     process.stdout.write(chunk);
   });
   child.stderr.on("data", (chunk) => {
-    guard.observe(chunk);
+    guard.observe("stderr", chunk);
     process.stderr.write(chunk);
   });
   const exitCode = await new Promise((resolveExit) => {
