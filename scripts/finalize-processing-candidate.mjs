@@ -9,6 +9,8 @@ import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
 
 const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
+const maximumSecurityGateBytes = 1024 * 1024;
+const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
 
 async function pathExists(path) {
   try {
@@ -52,7 +54,7 @@ async function readBuiltCandidate(root) {
   }
 }
 
-async function copyAndHash(source, destination, destinationName) {
+async function copyAndHash(source, destination, destinationName, maximumBytes = maximumAssetBytes) {
   let sourceHandle;
   let destinationHandle;
   try {
@@ -62,8 +64,9 @@ async function copyAndHash(source, destination, destinationName) {
     throw new Error(`${destinationName} could not be read`);
   }
   try {
-    const metadata = await sourceHandle.stat();
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumAssetBytes) {
+    const metadata = await sourceHandle.stat({ bigint: true });
+    const sizeBytes = Number(metadata.size);
+    if (!metadata.isFile() || metadata.size < 1n || metadata.size > BigInt(maximumBytes)) {
       throw new RangeError(`${destinationName} is not a bounded regular file`);
     }
     destinationHandle = await open(
@@ -75,8 +78,7 @@ async function copyAndHash(source, destination, destinationName) {
     let totalBytes = 0;
     for await (const chunk of sourceHandle.createReadStream({ autoClose: false })) {
       totalBytes += chunk.byteLength;
-      if (totalBytes > metadata.size)
-        throw new TypeError(`${destinationName} changed while reading`);
+      if (totalBytes > sizeBytes) throw new TypeError(`${destinationName} changed while reading`);
       hash.update(chunk);
       let written = 0;
       while (written < chunk.byteLength) {
@@ -89,7 +91,13 @@ async function copyAndHash(source, destination, destinationName) {
         written += result.bytesWritten;
       }
     }
-    if (totalBytes !== metadata.size)
+    const finalMetadata = await sourceHandle.stat({ bigint: true });
+    if (
+      totalBytes !== sizeBytes ||
+      finalMetadata.size !== metadata.size ||
+      finalMetadata.mtimeNs !== metadata.mtimeNs ||
+      finalMetadata.ctimeNs !== metadata.ctimeNs
+    )
       throw new TypeError(`${destinationName} changed while reading`);
     await destinationHandle.sync();
     return { path: destinationName, sizeBytes: totalBytes, sha256: hash.digest("hex") };
@@ -147,11 +155,17 @@ export async function finalizeProcessingCandidate({
   const temporaryRoot = await mkdtemp(join(outputParent, ".hereisit-finalized-candidate-"));
   let published = false;
   try {
-    const copyBuilt = async (asset, label, hashField = "sha256") => {
+    const copyBuilt = async (
+      asset,
+      label,
+      hashField = "sha256",
+      maximumBytes = maximumAssetBytes,
+    ) => {
       const copied = await copyAndHash(
         join(canonicalBuiltRoot, asset.path),
         join(temporaryRoot, asset.path),
         asset.path,
+        maximumBytes,
       );
       assertCopiedIdentity(copied, asset, label, hashField);
       return copied;
@@ -168,7 +182,12 @@ export async function finalizeProcessingCandidate({
     await copyBuilt(built.releaseAssets.web.production, "production web asset", "archiveSha256");
     for (const [groupName, group] of Object.entries(built.releaseAssets.security)) {
       for (const [name, asset] of Object.entries(group)) {
-        await copyBuilt(asset, `${name} security ${groupName} asset`);
+        await copyBuilt(
+          asset,
+          `${name} security ${groupName} asset`,
+          "sha256",
+          groupName === "gates" ? maximumSecurityGateBytes : maximumSecurityEvidenceBytes,
+        );
       }
     }
 

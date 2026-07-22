@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -1005,6 +1005,78 @@ describe("processing candidate verifier", () => {
         ),
       }),
     ).rejects.toThrow(/lockfile.*security.*(?:size|hash)/i);
+  });
+
+  it("rejects same-size security evidence writes that race candidate creation", async () => {
+    const fixture = await createFixture();
+    const sbomPath = join(fixture.root, "security-sbom-engine.cdx.json");
+    const sbomBytes = Buffer.alloc(8 * 1024 * 1024, "a");
+    await writeFile(sbomPath, sbomBytes);
+    const gatePath = join(fixture.root, "security-application-supply-chain-gate.json");
+    const gate = JSON.parse(await readFile(gatePath, "utf8"));
+    gate.scopes.engine.sbomSha256 = sha256Bytes(sbomBytes);
+    await writeFile(gatePath, canonicalJson(gate));
+
+    let settled = false;
+    let creationError: unknown;
+    const outputRoot = join(fixture.parent, "same-size-race-built");
+    const creation = createBuiltProcessingCandidate(builtOptions(fixture, outputRoot))
+      .catch((error: unknown) => {
+        creationError = error;
+      })
+      .finally(() => {
+        settled = true;
+      });
+    const writer = await open(sbomPath, "r+");
+    try {
+      let offset = 0;
+      while (!settled) {
+        await writer.write(Buffer.from("a"), 0, 1, offset);
+        offset = (offset + 4096) % sbomBytes.byteLength;
+        await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate));
+      }
+    } finally {
+      await writer.close();
+    }
+
+    await creation;
+    expect(creationError).toBeInstanceOf(TypeError);
+    expect((creationError as Error).message).toMatch(/changed while reading/i);
+    await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps security evidence bounded when finalization reopens verified files", async () => {
+    const fixture = await createFixture();
+    const builtRoot = join(fixture.parent, "bounded-security-built");
+    await createBuiltProcessingCandidate(builtOptions(fixture, builtRoot));
+    const outputRoot = join(fixture.parent, "bounded-security-finalized");
+    const target = join(builtRoot, "security-trivy-lockfile.json");
+    const watcher = watch(fixture.parent);
+    const temporaryCreated = new Promise<void>((resolveCreated) => {
+      watcher.on("change", (_event, name) => {
+        if (String(name).startsWith(".hereisit-finalized-candidate-")) resolveCreated();
+      });
+    });
+    const finalization = finalizeProcessingCandidate({
+      builtRoot,
+      outputRoot,
+      reportPath: join(fixture.root, "processing-release-report.json"),
+      evidenceBundlePath: join(fixture.root, `evidence-v1--${releaseId}--processing-evidence.json`),
+      evidenceSignaturePath: join(
+        fixture.root,
+        `evidence-v1--${releaseId}--processing-evidence.sig`,
+      ),
+    });
+    try {
+      await temporaryCreated;
+      const handle = await open(target, "w");
+      await handle.truncate(8 * 1024 * 1024 + 1);
+      await handle.close();
+      await expect(finalization).rejects.toThrow(/lockfile.*bounded regular file/i);
+    } finally {
+      watcher.close();
+    }
+    await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("recomputes the OCI distribution-layer identity from the archive", async () => {

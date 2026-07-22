@@ -87,8 +87,9 @@ async function copyAndHashRegularFile(
     throw new Error(`${destinationName} source could not be read`);
   }
   try {
-    const metadata = await sourceHandle.stat();
-    if (!metadata.isFile() || metadata.size < 1 || metadata.size > maximumBytes) {
+    const metadata = await sourceHandle.stat({ bigint: true });
+    const sizeBytes = Number(metadata.size);
+    if (!metadata.isFile() || metadata.size < 1n || metadata.size > BigInt(maximumBytes)) {
       throw new TypeError(`${destinationName} source must be a non-empty regular file`);
     }
     destinationHandle = await open(
@@ -100,8 +101,7 @@ async function copyAndHashRegularFile(
     let totalBytes = 0;
     for await (const chunk of sourceHandle.createReadStream({ autoClose: false })) {
       totalBytes += chunk.byteLength;
-      if (totalBytes > metadata.size)
-        throw new TypeError(`${destinationName} changed while reading`);
+      if (totalBytes > sizeBytes) throw new TypeError(`${destinationName} changed while reading`);
       hash.update(chunk);
       let written = 0;
       while (written < chunk.byteLength) {
@@ -114,7 +114,13 @@ async function copyAndHashRegularFile(
         written += result.bytesWritten;
       }
     }
-    if (totalBytes !== metadata.size)
+    const finalMetadata = await sourceHandle.stat({ bigint: true });
+    if (
+      totalBytes !== sizeBytes ||
+      finalMetadata.size !== metadata.size ||
+      finalMetadata.mtimeNs !== metadata.mtimeNs ||
+      finalMetadata.ctimeNs !== metadata.ctimeNs
+    )
       throw new TypeError(`${destinationName} changed while reading`);
     await destinationHandle.sync();
     return { path: destinationName, sizeBytes: totalBytes, sha256: hash.digest("hex") };
