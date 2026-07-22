@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { summarizeSmokeRequests } from "../scripts/smoke-image-compress-server.mjs";
+import {
+  projectSmokeRequest,
+  summarizeSmokeRequests,
+} from "../scripts/smoke-image-compress-server.mjs";
 import {
   createEdgeForwardHeaders,
   dynamicWorkerConfig,
@@ -64,6 +67,20 @@ describe("processing stack harness", () => {
         "PUT http://127.0.0.1:8787/v1/jobs/123e4567-e89b-42d3-a456-426614174000/input",
       ]),
     ).toEqual(["PUT /v1/jobs/[job]/input"]);
+    expect(
+      projectSmokeRequest({
+        method: "PUT",
+        url: "https://processing.example/v1/jobs/123e4567-e89b-42d3-a456-426614174000/input?secret=yes",
+        bodyBytes: 123,
+      }),
+    ).toEqual({ method: "PUT", path: "/v1/jobs/[job]/input", bodyBytes: 123 });
+    expect(
+      projectSmokeRequest({
+        method: "PUT",
+        url: "https://processing.example/v1/jobs/---/input",
+        bodyBytes: 123,
+      }),
+    ).toEqual({ method: "PUT", path: "/v1/jobs/---/input", bodyBytes: 123 });
   });
 
   it("emulates only the Cloudflare-managed connecting address at the local edge", () => {

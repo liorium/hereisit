@@ -435,7 +435,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             height: item.height,
             spec,
           })),
-          { apiOrigin: config.apiOrigin, anonymousSessionId: sessionId, onEvent },
+          {
+            apiOrigin: config.apiOrigin,
+            anonymousSessionId: sessionId,
+            confirmDownloadHandoff: async () => true,
+            onEvent,
+          },
         );
         batchRef.current = batch;
         const remoteResults = await batch.result;

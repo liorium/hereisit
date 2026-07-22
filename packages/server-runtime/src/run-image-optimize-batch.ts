@@ -97,6 +97,7 @@ export interface RemoteRuntimeDependencies {
 export interface RunRemoteImageOptimizeBatchOptions {
   readonly apiOrigin: string;
   readonly anonymousSessionId: string;
+  readonly confirmDownloadHandoff?: () => Promise<boolean>;
   readonly onEvent?: (event: RemoteImageOptimizeEvent) => void;
   readonly dependencies?: RemoteRuntimeDependencies;
 }
@@ -263,6 +264,7 @@ function terminalResult(input: {
   readonly identity: JobIdentity;
   readonly apiOrigin: string;
   readonly createDownloadHandle: (input: CreateRemoteDownloadHandleInput) => RemoteDownloadHandle;
+  readonly confirmDownloadHandoff?: () => Promise<boolean>;
   readonly fetch?: typeof fetch;
 }): RemoteImageOptimizeItemResult {
   const status = input.status;
@@ -274,6 +276,9 @@ function terminalResult(input: {
         apiOrigin: input.apiOrigin,
         ...input.identity,
         descriptor: status.result,
+        ...(input.confirmDownloadHandoff === undefined
+          ? {}
+          : { confirmDownloadHandoff: input.confirmDownloadHandoff }),
         ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
       }),
     };
@@ -411,6 +416,9 @@ export function runRemoteImageOptimizeBatch(
             identity,
             apiOrigin: options.apiOrigin,
             createDownloadHandle: dependencies.createDownloadHandle,
+            ...(options.confirmDownloadHandoff === undefined
+              ? {}
+              : { confirmDownloadHandoff: options.confirmDownloadHandoff }),
             ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
           });
         }

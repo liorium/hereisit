@@ -75,6 +75,40 @@ function succeeded(jobId: string): ImageOptimizeStatusResponseV1 {
 }
 
 describe("remote image optimization batch", () => {
+  it("passes an explicit browser download-handoff acknowledgement into remote handles", async () => {
+    const confirmDownloadHandoff = vi.fn(async () => true);
+    const createDownloadHandle = vi.fn((input) => ({
+      descriptor: input.descriptor,
+      download: vi.fn(),
+      fetchForArchive: vi.fn(),
+      dispose: vi.fn(),
+    }));
+    const handle = runRemoteImageOptimizeBatch([item("a")], {
+      apiOrigin: "https://processing.example",
+      anonymousSessionId: sessionId,
+      confirmDownloadHandoff,
+      dependencies: {
+        getPolicy: async () => policy,
+        createJob: async () => ({
+          contract: "tool-job@1",
+          mode: "existing-job",
+          jobId: "123e4567-e89b-42d3-a456-426614174001",
+          state: "succeeded",
+          reservedWeightedUnits: 10,
+        }),
+        upload: vi.fn(),
+        getStatus: async ({ jobId }) => succeeded(jobId),
+        createDownloadHandle,
+        sleep: async () => undefined,
+      },
+    });
+
+    await expect(handle.result).resolves.toMatchObject([{ status: "fulfilled" }]);
+    expect(createDownloadHandle).toHaveBeenCalledWith(
+      expect.objectContaining({ confirmDownloadHandoff }),
+    );
+  });
+
   it("runs sequentially, preserves opaque progress, and emits each lazy result immediately", async () => {
     const order: string[] = [];
     let number = 0;
