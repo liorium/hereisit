@@ -17,6 +17,19 @@
 - Container deployment uses an immutable same-account SHA-256 digest, never a mutable tag.
 - Add no npm dependency; reuse repository scripts and Node.js standard library.
 - Never log file contents, filenames, thumbnails, presigned URLs, user payloads, or secret values.
+- Run Trivy `0.69.3` only from the reviewed GHCR linux/amd64 manifest digest
+  `sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689`;
+  do not use `trivy-action`, `setup-trivy`, mutable scanner tags, or `latest`.
+- Resolve `ghcr.io/aquasecurity/trivy-db:2` once to an immutable digest, populate one private cache
+  from that digest, then run all five scans sequentially with DB updates disabled and bind the digest
+  into the candidate and vulnerability gate.
+- Stage or retag each scan target as `hereisit-<scope>:sha256-<artifact-sha256>`, run all scans and
+  gate verification in the same credential-free job, and finish verification within the gate's
+  30-minute report-freshness window. Trivy JSON does not carry the DB OCI digest, so the single-job,
+  single-cache command sequence is the reviewed DB provenance boundary.
+- Generate SBOMs with Syft `1.44.0` only from the reviewed GHCR linux/amd64 manifest digest
+  `sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d`;
+  do not use a mutable Syft tag or an SBOM action wrapper.
 
 ---
 
