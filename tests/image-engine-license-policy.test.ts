@@ -139,6 +139,7 @@ describe("image engine native supply-chain policy", () => {
     const policy = (await readJson("apps/image-engine/licenses/policy.json")) as {
       applicationAndNative: { prohibited: string[] };
       runtime: { prohibitedNames: string[]; benchmarkOnlyNames: string[] };
+      vulnerabilityExceptions: { requiredFields: string[] };
     };
     expect(policy.applicationAndNative.prohibited).toEqual(
       expect.arrayContaining(["GPL-2.0", "GPL-3.0", "AGPL-3.0"]),
@@ -147,6 +148,9 @@ describe("image engine native supply-chain policy", () => {
       expect.arrayContaining(["libimagequant", "pngquant"]),
     );
     expect(policy.runtime.benchmarkOnlyNames).toEqual(expect.arrayContaining(["jpegli", "libjxl"]));
+    expect(policy.vulnerabilityExceptions.requiredFields).toEqual(
+      expect.arrayContaining(["affectedVersion", "affectedScope"]),
+    );
     await expect(
       readJson("apps/image-engine/security/vulnerability-exceptions.json"),
     ).resolves.toEqual({ schemaVersion: 1, exceptions: [] });

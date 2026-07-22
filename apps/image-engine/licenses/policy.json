@@ -62,6 +62,8 @@
     "requiredFields": [
       "cve",
       "affectedPackage",
+      "affectedVersion",
+      "affectedScope",
       "affectedDigest",
       "exploitabilityEvidence",
       "owner",
