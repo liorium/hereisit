@@ -186,7 +186,7 @@ function validateQueryEnvelope(value, expectedCount, { requirePrimary }) {
   });
 }
 
-async function postD1Query({ url, apiToken, body, expectedCount, fetchImpl }) {
+export async function postD1Query({ url, apiToken, body, expectedCount, fetchImpl }) {
   let response;
   try {
     response = await fetchImpl(url, {
@@ -205,7 +205,7 @@ async function postD1Query({ url, apiToken, body, expectedCount, fetchImpl }) {
   return validateQueryEnvelope(envelope, expectedCount, { requirePrimary: true });
 }
 
-async function verifyAttestationMigration({ url, apiToken, fetchImpl }) {
+export async function verifyAttestationMigration({ url, apiToken, fetchImpl }) {
   let result;
   try {
     [result] = await postD1Query({
