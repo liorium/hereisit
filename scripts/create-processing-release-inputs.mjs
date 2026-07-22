@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, dirname } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createLiveCostModel, validateRouteCpuBenchmark } from "./create-live-cost-model.mjs";
 import {
@@ -8,13 +8,19 @@ import {
   assertObject,
   assertSha256,
   canonicalize,
+  canonicalJson,
   parseCliArguments,
+  readBoundedRegularFile,
   sha256Bytes,
   sha256Canonical,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
 
 const placeholder = /(?:todo|tbd|placeholder|example|changeme|your[-_ ]|xxx)/i;
+const releaseIdPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/;
+const releaseInputPathPattern =
+  /^docs\/deployment\/releases\/([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*)\/processing-release-inputs\.json$/;
+const maximumReleaseInputBytes = 1024 * 1024;
 
 export function createProcessingReleaseInputs(rawInput) {
   const input = assertObject(rawInput, "processing release input");
@@ -35,7 +41,7 @@ export function createProcessingReleaseInputs(rawInput) {
   if (input.version !== 1) throw new TypeError("processing release input version must be 1");
   if (
     typeof input.releaseId !== "string" ||
-    !/^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/.test(input.releaseId) ||
+    !releaseIdPattern.test(input.releaseId) ||
     placeholder.test(input.releaseId)
   ) {
     throw new TypeError("releaseId must be an immutable YYYY-MM-DD.N identifier");
@@ -100,8 +106,46 @@ export async function writeProcessingReleaseInputs(path, rawInput) {
   return writeCanonicalJsonAtomic(path, document, { refuseOverwrite: true });
 }
 
+export async function verifyProcessingReleaseInputs(path) {
+  const pathReleaseId = releaseInputPathPattern.exec(path)?.[1];
+  if (pathReleaseId === undefined) {
+    throw new TypeError("processing release inputs must use their canonical repository path");
+  }
+  const requestedPath = resolve(path);
+  const bytes = await readBoundedRegularFile(
+    requestedPath,
+    maximumReleaseInputBytes,
+    "processing release inputs",
+  );
+  let parsed;
+  try {
+    parsed = JSON.parse(bytes);
+  } catch {
+    throw new TypeError("processing release inputs are not valid JSON");
+  }
+  const {
+    routeCpuBenchmarkSha256: _routeCpuBenchmarkSha256,
+    routeCpuEnvelopeMs: _routeCpuEnvelopeMs,
+    ...rawInput
+  } = assertObject(parsed, "processing release inputs");
+  const document = createProcessingReleaseInputs(rawInput);
+  if (document.releaseId !== pathReleaseId) {
+    throw new TypeError("processing release ID does not match its repository path");
+  }
+  if (!bytes.equals(Buffer.from(canonicalJson(document)))) {
+    throw new TypeError("processing release inputs are not canonical JSON");
+  }
+  return sha256Bytes(bytes);
+}
+
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
+  if (args["verify-only"] !== undefined) {
+    assertExactKeys(args, ["verify-only", "schema"], "processing release arguments");
+    await readFile(args.schema, "utf8");
+    process.stdout.write(`${await verifyProcessingReleaseInputs(args["verify-only"])}\n`);
+    return;
+  }
   if (!args.schema || !args.output) throw new TypeError("--schema and --output are required");
   await readFile(args.schema, "utf8");
   let rawInput;
