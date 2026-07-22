@@ -1,12 +1,16 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdtemp, open, readdir, realpath, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments } from "./image-lab-common.mjs";
+import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
 
 const releaseTagPattern = /^processing-release-(\d{4}-\d{2}-\d{2}\.[1-9]\d*)$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
+const oneMiB = 1024 * 1024;
+const eightMiB = 8 * oneMiB;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
 const candidateSuffixes = Object.freeze([
   "processing-candidate.json",
@@ -33,7 +37,7 @@ const candidateSuffixes = Object.freeze([
   "security-trivy-lockfile.json",
 ]);
 
-export function processingReleaseMaterializationPlan(releaseTag, names) {
+function processingReleaseMaterializationPlan(releaseTag, names) {
   const releaseId = releaseTagPattern.exec(releaseTag)?.[1];
   if (
     releaseId === undefined ||
@@ -60,6 +64,30 @@ export function processingReleaseMaterializationPlan(releaseTag, names) {
   return [...expected].map(([source, destination]) => ({ source, destination }));
 }
 
+function releaseAssetPlan(candidate) {
+  const assets = candidate.releaseAssets;
+  const result = new Map();
+  const add = (descriptor, maximumBytes, hashField = "sha256", exactBytes) => {
+    result.set(descriptor.path, { descriptor, exactBytes, hashField, maximumBytes });
+  };
+  add(assets.report, oneMiB);
+  add(assets.engine.oci, maximumAssetBytes);
+  add(assets.engine.docker, maximumAssetBytes);
+  add(assets.worker, maximumAssetBytes);
+  add(assets.releaseInputs, oneMiB);
+  add(assets.costModel, oneMiB);
+  add(assets.web.staging, maximumAssetBytes, "archiveSha256");
+  add(assets.web.production, maximumAssetBytes, "archiveSha256");
+  for (const descriptor of Object.values(assets.security.gates)) add(descriptor, oneMiB);
+  for (const group of [assets.security.sboms, assets.security.vulnerabilityReports]) {
+    for (const descriptor of Object.values(group)) add(descriptor, eightMiB);
+  }
+  add(assets.evidence.bundle, eightMiB);
+  add(assets.evidence.signature, 64, "sha256", 64);
+  if (result.size !== 23) throw new TypeError("candidate release asset set is invalid");
+  return result;
+}
+
 function unchanged(before, after) {
   return (
     before.size === after.size &&
@@ -68,7 +96,11 @@ function unchanged(before, after) {
   );
 }
 
-async function copyRegularFile(source, destination) {
+async function copyRegularFile(
+  source,
+  destination,
+  { maximumBytes, expectedSize, expectedSha256, exactBytes, afterCopyChunk },
+) {
   const input = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
   let output;
   try {
@@ -77,7 +109,9 @@ async function copyRegularFile(source, destination) {
       !before.isFile() ||
       before.nlink !== 1n ||
       before.size < 1n ||
-      before.size > BigInt(maximumAssetBytes)
+      before.size > BigInt(maximumBytes) ||
+      (exactBytes !== undefined && before.size !== BigInt(exactBytes)) ||
+      (expectedSize !== undefined && before.size !== BigInt(expectedSize))
     ) {
       throw new TypeError("release asset must be a bounded unlinked regular file");
     }
@@ -87,6 +121,7 @@ async function copyRegularFile(source, destination) {
       0o600,
     );
     const buffer = Buffer.allocUnsafe(1024 * 1024);
+    const hash = createHash("sha256");
     let offset = 0n;
     while (offset < before.size) {
       const length = Number(
@@ -94,6 +129,7 @@ async function copyRegularFile(source, destination) {
       );
       const { bytesRead } = await input.read(buffer, 0, length, Number(offset));
       if (bytesRead < 1) throw new TypeError("release asset changed while materializing");
+      hash.update(buffer.subarray(0, bytesRead));
       let written = 0;
       while (written < bytesRead) {
         const result = await output.write(buffer, written, bytesRead - written, null);
@@ -101,10 +137,16 @@ async function copyRegularFile(source, destination) {
         written += result.bytesWritten;
       }
       offset += BigInt(bytesRead);
+      await afterCopyChunk?.();
     }
     if (!unchanged(before, await input.stat({ bigint: true }))) {
       throw new TypeError("release asset changed while materializing");
     }
+    const sha256 = hash.digest("hex");
+    if (expectedSha256 !== undefined && sha256 !== expectedSha256) {
+      throw new TypeError("release asset hash does not match the finalized candidate");
+    }
+    return { sha256, sizeBytes: Number(offset) };
   } finally {
     try {
       await output?.close();
@@ -114,19 +156,23 @@ async function copyRegularFile(source, destination) {
   }
 }
 
-export async function materializeProcessingReleaseCandidate({
-  releaseTag,
-  downloadRoot,
-  outputRoot,
-  expectedGitSha,
-}) {
+export async function materializeProcessingReleaseCandidate(
+  { releaseTag, downloadRoot, outputRoot, expectedGitSha },
+  adapters = {},
+) {
   if (!gitShaPattern.test(expectedGitSha)) throw new TypeError("expected Git SHA is invalid");
   const sourceRoot = resolve(downloadRoot);
   if ((await realpath(sourceRoot)) !== sourceRoot) {
     throw new TypeError("release download root must be canonical and must not be symbolic");
   }
-  const sourceMetadata = await lstat(sourceRoot);
-  if (!sourceMetadata.isDirectory())
+  const sourceHandle = await open(sourceRoot, constants.O_RDONLY | constants.O_DIRECTORY);
+  let directoryMetadata;
+  try {
+    directoryMetadata = await sourceHandle.stat();
+  } finally {
+    await sourceHandle.close();
+  }
+  if (!directoryMetadata.isDirectory())
     throw new TypeError("release download root must be a directory");
   const entries = await readdir(sourceRoot, { withFileTypes: true });
   if (entries.some((entry) => !entry.isFile())) {
@@ -141,29 +187,88 @@ export async function materializeProcessingReleaseCandidate({
   if (join(parent, basename(finalRoot)) !== finalRoot) {
     throw new TypeError("candidate output path must be canonical");
   }
-  try {
-    await lstat(finalRoot);
-    throw new Error("candidate output already exists");
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
   const temporaryRoot = await mkdtemp(join(parent, ".hereisit-release-candidate-"));
+  let reserved = false;
   let published = false;
   try {
-    for (const entry of plan) {
-      await copyRegularFile(join(sourceRoot, entry.source), join(temporaryRoot, entry.destination));
+    const manifestEntry = plan.find(
+      ({ destination }) => destination === "processing-candidate.json",
+    );
+    if (manifestEntry === undefined) throw new TypeError("candidate manifest asset is missing");
+    await copyRegularFile(
+      join(sourceRoot, manifestEntry.source),
+      join(temporaryRoot, manifestEntry.destination),
+      { maximumBytes: oneMiB },
+    );
+    const manifestBytes = await readFile(join(temporaryRoot, "processing-candidate.json"));
+    let candidate;
+    try {
+      candidate = validateProcessingCandidate(JSON.parse(manifestBytes));
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new TypeError("processing candidate JSON is invalid");
+      throw error;
     }
-    const verification = await verifyProcessingCandidate({
+    if (!manifestBytes.equals(Buffer.from(canonicalJson(candidate)))) {
+      throw new TypeError("processing candidate manifest is not canonical JSON");
+    }
+    if (
+      candidate.state !== "finalized" ||
+      candidate.releaseId !== releaseTagPattern.exec(releaseTag)[1] ||
+      candidate.gitSha !== expectedGitSha
+    ) {
+      throw new TypeError("processing candidate identity does not match the release");
+    }
+    const expected = releaseAssetPlan(candidate);
+    for (const entry of plan) {
+      if (entry === manifestEntry) continue;
+      const bound = expected.get(entry.destination);
+      if (bound === undefined) throw new TypeError("candidate release asset set is invalid");
+      if (
+        bound.descriptor.sizeBytes > bound.maximumBytes ||
+        (bound.exactBytes !== undefined && bound.descriptor.sizeBytes !== bound.exactBytes)
+      ) {
+        throw new RangeError("candidate release asset size exceeds its bound");
+      }
+      await copyRegularFile(
+        join(sourceRoot, entry.source),
+        join(temporaryRoot, entry.destination),
+        {
+          maximumBytes: bound.maximumBytes,
+          exactBytes: bound.exactBytes,
+          expectedSize: bound.descriptor.sizeBytes,
+          expectedSha256: bound.descriptor[bound.hashField],
+          afterCopyChunk: () => adapters.afterCopyChunk?.(entry.destination),
+        },
+      );
+    }
+    await verifyProcessingCandidate({
       manifestPath: join(temporaryRoot, "processing-candidate.json"),
       root: temporaryRoot,
       requiredState: "finalized",
       expectedGitSha,
     });
-    await rename(temporaryRoot, finalRoot);
+    await adapters.beforeReserve?.();
+    try {
+      await mkdir(finalRoot, { mode: 0o700 });
+      reserved = true;
+    } catch (error) {
+      if (error?.code === "EEXIST") throw new Error("candidate output already exists");
+      throw error;
+    }
+    for (const { destination } of plan) {
+      await rename(join(temporaryRoot, destination), join(finalRoot, destination));
+    }
+    const verification = await verifyProcessingCandidate({
+      manifestPath: join(finalRoot, "processing-candidate.json"),
+      root: finalRoot,
+      requiredState: "finalized",
+      expectedGitSha,
+    });
     published = true;
     return verification;
   } finally {
-    if (!published) await rm(temporaryRoot, { recursive: true, force: true });
+    if (!published && reserved) await rm(finalRoot, { recursive: true, force: true });
+    await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
 
