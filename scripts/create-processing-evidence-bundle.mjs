@@ -16,6 +16,8 @@ const maximumDocumentBytes = 1024 * 1024;
 const maximumBundleBytes = 8 * 1024 * 1024;
 const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
+const projectedMimeKeys = new Set(["inputMime", "outputMime"]);
+const allowedProjectedMimeValues = new Set([null, "image/jpeg", "image/png", "image/webp"]);
 const forbiddenKeyPattern =
   /^(?:path|filename|fileName|url|uri|secret|token|credential|password|thumbnail|bytes|content|data)$/i;
 const forbiddenStringPattern =
@@ -101,9 +103,37 @@ function validateDocumentValue(value, label, depth = 0) {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
-    if (forbiddenKeyPattern.test(key)) throw new TypeError(`${label} contains a forbidden key`);
+    if (forbiddenKeyPattern.test(key) || projectedMimeKeys.has(key)) {
+      throw new TypeError(`${label} contains a forbidden key`);
+    }
     validateDocumentValue(child, `${label} field`, depth + 1);
   }
+}
+
+function projectDocumentValue(value, label, depth = 0) {
+  if (depth > 32) throw new RangeError(`${label} exceeds the maximum depth`);
+  if (Array.isArray(value)) {
+    return value.map((child, index) => {
+      if (!Object.hasOwn(value, index))
+        throw new TypeError(`${label} must not contain sparse arrays`);
+      return projectDocumentValue(child, `${label} item`, depth + 1);
+    });
+  }
+  if (typeof value !== "object" || value === null) return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    throw new TypeError(`${label} must not contain prototype-bearing objects`);
+  }
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) => {
+      if (!projectedMimeKeys.has(key)) {
+        return [[key, projectDocumentValue(child, `${label} field`, depth + 1)]];
+      }
+      if (!allowedProjectedMimeValues.has(child)) {
+        throw new TypeError(`${label} contains an invalid MIME projection value`);
+      }
+      return [];
+    }),
+  );
 }
 
 function validateIdentity(bundle) {
@@ -144,14 +174,15 @@ export function validateProcessingEvidenceBundle(value) {
   assertExactKeys(reports, processingEvidenceReportNames, "processing evidence reports");
   for (const name of processingEvidenceReportNames) {
     const entry = assertObject(reports[name], `${name} report`);
-    assertExactKeys(entry, ["sha256", "document"], `${name} report`);
-    assertSha256(entry.sha256, `${name} report hash`);
+    assertExactKeys(entry, ["sourceSha256", "summarySha256", "document"], `${name} report`);
+    assertSha256(entry.sourceSha256, `${name} source report hash`);
+    assertSha256(entry.summarySha256, `${name} summary report hash`);
     validateDocumentValue(entry.document, `${name} report document`);
     if (Buffer.byteLength(canonicalJson(entry.document)) > maximumDocumentBytes) {
       throw new RangeError(`${name} report document exceeds the size limit`);
     }
-    if (sha256Canonical(entry.document) !== entry.sha256) {
-      throw new TypeError(`${name} report hash does not match`);
+    if (sha256Canonical(entry.document) !== entry.summarySha256) {
+      throw new TypeError(`${name} summary report hash does not match`);
     }
   }
   if (Buffer.byteLength(canonicalJson(bundle)) > maximumBundleBytes) {
@@ -172,12 +203,20 @@ export function createProcessingEvidenceBundle({
   assertExactKeys(documents, processingEvidenceReportNames, "processing evidence reports");
   const entries = Object.fromEntries(
     processingEvidenceReportNames.map((name) => {
-      const document = documents[name];
+      const source = documents[name];
+      const document = projectDocumentValue(source, `${name} report document`);
       validateDocumentValue(document, `${name} report document`);
-      if (Buffer.byteLength(canonicalJson(document)) > maximumDocumentBytes) {
+      if (Buffer.byteLength(canonicalJson(source)) > maximumDocumentBytes) {
         throw new RangeError(`${name} report document exceeds the size limit`);
       }
-      return [name, { sha256: sha256Canonical(document), document }];
+      return [
+        name,
+        {
+          sourceSha256: sha256Canonical(source),
+          summarySha256: sha256Canonical(document),
+          document,
+        },
+      ];
     }),
   );
   return canonicalize(

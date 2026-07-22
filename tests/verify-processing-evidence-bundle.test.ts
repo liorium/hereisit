@@ -87,7 +87,9 @@ describe("processing evidence bundle verification", () => {
     const value = await fixture();
     const bundle = JSON.parse(await readFile(value.bundlePath, "utf8"));
     bundle.reports.deviceMatrix.document.passed = false;
-    bundle.reports.deviceMatrix.sha256 = sha256Canonical(bundle.reports.deviceMatrix.document);
+    bundle.reports.deviceMatrix.summarySha256 = sha256Canonical(
+      bundle.reports.deviceMatrix.document,
+    );
     await writeFile(value.bundlePath, canonicalJson(bundle));
     await expect(verifyProcessingEvidenceBundle(verification(value))).rejects.toThrow(
       /hash|signature/i,
@@ -137,7 +139,7 @@ describe("processing evidence bundle verification", () => {
     await expect(verifyProcessingEvidenceBundle(verification(value))).rejects.toThrow(/canonical/i);
 
     await rm(value.signaturePath);
-    bundle.reports.deviceMatrix.sha256 = "c".repeat(64);
+    bundle.reports.deviceMatrix.summarySha256 = "c".repeat(64);
     await writeFile(value.bundlePath, canonicalJson(bundle));
     await signCanonicalProcessingEvidence({
       ...value,

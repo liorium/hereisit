@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,6 +32,45 @@ function inputs() {
   };
 }
 
+function producerReports() {
+  const benchmark = {
+    version: 1,
+    scope: "release",
+    identity: { engineImageDigest: `sha256:${"c".repeat(64)}` },
+    records: [
+      {
+        corpusId: "photo-jpeg",
+        inputMime: "image/jpeg",
+        outputMime: null,
+        outcome: "original-retained",
+      },
+      {
+        corpusId: "graphic-png",
+        inputMime: "image/png",
+        outputMime: "image/webp",
+        outcome: "download",
+      },
+    ],
+    summary: { attempted: 2, succeeded: 2 },
+  };
+  const competitor = [
+    {
+      vendor: "competitor",
+      tool: "image optimizer",
+      corpusId: "graphic-png",
+      inputSha256: "d".repeat(64),
+      outputSha256: "e".repeat(64),
+      outputMime: "image/png",
+      outputBytes: 1024,
+    },
+  ];
+  return {
+    ...inputs().reports,
+    fullCorpusBenchmark: benchmark,
+    competitorComparison: competitor,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -49,7 +88,71 @@ describe("processing evidence bundle creation", () => {
     expect(canonicalJson(first)).toBe(canonicalJson(second));
     expect(first).toMatchObject({ schema: "hereisit-processing-evidence@1", version: 1 });
     for (const name of reportNames) {
-      expect(first.reports[name].sha256).toBe(sha256Canonical(inputs().reports[name]));
+      expect(Object.keys(first.reports[name]).sort()).toEqual([
+        "document",
+        "sourceSha256",
+        "summarySha256",
+      ]);
+      expect(first.reports[name].sourceSha256).toBe(sha256Canonical(inputs().reports[name]));
+      expect(first.reports[name].summarySha256).toBe(sha256Canonical(first.reports[name].document));
+    }
+  });
+
+  it("projects producer MIME fields while preserving source hashes through both creators", async () => {
+    const reports = producerReports();
+    const expected = createProcessingEvidenceBundle({ ...inputs(), reports });
+
+    for (const name of ["fullCorpusBenchmark", "competitorComparison"] as const) {
+      const entry = expected.reports[name];
+      expect(entry.sourceSha256).toBe(sha256Canonical(reports[name]));
+      expect(entry.summarySha256).toBe(sha256Canonical(entry.document));
+      expect(canonicalJson(entry.document)).not.toMatch(/(?:inputMime|outputMime|image\/)/);
+    }
+
+    const root = await mkdtemp(join(tmpdir(), "hereisit-evidence-projection-"));
+    temporaryRoots.push(root);
+    const paths = Object.fromEntries(reportNames.map((name) => [name, join(root, `${name}.json`)]));
+    await Promise.all(
+      reportNames.map((name) => writeFile(paths[name], canonicalJson(reports[name]))),
+    );
+    const output = join(root, "bundle.json");
+    await runProcessingEvidenceBundleCreatorCli([
+      "--release-id",
+      inputs().releaseId,
+      "--git-sha",
+      inputs().gitSha,
+      "--candidate-verification-sha256",
+      inputs().candidateVerificationSha256,
+      "--created-at",
+      inputs().createdAt,
+      "--expires-at",
+      inputs().expiresAt,
+      "--full-corpus-benchmark",
+      paths.fullCorpusBenchmark,
+      "--competitor-comparison",
+      paths.competitorComparison,
+      "--blinded-human-review",
+      paths.blindedHumanReview,
+      "--commercial-review",
+      paths.commercialReview,
+      "--privacy-review",
+      paths.privacyReview,
+      "--device-matrix",
+      paths.deviceMatrix,
+      "--schema",
+      resolve("docs/deployment/processing-evidence.schema.json"),
+      "--output",
+      output,
+    ]);
+
+    expect(await readFile(output, "utf8")).toBe(canonicalJson(expected));
+  });
+
+  it("rejects MIME projection fields with any other value", () => {
+    for (const value of ["image/gif", "application/pdf", false]) {
+      const reports = producerReports();
+      reports.fullCorpusBenchmark.records[0].outputMime = value as never;
+      expect(() => createProcessingEvidenceBundle({ ...inputs(), reports })).toThrow(/MIME/i);
     }
   });
 

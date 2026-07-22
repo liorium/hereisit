@@ -49,9 +49,10 @@
     "report": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sha256", "document"],
+      "required": ["sourceSha256", "summarySha256", "document"],
       "properties": {
-        "sha256": { "$ref": "#/$defs/sha256" },
+        "sourceSha256": { "$ref": "#/$defs/sha256" },
+        "summarySha256": { "$ref": "#/$defs/sha256" },
         "document": {}
       }
     }
