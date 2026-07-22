@@ -2,9 +2,17 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  assertExactKeys,
+  assertSha256,
+  canonicalJson,
+  parseCliArguments,
+  readBoundedRegularFile,
+  sha256Bytes,
+  writeCanonicalJsonAtomic,
+} from "./image-lab-common.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -375,10 +383,6 @@ export function validateCommercialReview(value, sourceLockBytes, now = new Date(
   return { sourceLockSha256 };
 }
 
-async function readJson(path) {
-  return JSON.parse(await readFile(path, "utf8"));
-}
-
 export function validateSourceLock(lock) {
   if (lock?.schemaVersion !== 1 || !Array.isArray(lock.sources) || lock.sources.length === 0) {
     throw new TypeError("source lock is invalid");
@@ -571,10 +575,13 @@ export function validateRuntimeInventory(inventory, sourceLock, policy) {
   }
 }
 
-function inspectRuntimeImage(image) {
-  if (typeof image !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$/.test(image)) {
+function assertImageReference(image) {
+  if (typeof image !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$/.test(image))
     throw new TypeError("runtime image reference is invalid");
-  }
+  return image;
+}
+
+function inspectRuntimeImage({ image }) {
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const inventoryScript = resolve(
     repositoryRoot,
@@ -599,83 +606,122 @@ function inspectRuntimeImage(image) {
   return JSON.parse(output);
 }
 
-function parseArguments(argv) {
-  const options = {
-    scope: "pr",
-    lock: "apps/image-engine/native/sources.lock.json",
-    policy: "apps/image-engine/licenses/policy.json",
-    exceptions: "apps/image-engine/security/vulnerability-exceptions.json",
-    "base-lock": "apps/image-engine/base-images.lock.json",
-  };
-  for (let index = 0; index < argv.length; index += 2) {
-    const name = argv[index];
-    const value = argv[index + 1];
-    if (typeof name !== "string" || !name.startsWith("--") || value === undefined) {
-      throw new TypeError("license verifier arguments are invalid");
-    }
-    const key = name.slice(2);
-    if (!Object.hasOwn(options, key) && key !== "image" && key !== "commercial-review") {
-      throw new TypeError(`unknown license verifier argument: ${name}`);
-    }
-    options[key] = value;
+const maximumJsonBytes = 1024 * 1024;
+const optionNames = [
+  "scope",
+  "image",
+  "artifactSha256",
+  "sourceLockPath",
+  "policyPath",
+  "exceptionsPath",
+  "baseImageLockPath",
+  "outputPath",
+];
+
+async function readJson(path, label) {
+  const bytes = await readBoundedRegularFile(resolve(path), maximumJsonBytes, label);
+  try {
+    return { bytes, value: JSON.parse(bytes.toString("utf8")) };
+  } catch {
+    throw new TypeError(`${label} is not valid JSON`);
   }
-  if (options.scope !== "pr" && options.scope !== "release") {
-    throw new TypeError("license verifier scope is invalid");
-  }
-  return options;
 }
 
-async function main() {
-  const options = parseArguments(process.argv.slice(2));
-  const sourceLockPath = resolve(options.lock);
-  const [sourceLockBytes, policy, exceptions, baseLock] = await Promise.all([
-    readFile(sourceLockPath),
-    readJson(resolve(options.policy)),
-    readJson(resolve(options.exceptions)),
-    readJson(resolve(options["base-lock"])),
+export async function verifyImageEngineLicenseGate(
+  options,
+  { inspectRuntimeImage: inspect = inspectRuntimeImage } = {},
+) {
+  if (options?.scope !== "pr" && options?.scope !== "release") {
+    throw new TypeError("license verifier scope is invalid");
+  }
+  assertExactKeys(
+    options,
+    options.scope === "release" ? [...optionNames, "commercialReviewPath"] : optionNames,
+    "image engine license gate options",
+  );
+  const artifactSha256 = assertSha256(options.artifactSha256, "artifact SHA-256");
+  const image = assertImageReference(options.image);
+  const [sourceLock, policy, exceptions, baseImages, commercialReview] = await Promise.all([
+    readJson(options.sourceLockPath, "source lock"),
+    readJson(options.policyPath, "license policy"),
+    readJson(options.exceptionsPath, "vulnerability exceptions"),
+    readJson(options.baseImageLockPath, "base image lock"),
+    options.scope === "release"
+      ? readJson(options.commercialReviewPath, "commercial review")
+      : undefined,
   ]);
-  const lock = JSON.parse(sourceLockBytes.toString("utf8"));
+  const lock = sourceLock.value;
   validateSourceLock(lock);
-  validateBaseImageLock(baseLock);
+  validateBaseImageLock(baseImages.value);
   for (const source of lock.sources) {
-    if (!Array.isArray(source.licenses) || source.licenses.length === 0) {
-      throw new TypeError(`source ${source.name ?? "unknown"} has no licenses`);
-    }
     for (const license of source.licenses) {
-      const decision = evaluateSpdxExpression(license, policy);
+      const decision = evaluateSpdxExpression(license, policy.value);
       if (decision === "prohibited" || decision === "unknown") {
         throw new TypeError(`source ${source.name ?? "unknown"} license is not allowed`);
       }
     }
   }
-  validateVulnerabilityExceptions(exceptions);
-  if (options.image !== undefined) {
-    validateRuntimeInventory(inspectRuntimeImage(options.image), lock, policy);
-  }
-  let commercialReviewSha256;
-  if (options.scope === "release") {
-    if (options["commercial-review"] === undefined) {
-      throw new TypeError("release scope requires --commercial-review");
-    }
-    const reviewBytes = await readFile(resolve(options["commercial-review"]));
-    validateCommercialReview(JSON.parse(reviewBytes.toString("utf8")), sourceLockBytes);
-    commercialReviewSha256 = createHash("sha256").update(reviewBytes).digest("hex");
-  }
-  process.stdout.write(
-    `${JSON.stringify({
-      verified: true,
-      scope: options.scope,
-      sourceLockSha256: createHash("sha256").update(sourceLockBytes).digest("hex"),
-      ...(commercialReviewSha256 === undefined ? {} : { commercialReviewSha256 }),
-    })}\n`,
+  validateVulnerabilityExceptions(exceptions.value);
+  if (commercialReview !== undefined)
+    validateCommercialReview(commercialReview.value, sourceLock.bytes);
+  validateRuntimeInventory(await inspect({ image, artifactSha256 }), lock, policy.value);
+
+  const gate = {
+    schema: "hereisit-image-engine-license-gate@1",
+    passed: true,
+    scope: options.scope,
+    artifactSha256,
+    sourceLockSha256: sha256Bytes(sourceLock.bytes),
+    policySha256: sha256Bytes(policy.bytes),
+    exceptionsSha256: sha256Bytes(exceptions.bytes),
+    baseImagesSha256: sha256Bytes(baseImages.bytes),
+    ...(commercialReview === undefined
+      ? {}
+      : { commercialReviewSha256: sha256Bytes(commercialReview.bytes) }),
+  };
+  await writeCanonicalJsonAtomic(resolve(options.outputPath), gate, {
+    refuseOverwrite: true,
+    mode: 0o600,
+  });
+  return gate;
+}
+
+export async function runImageEngineLicenseCli(argv, stdout = process.stdout) {
+  const args = parseCliArguments(argv);
+  const names = [
+    "scope",
+    "image",
+    "artifact-sha256",
+    "lock",
+    "policy",
+    "exceptions",
+    "base-lock",
+    "output",
+  ];
+  if (args.scope === "release") names.push("commercial-review");
+  assertExactKeys(args, names, "image engine license verifier arguments");
+  const gate = await verifyImageEngineLicenseGate({
+    scope: args.scope,
+    image: args.image,
+    artifactSha256: args["artifact-sha256"],
+    sourceLockPath: args.lock,
+    policyPath: args.policy,
+    exceptionsPath: args.exceptions,
+    baseImageLockPath: args["base-lock"],
+    outputPath: args.output,
+    ...(args.scope === "release" ? { commercialReviewPath: args["commercial-review"] } : {}),
+  });
+  stdout.write(
+    canonicalJson({
+      gateSha256: sha256Bytes(canonicalJson(gate)),
+      passed: true,
+    }),
   );
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : "license verification failed"}\n`,
-    );
+  runImageEngineLicenseCli(process.argv.slice(2)).catch(() => {
+    process.stderr.write("image engine license verification failed\n");
     process.exitCode = 1;
   });
 }
