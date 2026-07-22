@@ -3,9 +3,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "@playwright/test";
 import { canonicalJson, parseCliArguments, writeCanonicalJsonAtomic } from "./image-lab-common.mjs";
+import { runProcessingStagingBrowserSmoke } from "./support/processing-staging-smoke-runtime.mjs";
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
+const PUBLIC_BUCKET_ZERO_SESSION_ID = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const JOB_UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const SESSION_UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const SESSION_UUID_PATTERN = new RegExp(`^${SESSION_UUID_SEGMENT}$`);
@@ -70,20 +72,76 @@ function assertQuietPage(page, state) {
   });
 }
 
+function injectSession(context, pageOrigin, sessionId) {
+  return context.addInitScript(
+    ({ origin, injectedSessionId, storageKey }) => {
+      if (location.origin === origin) localStorage.setItem(storageKey, injectedSessionId);
+    },
+    { origin: pageOrigin, injectedSessionId: sessionId, storageKey: SESSION_STORAGE_KEY },
+  );
+}
+
+function observePolicies(page, state) {
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname !== "/v1/policy") return;
+    state.policyReads.push(
+      response
+        .json()
+        .then((body) => {
+          state.policies.push({
+            status: response.status(),
+            maintainer: body?.maintainer,
+            execution: body?.execution,
+            reason: body?.reason,
+          });
+        })
+        .catch(() => {
+          state.invalidPolicy = true;
+        }),
+    );
+  });
+}
+
+async function assertPolicies(state, expected) {
+  await Promise.all(state.policyReads);
+  if (
+    state.invalidPolicy ||
+    state.policies.length < 1 ||
+    state.policies.some(
+      (policy) =>
+        policy.status !== 200 ||
+        policy.maintainer !== expected.maintainer ||
+        policy.execution !== expected.execution ||
+        policy.reason !== expected.reason,
+    )
+  ) {
+    throw new Error(stableFailure);
+  }
+}
+
 async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
   const context = await browser.newContext();
+  await injectSession(context, pageOrigin, PUBLIC_BUCKET_ZERO_SESSION_ID);
   const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
   const state = {
     jobRequest: false,
     consoleError: false,
     pageError: false,
     requestFailed: false,
     sourceFilenameLeak: false,
+    invalidPolicy: false,
+    policies: [],
+    policyReads: [],
   };
   assertQuietPage(page, state);
+  observePolicies(page, state);
+  cdp.on("Network.requestWillBeSent", ({ request: { method: _method, url } }) => {
+    if (new URL(url).pathname.startsWith("/v1/jobs")) state.jobRequest = true;
+  });
   page.on("request", (request) => {
     const url = request.url();
-    if (new URL(url).pathname.startsWith("/v1/jobs")) state.jobRequest = true;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
   });
   try {
@@ -92,6 +150,11 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
       timeout: timeoutMs,
     });
     await page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs });
+    await assertPolicies(state, {
+      maintainer: false,
+      execution: "local",
+      reason: "LOCAL_FALLBACK_REQUIRED",
+    });
     await page.waitForTimeout(250);
     if (
       state.jobRequest ||
@@ -115,13 +178,10 @@ async function assertMaintainerServer(
   timeoutMs,
 ) {
   const context = await browser.newContext({ acceptDownloads: true });
-  await context.addInitScript(
-    ({ origin, sessionId, storageKey }) => {
-      if (location.origin === origin) localStorage.setItem(storageKey, sessionId);
-    },
-    { origin: pageOrigin, sessionId: maintainerSessionId, storageKey: SESSION_STORAGE_KEY },
-  );
+  await injectSession(context, pageOrigin, maintainerSessionId);
   const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Network.enable");
   const state = {
     consoleError: false,
     pageError: false,
@@ -132,14 +192,21 @@ async function assertMaintainerServer(
     putBodyBytes: [],
     downloadAcknowledgements: 0,
     downloadAcknowledged: false,
+    invalidPolicy: false,
+    policies: [],
+    policyReads: [],
   };
   const sizeReads = [];
   assertQuietPage(page, state);
+  observePolicies(page, state);
+  cdp.on("Network.requestWillBeSent", ({ request: { method, url } }) => {
+    const path = new URL(url).pathname;
+    if (method === "OPTIONS" && inputPathPattern.test(path)) state.inputOptions += 1;
+  });
   page.on("request", (request) => {
     const url = request.url();
     const path = new URL(url).pathname;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
-    if (inputPathPattern.test(path) && request.method() === "OPTIONS") state.inputOptions += 1;
     if (inputPathPattern.test(path) && request.method() === "PUT") state.inputPuts += 1;
     if (downloadedPathPattern.test(path) && request.method() === "POST") {
       state.downloadAcknowledgements += 1;
@@ -196,6 +263,7 @@ async function assertMaintainerServer(
     for await (const chunk of stream) downloadBytes += chunk.byteLength;
     if (downloadBytes < 1) throw new Error(stableFailure);
     await Promise.all(sizeReads);
+    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await page.waitForTimeout(250);
     if (
       state.consoleError ||
@@ -232,13 +300,13 @@ function stagingSmokeResult() {
   };
 }
 
-export async function smokeImageCompressServer({
+async function performImageCompressServerSmoke({
   pageOrigin,
   sourcePath = resolve("tests/image-corpus/public/photo-ordinary-jpeg.jpg"),
   timeoutMs = 120_000,
   maintainerSessionId,
 }) {
-  const origin = assertOrigin(pageOrigin, "page origin");
+  const origin = pageOrigin;
   const browser = await chromium.launch({ headless: true });
   try {
     if (maintainerSessionId !== undefined) {
@@ -297,6 +365,14 @@ export async function smokeImageCompressServer({
   }
 }
 
+export async function smokeImageCompressServer(input) {
+  const pageOrigin = assertOrigin(input.pageOrigin, "page origin");
+  return runProcessingStagingBrowserSmoke(
+    { ...input, pageOrigin },
+    performImageCompressServerSmoke,
+  );
+}
+
 function parseStagingSmokeCli(argv, environment) {
   try {
     const args = parseCliArguments(argv);
@@ -320,11 +396,7 @@ function parseStagingSmokeCli(argv, environment) {
   }
 }
 
-export async function runProcessingStagingSmokeCli({
-  argv,
-  environment,
-  smoke = smokeImageCompressServer,
-}) {
+export async function runProcessingStagingSmokeCli({ argv, environment }) {
   const input = parseStagingSmokeCli(argv, environment);
   try {
     await lstat(input.outputPath).then(
@@ -333,7 +405,7 @@ export async function runProcessingStagingSmokeCli({
         if (error?.code !== "ENOENT") throw new Error(stableFailure);
       },
     );
-    const result = await smoke({
+    const result = await smokeImageCompressServer({
       pageOrigin: input.pageOrigin,
       maintainerSessionId: input.sessionId,
     });

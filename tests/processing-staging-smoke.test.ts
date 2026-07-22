@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import * as smokeModule from "../scripts/smoke-image-compress-server.mjs";
 import {
@@ -10,9 +11,20 @@ import {
   smokeImageCompressServer,
 } from "../scripts/smoke-image-compress-server.mjs";
 
+const browserSmoke = vi.hoisted(() => vi.fn());
+vi.mock("../scripts/support/processing-staging-smoke-runtime.mjs", () => ({
+  runProcessingStagingBrowserSmoke: browserSmoke,
+}));
+
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
+const publicBucketZeroSessionId = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const temporaryRoots: string[] = [];
+
+beforeEach(() => {
+  browserSmoke.mockReset();
+  browserSmoke.mockResolvedValue(stagingSmokeResult());
+});
 
 afterEach(async () => {
   await Promise.all(
@@ -43,18 +55,39 @@ function stagingSmokeResult() {
 }
 
 describe("authenticated processing staging smoke", () => {
+  it("uses CDP for preflight and a public deterministic rollout-zero session", async () => {
+    const digest = createHash("sha256").update(publicBucketZeroSessionId).digest();
+    expect(digest.readUInt32BE(0) % 100).toBe(0);
+
+    const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+    expect(source).toContain(publicBucketZeroSessionId);
+    expect(source).toContain("newCDPSession(page)");
+    expect(source).toContain('send("Network.enable")');
+    expect(source).toContain("policy.status !== 200");
+    expect(source).toContain("maintainer: false");
+    expect(source).toContain('execution: "local"');
+    expect(source).toContain('reason: "LOCAL_FALLBACK_REQUIRED"');
+    expect(source).toContain("maintainer: true");
+    expect(source).toContain('execution: "server"');
+    expect(source).toContain("reason: null");
+  });
+
+  it("does not expose a production result-minting dependency parameter", async () => {
+    const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+    expect(source).not.toMatch(/runProcessingStagingSmokeCli\([\s\S]*?smoke\s*=/u);
+    expect(source).not.toContain("const result = await smoke({");
+  });
+
   it("accepts only the fixed staging origin, output path, and canonical environment session", async () => {
     const output = await outputPath();
-    const smoke = vi.fn(async () => stagingSmokeResult());
     await runProcessingStagingSmokeCli({
       argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
       environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-      smoke,
     });
-    expect(smoke).toHaveBeenCalledWith({
-      pageOrigin: PROCESSING_STAGING_ORIGIN,
-      maintainerSessionId: sessionId,
-    });
+    expect(browserSmoke).toHaveBeenCalledWith(
+      { pageOrigin: PROCESSING_STAGING_ORIGIN, maintainerSessionId: sessionId },
+      expect.any(Function),
+    );
 
     for (const argv of [
       ["--page-origin", "https://example.com", "--output", "result.json"],
@@ -73,7 +106,6 @@ describe("authenticated processing staging smoke", () => {
         runProcessingStagingSmokeCli({
           argv,
           environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-          smoke,
         }),
       ).rejects.toThrow("processing staging smoke configuration is invalid");
     }
@@ -90,7 +122,6 @@ describe("authenticated processing staging smoke", () => {
           argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", invalidOutput],
           environment:
             invalidSession === undefined ? {} : { STAGING_MAINTAINER_SESSION_ID: invalidSession },
-          smoke,
         }),
       ).rejects.toThrow("processing staging smoke configuration is invalid");
     }
@@ -110,18 +141,16 @@ describe("authenticated processing staging smoke", () => {
 
   it("writes only the canonical mode-0600 result and refuses overwrite", async () => {
     const output = await outputPath();
-    const smoke = vi.fn(async () => stagingSmokeResult());
     const result = await runProcessingStagingSmokeCli({
       argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
       environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-      smoke,
     });
 
     expect(result).toEqual(stagingSmokeResult());
-    expect(smoke).toHaveBeenCalledWith({
-      pageOrigin: PROCESSING_STAGING_ORIGIN,
-      maintainerSessionId: sessionId,
-    });
+    expect(browserSmoke).toHaveBeenCalledWith(
+      { pageOrigin: PROCESSING_STAGING_ORIGIN, maintainerSessionId: sessionId },
+      expect.any(Function),
+    );
     expect(await readFile(output, "utf8")).toBe(canonicalJson(stagingSmokeResult()));
     expect((await stat(output)).mode & 0o777).toBe(0o600);
     expect(Object.keys(result).sort()).toEqual([
@@ -142,10 +171,9 @@ describe("authenticated processing staging smoke", () => {
       runProcessingStagingSmokeCli({
         argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-        smoke,
       }),
     ).rejects.toThrow();
-    expect(smoke).toHaveBeenCalledTimes(1);
+    expect(browserSmoke).toHaveBeenCalledTimes(1);
   });
 
   it("does not disclose the session or internal failure through direct execution", async () => {
@@ -175,22 +203,17 @@ describe("authenticated processing staging smoke", () => {
 
   it("collapses browser failures before they can disclose private state", async () => {
     const output = await outputPath();
+    browserSmoke.mockRejectedValue(new Error(`private ${sessionId}`));
     await expect(
       runProcessingStagingSmokeCli({
         argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-        smoke: async () => {
-          throw new Error(`private ${sessionId}`);
-        },
       }),
     ).rejects.toThrow("processing staging smoke failed");
     await expect(
       runProcessingStagingSmokeCli({
         argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
-        smoke: async () => {
-          throw new Error(`private ${sessionId}`);
-        },
       }),
     ).rejects.not.toThrow(sessionId);
   });

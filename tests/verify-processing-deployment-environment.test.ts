@@ -6,7 +6,7 @@ import {
 } from "../scripts/verify-processing-deployment-environment.mjs";
 
 const secret = "A".repeat(43);
-const maintainerSessionId = "018f47a2-65d4-7f31-a377-5afbb8f53f27";
+const maintainerSessionId = "123e4567-e89b-42d3-a456-426614174000";
 const maintainerSessionHash = createHash("sha256").update(maintainerSessionId).digest("hex");
 
 function validEnvironment(): Record<string, string> {
@@ -94,6 +94,18 @@ describe("processing deployment environment verifier", () => {
   it("requires the staging maintainer session UUID to be present in the hashed allowlist", () => {
     const environment = validEnvironment();
     environment.STAGING_MAINTAINER_HASHES_JSON = JSON.stringify(["b".repeat(64)]);
+    expect(() => validateProcessingDeploymentEnvironment(environment)).toThrow(
+      "STAGING_MAINTAINER_SESSION_ID",
+    );
+  });
+
+  it("rejects non-v4 maintainer UUIDs even when their hash is allowlisted", () => {
+    const environment = validEnvironment();
+    const versionSeven = "018f47a2-65d4-7f31-a377-5afbb8f53f27";
+    environment.STAGING_MAINTAINER_SESSION_ID = versionSeven;
+    environment.STAGING_MAINTAINER_HASHES_JSON = JSON.stringify([
+      createHash("sha256").update(versionSeven).digest("hex"),
+    ]);
     expect(() => validateProcessingDeploymentEnvironment(environment)).toThrow(
       "STAGING_MAINTAINER_SESSION_ID",
     );

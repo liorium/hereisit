@@ -310,9 +310,10 @@ test.describe("configured processing server", () => {
     await expect(downloadButton).toBeVisible();
     const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
     expect(download.suggestedFilename()).toBe("server-hereisit.png");
-    await expect(page.getByText(/기본 브라우저에서 열어 다시 다운로드해 주세요/)).toBeVisible();
+    await expect(page.getByText("다운로드와 서버 결과 삭제 요청을 완료했어요.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "다운로드 완료" })).toBeDisabled();
     expect(requestBodies.every((body) => !body.includes("server.png"))).toBe(true);
-    expect(calls.some((call) => call.includes("/downloaded"))).toBe(false);
+    expect(calls.some((call) => call.includes("/downloaded"))).toBe(true);
     await page.getByRole("radio", { name: /최소 용량/ }).check();
     await expect(downloadButton).toHaveCount(0);
     await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
@@ -597,8 +598,9 @@ test.describe("configured processing server", () => {
     expect(resultResponse.headers()["x-download-lease"]).toBe("a".repeat(43));
     const firstDownload = await downloadPromise;
     expect(firstDownload.suggestedFilename()).toBe("first-hereisit.png");
+    await expect(page.getByRole("button", { name: "다운로드 완료" })).toBeDisabled();
     releaseSecond = true;
-    await expect(downloadButtons).toHaveCount(2);
+    await expect(downloadButtons).toHaveCount(1);
   });
 
   test("shows retry guidance without presenting it as a local usage fallback", async ({ page }) => {
