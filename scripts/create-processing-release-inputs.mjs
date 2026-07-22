@@ -20,7 +20,42 @@ const placeholder = /(?:todo|tbd|placeholder|example|changeme|your[-_ ]|xxx)/i;
 const releaseIdPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/;
 const releaseInputPathPattern =
   /^docs\/deployment\/releases\/([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*)\/processing-release-inputs\.json$/;
+const trustedSchemaPath = "docs/deployment/processing-release-inputs.schema.json";
 const maximumReleaseInputBytes = 1024 * 1024;
+
+async function assertTrustedReleaseInputSchema(path, requireRepositoryPath = false) {
+  if (requireRepositoryPath && path !== trustedSchemaPath) {
+    throw new TypeError("trusted schema must use its canonical repository path");
+  }
+  const bytes = await readBoundedRegularFile(
+    resolve(path),
+    maximumReleaseInputBytes,
+    "processing release input schema",
+  );
+  let schema;
+  try {
+    schema = assertObject(JSON.parse(bytes), "processing release input schema");
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new TypeError("processing release input schema is not valid JSON");
+    }
+    throw error;
+  }
+  const version = assertObject(
+    assertObject(schema.properties, "processing release input schema properties").version,
+    "processing release input schema version",
+  );
+  // Identity only: createProcessingReleaseInputs remains the authoritative semantic validator.
+  if (
+    schema.$id !== "https://hereisit.app/schemas/processing-release-inputs-v1.json" ||
+    schema.title !== "HereIsIt immutable processing release inputs v1" ||
+    schema.type !== "object" ||
+    schema.additionalProperties !== false ||
+    version.const !== 1
+  ) {
+    throw new TypeError("processing release input schema identity is invalid");
+  }
+}
 
 export function createProcessingReleaseInputs(rawInput) {
   const input = assertObject(rawInput, "processing release input");
@@ -142,12 +177,12 @@ async function main() {
   const args = parseCliArguments(process.argv.slice(2));
   if (args["verify-only"] !== undefined) {
     assertExactKeys(args, ["verify-only", "schema"], "processing release arguments");
-    await readFile(args.schema, "utf8");
+    await assertTrustedReleaseInputSchema(args.schema, true);
     process.stdout.write(`${await verifyProcessingReleaseInputs(args["verify-only"])}\n`);
     return;
   }
   if (!args.schema || !args.output) throw new TypeError("--schema and --output are required");
-  await readFile(args.schema, "utf8");
+  await assertTrustedReleaseInputSchema(args.schema);
   let rawInput;
   if (args.input !== undefined) {
     assertExactKeys(args, ["input", "schema", "output"], "processing release arguments");

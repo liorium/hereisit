@@ -62,10 +62,11 @@ the trusted maintainer workstation. After the reviewed public PEM is copied to t
 each detached signature before deployment with the existing fail-closed CLI:
 
 ```bash
+: "${RELEASE_ID:?set the immutable YYYY-MM-DD.N release ID}"
 node scripts/processing-evidence-signature.mjs \
   --mode verify \
-  --bundle .artifacts/evidence/processing-evidence.json \
-  --signature .artifacts/evidence/processing-evidence.sig \
+  --bundle ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.json" \
+  --signature ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
   --public-key docs/deployment/processing-evidence-ed25519-public.pem
 ```
 

@@ -253,6 +253,56 @@ describe("immutable processing release inputs", () => {
     }
   });
 
+  it("rejects an arbitrary schema path in verification mode", async () => {
+    const fixture = await createVerificationRoot();
+    const arbitrarySchema = join(fixture.root, "schema.json");
+    try {
+      await writeFile(fixture.inputPath, canonicalJson(createProcessingReleaseInputs(reviewed)));
+      await writeFile(arbitrarySchema, trustedSchema);
+      const result = runCli(fixture.root, [
+        "--verify-only",
+        "docs/deployment/releases/2026-07-16.1/processing-release-inputs.json",
+        "--schema",
+        "schema.json",
+      ]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/schema.*repository path|trusted schema/i);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    "invalid",
+    "symbolic",
+    "oversized",
+  ])("rejects a %s trusted schema in verification mode", async (kind) => {
+    const fixture = await createVerificationRoot();
+    try {
+      await writeFile(fixture.inputPath, canonicalJson(createProcessingReleaseInputs(reviewed)));
+      if (kind === "invalid") {
+        await writeFile(fixture.schemaPath, "{}\n");
+      } else if (kind === "symbolic") {
+        const target = join(fixture.root, "schema-target.json");
+        await writeFile(target, trustedSchema);
+        await rm(fixture.schemaPath);
+        await symlink(target, fixture.schemaPath);
+      } else {
+        await writeFile(fixture.schemaPath, Buffer.alloc(1024 * 1024 + 1, 0x20));
+      }
+      const result = runCli(fixture.root, [
+        "--verify-only",
+        "docs/deployment/releases/2026-07-16.1/processing-release-inputs.json",
+        "--schema",
+        "docs/deployment/processing-release-inputs.schema.json",
+      ]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/schema|symbolic|bounded|regular|size/i);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves the existing input-file creation mode", async () => {
     const fixture = await createVerificationRoot();
     const rawInput = join(fixture.root, "reviewed.json");
