@@ -7,7 +7,7 @@
     "dev": "pnpm --filter @hereisit/image-engine build && wrangler dev -c wrangler.local.jsonc --persist-to .wrangler/state",
     "build": "pnpm --filter @hereisit/image-engine build && wrangler deploy -c wrangler.local.jsonc --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
-    "test:integration": "vitest run -c vitest.config.ts",
+    "test:integration": "node scripts/run-integration-tests.mjs",
     "types": "wrangler types -c wrangler.local.jsonc src/worker-configuration.d.ts --strict-vars=false",
     "types:check": "wrangler types -c wrangler.local.jsonc src/worker-configuration.d.ts --strict-vars=false --check"
   },

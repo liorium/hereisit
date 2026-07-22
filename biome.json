@@ -4,6 +4,7 @@
     "includes": [
       "**",
       "!!apps/api-worker/src/worker-configuration.d.ts",
+      "!!apps/api-worker/wrangler.vitest.generated.jsonc",
       "!!apps/web/public/pdfjs",
       "!!security/application-license-policy.json",
       "!!security/vulnerability-scan-policy.json",

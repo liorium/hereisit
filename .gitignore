@@ -5,6 +5,7 @@ out/
 apps/web/public/pdfjs/
 apps/web/public/_headers
 .wrangler/
+apps/api-worker/wrangler.vitest.generated.jsonc
 .dev.vars*
 !.dev.vars.example
 coverage/
