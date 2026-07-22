@@ -217,6 +217,25 @@ async function withPinnedPackageRoot(root, task) {
   }
 }
 
+async function assertPinnedPackageIdentity(pinnedRoot, expected) {
+  const packageBytes = await readBoundedRegularFile(
+    join(pinnedRoot, "package.json"),
+    PACKAGE_JSON_MAXIMUM_BYTES,
+    "inventory package manifest",
+  );
+  const manifest = assertObject(
+    parseJson(packageBytes, "inventory package manifest"),
+    "inventory package manifest",
+  );
+  if (
+    manifest.name !== expected.name ||
+    manifest.version !== expected.version ||
+    manifest.license !== expected.license
+  ) {
+    throw new TypeError("inventory package manifest identity does not agree with pnpm");
+  }
+}
+
 async function assertRepository(root) {
   const resolved = resolve(root);
   const canonical = await realpath(resolved).catch(() => {
@@ -313,35 +332,21 @@ async function collectInventory(repository, rawInventory) {
           throw new TypeError("inventory package path must not be symbolic");
         }
         ensureInside(canonicalPath, repository.nodeModules, "inventory package path");
-        const packageBytes = await withPinnedPackageRoot(canonicalPath, (pinnedRoot) =>
-          readBoundedRegularFile(
-            join(pinnedRoot, "package.json"),
-            PACKAGE_JSON_MAXIMUM_BYTES,
-            "inventory package manifest",
-          ),
-        );
-        const manifest = assertObject(
-          parseJson(packageBytes, "inventory package manifest"),
-          "inventory package manifest",
-        );
         const version = record.versions[index];
-        if (
-          manifest.name !== record.name ||
-          manifest.version !== version ||
-          manifest.license !== record.license
-        ) {
-          throw new TypeError("inventory package manifest identity does not agree with pnpm");
-        }
         const identity = `${record.name}@${version}`;
-        if (identities.has(identity)) throw new TypeError("duplicate inventory package identity");
-        identities.add(identity);
-        packages.push({
+        const packageValue = {
           identity,
           name: record.name,
           version,
           license: record.license,
           root: canonicalPath,
-        });
+        };
+        await withPinnedPackageRoot(canonicalPath, (pinnedRoot) =>
+          assertPinnedPackageIdentity(pinnedRoot, packageValue),
+        );
+        if (identities.has(identity)) throw new TypeError("duplicate inventory package identity");
+        identities.add(identity);
+        packages.push(packageValue);
       }
     }
   }
@@ -353,6 +358,7 @@ async function collectInventory(repository, rawInventory) {
 
 async function directLicenseTexts(packageValue, budget) {
   return withPinnedPackageRoot(packageValue.root, async (pinnedRoot) => {
+    await assertPinnedPackageIdentity(pinnedRoot, packageValue);
     const candidates = [];
     const directory = await opendir(pinnedRoot);
     let entryCount = 0;
@@ -438,13 +444,14 @@ async function buildNotices(repository, policyState, packages) {
     }
     const readmePath = resolve(packageValue.root, fallback.path);
     ensureInside(readmePath, packageValue.root, "fallback README");
-    const bytes = await withPinnedPackageRoot(packageValue.root, (pinnedRoot) =>
-      readBoundedRegularFile(
+    const bytes = await withPinnedPackageRoot(packageValue.root, async (pinnedRoot) => {
+      await assertPinnedPackageIdentity(pinnedRoot, packageValue);
+      return readBoundedRegularFile(
         join(pinnedRoot, fallback.path),
         Math.min(LICENSE_TEXT_MAXIMUM_BYTES, budget.remainingBytes),
         "fallback README",
-      ),
-    );
+      );
+    });
     budget.remainingBytes -= bytes.byteLength;
     return [{ label: fallback.path, text: decodeUtf8(bytes, "fallback README") }];
   }
