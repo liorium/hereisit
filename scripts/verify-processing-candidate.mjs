@@ -348,6 +348,29 @@ async function verifyWebAsset(root, asset, environment) {
   }
 }
 
+export function assertVerifiedProcessingCandidateManifest({
+  verification,
+  manifestBytes,
+  candidate,
+}) {
+  const verified = assertObject(verification, "candidate verification summary");
+  assertSha256(verified.manifestSha256, "verified candidate manifest hash");
+  assertSha256(
+    verified.candidateVerificationSha256,
+    "verified candidate payload verification hash",
+  );
+  if (!Buffer.isBuffer(manifestBytes)) {
+    throw new TypeError("candidate manifest bytes must be a buffer");
+  }
+  const manifest = assertObject(candidate, "reread processing candidate");
+  if (
+    sha256Bytes(manifestBytes) !== verified.manifestSha256 ||
+    manifest.verificationSha256 !== verified.candidateVerificationSha256
+  ) {
+    throw new TypeError("reread processing candidate does not match the verified manifest");
+  }
+}
+
 export async function verifyProcessingCandidate({
   manifestPath,
   root,
@@ -435,6 +458,8 @@ export async function verifyProcessingCandidate({
     state: candidate.state,
     releaseId: candidate.releaseId,
     gitSha: candidate.gitSha,
+    manifestSha256: sha256Bytes(manifestBytes),
+    candidateVerificationSha256: candidate.verificationSha256,
     assetCount: entries.length + 4,
     web: {
       staging: {

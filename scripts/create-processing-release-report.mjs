@@ -18,7 +18,10 @@ import {
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
-import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
+import {
+  assertVerifiedProcessingCandidateManifest,
+  verifyProcessingCandidate,
+} from "./verify-processing-candidate.mjs";
 import { verifyProcessingEvidenceBundle } from "./verify-processing-evidence-bundle.mjs";
 
 const maximumReportBytes = 1024 * 1024;
@@ -260,7 +263,7 @@ async function deriveProcessingReleaseReport({
   publicKeyPath,
   now,
 }) {
-  await verifyProcessingCandidate({
+  const candidateVerification = await verifyProcessingCandidate({
     manifestPath: candidateManifestPath,
     root: candidateRoot,
     requiredState: "built",
@@ -272,6 +275,11 @@ async function deriveProcessingReleaseReport({
     validateProcessingCandidate,
   );
   if (candidate.state !== "built") throw new TypeError("processing candidate must be built");
+  assertVerifiedProcessingCandidateManifest({
+    verification: candidateVerification,
+    manifestBytes: candidateBytes,
+    candidate,
+  });
   const evidenceIdentity = await verifyProcessingEvidenceBundle({
     bundlePath: evidenceBundlePath,
     signaturePath: evidenceSignaturePath,

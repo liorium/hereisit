@@ -16,6 +16,10 @@ import {
 import { canonicalJson, sha256Bytes } from "../scripts/image-lab-common.mjs";
 import { signCanonicalProcessingEvidence } from "../scripts/processing-evidence-signature.mjs";
 import {
+  assertVerifiedProcessingCandidateManifest,
+  verifyProcessingCandidate,
+} from "../scripts/verify-processing-candidate.mjs";
+import {
   runProcessingReleaseReportVerifierCli,
   verifyProcessingReleaseReport,
 } from "../scripts/verify-processing-release-report.mjs";
@@ -312,6 +316,41 @@ afterEach(async () => {
 });
 
 describe("processing release report verification", () => {
+  it("binds reread candidate bytes and fields to the exact verified manifest", async () => {
+    const value = await fixture();
+    const manifestBytes = await readFile(value.candidateManifestPath);
+    const verification = await verifyProcessingCandidate({
+      manifestPath: value.candidateManifestPath,
+      root: value.candidateRoot,
+      requiredState: "built",
+    });
+    expect(verification).toMatchObject({
+      manifestSha256: sha256Bytes(manifestBytes),
+      candidateVerificationSha256: value.candidate.verificationSha256,
+    });
+    expect(() =>
+      assertVerifiedProcessingCandidateManifest({
+        verification,
+        manifestBytes,
+        candidate: value.candidate,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertVerifiedProcessingCandidateManifest({
+        verification,
+        manifestBytes: Buffer.from(`${manifestBytes.toString("utf8")} `),
+        candidate: value.candidate,
+      }),
+    ).toThrow(/verified|manifest|identity/i);
+    expect(() =>
+      assertVerifiedProcessingCandidateManifest({
+        verification,
+        manifestBytes,
+        candidate: { ...value.candidate, verificationSha256: "0".repeat(64) },
+      }),
+    ).toThrow(/verified|manifest|identity/i);
+  });
+
   it("creates and verifies an exact report derived only from verified bytes", async () => {
     const value = await fixture();
     const created = await createAndWriteProcessingReleaseReport(options(value));

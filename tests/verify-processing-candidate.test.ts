@@ -876,6 +876,8 @@ describe("processing candidate verifier", () => {
       state: "finalized",
       releaseId,
       gitSha,
+      manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
+      candidateVerificationSha256: fixture.candidate.verificationSha256,
       assetCount: 23,
       web: {
         staging: expect.objectContaining({ treeSha256: fixture.candidate.web.staging.treeSha256 }),
@@ -1239,7 +1241,12 @@ describe("processing candidate verifier", () => {
     );
     expect(writes).toHaveLength(1);
     const summary = JSON.parse(writes[0]);
-    expect(summary).toMatchObject({ state: "finalized", assetCount: 23 });
+    expect(summary).toMatchObject({
+      state: "finalized",
+      assetCount: 23,
+      manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
+      candidateVerificationSha256: fixture.candidate.verificationSha256,
+    });
     expect(writes[0]).not.toContain("api-worker.mjs");
     expect(writes[0]).not.toContain(fixture.root);
   });
