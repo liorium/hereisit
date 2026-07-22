@@ -65,6 +65,41 @@ describe("previous active Worker version resolution", () => {
     ]);
   });
 
+  it("resolves an empty primary D1 table as the first deployment", async () => {
+    const results = [
+      [{ name: migrationName }],
+      [
+        {
+          rowCount: 0,
+          activeCount: 0,
+          versionId: null,
+          publicAdmissionAllowed: null,
+          retiredAt: null,
+        },
+      ],
+    ];
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          errors: [],
+          messages: [],
+          result: [{ success: true, results: results.shift(), meta: { served_by_primary: true } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    await expect(
+      resolvePreviousActiveWorkerVersionFromD1({
+        accountId: "a".repeat(32),
+        databaseId: activeId,
+        apiToken: "deployment-token",
+        before: [],
+        fetchImpl,
+      }),
+    ).resolves.toBe("none");
+  });
+
   it("returns none only for a consistent first deployment", () => {
     expect(
       resolvePreviousActiveWorkerVersion({

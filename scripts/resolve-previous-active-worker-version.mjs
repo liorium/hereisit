@@ -14,7 +14,7 @@ const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const versionIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const migrationName = "0002_worker_version_attestations.sql";
 const stateSql =
-  "SELECT COUNT(*) AS rowCount, SUM(CASE WHEN kind = 'active' THEN 1 ELSE 0 END) AS activeCount, MAX(CASE WHEN kind = 'active' THEN version_id END) AS versionId, MAX(CASE WHEN kind = 'active' THEN public_admission_allowed END) AS publicAdmissionAllowed, MAX(CASE WHEN kind = 'active' THEN retired_at END) AS retiredAt FROM worker_version_attestations";
+  "SELECT COUNT(*) AS rowCount, COALESCE(SUM(CASE WHEN kind = 'active' THEN 1 ELSE 0 END), 0) AS activeCount, MAX(CASE WHEN kind = 'active' THEN version_id END) AS versionId, MAX(CASE WHEN kind = 'active' THEN public_admission_allowed END) AS publicAdmissionAllowed, MAX(CASE WHEN kind = 'active' THEN retired_at END) AS retiredAt FROM worker_version_attestations";
 
 export function resolvePreviousActiveWorkerVersion({ rows, before }) {
   if (!Array.isArray(rows) || rows.length !== 1) {
