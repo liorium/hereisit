@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -14,28 +15,40 @@ const releaseTag = `processing-release-${releaseId}`;
 const targetSha = "a".repeat(40);
 const tagObjectSha = "b".repeat(40);
 const temporaryRoots: string[] = [];
+const securityScopes = [
+  ["engine", "engine"],
+  ["webStaging", "web-staging"],
+  ["webProduction", "web-production"],
+  ["worker", "worker"],
+  ["lockfile", "lockfile"],
+] as const;
+const securityPaths = [
+  "security-image-engine-license-gate.json",
+  "security-application-supply-chain-gate.json",
+  "security-vulnerability-gate.json",
+  ...securityScopes.map(([, scope]) => `security-sbom-${scope}.cdx.json`),
+  ...securityScopes.map(([, scope]) => `security-trivy-${scope}.json`),
+];
 
 function sha256(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function securityAssets() {
-  const descriptor = (path: string, hash: string) => ({ path, sizeBytes: 1, sha256: hash });
-  const scoped = (prefix: string, suffix: string) => ({
-    engine: descriptor(`${prefix}engine${suffix}`, "1".repeat(64)),
-    webStaging: descriptor(`${prefix}web-staging${suffix}`, "2".repeat(64)),
-    webProduction: descriptor(`${prefix}web-production${suffix}`, "3".repeat(64)),
-    worker: descriptor(`${prefix}worker${suffix}`, "4".repeat(64)),
-    lockfile: descriptor(`${prefix}lockfile${suffix}`, "5".repeat(64)),
+function securityAssets(files: Record<string, Uint8Array>) {
+  const descriptor = (path: string) => ({
+    path,
+    sizeBytes: files[path].byteLength,
+    sha256: sha256(files[path]),
   });
+  const scoped = (prefix: string, suffix: string) =>
+    Object.fromEntries(
+      securityScopes.map(([key, scope]) => [key, descriptor(`${prefix}${scope}${suffix}`)]),
+    );
   return {
     gates: {
-      imageEngine: descriptor("security-image-engine-license-gate.json", "6".repeat(64)),
-      applicationSupplyChain: descriptor(
-        "security-application-supply-chain-gate.json",
-        "7".repeat(64),
-      ),
-      vulnerability: descriptor("security-vulnerability-gate.json", "8".repeat(64)),
+      imageEngine: descriptor("security-image-engine-license-gate.json"),
+      applicationSupplyChain: descriptor("security-application-supply-chain-gate.json"),
+      vulnerability: descriptor("security-vulnerability-gate.json"),
     },
     sboms: scoped("security-sbom-", ".cdx.json"),
     vulnerabilityReports: scoped("security-trivy-", ".json"),
@@ -66,7 +79,7 @@ async function createFixture({ wrongStagingTree = false } = {}) {
   };
   const stagingWeb = await createWeb("staging", "<h1>staging</h1>\n");
   const productionWeb = await createWeb("production", "<h1>production</h1>\n");
-  const files = {
+  const files: Record<string, Buffer> = {
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": Buffer.from("canonical-oci\n"),
     "image-engine-linux-amd64.docker.tar": Buffer.from("loadable-docker\n"),
@@ -77,8 +90,9 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     "web-production.tar": productionWeb.bytes,
     [`evidence-v1--${releaseId}--processing-evidence.json`]: Buffer.from('{"signed":true}\n'),
     [`evidence-v1--${releaseId}--processing-evidence.sig`]: Buffer.from("signature\n"),
+    ...Object.fromEntries(securityPaths.map((path) => [path, Buffer.from(`${path}\n`)])),
   };
-  const identity = (path: keyof typeof files) => ({
+  const identity = (path: string) => ({
     path,
     sizeBytes: files[path].byteLength,
     sha256: sha256(files[path]),
@@ -142,7 +156,7 @@ async function createFixture({ wrongStagingTree = false } = {}) {
           processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
         },
       },
-      security: securityAssets(),
+      security: securityAssets(files),
       evidence: {
         bundle: identity(`evidence-v1--${releaseId}--processing-evidence.json`),
         signature: identity(`evidence-v1--${releaseId}--processing-evidence.sig`),
@@ -165,7 +179,22 @@ async function startGitHubServer(
     target = targetSha,
     extraAsset = false,
     changedWorkerBytes = false,
-  }: { target?: string; extraAsset?: boolean; changedWorkerBytes?: boolean } = {},
+    securityMutation,
+    onFirstDownload,
+  }: {
+    target?: string;
+    extraAsset?: boolean;
+    changedWorkerBytes?: boolean;
+    securityMutation?:
+      | "missing"
+      | "renamed"
+      | "duplicate-id"
+      | "duplicate-name"
+      | "wrong-size"
+      | "wrong-hash"
+      | "changed-bytes";
+    onFirstDownload?: () => void;
+  } = {},
 ) {
   const requests: Array<{ authorization?: string; path: string; version?: string }> = [];
   let origin = "";
@@ -181,11 +210,12 @@ async function startGitHubServer(
     "web-production.tar",
     `evidence-v1--${releaseId}--processing-evidence.json`,
     `evidence-v1--${releaseId}--processing-evidence.sig`,
+    ...securityPaths,
   ];
   const records = suffixes.map((suffix, index) => {
     const evidence = suffix.startsWith("evidence-v1--");
     const name = evidence ? suffix : `candidate-v1--${releaseId}--${suffix}`;
-    const bytes = fixture.files[suffix as keyof typeof fixture.files];
+    const bytes = fixture.files[suffix];
     const id = 101 + index;
     return {
       id,
@@ -210,6 +240,16 @@ async function startGitHubServer(
       bytes: Buffer.from("x"),
     });
   }
+  const securityRecord = records.find((record) => record.name.endsWith(securityPaths[0]));
+  if (securityRecord === undefined) throw new Error("security record is missing from fixture");
+  if (securityMutation === "missing") records.splice(records.indexOf(securityRecord), 1);
+  if (securityMutation === "renamed") securityRecord.name += ".renamed";
+  if (securityMutation === "duplicate-id") securityRecord.id = records[0].id;
+  if (securityMutation === "duplicate-name") securityRecord.name = records[0].name;
+  if (securityMutation === "wrong-size") securityRecord.size += 1;
+  if (securityMutation === "wrong-hash") securityRecord.digest = `sha256:${"f".repeat(64)}`;
+
+  let downloadStarted = false;
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
@@ -264,10 +304,16 @@ async function startGitHubServer(
     }
     const download = records.find((record) => url.pathname === `/download/${record.id}`);
     if (download) {
+      if (!downloadStarted) {
+        downloadStarted = true;
+        onFirstDownload?.();
+      }
       const bytes =
         changedWorkerBytes && download.name.endsWith("api-worker.mjs")
           ? Buffer.alloc(download.bytes.byteLength, 0x78)
-          : download.bytes;
+          : securityMutation === "changed-bytes" && download.name.endsWith(securityPaths[0])
+            ? Buffer.alloc(download.bytes.byteLength, 0x78)
+            : download.bytes;
       response.writeHead(200, { "content-length": String(bytes.byteLength) });
       response.end(bytes);
       return;
@@ -315,6 +361,21 @@ describe("GitHub release asset resolver", () => {
           staging: { treeSha256: fixture.candidate.releaseAssets.web.staging.treeSha256 },
           production: { treeSha256: fixture.candidate.releaseAssets.web.production.treeSha256 },
         },
+        security: {
+          gates: {
+            imageEngine: {
+              sha256: fixture.candidate.releaseAssets.security.gates.imageEngine.sha256,
+            },
+          },
+          sboms: {
+            worker: { sha256: fixture.candidate.releaseAssets.security.sboms.worker.sha256 },
+          },
+          vulnerabilityReports: {
+            lockfile: {
+              sha256: fixture.candidate.releaseAssets.security.vulnerabilityReports.lockfile.sha256,
+            },
+          },
+        },
       });
       expect(JSON.parse(await readFile(output, "utf8"))).toEqual(result);
       expect(
@@ -352,6 +413,73 @@ describe("GitHub release asset resolver", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it.each([
+    ["missing", /exact|missing/i],
+    ["renamed", /unexpected|missing/i],
+    ["duplicate-id", /duplicated/i],
+    ["duplicate-name", /duplicated/i],
+    ["wrong-size", /metadata/i],
+    ["wrong-hash", /metadata/i],
+    ["changed-bytes", /downloaded.*SHA|digest/i],
+  ] as const)("rejects a %s security release asset", async (securityMutation, expectedError) => {
+    const fixture = await createFixture();
+    const server = await startGitHubServer(fixture, { securityMutation });
+    try {
+      await expect(
+        resolveGitHubReleaseAssets({
+          repository,
+          releaseTag,
+          candidateRoot: fixture.candidateRoot,
+          output: join(fixture.root, "manifest.json"),
+          apiOrigin: server.origin,
+          token: "test-token",
+        }),
+      ).rejects.toThrow(expectedError);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it.each([
+    [
+      "renamed",
+      (fixture: Awaited<ReturnType<typeof createFixture>>) => {
+        fixture.candidate.releaseAssets.security.gates.imageEngine.path = "renamed.json";
+      },
+    ],
+    [
+      "oversized gate",
+      (fixture: Awaited<ReturnType<typeof createFixture>>) => {
+        fixture.candidate.releaseAssets.security.gates.imageEngine.sizeBytes = 1024 * 1024 + 1;
+      },
+    ],
+    [
+      "oversized evidence",
+      (fixture: Awaited<ReturnType<typeof createFixture>>) => {
+        fixture.candidate.releaseAssets.security.sboms.engine.sizeBytes = 8 * 1024 * 1024 + 1;
+      },
+    ],
+  ])("rejects a %s candidate security asset before network access", async (_label, mutate) => {
+    const fixture = await createFixture();
+    mutate(fixture);
+    const { verificationSha256: _old, ...payload } = fixture.candidate;
+    fixture.candidate.verificationSha256 = sha256Canonical(payload);
+    await writeFile(
+      join(fixture.candidateRoot, "processing-candidate.json"),
+      canonicalJson(fixture.candidate),
+    );
+    await expect(
+      resolveGitHubReleaseAssets({
+        repository,
+        releaseTag,
+        candidateRoot: fixture.candidateRoot,
+        output: join(fixture.root, "manifest.json"),
+        apiOrigin: "http://127.0.0.1:9",
+        token: "test-token",
+      }),
+    ).rejects.toThrow(/path|size|limit/i);
   });
 
   it("rejects a release tag that targets another source commit", async () => {
@@ -416,6 +544,29 @@ describe("GitHub release asset resolver", () => {
     const server = await startGitHubServer(fixture);
     const output = join(fixture.root, "manifest.json");
     await writeFile(output, "keep\n");
+    try {
+      await expect(
+        resolveGitHubReleaseAssets({
+          repository,
+          releaseTag,
+          candidateRoot: fixture.candidateRoot,
+          output,
+          apiOrigin: server.origin,
+          token: "test-token",
+        }),
+      ).rejects.toThrow(/exists|overwrite/i);
+      expect(await readFile(output, "utf8")).toBe("keep\n");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("never overwrites an output created while assets are downloading", async () => {
+    const fixture = await createFixture();
+    const output = join(fixture.root, "manifest.json");
+    const server = await startGitHubServer(fixture, {
+      onFirstDownload: () => writeFileSync(output, "keep\n"),
+    });
     try {
       await expect(
         resolveGitHubReleaseAssets({

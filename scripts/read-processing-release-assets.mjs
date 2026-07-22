@@ -14,6 +14,8 @@ import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
 const MAXIMUM_MANIFEST_BYTES = 512 * 1024;
 const MAXIMUM_CANDIDATE_MANIFEST_BYTES = 1024 * 1024;
+const MAXIMUM_SECURITY_GATE_BYTES = 1024 * 1024;
+const MAXIMUM_SECURITY_EVIDENCE_BYTES = 8 * 1024 * 1024;
 const REPOSITORY = "liorium/hereisit";
 const GITHUB_API_ORIGIN = "https://api.github.com";
 const releaseIdPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/;
@@ -28,6 +30,18 @@ const webAssetFields = [
   "treeSha256",
   "processingApiOrigin",
 ];
+const securityScopes = Object.freeze([
+  ["engine", "engine"],
+  ["webStaging", "web-staging"],
+  ["webProduction", "web-production"],
+  ["worker", "worker"],
+  ["lockfile", "lockfile"],
+]);
+const securityGates = Object.freeze([
+  ["imageEngine", "security-image-engine-license-gate.json"],
+  ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
+  ["vulnerability", "security-vulnerability-gate.json"],
+]);
 
 function assertPositiveSafeInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -58,7 +72,14 @@ function assertExactHttpsOrigin(value, label) {
   return url;
 }
 
-function validateAsset(value, label, context, expectedName, fields = genericAssetFields) {
+function validateAsset(
+  value,
+  label,
+  context,
+  expectedName,
+  fields = genericAssetFields,
+  maximumBytes,
+) {
   const asset = assertObject(value, label);
   assertExactKeys(asset, fields, label);
   const assetId = assertPositiveSafeInteger(asset.assetId, `${label} ID`);
@@ -66,10 +87,58 @@ function validateAsset(value, label, context, expectedName, fields = genericAsse
     throw new TypeError(`${label} name does not match the immutable release namespace`);
   }
   const sizeBytes = assertPositiveSafeInteger(asset.sizeBytes, `${label} size`);
+  if (maximumBytes !== undefined && sizeBytes > maximumBytes) {
+    throw new RangeError(`${label} exceeds the size limit`);
+  }
   assertSha256(asset.sha256, `${label} SHA-256`);
   const expectedApiUrl = `${context.apiOrigin}/repos/${context.repository}/releases/assets/${assetId}`;
   if (asset.apiUrl !== expectedApiUrl) throw new TypeError(`${label} API URL is not canonical`);
   return { asset, assetId, sizeBytes };
+}
+
+function validateSecurityAssets(value, context) {
+  const security = assertObject(value, "security release assets");
+  assertExactKeys(security, ["gates", "sboms", "vulnerabilityReports"], "security release assets");
+  const gates = assertObject(security.gates, "security gate release assets");
+  assertExactKeys(
+    gates,
+    securityGates.map(([key]) => key),
+    "security gate release assets",
+  );
+  const identities = securityGates.map(([key, path]) =>
+    validateAsset(
+      gates[key],
+      `${key} security gate asset`,
+      context,
+      `candidate-v1--${context.releaseId}--${path}`,
+      genericAssetFields,
+      MAXIMUM_SECURITY_GATE_BYTES,
+    ),
+  );
+  for (const [groupName, prefix, suffix] of [
+    ["sboms", "security-sbom-", ".cdx.json"],
+    ["vulnerabilityReports", "security-trivy-", ".json"],
+  ]) {
+    const group = assertObject(security[groupName], `security ${groupName} release assets`);
+    assertExactKeys(
+      group,
+      securityScopes.map(([key]) => key),
+      `security ${groupName} release assets`,
+    );
+    for (const [key, scope] of securityScopes) {
+      identities.push(
+        validateAsset(
+          group[key],
+          `${scope} security ${groupName} asset`,
+          context,
+          `candidate-v1--${context.releaseId}--${prefix}${scope}${suffix}`,
+          genericAssetFields,
+          MAXIMUM_SECURITY_EVIDENCE_BYTES,
+        ),
+      );
+    }
+  }
+  return identities;
 }
 
 function validateProcessingApiOrigin(value, environment) {
@@ -119,6 +188,7 @@ export function validateProcessingReleaseAssets(value) {
       "costModel",
       "web",
       "evidence",
+      "security",
       "verificationSha256",
     ],
     "processing release asset manifest",
@@ -212,6 +282,7 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `evidence-v1--${releaseId}--processing-evidence.sig`,
   );
+  const security = validateSecurityAssets(manifest.security, context);
 
   const identities = [
     candidate,
@@ -225,6 +296,7 @@ export function validateProcessingReleaseAssets(value) {
     webProduction,
     evidenceBundle,
     evidenceSignature,
+    ...security,
   ];
   if (new Set(identities.map(({ assetId }) => assetId)).size !== identities.length) {
     throw new TypeError("processing release asset IDs are duplicated");
@@ -321,6 +393,7 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   const webProduction = releaseAssets.web.production;
   const evidenceBundle = releaseAssets.evidence.bundle;
   const evidenceSignature = releaseAssets.evidence.signature;
+  const candidateSecurity = releaseAssets.security;
 
   assertAssetMatch(report, manifest.report, "release report");
   assertAssetMatch(engineOci, manifest.engine.oci, "engine OCI");
@@ -340,6 +413,18 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   }
   assertAssetMatch(evidenceBundle, manifest.evidence.bundle, "release evidence bundle");
   assertAssetMatch(evidenceSignature, manifest.evidence.signature, "release evidence signature");
+  for (const [key] of securityGates) {
+    assertAssetMatch(candidateSecurity.gates[key], manifest.security.gates[key], `${key} gate`);
+  }
+  for (const groupName of ["sboms", "vulnerabilityReports"]) {
+    for (const [key, scope] of securityScopes) {
+      assertAssetMatch(
+        candidateSecurity[groupName][key],
+        manifest.security[groupName][key],
+        `${scope} security ${groupName}`,
+      );
+    }
+  }
 }
 
 const allowedFields = new Map([
@@ -369,6 +454,20 @@ const allowedFields = new Map([
       `evidence.${kind}.${field}`,
       (manifest) => manifest.evidence[kind][field],
     ]),
+  ),
+  ...securityGates.flatMap(([key]) =>
+    genericAssetFields.map((field) => [
+      `security.gates.${key}.${field}`,
+      (manifest) => manifest.security.gates[key][field],
+    ]),
+  ),
+  ...["sboms", "vulnerabilityReports"].flatMap((groupName) =>
+    securityScopes.flatMap(([key]) =>
+      genericAssetFields.map((field) => [
+        `security.${groupName}.${key}.${field}`,
+        (manifest) => manifest.security[groupName][key][field],
+      ]),
+    ),
   ),
 ]);
 

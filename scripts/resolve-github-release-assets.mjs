@@ -25,8 +25,22 @@ const REPOSITORY = "liorium/hereisit";
 const MAXIMUM_JSON_BYTES = 2 * 1024 * 1024;
 const MAXIMUM_CANDIDATE_BYTES = 1024 * 1024;
 const MAXIMUM_ASSET_BYTES = 2 * 1024 * 1024 * 1024;
+const MAXIMUM_SECURITY_GATE_BYTES = 1024 * 1024;
+const MAXIMUM_SECURITY_EVIDENCE_BYTES = 8 * 1024 * 1024;
 const releaseTagPattern = /^processing-release-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*)$/;
 const gitShaPattern = /^[0-9a-f]{40}$/;
+const securityScopes = Object.freeze([
+  ["engine", "engine"],
+  ["webStaging", "web-staging"],
+  ["webProduction", "web-production"],
+  ["worker", "worker"],
+  ["lockfile", "lockfile"],
+]);
+const securityGates = Object.freeze([
+  ["imageEngine", "security-image-engine-license-gate.json"],
+  ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
+  ["vulnerability", "security-vulnerability-gate.json"],
+]);
 
 function assertPositiveSafeInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -223,9 +237,18 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
   const engine = assertObject(assets.engine, "candidate engine assets");
   const web = assertObject(assets.web, "candidate web assets");
   const evidence = assertObject(assets.evidence, "candidate evidence assets");
-  const generic = (key, suffix, identity) => {
+  const security = assertObject(assets.security, "candidate security assets");
+  assertExactKeys(
+    security,
+    ["gates", "sboms", "vulnerabilityReports"],
+    "candidate security assets",
+  );
+  const generic = (key, suffix, identity, maximumBytes = MAXIMUM_ASSET_BYTES) => {
     const value = assertObject(identity, `candidate ${key} asset`);
     assertPositiveSafeInteger(value.sizeBytes, `candidate ${key} asset size`);
+    if (value.sizeBytes > maximumBytes) {
+      throw new RangeError(`candidate ${key} asset exceeds the size limit`);
+    }
     assertSha256(value.sha256, `candidate ${key} asset SHA-256`);
     if (value.path !== suffix) throw new TypeError(`candidate ${key} asset path does not match`);
     return {
@@ -233,6 +256,7 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
       name: `candidate-v1--${releaseId}--${suffix}`,
       sizeBytes: value.sizeBytes,
       sha256: value.sha256,
+      maximumBytes,
     };
   };
   const webAsset = (environment, identity) => {
@@ -254,6 +278,36 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
     const value = generic(key, suffix, identity);
     return { ...value, name: suffix };
   };
+  const gates = assertObject(security.gates, "candidate security gate assets");
+  assertExactKeys(
+    gates,
+    securityGates.map(([key]) => key),
+    "candidate security gate assets",
+  );
+  const securityAssets = securityGates.map(([key, path]) =>
+    generic(`security.gates.${key}`, path, gates[key], MAXIMUM_SECURITY_GATE_BYTES),
+  );
+  for (const [groupName, prefix, suffix] of [
+    ["sboms", "security-sbom-", ".cdx.json"],
+    ["vulnerabilityReports", "security-trivy-", ".json"],
+  ]) {
+    const group = assertObject(security[groupName], `candidate security ${groupName} assets`);
+    assertExactKeys(
+      group,
+      securityScopes.map(([key]) => key),
+      `candidate security ${groupName} assets`,
+    );
+    for (const [key, scope] of securityScopes) {
+      securityAssets.push(
+        generic(
+          `security.${groupName}.${key}`,
+          `${prefix}${scope}${suffix}`,
+          group[key],
+          MAXIMUM_SECURITY_EVIDENCE_BYTES,
+        ),
+      );
+    }
+  }
   return [
     {
       key: "candidate",
@@ -279,6 +333,7 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
       `evidence-v1--${releaseId}--processing-evidence.sig`,
       evidence.signature,
     ),
+    ...securityAssets,
   ];
 }
 
@@ -331,6 +386,7 @@ async function writeChunk(handle, chunk) {
 }
 
 async function downloadAsset({ origin, repository, assetId, headers, expected, output }) {
+  const maximumBytes = expected.maximumBytes ?? MAXIMUM_ASSET_BYTES;
   const response = await fetch(`${origin}/repos/${repository}/releases/assets/${assetId}`, {
     headers: { ...headers, accept: "application/octet-stream" },
     redirect: "manual",
@@ -353,7 +409,7 @@ async function downloadAsset({ origin, repository, assetId, headers, expected, o
   if (declared !== null && Number(declared) !== expected.sizeBytes) {
     throw new TypeError("release asset download size does not match metadata");
   }
-  if (expected.sizeBytes > MAXIMUM_ASSET_BYTES) {
+  if (expected.sizeBytes > maximumBytes) {
     throw new RangeError("release asset exceeds the size limit");
   }
   const hash = createHash("sha256");
@@ -363,7 +419,7 @@ async function downloadAsset({ origin, repository, assetId, headers, expected, o
     for await (const rawChunk of download.body) {
       const chunk = rawChunk instanceof Uint8Array ? rawChunk : new Uint8Array(rawChunk);
       sizeBytes += chunk.byteLength;
-      if (sizeBytes > expected.sizeBytes || sizeBytes > MAXIMUM_ASSET_BYTES) {
+      if (sizeBytes > expected.sizeBytes || sizeBytes > maximumBytes) {
         throw new RangeError("release asset download exceeds the expected size");
       }
       hash.update(chunk);
@@ -396,6 +452,13 @@ function buildManifest({ releaseTag, targetSha, releaseIdNumber, resolved }) {
     costModel: get("costModel"),
     web: { staging: get("web.staging"), production: get("web.production") },
     evidence: { bundle: get("evidence.bundle"), signature: get("evidence.signature") },
+    security: {
+      gates: Object.fromEntries(securityGates.map(([key]) => [key, get(`security.gates.${key}`)])),
+      sboms: Object.fromEntries(securityScopes.map(([key]) => [key, get(`security.sboms.${key}`)])),
+      vulnerabilityReports: Object.fromEntries(
+        securityScopes.map(([key]) => [key, get(`security.vulnerabilityReports.${key}`)]),
+      ),
+    },
   };
   return { ...payload, verificationSha256: sha256Canonical(payload) };
 }

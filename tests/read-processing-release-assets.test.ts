@@ -49,6 +49,31 @@ function securityAssets() {
   };
 }
 
+function securityReleaseAssets() {
+  const candidate = securityAssets();
+  let assetId = 112;
+  const releaseAsset = (descriptor: { path: string; sha256: string; sizeBytes: number }) => ({
+    ...asset(assetId++, descriptor.path, descriptor.sha256),
+    sizeBytes: descriptor.sizeBytes,
+  });
+  return {
+    gates: {
+      imageEngine: releaseAsset(candidate.gates.imageEngine),
+      applicationSupplyChain: releaseAsset(candidate.gates.applicationSupplyChain),
+      vulnerability: releaseAsset(candidate.gates.vulnerability),
+    },
+    sboms: Object.fromEntries(
+      Object.entries(candidate.sboms).map(([key, descriptor]) => [key, releaseAsset(descriptor)]),
+    ),
+    vulnerabilityReports: Object.fromEntries(
+      Object.entries(candidate.vulnerabilityReports).map(([key, descriptor]) => [
+        key,
+        releaseAsset(descriptor),
+      ]),
+    ),
+  };
+}
+
 function candidateDocument() {
   const payload = {
     schema: "hereisit-processing-candidate@1",
@@ -190,6 +215,7 @@ function releaseManifest(candidateBytes: Uint8Array) {
         name: `evidence-v1--${releaseId}--processing-evidence.sig`,
       },
     },
+    security: securityReleaseAssets(),
   };
   return { ...payload, verificationSha256: sha256Canonical(payload) };
 }
@@ -230,6 +256,13 @@ describe("processing release asset reader", () => {
         "web.production.processingApiOrigin",
       ),
     ).toBe("https://hereisit-processing-production.liorium.workers.dev");
+    expect(
+      await readProcessingReleaseAssetField(
+        manifest,
+        candidateRoot,
+        "security.vulnerabilityReports.lockfile.sha256",
+      ),
+    ).toBe("5".repeat(64));
   });
 
   it.each([
@@ -274,6 +307,61 @@ describe("processing release asset reader", () => {
     await expect(
       readProcessingReleaseAssetField(manifest, candidateRoot, "worker.sha256"),
     ).rejects.toThrow(/candidate.*worker.*match/i);
+  });
+
+  it.each([
+    [
+      "extra security group field",
+      (manifest: ReturnType<typeof releaseManifest>) => {
+        (manifest.security as Record<string, unknown>).extra = {};
+      },
+    ],
+    [
+      "renamed security asset",
+      (manifest: ReturnType<typeof releaseManifest>) => {
+        manifest.security.gates.imageEngine.name = "security-image-engine-license-gate.json";
+      },
+    ],
+    [
+      "duplicate security ID",
+      (manifest: ReturnType<typeof releaseManifest>) => {
+        manifest.security.gates.imageEngine.assetId = manifest.worker.assetId;
+      },
+    ],
+    [
+      "oversized security gate",
+      (manifest: ReturnType<typeof releaseManifest>) => {
+        manifest.security.gates.imageEngine.sizeBytes = 1024 * 1024 + 1;
+      },
+    ],
+    [
+      "oversized security evidence",
+      (manifest: ReturnType<typeof releaseManifest>) => {
+        manifest.security.sboms.engine.sizeBytes = 8 * 1024 * 1024 + 1;
+      },
+    ],
+  ])("rejects %s", async (_label, mutate) => {
+    const { candidateRoot, manifest } = await fixture();
+    mutate(manifest);
+    const { verificationSha256: _old, ...payload } = manifest;
+    manifest.verificationSha256 = sha256Canonical(payload);
+    await expect(
+      readProcessingReleaseAssetField(manifest, candidateRoot, "security.gates.imageEngine.sha256"),
+    ).rejects.toThrow();
+  });
+
+  it("rejects candidate security hash drift after manifest verification", async () => {
+    const { candidateRoot, manifest } = await fixture();
+    manifest.security.vulnerabilityReports.lockfile.sha256 = "f".repeat(64);
+    const { verificationSha256: _old, ...payload } = manifest;
+    manifest.verificationSha256 = sha256Canonical(payload);
+    await expect(
+      readProcessingReleaseAssetField(
+        manifest,
+        candidateRoot,
+        "security.vulnerabilityReports.lockfile.sha256",
+      ),
+    ).rejects.toThrow(/candidate.*lockfile.*match/i);
   });
 
   it.each([
