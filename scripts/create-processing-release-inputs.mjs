@@ -117,6 +117,9 @@ export function createProcessingReleaseInputs(rawInput) {
     assertNonNegativeSafeInteger(ceilings[field], `ceilings.${field}`);
     if (ceilings[field] === 0) throw new TypeError(`ceilings.${field} must be positive`);
   }
+  if (ceilings.maxLiveMedianOutputRatioBps > 10_000) {
+    throw new TypeError("ceilings.maxLiveMedianOutputRatioBps must not exceed 10000");
+  }
   assertNonNegativeSafeInteger(
     ceilings.maxLiveOriginalRetainedRateBps,
     "ceilings.maxLiveOriginalRetainedRateBps",

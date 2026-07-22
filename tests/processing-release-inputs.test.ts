@@ -107,6 +107,7 @@ describe("immutable processing release inputs", () => {
   it.each([
     ["zero median ratio", "maxLiveMedianOutputRatioBps", 0],
     ["unsafe median ratio", "maxLiveMedianOutputRatioBps", Number.MAX_SAFE_INTEGER + 1],
+    ["median ratio above 10000", "maxLiveMedianOutputRatioBps", 10_001],
     ["zero weighted units", "maxLiveP95WeightedUnits", 0],
     ["negative retained rate", "maxLiveOriginalRetainedRateBps", -1],
     ["retained rate above 10000", "maxLiveOriginalRetainedRateBps", 10_001],
@@ -117,6 +118,15 @@ describe("immutable processing release inputs", () => {
         ceilings: { ...reviewed.ceilings, [field]: value },
       }),
     ).toThrow();
+  });
+
+  it("accepts the exact 10000 basis-point median ratio boundary", () => {
+    expect(
+      createProcessingReleaseInputs({
+        ...reviewed,
+        ceilings: { ...reviewed.ceilings, maxLiveMedianOutputRatioBps: 10_000 },
+      }).ceilings.maxLiveMedianOutputRatioBps,
+    ).toBe(10_000);
   });
 
   it("produces stable content", () => {
@@ -422,7 +432,7 @@ describe("immutable processing release inputs", () => {
         maxLiveMedianOutputRatioBps: {
           type: "integer",
           minimum: 1,
-          maximum: Number.MAX_SAFE_INTEGER,
+          maximum: 10_000,
         },
         maxLiveP95WeightedUnits: {
           type: "integer",

@@ -10,7 +10,7 @@ const cli = resolve("scripts/read-processing-release-inputs.mjs");
 const roots: string[] = [];
 const ceilings = {
   maxCostPer1000JobsMicrousd: 500_000,
-  maxLiveMedianOutputRatioBps: 8_000,
+  maxLiveMedianOutputRatioBps: 10_000,
   maxLiveP95WeightedUnits: 12_000,
   maxLiveOriginalRetainedRateBps: 2_500,
   maxProjectedMonthlyCostMicrousd: 5_000_000,
@@ -130,6 +130,27 @@ describe("processing release-input scalar reader", () => {
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toMatch(/symbolic|bounded|regular|canonical|size/i);
+  });
+
+  it("rejects a canonical document whose median ratio exceeds 10000 basis points", async () => {
+    const valueFixture = await fixture();
+    const document = JSON.parse(valueFixture.bytes.toString("utf8"));
+    document.ceilings.maxLiveMedianOutputRatioBps = 10_001;
+    const bytes = Buffer.from(canonicalJson(document));
+    await writeFile(valueFixture.path, bytes);
+
+    const result = run([
+      "--release-inputs",
+      valueFixture.path,
+      "--expected-sha256",
+      sha256Bytes(bytes),
+      "--field",
+      "maxLiveMedianOutputRatioBps",
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/median|10000|positive/i);
   });
 
   it("rejects a document mutated while the CLI reads it", async () => {
