@@ -6,6 +6,7 @@
       "!!apps/api-worker/src/worker-configuration.d.ts",
       "!!apps/web/public/pdfjs",
       "!!security/application-license-policy.json",
+      "!!security/vulnerability-scan-policy.json",
       "!!**/.next",
       "!!**/.turbo",
       "!!**/target",
@@ -15,7 +16,9 @@
       "!!**/test-results",
       "!!**/out",
       "!!**/.wrangler",
-      "!!**/.artifacts"
+      "!!**/.artifacts",
+      "!!**/.worktrees",
+      "!!**/.superpowers"
     ]
   },
   "formatter": {
