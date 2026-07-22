@@ -35,7 +35,24 @@ describe("processing staging workflow phase A", () => {
     expect(build).toContain("security-application-supply-chain-gate.json");
     expect(build).toContain("security-vulnerability-gate.json");
     expect(build.match(/rm -rf apps\/web\/\.next apps\/web\/out/g)).toHaveLength(2);
+    expect(build).toContain("--containers-rollout none");
     expect(build).toContain("--required-state built");
+  });
+
+  it("binds both jobs to one release-input-only lock commit", () => {
+    for (const body of [job("build"), job("verify-release")]) {
+      expect(body).toContain('git rev-list --parents -n 1 "$GITHUB_SHA"');
+      expect(body).toMatch(/test "\$\{#RELEASE_COMMIT\[@\]\}" -eq 2/);
+      expect(body).toContain(
+        'git diff-tree --no-commit-id --name-only -r --no-renames "$GITHUB_SHA"',
+      );
+      expect(body).toMatch(/test "\$\{#RELEASE_CHANGED_PATHS\[@\]\}" -eq 1/);
+      expect(body).toMatch(/test "\$\{RELEASE_CHANGED_PATHS\[0\]\}" = "\$RELEASE_INPUTS"/);
+      expect(body).toContain("printf '%s' \"$PARENT_SHA\" | sha256sum");
+      expect(body).toContain("input.baseSourceSha256");
+      expect(body).toContain('"$RELEASE_ID $EXPECTED_BASE_SOURCE_SHA256"');
+      expect(body).toContain("node scripts/create-processing-release-inputs.mjs");
+    }
   });
 
   it("uses genuine pinned scanner identities without rewriting reports", () => {
@@ -43,6 +60,7 @@ describe("processing staging workflow phase A", () => {
     expect(workflow).toContain("ghcr.io/anchore/syft@sha256:");
     expect(workflow).toContain("ghcr.io/aquasecurity/trivy@sha256:");
     expect(build).toContain("docker buildx imagetools inspect");
+    expect(build.match(/ghcr\.io\/aquasecurity\/trivy-db:2 \|/g)).toHaveLength(1);
     expect(build).toContain('TRIVY_DB_DIGEST="$(');
     expect(build).toContain('"hereisit-engine:sha256-$ENGINE_CONFIG_SHA256"');
     expect(build).toContain("image --image-src docker");
@@ -72,6 +90,14 @@ describe("processing staging workflow phase A", () => {
     expect(verify).toContain("compression-level: 0");
     expect(verify).toContain("if-no-files-found: error");
     expect(verify).toContain("retention-days: 7");
+    expect(verify).toMatch(/artifact_name: \$\{\{ steps\.handoff\.outputs\.artifact_name \}\}/);
+    expect(verify).toMatch(/artifact_id: \$\{\{ steps\.publish\.outputs\.artifact-id \}\}/);
     expect(verify).toMatch(/artifact_digest: \$\{\{ steps\.publish\.outputs\.artifact-digest \}\}/);
+    expect(verify).toContain("id: handoff");
+    expect(verify).toContain(
+      'echo "artifact_name=processing-verified-candidate-$GITHUB_SHA" >> "$GITHUB_OUTPUT"',
+    );
+    expect(verify).toMatch(/name: \$\{\{ steps\.handoff\.outputs\.artifact_name \}\}/);
+    expect(verify).not.toContain("steps.publish.outputs.artifact-name");
   });
 });
