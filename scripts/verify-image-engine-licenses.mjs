@@ -134,7 +134,7 @@ function assertNonEmptyString(record, field) {
   }
 }
 
-export function validateVulnerabilityExceptions(value, now = new Date()) {
+export function validateVulnerabilityExceptions(value, now = new Date(), options = {}) {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -146,35 +146,78 @@ export function validateVulnerabilityExceptions(value, now = new Date()) {
   const required = [
     "cve",
     "affectedPackage",
+    "affectedVersion",
+    "affectedScope",
     "affectedDigest",
     "exploitabilityEvidence",
     "owner",
     "approvalReference",
     "expiresAt",
   ];
+  const allowedScopes = new Set(options.allowedScopes ?? ["engine"]);
+  const maximumValidityDays = options.maximumValidityDays ?? 30;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new TypeError("vulnerability exception verification time is invalid");
+  }
+  const identities = new Set();
   for (const exception of value.exceptions) {
     if (typeof exception !== "object" || exception === null) {
       throw new TypeError("vulnerability exception is invalid");
+    }
+    const fields = Object.keys(exception);
+    const unknown = fields.filter((field) => !required.includes(field));
+    if (unknown.length > 0) {
+      throw new TypeError("vulnerability exception fields are invalid");
     }
     for (const field of required) assertNonEmptyString(exception, field);
     if (!/^CVE-\d{4}-\d{4,}$/.test(exception.cve)) {
       throw new TypeError("vulnerability exception CVE is invalid");
     }
+    for (const field of ["affectedPackage", "affectedVersion"]) {
+      if (exception[field] !== exception[field].trim() || /[*?[\]]/.test(exception[field])) {
+        throw new TypeError(`vulnerability exception ${field} must be exact`);
+      }
+    }
+    if (!allowedScopes.has(exception.affectedScope)) {
+      throw new TypeError("vulnerability exception scope is invalid");
+    }
     if (!/^sha256:[0-9a-f]{64}$/.test(exception.affectedDigest)) {
       throw new TypeError("vulnerability exception affectedDigest is invalid");
     }
+    let approval;
+    try {
+      approval = new URL(exception.approvalReference);
+    } catch {
+      throw new TypeError("vulnerability exception approvalReference is invalid");
+    }
+    if (
+      approval.protocol !== "https:" ||
+      approval.username !== "" ||
+      approval.password !== "" ||
+      approval.hostname === ""
+    ) {
+      throw new TypeError("vulnerability exception approvalReference must use HTTPS");
+    }
     const expiry = new Date(exception.expiresAt);
-    if (!Number.isFinite(expiry.getTime())) {
+    if (!Number.isFinite(expiry.getTime()) || expiry.toISOString() !== exception.expiresAt) {
       throw new TypeError("vulnerability exception expiresAt is invalid");
     }
     if (expiry.getTime() <= now.getTime())
       throw new TypeError("vulnerability exception is expired");
-    if (expiry.getTime() - now.getTime() > 30 * DAY_MS) {
-      throw new TypeError("vulnerability exception may not exceed 30 days");
+    if (expiry.getTime() - now.getTime() > maximumValidityDays * DAY_MS) {
+      throw new TypeError(`vulnerability exception may not exceed ${maximumValidityDays} days`);
     }
-    const unknown = Object.keys(exception).filter((field) => !required.includes(field));
-    if (unknown.length > 0) throw new TypeError("vulnerability exception has unknown fields");
+    const identity = [
+      exception.cve,
+      exception.affectedPackage,
+      exception.affectedVersion,
+      exception.affectedScope,
+      exception.affectedDigest,
+    ].join("\0");
+    if (identities.has(identity)) throw new TypeError("duplicate vulnerability exception");
+    identities.add(identity);
   }
+  return value.exceptions;
 }
 
 export function validatePackageLicenses(packages, policy, sourceLock) {

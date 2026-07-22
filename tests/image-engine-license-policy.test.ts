@@ -178,11 +178,13 @@ describe("image engine native supply-chain policy", () => {
       exceptions: [
         {
           cve: "CVE-2026-12345",
-          affectedPackage: "example@1.0.0",
+          affectedPackage: "example",
+          affectedVersion: "1.0.0",
+          affectedScope: "engine",
           affectedDigest: `sha256:${"a".repeat(64)}`,
           exploitabilityEvidence: "Unreachable code path in the network-disabled runtime.",
           owner: "security-owner",
-          approvalReference: "SEC-123",
+          approvalReference: "https://github.com/liorium/hereisit/issues/123",
           expiresAt: "2026-07-30T00:00:00.000Z",
         },
       ],
