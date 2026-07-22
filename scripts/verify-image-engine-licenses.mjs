@@ -581,7 +581,14 @@ function assertImageReference(image) {
   return image;
 }
 
-function inspectRuntimeImage({ image }) {
+function inspectRuntimeImage({ image, artifactSha256 }) {
+  const imageId = execFileSync("docker", ["image", "inspect", "--format={{.Id}}", image], {
+    encoding: "utf8",
+    maxBuffer: 1024,
+  }).trim();
+  if (imageId !== `sha256:${artifactSha256}`) {
+    throw new TypeError("runtime image identity does not match the artifact");
+  }
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const inventoryScript = resolve(
     repositoryRoot,

@@ -327,7 +327,7 @@ describe("image engine native supply-chain policy", () => {
     const docker = join(fixture.root, "docker");
     await writeFile(
       docker,
-      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(fixture.inventory))});\n`,
+      `#!/usr/bin/env node\nif (process.argv[2] === "image") process.stdout.write("sha256:${fixture.options.artifactSha256}\\n");\nelse process.stdout.write(${JSON.stringify(JSON.stringify(fixture.inventory))});\n`,
     );
     await chmod(docker, 0o755);
     const result = spawnSync(
@@ -362,6 +362,46 @@ describe("image engine native supply-chain policy", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(expected);
+  });
+
+  it("rejects a runtime image whose config digest does not match the artifact identity", async () => {
+    const fixture = await licenseGateFixture();
+    const docker = join(fixture.root, "docker");
+    await writeFile(
+      docker,
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(fixture.inventory))});\n`,
+    );
+    await chmod(docker, 0o755);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/verify-image-engine-licenses.mjs",
+        "--scope",
+        "pr",
+        "--image",
+        fixture.options.image,
+        "--artifact-sha256",
+        fixture.options.artifactSha256,
+        "--lock",
+        fixture.paths.sourceLockPath,
+        "--policy",
+        fixture.paths.policyPath,
+        "--exceptions",
+        fixture.paths.exceptionsPath,
+        "--base-lock",
+        fixture.paths.baseImageLockPath,
+        "--output",
+        fixture.paths.outputPath,
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fixture.root}:${process.env.PATH}` },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("image engine license verification failed\n");
   });
 
   it("prints one generic direct-execution error without supplied data", () => {
