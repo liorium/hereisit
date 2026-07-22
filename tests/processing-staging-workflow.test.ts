@@ -1,0 +1,176 @@
+import { existsSync, readFileSync } from "node:fs";
+import { beforeAll, describe, expect, it } from "vitest";
+
+const workflowPath = ".github/workflows/processing-staging.yml";
+let workflow = "";
+
+function jobBody(name: string) {
+  const header = `  ${name}:\n`;
+  const start = workflow.indexOf(header);
+  expect(start, `${name} job is missing`).toBeGreaterThanOrEqual(0);
+  const tail = workflow.slice(start + header.length);
+  const nextJob = tail.search(/^ {2}[a-z0-9-]+:\s*$/m);
+  return nextJob < 0 ? tail : tail.slice(0, nextJob);
+}
+
+function actionStep(job: string, action: string) {
+  const start = job.indexOf(`- uses: ${action}`);
+  expect(start, `${action} step is missing`).toBeGreaterThanOrEqual(0);
+  const tail = job.slice(start);
+  const nextStep = tail.slice(1).search(/^ {6}- /m);
+  return nextStep < 0 ? tail : tail.slice(0, nextStep + 1);
+}
+
+function expectMainRepositoryGate(job: string, mode: "build" | "deploy") {
+  expect(job).toContain(`inputs.mode == '${mode}'`);
+  expect(job).toContain("github.repository == 'liorium/hereisit'");
+  expect(job).toContain("github.ref == 'refs/heads/main'");
+}
+
+beforeAll(() => {
+  expect(existsSync(workflowPath), `${workflowPath} must be checked in`).toBe(true);
+  workflow = readFileSync(workflowPath, "utf8");
+});
+
+describe("processing staging workflow", () => {
+  it("is manual, main-only, repository-bound, and exposes only build/deploy modes", () => {
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("type: choice");
+    expect(workflow).toMatch(/options:\s*(?:\[build,\s*deploy\]|\n\s+- build\n\s+- deploy)/);
+    expect(workflow).toContain("permissions:\n  contents: read");
+    expect(workflow).not.toMatch(/^\s+(?:push|pull_request|schedule):/m);
+
+    expectMainRepositoryGate(jobBody("build"), "build");
+    expectMainRepositoryGate(jobBody("verify-release"), "deploy");
+    expectMainRepositoryGate(jobBody("deploy"), "deploy");
+  });
+
+  it("keeps build and release verification outside the protected Cloudflare environment", () => {
+    const build = jobBody("build");
+    const verify = jobBody("verify-release");
+    const deploy = jobBody("deploy");
+
+    expect(build).not.toContain("environment: processing-staging");
+    expect(build).not.toContain("secrets.");
+    expect(verify).not.toContain("environment: processing-staging");
+    expect(verify).not.toContain("secrets.CLOUDFLARE");
+    expect(workflow.indexOf("  verify-release:\n")).toBeLessThan(workflow.indexOf("  deploy:\n"));
+    expect(deploy).toContain("needs: verify-release");
+    expect(deploy).toContain("environment: processing-staging");
+  });
+
+  it("resolves and verifies the complete finalized signed release before mutation", () => {
+    const verify = jobBody("verify-release");
+    const candidate = verify.indexOf("node scripts/verify-processing-candidate.mjs");
+    const report = verify.indexOf("node scripts/verify-processing-release-report.mjs");
+    const signature = verify.indexOf("node scripts/processing-evidence-signature.mjs");
+
+    expect(verify).toContain("node scripts/resolve-github-release-assets.mjs");
+    expect(candidate).toBeGreaterThanOrEqual(0);
+    expect(verify.slice(candidate)).toContain("--required-state finalized");
+    expect(report).toBeGreaterThan(candidate);
+    expect(signature).toBeGreaterThan(report);
+    expect(verify.slice(signature)).toContain("--mode verify");
+    expect(verify.slice(signature)).toContain("processing-evidence.sig");
+    expect(verify.slice(signature)).toContain(
+      "docs/deployment/processing-evidence-ed25519-public.pem",
+    );
+
+    for (const asset of [
+      "security-image-engine-license-gate.json",
+      "security-application-supply-chain-gate.json",
+      "security-vulnerability-gate.json",
+      "security-sbom-engine.cdx.json",
+      "security-sbom-web-staging.cdx.json",
+      "security-sbom-web-production.cdx.json",
+      "security-sbom-worker.cdx.json",
+      "security-sbom-lockfile.cdx.json",
+      "security-trivy-engine.json",
+      "security-trivy-web-staging.json",
+      "security-trivy-web-production.json",
+      "security-trivy-worker.json",
+      "security-trivy-lockfile.json",
+    ]) {
+      expect(verify).toContain(asset);
+    }
+
+    expect(workflow).not.toContain("--mode sign");
+    expect(workflow).not.toContain("--private-key");
+    expect(workflow).not.toMatch(/PRIVATE(?:_|-)KEY/);
+  });
+
+  it("deploys only an immutable resolved image at zero rollout with paused queues", () => {
+    const deploy = jobBody("deploy");
+    const resolveDigest = deploy.indexOf("node scripts/resolve-cloudflare-image-digest.mjs");
+    const provision = deploy.indexOf("node scripts/ensure-cloudflare-processing-resources.mjs");
+    const deployments = [...deploy.matchAll(/pnpm exec wrangler deploy/g)];
+
+    expect(resolveDigest).toBeGreaterThanOrEqual(0);
+    expect(provision).toBeGreaterThan(resolveDigest);
+    expect(deploy).toContain(".artifacts/deployment/cloudflare-image-digest.txt");
+    expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
+    expect(deploy.match(/--rollout-percent 0/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(deploy).not.toMatch(/--rollout-percent (?!0\b)\d+/);
+    expect(deployments.length).toBeGreaterThanOrEqual(2);
+    expect(deploy).toContain("node scripts/verify-queue-delivery-state.mjs");
+    expect(deploy).toContain("--expected paused");
+    expect(workflow).not.toContain("queues resume-delivery");
+  });
+
+  it("runs the authenticated staging smoke after deployment", () => {
+    const deploy = jobBody("deploy");
+    const lastDeployment = deploy.lastIndexOf("pnpm exec wrangler deploy");
+    const smoke = deploy.indexOf("node scripts/smoke-image-compress-server.mjs");
+
+    expect(smoke).toBeGreaterThan(lastDeployment);
+    expect(deploy).toContain(
+      `STAGING_MAINTAINER_SESSION_ID: \${{ secrets.STAGING_MAINTAINER_SESSION_ID }}`,
+    );
+    expect(deploy.slice(smoke)).toContain("--output .artifacts/deployment/smoke-result.json");
+  });
+
+  it("publishes only sanitized deployment evidence for seven days", () => {
+    const upload = actionStep(jobBody("deploy"), "actions/upload-artifact@");
+    const paths = [...upload.matchAll(/^\s+(.artifacts\/deployment\/[^\s]+)$/gm)].map(
+      ([, path]) => path,
+    );
+
+    expect(paths).toEqual([
+      ".artifacts/deployment/processing-candidate-identity.json",
+      ".artifacts/deployment/cloudflare-image-digest.txt",
+      ".artifacts/deployment/worker-version.json",
+      ".artifacts/deployment/gate-results.json",
+      ".artifacts/deployment/smoke-result.json",
+    ]);
+    expect(upload).toContain("if-no-files-found: error");
+    expect(upload).toContain("retention-days: 7");
+    expect(upload).not.toContain(".artifacts/candidate");
+    expect(upload).not.toContain("processing-evidence");
+  });
+
+  it("pins every action and prevents checkout credential persistence", () => {
+    const actionReferences = [...workflow.matchAll(/^\s+- uses: ([^\s#]+)/gm)].map(
+      ([, reference]) => reference,
+    );
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    for (const reference of actionReferences) {
+      expect(reference).toMatch(/^[^@\s]+@[a-f0-9]{40}$/);
+    }
+    for (const action of [
+      "actions/checkout@",
+      "pnpm/action-setup@",
+      "actions/setup-node@",
+      "docker/setup-buildx-action@",
+      "actions/upload-artifact@",
+      "actions/download-artifact@",
+    ]) {
+      expect(actionReferences.some((reference) => reference.startsWith(action))).toBe(true);
+    }
+    for (const name of ["build", "verify-release", "deploy"]) {
+      const job = jobBody(name);
+      expect(job).toContain("actions/checkout@");
+      expect(job).toContain("persist-credentials: false");
+    }
+  });
+});
