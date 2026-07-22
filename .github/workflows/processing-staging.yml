@@ -559,7 +559,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$ARTIFACT_DIGEST" =~ ^sha256:([0-9a-f]{64})$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^([0-9a-f]{64})$ ]]
           node scripts/download-and-verify-github-artifact.mjs \
             --repo "$GITHUB_REPOSITORY" \
             --run-id "$GITHUB_RUN_ID" \
@@ -863,6 +863,9 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec playwright install --with-deps chromium
+      - name: Arm primary queue failure cleanup
+        id: resume-attempt
+        run: echo "attempted=true" >> "$GITHUB_OUTPUT"
       - name: Resume only primary delivery
         id: resume-primary
         env:
@@ -887,23 +890,6 @@ jobs:
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$STAGING_PAGES_ORIGIN" \
             --output .artifacts/deployment/smoke-result.json
-      - name: Re-pause primary delivery after a failed deployment
-        if: failure() && steps.resume-primary.outcome == 'success'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
-      - name: Verify failure cleanup left both queues paused
-        if: failure() && steps.resume-primary.outcome == 'success'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: processing-staging-deployment-${{ github.sha }}
@@ -917,3 +903,14 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+      - name: Re-pause and verify both queues after any failed delivery attempt
+        if: failure() && steps.resume-attempt.outputs.attempted == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"

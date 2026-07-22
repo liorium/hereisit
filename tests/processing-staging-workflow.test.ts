@@ -68,6 +68,8 @@ describe("processing staging workflow", () => {
     expect(native).toContain(`artifact-ids: \${{ needs.verify-release.outputs.artifact_id }}`);
     expect(native).toContain("path: .artifacts/native-download");
     expect(independent).toBeGreaterThan(deploy.indexOf("actions/download-artifact@"));
+    expect(deploy).toContain('[[ "$ARTIFACT_DIGEST" =~ ^([0-9a-f]{64})$ ]]');
+    expect(deploy).not.toContain('ARTIFACT_DIGEST" =~ ^sha256:');
     for (const binding of [
       '--repo "$GITHUB_REPOSITORY"',
       '--run-id "$GITHUB_RUN_ID"',
@@ -194,16 +196,26 @@ describe("processing staging workflow", () => {
     expect(deploy).not.toContain("STAGING_PREVIOUS_ACTIVE_VERSION_ID");
   });
 
-  it("re-pauses and verifies both queues only after a successful primary resume", () => {
+  it("arms fail-safe cleanup before resume and makes cleanup the terminal step", () => {
     const deploy = jobBody("deploy");
-    expect(deploy).toContain("id: resume-primary");
-    expect(
-      deploy.match(/if: failure\(\) && steps\.resume-primary\.outcome == 'success'/g)?.length,
-    ).toBe(2);
-    const cleanup = deploy.indexOf('pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"');
-    expect(cleanup).toBeGreaterThan(
-      deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"'),
+    const arm = deploy.indexOf("id: resume-attempt");
+    const resume = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
+    const upload = deploy.indexOf("actions/upload-artifact@");
+    const cleanupStep = deploy.indexOf(
+      "      - name: Re-pause and verify both queues after any failed delivery attempt",
     );
+    const cleanup = deploy.indexOf('pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"');
+
+    expect(arm).toBeGreaterThanOrEqual(0);
+    expect(deploy).toContain("id: resume-primary");
+    expect(deploy.slice(arm, resume)).toContain('run: echo "attempted=true" >> "$GITHUB_OUTPUT"');
+    expect(resume).toBeGreaterThan(arm);
+    expect(upload).toBeGreaterThan(resume);
+    expect(cleanupStep).toBeGreaterThan(upload);
+    expect(cleanup).toBeGreaterThan(cleanupStep);
+    expect(deploy.slice(cleanupStep + 1)).not.toMatch(/^ {6}- /m);
+    expect(deploy).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
+    expect(deploy).not.toContain("steps.resume-primary.outcome");
     expect(deploy.slice(cleanup)).toContain('--queue "$QUEUE_NAME" --expected paused');
     expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
   });
