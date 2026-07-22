@@ -476,6 +476,70 @@ describe("application supply-chain gate", () => {
     ).rejects.toThrow(/manifest|bounded|package/i);
   });
 
+  it("rejects malformed package manifests and SBOMs", async () => {
+    const malformedManifest = await makeFixture();
+    const first = Object.values(malformedManifest.inventory)[0][0];
+    await writeFile(join(first.paths[0], "package.json"), "{\n");
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "notices", ...malformedManifest.options },
+        malformedManifest.adapters,
+      ),
+    ).rejects.toThrow(/manifest|JSON|package/i);
+
+    const malformedSbom = await makeFixture();
+    await runApplicationSupplyChain(
+      { mode: "notices", ...malformedSbom.options },
+      malformedSbom.adapters,
+    );
+    await writeFile(malformedSbom.sboms.engine.path, "{\n");
+    await expect(
+      runApplicationSupplyChain(
+        {
+          mode: "verify",
+          ...malformedSbom.options,
+          sboms: malformedSbom.sboms,
+          gatePath: malformedSbom.gatePath,
+        },
+        malformedSbom.adapters,
+      ),
+    ).rejects.toThrow(/SBOM|JSON/i);
+  });
+
+  it("rejects an SBOM changed while reading", async () => {
+    const fixture = await makeFixture();
+    await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+    const descriptor = fixture.sboms.engine;
+    const sbom = {
+      ...makeSbom("engine", descriptor.artifactSha256),
+      padding: "x".repeat(3_000_000),
+    };
+    await writeCanonical(descriptor.path, sbom);
+    const handle = await open(descriptor.path, "r+");
+    const size = Number((await handle.stat()).size);
+    let active = true;
+    let byte = 0x20;
+    const writer = (async () => {
+      while (active) {
+        await handle.write(Buffer.from([byte]), 0, 1, size - 1);
+        byte = byte === 0x20 ? 0x0a : 0x20;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    })();
+    try {
+      await expect(
+        runApplicationSupplyChain(
+          { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+          fixture.adapters,
+        ),
+      ).rejects.toThrow(/changed while reading/i);
+    } finally {
+      active = false;
+      await writer;
+      await handle.close();
+    }
+  });
+
   it("rejects C1 controls in license text", async () => {
     const fixture = await makeFixture();
     const record = fixture.inventory.MIT[0];
