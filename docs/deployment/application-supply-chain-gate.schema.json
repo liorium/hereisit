@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hereisit.example/schemas/application-supply-chain-gate.schema.json",
+  "$id": "https://hereisit.pages.dev/schemas/application-supply-chain-gate.schema.json",
   "title": "HereIsIt application supply-chain gate",
   "type": "object",
   "additionalProperties": false,

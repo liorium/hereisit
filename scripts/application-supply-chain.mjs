@@ -117,6 +117,9 @@ async function loadPolicy(path) {
     parseJson(bytes, "application license policy"),
     "application license policy",
   );
+  if (!bytes.equals(Buffer.from(canonicalJson(policy)))) {
+    throw new TypeError("application license policy must be byte-canonical");
+  }
   assertExactKeys(
     policy,
     ["allowedLicenseExpressions", "fallbacks", "mustNotShip", "pnpm", "schemaVersion", "syft"],
@@ -389,7 +392,7 @@ async function buildNotices(repository, policyState, packages) {
   );
   if (unused.length > 0)
     throw new TypeError("application license policy contains an unused fallback");
-  const text = `HereIsIt Third-Party Notices\n\nGenerated deterministically from the reviewed production dependency inventory.\n\n${sections.join("\n")}\n`;
+  const text = `HereIsIt Third-Party Notices\n\nGenerated deterministically from the reviewed production dependency inventory.\n\n${sections.join("\n")}`;
   if (Buffer.byteLength(text) > NOTICES_MAXIMUM_BYTES)
     throw new RangeError("third-party notices are oversized");
   return {

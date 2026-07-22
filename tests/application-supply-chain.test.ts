@@ -217,9 +217,17 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "bafe9bf3579700944f06f5cfd297e693e9bb47f2d41bd708766cfe04a70d235a",
+      noticeSha256: "e833a0609b666b386f49f76ec5266d3cb744669bbcec7a5b72766dfff6bc3d62",
       packageCount: 44,
     });
+  });
+
+  it("requires a byte-canonical application license policy", async () => {
+    const fixture = await makeFixture();
+    await writeFile(fixture.options.policyPath, JSON.stringify(policy, null, 2));
+    await expect(
+      runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
+    ).rejects.toThrow(/policy|canonical|reviewed/i);
   });
 
   it("writes deterministic notices and permits exact regeneration", async () => {
@@ -243,6 +251,8 @@ describe("application supply-chain gate", () => {
     expect(bytes).toContain("@cloudflare/containers\nVersion: 0.3.7");
     expect(bytes).toContain(checkedInMit.trimEnd());
     expect(bytes).not.toContain(fixture.root);
+    expect(bytes.split("\n").some((line) => /[ \t]$/.test(line))).toBe(false);
+    expect(bytes.endsWith("\n\n")).toBe(false);
     await writeFile(fixture.noticesPath, "changed\n");
     await expect(
       runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
