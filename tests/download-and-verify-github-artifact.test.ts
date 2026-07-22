@@ -40,6 +40,8 @@ async function startGitHubServer({
   artifacts,
   metadataDigest = `sha256:${sha256(zip)}`,
   expired = false,
+  runStatus = "completed",
+  runConclusion = "success" as string | null,
 } = {}) {
   const requests: Array<{ authorization?: string; path: string; version?: string }> = [];
   let origin = "";
@@ -58,8 +60,8 @@ async function startGitHubServer({
       sendJson({
         id: runId,
         head_sha: runHeadSha,
-        status: "completed",
-        conclusion: "success",
+        status: runStatus,
+        conclusion: runConclusion,
         repository: { full_name: "liorium/hereisit" },
       });
       return;
@@ -150,6 +152,64 @@ afterEach(async () => {
 });
 
 describe("GitHub artifact downloader", () => {
+  it("accepts only an explicitly allowed in-progress same-run handoff", async () => {
+    const temporary = await temporaryDirectory();
+    const zip = defaultZip();
+    const server = await startGitHubServer({
+      zip,
+      runStatus: "in_progress",
+      runConclusion: null,
+    });
+    try {
+      await expect(
+        runDownloader(server.origin, join(temporary, "allowed"), sha256(zip), [
+          "--allow-in-progress",
+          "true",
+        ]),
+      ).resolves.toBeDefined();
+      await expect(
+        runDownloader(server.origin, join(temporary, "default"), sha256(zip)),
+      ).rejects.toMatchObject({ stderr: expect.stringContaining("completed successfully") });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it.each([
+    ["queued", null],
+    ["completed", "failure"],
+  ])("rejects %s runs even when in-progress handoff is allowed", async (runStatus, runConclusion) => {
+    const temporary = await temporaryDirectory();
+    const zip = defaultZip();
+    const server = await startGitHubServer({ zip, runStatus, runConclusion });
+    try {
+      await expect(
+        runDownloader(server.origin, join(temporary, runStatus), sha256(zip), [
+          "--allow-in-progress",
+          "true",
+        ]),
+      ).rejects.toMatchObject({ stderr: expect.stringContaining("completed successfully") });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects non-literal in-progress opt-in values", async () => {
+    const temporary = await temporaryDirectory();
+    const zip = defaultZip();
+    const server = await startGitHubServer({ zip });
+    try {
+      await expect(
+        runDownloader(server.origin, join(temporary, "candidate"), sha256(zip), [
+          "--allow-in-progress",
+          "yes",
+        ]),
+      ).rejects.toMatchObject({ stderr: expect.stringContaining("exactly true") });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("binds run, artifact metadata, ZIP digest, and safe extracted bytes", async () => {
     const temporary = await temporaryDirectory();
     const zip = defaultZip();

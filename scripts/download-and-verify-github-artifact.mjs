@@ -109,14 +109,17 @@ async function requestJson(origin, path, headers) {
   }
 }
 
-function validateWorkflowRun(document, repository, runId, expectedHeadSha) {
+function validateWorkflowRun(document, repository, runId, expectedHeadSha, allowInProgress) {
   const run = assertObject(document, "workflow run");
   if (run.id !== runId) throw new TypeError("workflow run ID mismatch");
   if (run.head_sha !== expectedHeadSha) throw new TypeError("workflow run head SHA mismatch");
   if (assertObject(run.repository, "workflow run repository").full_name !== repository) {
     throw new TypeError("workflow run repository mismatch");
   }
-  if (run.status !== "completed" || run.conclusion !== "success") {
+  const validState = allowInProgress
+    ? run.status === "in_progress" && run.conclusion === null
+    : run.status === "completed" && run.conclusion === "success";
+  if (!validState) {
     throw new Error("workflow run is not completed successfully");
   }
 }
@@ -491,6 +494,7 @@ export async function downloadAndVerifyGitHubArtifact({
   outputDir,
   expectedArtifactId,
   expectedSize,
+  allowInProgress = false,
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: this standalone verifier intentionally follows the GitHub Actions API-origin contract outside Turbo tasks.
   apiOrigin = process.env.GITHUB_API_URL ?? "https://api.github.com",
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: credentials are runtime-only CLI inputs and must never enter Turbo cache keys.
@@ -510,12 +514,15 @@ export async function downloadAndVerifyGitHubArtifact({
   if (expectedArtifactId !== undefined)
     assertPositiveSafeInteger(expectedArtifactId, "artifact ID");
   if (expectedSize !== undefined) assertPositiveSafeInteger(expectedSize, "artifact size");
+  if (typeof allowInProgress !== "boolean") {
+    throw new TypeError("allow-in-progress must be boolean");
+  }
   const origin = assertApiOrigin(apiOrigin);
   const headers = apiHeaders(token);
   if (await pathExists(resolve(outputDir))) throw new Error("output directory already exists");
 
   const run = await requestJson(origin, `/repos/${repository}/actions/runs/${runId}`, headers);
-  validateWorkflowRun(run, repository, runId, expectedHeadSha);
+  validateWorkflowRun(run, repository, runId, expectedHeadSha, allowInProgress);
   const artifacts = await listArtifacts(origin, repository, runId, headers);
   const matches = artifacts.filter((artifact) => artifact?.name === name);
   if (matches.length !== 1)
@@ -558,7 +565,7 @@ export async function downloadAndVerifyGitHubArtifact({
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
   const required = ["repo", "run-id", "expected-head-sha", "name", "expected-sha256", "output-dir"];
-  const optional = ["expected-artifact-id", "expected-size"];
+  const optional = ["expected-artifact-id", "expected-size", "allow-in-progress"];
   const allowed = new Set([...required, ...optional]);
   if (
     Object.keys(args).some((name) => !allowed.has(name)) ||
@@ -571,6 +578,9 @@ async function main() {
     if (!/^[1-9][0-9]*$/.test(args[name])) throw new TypeError(`--${name} is invalid`);
     return Number(args[name]);
   };
+  if (args["allow-in-progress"] !== undefined && args["allow-in-progress"] !== "true") {
+    throw new TypeError("--allow-in-progress must be exactly true");
+  }
   const result = await downloadAndVerifyGitHubArtifact({
     repository: args.repo,
     runId: parseInteger("run-id"),
@@ -580,6 +590,7 @@ async function main() {
     outputDir: args["output-dir"],
     expectedArtifactId: parseInteger("expected-artifact-id"),
     expectedSize: parseInteger("expected-size"),
+    allowInProgress: args["allow-in-progress"] === "true",
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
