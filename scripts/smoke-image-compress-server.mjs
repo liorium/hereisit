@@ -243,7 +243,7 @@ async function assertMaintainerServer(
       mimeType: "image/jpeg",
       buffer: source,
     });
-    await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await downloadButton.waitFor({ timeout: timeoutMs });
     const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
@@ -338,7 +338,7 @@ async function performImageCompressServerSmoke({
         mimeType: "image/jpeg",
         buffer: source,
       });
-      await page.getByRole("button", { name: "이미지 1개 압축하기" }).click();
+      await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
       const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
       await downloadButton.waitFor({ timeout: timeoutMs });
       const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });

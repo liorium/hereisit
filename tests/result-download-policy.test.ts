@@ -32,6 +32,15 @@ describe("download-only result delivery policy", () => {
     expect(source).not.toContain("개별 결과도 다시 받을 수 있어요");
   });
 
+  it("serializes individual and ZIP remote result delivery without blocking local downloads", async () => {
+    const source = await readFile("apps/web/src/components/image-compress-workbench.tsx", "utf8");
+    expect(source).toContain("remoteDeliveryLockRef");
+    expect(source).toContain("remoteDeliveryBusy");
+    expect(source.match(/remoteDeliveryLockRef\.current/gu)?.length).toBeGreaterThanOrEqual(6);
+    expect(source).toContain('item.result?.kind === "remote" && remoteDeliveryBusy');
+    expect(source).not.toContain('item.result?.kind !== "remote-consumed" && remoteDeliveryBusy');
+  });
+
   it("rejects any Korean share label in result delivery copy", () => {
     expect(findForbiddenResultDeliveryText("<button>결과 공유</button>")).toContain("공유");
   });

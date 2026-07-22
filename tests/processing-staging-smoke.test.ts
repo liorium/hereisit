@@ -78,6 +78,16 @@ describe("authenticated processing staging smoke", () => {
     expect(source).not.toContain("const result = await smoke({");
   });
 
+  it("uses the real one-item compression action name in both browser paths", async () => {
+    const [smokeSource, componentSource] = await Promise.all([
+      readFile("scripts/smoke-image-compress-server.mjs", "utf8"),
+      readFile("apps/web/src/components/image-compress-workbench.tsx", "utf8"),
+    ]);
+    expect(smokeSource.match(/1개 이미지 용량 줄이기 →/gu)).toHaveLength(2);
+    expect(smokeSource).not.toContain("이미지 1개 압축하기");
+    expect(componentSource).toContain("{items.length}개 이미지 용량 줄이기 →");
+  });
+
   it("accepts only the fixed staging origin, output path, and canonical environment session", async () => {
     const output = await outputPath();
     await runProcessingStagingSmokeCli({
