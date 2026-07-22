@@ -357,7 +357,10 @@ export async function verifyProcessingCandidate({
   if (requiredState !== "built" && requiredState !== "finalized") {
     throw new TypeError("required candidate state is invalid");
   }
-  if (typeof expectedGitSha !== "string" || !gitShaPattern.test(expectedGitSha)) {
+  if (
+    expectedGitSha !== undefined &&
+    (typeof expectedGitSha !== "string" || !gitShaPattern.test(expectedGitSha))
+  ) {
     throw new TypeError("expected git SHA is invalid");
   }
   const requestedRoot = resolve(root);
@@ -386,7 +389,7 @@ export async function verifyProcessingCandidate({
   if (candidate.state !== requiredState) {
     throw new TypeError("processing candidate state does not match the required state");
   }
-  if (candidate.gitSha !== expectedGitSha) {
+  if (expectedGitSha !== undefined && candidate.gitSha !== expectedGitSha) {
     throw new TypeError("processing candidate source SHA does not match");
   }
 
