@@ -113,6 +113,37 @@ export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, ca
   return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
 }
 
+export function resolveCloudflareImageDigestFromConfig({
+  manifest,
+  imageRef,
+  accountId,
+  expectedConfigDigest,
+}) {
+  validateRequestedReference(imageRef, accountId);
+  const expected = assertDigest(expectedConfigDigest, "local image config digest");
+  const selected = selectRunnableDescriptor(manifest);
+  const descriptor = assertObject(selected.Descriptor, "selected registry descriptor");
+  const digest = assertDigest(descriptor.digest, "selected registry manifest digest");
+  if (selected.Ref !== `${imageRef}@${digest}`) {
+    throw new TypeError("selected registry Ref does not match the requested image and digest");
+  }
+  const imageManifest = assertObject(selected.SchemaV2Manifest, "selected registry image manifest");
+  if (imageManifest.schemaVersion !== 2) {
+    throw new TypeError("selected registry image manifest schema is unsupported");
+  }
+  const config = assertObject(imageManifest.config, "registry image config");
+  if (assertDigest(config.digest, "registry image config digest") !== expected) {
+    throw new TypeError("registry image config does not match the local Docker image");
+  }
+  if (!Array.isArray(imageManifest.layers) || imageManifest.layers.length === 0) {
+    throw new TypeError("registry image layers are missing");
+  }
+  for (const layer of imageManifest.layers) {
+    assertDigest(assertObject(layer, "registry image layer").digest, "registry layer digest");
+  }
+  return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
+}
+
 export function candidateIdentityFromManifest(candidate) {
   const root = validateProcessingCandidate(candidate);
   if (root.state !== "finalized") throw new TypeError("candidate manifest must be finalized");
@@ -124,23 +155,45 @@ export function candidateIdentityFromManifest(candidate) {
 
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
-  const allowed = new Set(["manifest", "candidate-manifest", "image-ref", "account-id", "output"]);
+  const allowed = new Set([
+    "manifest",
+    "candidate-manifest",
+    "expected-config-digest",
+    "image-ref",
+    "account-id",
+    "output",
+  ]);
   if (Object.keys(args).some((key) => !allowed.has(key))) {
     throw new TypeError("unknown Cloudflare image resolver argument");
   }
-  for (const key of allowed) {
+  for (const key of ["manifest", "image-ref", "account-id", "output"]) {
     if (args[key] === undefined) throw new TypeError(`--${key} is required`);
   }
-  const [manifest, candidate] = await Promise.all([
-    readFile(resolve(args.manifest), "utf8").then(JSON.parse),
-    readFile(resolve(args["candidate-manifest"]), "utf8").then(JSON.parse),
-  ]);
-  const image = resolveCloudflareImageDigest({
+  if (
+    Number(args["candidate-manifest"] !== undefined) +
+      Number(args["expected-config-digest"] !== undefined) !==
+    1
+  ) {
+    throw new TypeError("exactly one image identity input is required");
+  }
+  const manifest = await readFile(resolve(args.manifest), "utf8").then(JSON.parse);
+  const common = {
     manifest,
     imageRef: args["image-ref"],
     accountId: args["account-id"],
-    candidateIdentity: candidateIdentityFromManifest(candidate),
-  });
+  };
+  const image =
+    args["candidate-manifest"] !== undefined
+      ? resolveCloudflareImageDigest({
+          ...common,
+          candidateIdentity: candidateIdentityFromManifest(
+            JSON.parse(await readFile(resolve(args["candidate-manifest"]), "utf8")),
+          ),
+        })
+      : resolveCloudflareImageDigestFromConfig({
+          ...common,
+          expectedConfigDigest: args["expected-config-digest"],
+        });
   await writeFile(resolve(args.output), `${image}\n`, {
     encoding: "utf8",
     flag: "wx",

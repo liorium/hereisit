@@ -3,6 +3,7 @@ import { sha256Canonical } from "../scripts/image-lab-common.mjs";
 import {
   candidateIdentityFromManifest,
   resolveCloudflareImageDigest,
+  resolveCloudflareImageDigestFromConfig,
 } from "../scripts/resolve-cloudflare-image-digest.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
@@ -142,6 +143,26 @@ describe("Cloudflare image digest resolver", () => {
         candidateIdentity,
       }),
     ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+  });
+
+  it("binds a direct deployment to its local Docker config digest", () => {
+    expect(
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor(),
+        imageRef,
+        accountId,
+        expectedConfigDigest: configDigest,
+      }),
+    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+
+    expect(() =>
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor(),
+        imageRef,
+        accountId,
+        expectedConfigDigest: `sha256:${"9".repeat(64)}`,
+      }),
+    ).toThrow(/config/i);
   });
 
   it("selects one runnable image while ignoring unknown-platform attestations", () => {

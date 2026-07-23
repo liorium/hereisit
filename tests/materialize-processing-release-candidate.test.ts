@@ -125,7 +125,7 @@ async function createCandidateFixture() {
   });
 
   const liveCostInput = JSON.parse(
-    readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"),
+    readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
   );
   const { routeCpuBenchmark: _route, ...modelInput } = liveCostInput;
   const fileBytes: Record<string, Buffer> = {

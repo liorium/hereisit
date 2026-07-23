@@ -20,7 +20,9 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "hereisit-release-input-reader-"));
   roots.push(root);
   const path = join(root, "processing-release-inputs.json");
-  const input = JSON.parse(await readFile("tests/fixtures/live-cost-model-pr-input.json", "utf8"));
+  const input = JSON.parse(
+    await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
+  );
   const { routeCpuBenchmark, ...modelInput } = input;
   const document = createProcessingReleaseInputs({
     version: 1,

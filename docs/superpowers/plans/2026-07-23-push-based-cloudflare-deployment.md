@@ -21,7 +21,11 @@
 
 **Files:**
 - Move: `tests/fixtures/live-cost-model-pr-input.json` → `docs/deployment/processing-staging-cost-input.json`
-- Modify: `tests/live-cost-model.test.ts`
+- Modify: `tests/materialize-processing-release-candidate.test.ts`
+- Modify: `tests/processing-release-inputs.test.ts`
+- Modify: `tests/read-processing-release-inputs.test.ts`
+- Modify: `tests/verify-processing-candidate.test.ts`
+- Modify: `tests/verify-processing-release-report.test.ts`
 
 **Interfaces:**
 - Consumes: `scripts/create-live-cost-model.mjs --input <path> --schema <path> --output <path>`
@@ -30,12 +34,12 @@
 - [ ] **Step 1: Change the fixture path in the test**
 
 ```ts
-const fixturePath = "docs/deployment/processing-staging-cost-input.json";
+readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8");
 ```
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run: `pnpm vitest run tests/live-cost-model.test.ts`
+Run: `pnpm vitest run tests/processing-release-inputs.test.ts`
 
 Expected: FAIL because the new path does not exist.
 
@@ -47,7 +51,7 @@ mv tests/fixtures/live-cost-model-pr-input.json docs/deployment/processing-stagi
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `pnpm vitest run tests/live-cost-model.test.ts`
+Run: `pnpm vitest run tests/processing-release-inputs.test.ts`
 
 Expected: all tests pass.
 
@@ -55,8 +59,10 @@ Expected: all tests pass.
 
 **Files:**
 - Modify: `tests/processing-staging-workflow.test.ts`
+- Modify: `tests/resolve-cloudflare-image-digest.test.ts`
 - Delete: `tests/processing-staging-workflow-phase-a.test.ts`
 - Replace: `.github/workflows/processing-staging.yml`
+- Modify: `scripts/resolve-cloudflare-image-digest.mjs`
 
 **Interfaces:**
 - Consumes: successful `CI` `workflow_run`, `processing-staging` variables/secrets, existing deployment scripts.
@@ -119,11 +125,13 @@ it, install the frozen lockfile, validate the sealed environment, build the engi
 generate and hash the live cost model, push and resolve the immutable Container digest, provision
 resources, generate bootstrap/active Wrangler configs, apply migrations, deploy Worker secrets and the
 final Worker, deploy Pages, verify both queue states, run authenticated compression smoke, upload only
-sanitized outputs, and re-pause the primary queue on any post-resume failure.
+sanitized outputs, and re-pause the primary queue on any post-resume failure. The existing image
+resolver accepts the locally inspected Docker config digest and returns only the matching immutable
+Cloudflare registry manifest digest.
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `pnpm vitest run tests/processing-staging-workflow.test.ts tests/live-cost-model.test.ts`
+Run: `pnpm vitest run tests/processing-staging-workflow.test.ts tests/resolve-cloudflare-image-digest.test.ts`
 
 Expected: all tests pass.
 
@@ -148,7 +156,7 @@ Run:
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm vitest run tests/processing-staging-workflow.test.ts tests/live-cost-model.test.ts
+pnpm vitest run tests/processing-staging-workflow.test.ts tests/resolve-cloudflare-image-digest.test.ts
 git diff --check
 ```
 

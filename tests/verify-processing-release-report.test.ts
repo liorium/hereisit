@@ -126,7 +126,7 @@ async function fixture() {
   });
 
   const costModel = createLiveCostModel(
-    JSON.parse(readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8")),
+    JSON.parse(readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8")),
   );
   const releaseInputs = createProcessingReleaseInputs({
     version: 1,
@@ -139,7 +139,7 @@ async function fixture() {
       artifactSha256: "3".repeat(64),
       modelInput: (() => {
         const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
-          readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"),
+          readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
         );
         return modelInput;
       })(),
@@ -153,7 +153,7 @@ async function fixture() {
     },
     routeCpuBenchmark: {
       artifactSha256: "4".repeat(64),
-      ...JSON.parse(readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"))
+      ...JSON.parse(readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"))
         .routeCpuBenchmark,
     },
   });

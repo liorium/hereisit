@@ -1,526 +1,35 @@
 name: Processing staging
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Build a candidate or verify a finalized release
-        required: true
-        type: choice
-        options:
-          - build
-          - deploy
-      release_tag:
-        description: Immutable annotated tag (processing-release-YYYY-MM-DD.N)
-        required: true
-        type: string
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
-  group: processing-staging-${{ inputs.mode }}
+  group: processing-staging
   cancel-in-progress: false
 
 env:
   NODE_VERSION: "24"
   PNPM_VERSION: "11.11.0"
-  SYFT_IMAGE: ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d
-  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689
 
 jobs:
-  build:
-    name: Build immutable processing candidate
-    if: inputs.mode == 'build' && github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: ${{ env.PNPM_VERSION }}
-          run_install: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - name: Validate immutable tag and release input
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          umask 077
-          [[ "$RELEASE_TAG" =~ ^processing-release-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*)$ ]]
-          RELEASE_ID="${BASH_REMATCH[1]}"
-          test "$(git cat-file -t "$RELEASE_TAG")" = tag
-          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
-          RELEASE_INPUTS="docs/deployment/releases/$RELEASE_ID/processing-release-inputs.json"
-          read -r -a RELEASE_COMMIT < <(git rev-list --parents -n 1 "$GITHUB_SHA")
-          test "${#RELEASE_COMMIT[@]}" -eq 2
-          test "${RELEASE_COMMIT[0]}" = "$GITHUB_SHA"
-          PARENT_SHA="${RELEASE_COMMIT[1]}"
-          [[ "$PARENT_SHA" =~ ^[0-9a-f]{40}$ ]]
-          mapfile -t RELEASE_CHANGED_PATHS < <(
-            git diff-tree --no-commit-id --name-only -r --no-renames "$GITHUB_SHA"
-          )
-          test "${#RELEASE_CHANGED_PATHS[@]}" -eq 1
-          test "${RELEASE_CHANGED_PATHS[0]}" = "$RELEASE_INPUTS"
-          test "$(git ls-files --error-unmatch "$RELEASE_INPUTS")" = "$RELEASE_INPUTS"
-          node scripts/create-processing-release-inputs.mjs \
-            --verify-only "$RELEASE_INPUTS" \
-            --schema docs/deployment/processing-release-inputs.schema.json
-          EXPECTED_BASE_SOURCE_SHA256="$(printf '%s' "$PARENT_SHA" | sha256sum | cut -d' ' -f1)"
-          test "$(node --input-type=module -e \
-            'import {readFileSync} from "node:fs"; const input = JSON.parse(readFileSync(process.argv[1], "utf8")); process.stdout.write(`${input.releaseId} ${input.baseSourceSha256}`)' \
-            "$RELEASE_INPUTS")" = "$RELEASE_ID $EXPECTED_BASE_SOURCE_SHA256"
-          {
-            echo "RELEASE_ID=$RELEASE_ID"
-            echo "RELEASE_INPUTS=$RELEASE_INPUTS"
-            echo "STAGING_PROCESSING_API_ORIGIN=https://hereisit-processing-staging.liorium.workers.dev"
-            echo "PRODUCTION_PROCESSING_API_ORIGIN=https://hereisit-processing-production.liorium.workers.dev"
-          } >> "$GITHUB_ENV"
-      - name: Install locked dependencies
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          git diff --exit-code
-      - name: Run source verification
-        run: |
-          set -euo pipefail
-          pnpm typecheck
-          pnpm test
-          pnpm test:worker
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.0.0
-        with:
-          version: v0.34.1
-          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
-          install: true
-      - name: Build linux amd64 engine once with two exporters
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p .artifacts/build
-          docker buildx build \
-            --file apps/image-engine/Dockerfile \
-            --platform linux/amd64 \
-            --target production \
-            --tag "hereisit-image-engine:$GITHUB_SHA" \
-            --output type=oci,dest=.artifacts/build/image-engine-linux-amd64.oci.tar \
-            --output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar \
-            .
-          docker load --input .artifacts/build/image-engine-linux-amd64.docker.tar
-          ENGINE_ID="$(docker image inspect --format '{{.Id}}' "hereisit-image-engine:$GITHUB_SHA")"
-          [[ "$ENGINE_ID" =~ ^sha256:([0-9a-f]{64})$ ]]
-          echo "ENGINE_CONFIG_SHA256=${BASH_REMATCH[1]}" >> "$GITHUB_ENV"
-      - name: Build Worker and isolated web trees
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p .artifacts/build/api-worker-bundle
-          pnpm --filter @hereisit/api-worker exec wrangler deploy \
-            --config wrangler.local.jsonc \
-            --containers-rollout none \
-            --dry-run \
-            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
-          test -f .artifacts/build/api-worker-bundle/index.js
-          cp .artifacts/build/api-worker-bundle/index.js .artifacts/build/api-worker.mjs
-
-          rm -rf apps/web/.next apps/web/out
-          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$STAGING_PROCESSING_API_ORIGIN" \
-            pnpm --filter @hereisit/web build
-          test -d apps/web/out
-          cp -a apps/web/out .artifacts/build/web-staging
-
-          rm -rf apps/web/.next apps/web/out
-          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_PROCESSING_API_ORIGIN" \
-            pnpm --filter @hereisit/web build
-          test -d apps/web/out
-          cp -a apps/web/out .artifacts/build/web-production
-
-          node scripts/create-deterministic-tree-archive.mjs \
-            --root .artifacts/build/web-staging \
-            --output .artifacts/build/web-staging.tar \
-            > .artifacts/build/web-staging-archive.json
-          node scripts/create-deterministic-tree-archive.mjs \
-            --root .artifacts/build/web-production \
-            --output .artifacts/build/web-production.tar \
-            > .artifacts/build/web-production-archive.json
-          STAGING_WEB_TREE_SHA256="$(node -e \
-            'process.stdout.write(require("./.artifacts/build/web-staging-archive.json").treeSha256)')"
-          PRODUCTION_WEB_TREE_SHA256="$(node -e \
-            'process.stdout.write(require("./.artifacts/build/web-production-archive.json").treeSha256)')"
-          {
-            echo "STAGING_WEB_TREE_SHA256=$STAGING_WEB_TREE_SHA256"
-            echo "PRODUCTION_WEB_TREE_SHA256=$PRODUCTION_WEB_TREE_SHA256"
-          } >> "$GITHUB_ENV"
-      - name: Generate pinned SBOMs and application license gate
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p \
-            .artifacts/build/lockfile-scan \
-            .artifacts/build/notices \
-            .artifacts/build/worker-scan
-          cp pnpm-lock.yaml .artifacts/build/lockfile-scan/pnpm-lock.yaml
-          cp .artifacts/build/api-worker.mjs .artifacts/build/worker-scan/api-worker.mjs
-          node scripts/application-supply-chain.mjs \
-            --mode notices \
-            --repository . \
-            --policy security/application-license-policy.json \
-            --lockfile pnpm-lock.yaml \
-            --notices-output .artifacts/build/notices/THIRD_PARTY_NOTICES.txt
-
-          WEB_STAGING_SHA256="$(sha256sum .artifacts/build/web-staging.tar | cut -d' ' -f1)"
-          WEB_PRODUCTION_SHA256="$(sha256sum .artifacts/build/web-production.tar | cut -d' ' -f1)"
-          WORKER_SHA256="$(sha256sum .artifacts/build/api-worker.mjs | cut -d' ' -f1)"
-          LOCKFILE_SHA256="$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)"
-          {
-            echo "WEB_STAGING_SHA256=$WEB_STAGING_SHA256"
-            echo "WEB_PRODUCTION_SHA256=$WEB_PRODUCTION_SHA256"
-            echo "WORKER_SHA256=$WORKER_SHA256"
-            echo "LOCKFILE_SHA256=$LOCKFILE_SHA256"
-          } >> "$GITHUB_ENV"
-
-          docker run --rm \
-            -v "$PWD/.artifacts/build:/input:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            "$SYFT_IMAGE" scan oci-archive:/input/image-engine-linux-amd64.oci.tar \
-            --source-name "hereisit-engine:sha256-$ENGINE_CONFIG_SHA256" \
-            --output cyclonedx-json@1.6=/output/security-sbom-engine.cdx.json
-          docker run --rm \
-            -v "$PWD/.artifacts/build/web-staging:/input:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            "$SYFT_IMAGE" scan dir:/input \
-            --source-name "hereisit-web-staging:sha256-$WEB_STAGING_SHA256" \
-            --output cyclonedx-json@1.6=/output/security-sbom-web-staging.cdx.json
-          docker run --rm \
-            -v "$PWD/.artifacts/build/web-production:/input:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            "$SYFT_IMAGE" scan dir:/input \
-            --source-name "hereisit-web-production:sha256-$WEB_PRODUCTION_SHA256" \
-            --output cyclonedx-json@1.6=/output/security-sbom-web-production.cdx.json
-          docker run --rm \
-            -v "$PWD/.artifacts/build/worker-scan:/input:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            "$SYFT_IMAGE" scan dir:/input \
-            --source-name "hereisit-worker:sha256-$WORKER_SHA256" \
-            --output cyclonedx-json@1.6=/output/security-sbom-worker.cdx.json
-          docker run --rm \
-            -v "$PWD/.artifacts/build/lockfile-scan:/input:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            "$SYFT_IMAGE" scan dir:/input \
-            --source-name "hereisit-lockfile:sha256-$LOCKFILE_SHA256" \
-            --output cyclonedx-json@1.6=/output/security-sbom-lockfile.cdx.json
-
-          node scripts/application-supply-chain.mjs \
-            --mode verify \
-            --repository . \
-            --policy security/application-license-policy.json \
-            --lockfile pnpm-lock.yaml \
-            --notices-output .artifacts/build/notices/THIRD_PARTY_NOTICES.txt \
-            --gate-output .artifacts/build/security-application-supply-chain-gate.json \
-            --engine-sbom .artifacts/build/security-sbom-engine.cdx.json \
-            --engine-artifact-sha256 "$ENGINE_CONFIG_SHA256" \
-            --web-staging-sbom .artifacts/build/security-sbom-web-staging.cdx.json \
-            --web-staging-artifact-sha256 "$WEB_STAGING_SHA256" \
-            --web-production-sbom .artifacts/build/security-sbom-web-production.cdx.json \
-            --web-production-artifact-sha256 "$WEB_PRODUCTION_SHA256" \
-            --worker-sbom .artifacts/build/security-sbom-worker.cdx.json \
-            --worker-artifact-sha256 "$WORKER_SHA256" \
-            --lockfile-sbom .artifacts/build/security-sbom-lockfile.cdx.json \
-            --lockfile-artifact-sha256 "$LOCKFILE_SHA256"
-      - name: Run pinned license and vulnerability gates
-        run: |
-          set -euo pipefail
-          umask 077
-          node scripts/verify-image-engine-licenses.mjs \
-            --scope pr \
-            --image "hereisit-image-engine:$GITHUB_SHA" \
-            --artifact-sha256 "$ENGINE_CONFIG_SHA256" \
-            --lock apps/image-engine/native/sources.lock.json \
-            --policy apps/image-engine/licenses/policy.json \
-            --exceptions apps/image-engine/security/vulnerability-exceptions.json \
-            --base-lock apps/image-engine/base-images.lock.json \
-            --output .artifacts/build/security-image-engine-license-gate.json
-
-          TRIVY_DB_DIGEST="$(
-            docker buildx imagetools inspect \
-              --format '{{json .Manifest}}' \
-              ghcr.io/aquasecurity/trivy-db:2 |
-              node --input-type=module -e '
-                import { readFileSync } from "node:fs";
-                const descriptor = JSON.parse(readFileSync(0, "utf8"));
-                if (!/^sha256:[0-9a-f]{64}$/.test(descriptor.digest ?? "")) process.exit(1);
-                process.stdout.write(descriptor.digest);
-              '
-          )"
-          [[ "$TRIVY_DB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          TRIVY_DB_REFERENCE="ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST"
-          {
-            echo "TRIVY_DB_REFERENCE=$TRIVY_DB_REFERENCE"
-            echo "TRIVY_DB_DIGEST=$TRIVY_DB_DIGEST"
-          } >> "$GITHUB_ENV"
-          install -d -m 0700 .artifacts/trivy-cache .artifacts/trivy-targets
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            "$TRIVY_IMAGE" image --no-progress --download-db-only \
-            --db-repository "$TRIVY_DB_REFERENCE"
-
-          docker tag \
-            "hereisit-image-engine:$GITHUB_SHA" \
-            "hereisit-engine:sha256-$ENGINE_CONFIG_SHA256"
-          cp -al \
-            .artifacts/build/web-staging \
-            ".artifacts/trivy-targets/hereisit-web-staging:sha256-$WEB_STAGING_SHA256"
-          cp -al \
-            .artifacts/build/web-production \
-            ".artifacts/trivy-targets/hereisit-web-production:sha256-$WEB_PRODUCTION_SHA256"
-          install -d \
-            ".artifacts/trivy-targets/hereisit-worker:sha256-$WORKER_SHA256" \
-            ".artifacts/trivy-targets/hereisit-lockfile:sha256-$LOCKFILE_SHA256"
-          cp .artifacts/build/api-worker.mjs \
-            ".artifacts/trivy-targets/hereisit-worker:sha256-$WORKER_SHA256/api-worker.mjs"
-          cp pnpm-lock.yaml \
-            ".artifacts/trivy-targets/hereisit-lockfile:sha256-$LOCKFILE_SHA256/pnpm-lock.yaml"
-
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            -v "$PWD/.artifacts/build:/output" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            "$TRIVY_IMAGE" image --image-src docker \
-            "hereisit-engine:sha256-$ENGINE_CONFIG_SHA256" \
-            --scanners vuln --skip-db-update --offline-scan --no-progress \
-            --format json --output /output/security-trivy-engine.json
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            -v "$PWD/.artifacts/trivy-targets:/scan:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            -w /scan \
-            "$TRIVY_IMAGE" filesystem "hereisit-web-staging:sha256-$WEB_STAGING_SHA256" \
-            --scanners vuln --skip-db-update --offline-scan --no-progress \
-            --format json --output /output/security-trivy-web-staging.json
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            -v "$PWD/.artifacts/trivy-targets:/scan:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            -w /scan \
-            "$TRIVY_IMAGE" filesystem "hereisit-web-production:sha256-$WEB_PRODUCTION_SHA256" \
-            --scanners vuln --skip-db-update --offline-scan --no-progress \
-            --format json --output /output/security-trivy-web-production.json
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            -v "$PWD/.artifacts/trivy-targets:/scan:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            -w /scan \
-            "$TRIVY_IMAGE" filesystem "hereisit-worker:sha256-$WORKER_SHA256" \
-            --scanners vuln --skip-db-update --offline-scan --no-progress \
-            --format json --output /output/security-trivy-worker.json
-          docker run --rm \
-            -v "$PWD/.artifacts/trivy-cache:/root/.cache/trivy" \
-            -v "$PWD/.artifacts/trivy-targets:/scan:ro" \
-            -v "$PWD/.artifacts/build:/output" \
-            -w /scan \
-            "$TRIVY_IMAGE" filesystem "hereisit-lockfile:sha256-$LOCKFILE_SHA256" \
-            --scanners vuln --skip-db-update --offline-scan --no-progress \
-            --format json --output /output/security-trivy-lockfile.json
-
-          node scripts/verify-vulnerability-results.mjs \
-            --engine-report .artifacts/build/security-trivy-engine.json \
-            --engine-artifact-sha256 "$ENGINE_CONFIG_SHA256" \
-            --web-staging-report .artifacts/build/security-trivy-web-staging.json \
-            --web-staging-artifact-sha256 "$WEB_STAGING_SHA256" \
-            --web-production-report .artifacts/build/security-trivy-web-production.json \
-            --web-production-artifact-sha256 "$WEB_PRODUCTION_SHA256" \
-            --worker-report .artifacts/build/security-trivy-worker.json \
-            --worker-artifact-sha256 "$WORKER_SHA256" \
-            --lockfile-report .artifacts/build/security-trivy-lockfile.json \
-            --lockfile-artifact-sha256 "$LOCKFILE_SHA256" \
-            --scanner-policy security/vulnerability-scan-policy.json \
-            --engine-exceptions apps/image-engine/security/vulnerability-exceptions.json \
-            --application-exceptions security/application-vulnerability-exceptions.json \
-            --trivy-db-digest "$TRIVY_DB_DIGEST" \
-            --output .artifacts/build/security-vulnerability-gate.json
-      - name: Create and verify built candidate
-        run: |
-          set -euo pipefail
-          umask 077
-          cp "$RELEASE_INPUTS" .artifacts/build/processing-release-inputs.json
-          node scripts/create-live-cost-model.mjs \
-            --release-inputs "$RELEASE_INPUTS" \
-            --schema docs/deployment/live-cost-model.schema.json \
-            --output .artifacts/build/live-cost-model.json
-          node scripts/create-processing-candidate.mjs \
-            --source-root .artifacts/build \
-            --output-root .artifacts/built-candidate \
-            --release-id "$RELEASE_ID" \
-            --git-sha "$GITHUB_SHA" \
-            --staging-processing-api-origin "$STAGING_PROCESSING_API_ORIGIN" \
-            --production-processing-api-origin "$PRODUCTION_PROCESSING_API_ORIGIN" \
-            --staging-web-tree-sha256 "$STAGING_WEB_TREE_SHA256" \
-            --production-web-tree-sha256 "$PRODUCTION_WEB_TREE_SHA256" \
-            --trivy-db-digest "$TRIVY_DB_DIGEST" \
-            --provider-usage-schema docs/deployment/provider-usage-schema.v1.json \
-            > .artifacts/processing-candidate-creation.json
-          node scripts/verify-processing-candidate.mjs \
-            --manifest .artifacts/built-candidate/processing-candidate.json \
-            --root .artifacts/built-candidate \
-            --required-state built \
-            --expected-git-sha "$GITHUB_SHA" \
-            > .artifacts/processing-candidate-identity.json
-      - name: Publish built candidate for trusted review
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: processing-built-candidate-${{ github.sha }}
-          path: |
-            .artifacts/built-candidate
-            .artifacts/processing-candidate-creation.json
-            .artifacts/processing-candidate-identity.json
-          compression-level: 0
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 7
-
-  verify-release:
-    name: Verify finalized signed release
-    if: inputs.mode == 'deploy' && github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    outputs:
-      artifact_name: ${{ steps.handoff.outputs.artifact_name }}
-      artifact_id: ${{ steps.publish.outputs.artifact-id }}
-      artifact_digest: ${{ steps.publish.outputs.artifact-digest }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Download exact immutable release namespace
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          umask 077
-          [[ "$RELEASE_TAG" =~ ^processing-release-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*)$ ]]
-          RELEASE_ID="${BASH_REMATCH[1]}"
-          test "$(git cat-file -t "$RELEASE_TAG")" = tag
-          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
-          RELEASE_INPUTS="docs/deployment/releases/$RELEASE_ID/processing-release-inputs.json"
-          read -r -a RELEASE_COMMIT < <(git rev-list --parents -n 1 "$GITHUB_SHA")
-          test "${#RELEASE_COMMIT[@]}" -eq 2
-          test "${RELEASE_COMMIT[0]}" = "$GITHUB_SHA"
-          PARENT_SHA="${RELEASE_COMMIT[1]}"
-          [[ "$PARENT_SHA" =~ ^[0-9a-f]{40}$ ]]
-          mapfile -t RELEASE_CHANGED_PATHS < <(
-            git diff-tree --no-commit-id --name-only -r --no-renames "$GITHUB_SHA"
-          )
-          test "${#RELEASE_CHANGED_PATHS[@]}" -eq 1
-          test "${RELEASE_CHANGED_PATHS[0]}" = "$RELEASE_INPUTS"
-          test "$(git ls-files --error-unmatch "$RELEASE_INPUTS")" = "$RELEASE_INPUTS"
-          node scripts/create-processing-release-inputs.mjs \
-            --verify-only "$RELEASE_INPUTS" \
-            --schema docs/deployment/processing-release-inputs.schema.json
-          EXPECTED_BASE_SOURCE_SHA256="$(printf '%s' "$PARENT_SHA" | sha256sum | cut -d' ' -f1)"
-          test "$(node --input-type=module -e \
-            'import {readFileSync} from "node:fs"; const input = JSON.parse(readFileSync(process.argv[1], "utf8")); process.stdout.write(`${input.releaseId} ${input.baseSourceSha256}`)' \
-            "$RELEASE_INPUTS")" = "$RELEASE_ID $EXPECTED_BASE_SOURCE_SHA256"
-          mkdir -p .artifacts/release-download .artifacts/verification
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "candidate-v1--$RELEASE_ID--*" \
-            --pattern "evidence-v1--$RELEASE_ID--*" \
-            --dir .artifacts/release-download
-          node scripts/materialize-processing-release-candidate.mjs \
-            --release-tag "$RELEASE_TAG" \
-            --download-root .artifacts/release-download \
-            --output-root .artifacts/candidate \
-            --expected-git-sha "$GITHUB_SHA" \
-            > .artifacts/verification/materialization.json
-          echo "RELEASE_ID=$RELEASE_ID" >> "$GITHUB_ENV"
-      - name: Resolve and independently hash all release assets
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          node scripts/resolve-github-release-assets.mjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --release-tag "$RELEASE_TAG" \
-            --candidate-root .artifacts/candidate \
-            --output .artifacts/verification/processing-release-assets.json
-          for asset in \
-            security-image-engine-license-gate.json \
-            security-application-supply-chain-gate.json \
-            security-vulnerability-gate.json \
-            security-sbom-engine.cdx.json \
-            security-sbom-web-staging.cdx.json \
-            security-sbom-web-production.cdx.json \
-            security-sbom-worker.cdx.json \
-            security-sbom-lockfile.cdx.json \
-            security-trivy-engine.json \
-            security-trivy-web-staging.json \
-            security-trivy-web-production.json \
-            security-trivy-worker.json \
-            security-trivy-lockfile.json
-          do
-            test -f ".artifacts/candidate/$asset"
-          done
-      - name: Verify finalized candidate, report, and detached signature
-        run: |
-          set -euo pipefail
-          node scripts/verify-processing-candidate.mjs \
-            --manifest .artifacts/candidate/processing-candidate.json \
-            --root .artifacts/candidate \
-            --required-state finalized \
-            --expected-git-sha "$GITHUB_SHA" \
-            > .artifacts/verification/processing-candidate-identity.json
-          node scripts/verify-processing-release-report.mjs \
-            --candidate-root .artifacts/candidate \
-            --candidate-manifest .artifacts/candidate/processing-candidate.json \
-            --evidence-bundle ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.json" \
-            --evidence-signature ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
-            --public-key docs/deployment/processing-evidence-ed25519-public.pem \
-            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-            --report .artifacts/candidate/processing-release-report.json \
-            > .artifacts/verification/processing-release-report.json
-          node scripts/processing-evidence-signature.mjs \
-            --mode verify \
-            --bundle ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.json" \
-            --signature ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
-            --public-key docs/deployment/processing-evidence-ed25519-public.pem \
-            > .artifacts/verification/processing-evidence-signature.json
-      - name: Bind verified candidate artifact name
-        id: handoff
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          echo "artifact_name=processing-verified-candidate-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-      - name: Publish digest-bound verified candidate
-        id: publish
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ${{ steps.handoff.outputs.artifact_name }}
-          path: .artifacts/candidate
-          compression-level: 0
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 7
-
   deploy:
-    name: Deploy verified processing candidate to staging
-    if: inputs.mode == 'deploy' && github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
-    needs: verify-release
+    name: Deploy successful main CI commit to staging
+    if: >-
+      github.repository == 'liorium/hereisit' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     environment: processing-staging
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       ALERT_DESTINATION_ADDRESS: ${{ vars.ALERT_DESTINATION_ADDRESS }}
       WORKER_SCRIPT_NAME: hereisit-processing-staging
@@ -531,11 +40,13 @@ jobs:
       QUEUE_NAME: hereisit-image-jobs-staging
       DLQ_NAME: hereisit-image-jobs-dlq-staging
       WRANGLER_CONFIG: .wrangler/generated/wrangler.staging.jsonc
-      WORKER_MODULE: .artifacts/candidate/api-worker.mjs
+      WORKER_MODULE: .artifacts/build/api-worker.mjs
+      STAGING_API_ORIGIN: https://hereisit-processing-staging.liorium.workers.dev
       STAGING_PAGES_ORIGIN: https://processing-staging.hereisit.pages.dev
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -546,29 +57,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.verify-release.outputs.artifact_id }}
-          path: .artifacts/native-download
-      - name: Independently download and bind the verified candidate
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          ARTIFACT_NAME: ${{ needs.verify-release.outputs.artifact_name }}
-          ARTIFACT_ID: ${{ needs.verify-release.outputs.artifact_id }}
-          ARTIFACT_DIGEST: ${{ needs.verify-release.outputs.artifact_digest }}
+      - name: Bind the exact successful CI source
         run: |
           set -euo pipefail
           umask 077
-          [[ "$ARTIFACT_DIGEST" =~ ^([0-9a-f]{64})$ ]]
-          node scripts/download-and-verify-github-artifact.mjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --run-id "$GITHUB_RUN_ID" \
-            --expected-head-sha "$GITHUB_SHA" \
-            --name "$ARTIFACT_NAME" \
-            --expected-artifact-id "$ARTIFACT_ID" \
-            --expected-sha256 "${BASH_REMATCH[1]}" \
-            --allow-in-progress true \
-            --output-dir .artifacts/candidate
+          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p .artifacts/build .artifacts/deployment .artifacts/runtime .wrangler/generated
+          printf '%s\n' "$EXPECTED_HEAD_SHA" > .artifacts/deployment/source-sha.txt
+          SOURCE_SHA256="$(sha256sum .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
+          echo "SOURCE_SHA256=$SOURCE_SHA256" >> "$GITHUB_ENV"
       - name: Install locked dependencies
         run: |
           set -euo pipefail
@@ -587,70 +86,74 @@ jobs:
           STAGING_ABUSE_HMAC_SECRET_PREVIOUS: ${{ secrets.STAGING_ABUSE_HMAC_SECRET_PREVIOUS }}
           STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
           STAGING_MAINTAINER_HASHES_JSON: ${{ secrets.STAGING_MAINTAINER_HASHES_JSON }}
-        run: |
-          set -euo pipefail
-          node scripts/verify-processing-deployment-environment.mjs
-      - name: Reverify independently downloaded candidate
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p .artifacts/deployment .artifacts/runtime .wrangler/generated
-          node scripts/verify-processing-candidate.mjs \
-            --manifest .artifacts/candidate/processing-candidate.json \
-            --root .artifacts/candidate \
-            --required-state finalized \
-            --expected-git-sha "$GITHUB_SHA" \
-            > .artifacts/deployment/processing-candidate-identity.json
-      - name: Read signed deployment limits and immutable identities
+        run: node scripts/verify-processing-deployment-environment.mjs
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.0.0
+        with:
+          version: v0.34.1
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+          install: true
+      - name: Build the engine, Worker, web, and cost model
         run: |
           set -euo pipefail
           umask 077
-          candidate_field() {
-            node scripts/read-processing-candidate.mjs \
-              --manifest .artifacts/candidate/processing-candidate.json --field "$1"
-          }
-          CANDIDATE_RELEASE_INPUTS_SHA256="$(candidate_field releaseInputs.sha256)"
-          release_limit() {
-            node scripts/read-processing-release-inputs.mjs \
-              --release-inputs .artifacts/candidate/processing-release-inputs.json \
-              --expected-sha256 "$CANDIDATE_RELEASE_INPUTS_SHA256" --field "$1"
-          }
+          docker buildx build \
+            --file apps/image-engine/Dockerfile \
+            --platform linux/amd64 \
+            --target production \
+            --tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" \
+            --output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar \
+            .
+          docker load --input .artifacts/build/image-engine-linux-amd64.docker.tar
+          LOCAL_IMAGE_CONFIG_DIGEST="$(docker image inspect --format '{{.Id}}' \
+            "hereisit-image-engine:$EXPECTED_HEAD_SHA")"
+          [[ "$LOCAL_IMAGE_CONFIG_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          mkdir -p .artifacts/build/api-worker-bundle
+          pnpm --filter @hereisit/api-worker exec wrangler deploy \
+            --config wrangler.local.jsonc \
+            --containers-rollout none \
+            --dry-run \
+            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
+          test -f .artifacts/build/api-worker-bundle/index.js
+          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
+
+          rm -rf apps/web/.next apps/web/out
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$STAGING_API_ORIGIN" \
+            pnpm --filter @hereisit/web build
+          test -d apps/web/out
+
+          LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
+            --input docs/deployment/processing-staging-cost-input.json \
+            --schema docs/deployment/live-cost-model.schema.json \
+            --output .artifacts/runtime/live-cost-model.json)"
+          [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
+            'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
+          [[ "$PROVIDER_USAGE_SCHEMA_SHA256" =~ ^[0-9a-f]{64}$ ]]
           {
-            echo "CANDIDATE_RELEASE_INPUTS_SHA256=$CANDIDATE_RELEASE_INPUTS_SHA256"
-            echo "CANDIDATE_MAX_COST_PER_1000_MICROUSD=$(release_limit maxCostPer1000JobsMicrousd)"
-            echo "CANDIDATE_MAX_MEDIAN_OUTPUT_RATIO_BPS=$(release_limit maxLiveMedianOutputRatioBps)"
-            echo "CANDIDATE_MAX_P95_WEIGHTED_UNITS=$(release_limit maxLiveP95WeightedUnits)"
-            echo "CANDIDATE_MAX_ORIGINAL_RETAINED_RATE_BPS=$(release_limit maxLiveOriginalRetainedRateBps)"
-            echo "CANDIDATE_MAX_PROJECTED_MONTHLY_COST_MICROUSD=$(release_limit maxProjectedMonthlyCostMicrousd)"
-            echo "CANDIDATE_LIVE_COST_MODEL_SHA256=$(candidate_field costModel.sha256)"
-            echo "CANDIDATE_PROVIDER_USAGE_SCHEMA_SHA256=$(candidate_field providerUsage.schemaSha256)"
-            echo "CANDIDATE_RELEASE_REPORT_SHA256=$(sha256sum .artifacts/candidate/processing-release-report.json | cut -d' ' -f1)"
-            echo "STAGING_WEB_ARCHIVE_SHA256=$(candidate_field web.staging.archiveSha256)"
-            echo "STAGING_WEB_TREE_SHA256=$(candidate_field web.staging.treeSha256)"
-            echo "EXPECTED_STAGING_API_ORIGIN=$(candidate_field web.staging.processingApiOrigin)"
-            echo "LOADED_ENGINE_IMAGE=$(candidate_field engine.loadedImage)"
+            echo "LOCAL_IMAGE_CONFIG_DIGEST=$LOCAL_IMAGE_CONFIG_DIGEST"
+            echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
+            echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
           } >> "$GITHUB_ENV"
-      - name: Load and publish the exact candidate engine image
+      - name: Publish and bind the immutable engine image
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           umask 077
-          docker load --input .artifacts/candidate/image-engine-linux-amd64.docker.tar
-          docker image inspect "$LOADED_ENGINE_IMAGE" > /dev/null
-          REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$GITHUB_SHA"
-          docker tag "$LOADED_ENGINE_IMAGE" "$REGISTRY_IMAGE_TAG"
+          REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"
+          docker tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" "$REGISTRY_IMAGE_TAG"
           pnpm exec wrangler containers push "$REGISTRY_IMAGE_TAG"
           docker manifest inspect -v "$REGISTRY_IMAGE_TAG" \
             > .artifacts/runtime/cloudflare-container-manifest.json
           node scripts/resolve-cloudflare-image-digest.mjs \
             --manifest .artifacts/runtime/cloudflare-container-manifest.json \
-            --candidate-manifest .artifacts/candidate/processing-candidate.json \
+            --expected-config-digest "$LOCAL_IMAGE_CONFIG_DIGEST" \
             --image-ref "$REGISTRY_IMAGE_TAG" \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --output .artifacts/deployment/cloudflare-image-digest.txt
           echo "ENGINE_IMAGE=$(cat .artifacts/deployment/cloudflare-image-digest.txt)" >> "$GITHUB_ENV"
-      - name: Provision resources and deploy the rollout-zero bootstrap
+      - name: Provision resources and deploy the bootstrap Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
@@ -702,15 +205,15 @@ jobs:
               --account-pending-job-limit 10 \
               --network-pending-job-limit 3 \
               --maximum-queued-age-seconds 600 \
-              --max-live-median-output-ratio-bps "$CANDIDATE_MAX_MEDIAN_OUTPUT_RATIO_BPS" \
-              --max-live-p95-weighted-units "$CANDIDATE_MAX_P95_WEIGHTED_UNITS" \
-              --max-live-original-retained-rate-bps "$CANDIDATE_MAX_ORIGINAL_RETAINED_RATE_BPS" \
-              --max-live-cost-per-1000-microusd "$CANDIDATE_MAX_COST_PER_1000_MICROUSD" \
-              --max-projected-monthly-cost-microusd "$CANDIDATE_MAX_PROJECTED_MONTHLY_COST_MICROUSD" \
-              --live-cost-model .artifacts/candidate/live-cost-model.json \
-              --live-cost-model-sha256 "$CANDIDATE_LIVE_COST_MODEL_SHA256" \
-              --provider-usage-schema-sha256 "$CANDIDATE_PROVIDER_USAGE_SCHEMA_SHA256" \
-              --release-report-sha256 "$CANDIDATE_RELEASE_REPORT_SHA256" \
+              --max-live-median-output-ratio-bps 8500 \
+              --max-live-p95-weighted-units 150000000 \
+              --max-live-original-retained-rate-bps 7000 \
+              --max-live-cost-per-1000-microusd 500000 \
+              --max-projected-monthly-cost-microusd 5000000 \
+              --live-cost-model .artifacts/runtime/live-cost-model.json \
+              --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
+              --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
+              --release-report-sha256 "$SOURCE_SHA256" \
               --session-rate-limit-namespace-id 21001 \
               --network-rate-limit-namespace-id 21002 \
               --job-read-rate-limit-namespace-id 21003 \
@@ -754,7 +257,7 @@ jobs:
             --mode capture-bootstrap \
             --worker-module "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" \
-            --release-report .artifacts/candidate/processing-release-report.json \
+            --release-report .artifacts/deployment/source-sha.txt \
             --output .artifacts/runtime/bootstrap-witness.json
           {
             echo "STAGING_D1_DATABASE_ID=$STAGING_D1_DATABASE_ID"
@@ -790,9 +293,9 @@ jobs:
               --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
             > .artifacts/runtime/versions-after-final.json
-          STAGING_API_ORIGIN="$(node scripts/read-wrangler-output.mjs \
+          DEPLOYED_API_ORIGIN="$(node scripts/read-wrangler-output.mjs \
             --file .artifacts/runtime/final-deploy.ndjson --event deploy --field targets.0)"
-          test "$STAGING_API_ORIGIN" = "$EXPECTED_STAGING_API_ORIGIN"
+          test "$DEPLOYED_API_ORIGIN" = "$STAGING_API_ORIGIN"
           node scripts/verify-worker-version-chain.mjs \
             --mode finalize \
             --before .artifacts/runtime/versions-before.json \
@@ -804,7 +307,7 @@ jobs:
             --bootstrap-witness .artifacts/runtime/bootstrap-witness.json \
             --worker-module "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" \
-            --release-report .artifacts/candidate/processing-release-report.json \
+            --release-report .artifacts/deployment/source-sha.txt \
             --output .artifacts/runtime/worker-version-attestations.json \
             --previous-active-version-id "$PREVIOUS_ACTIVE_VERSION_ID"
           cp .artifacts/runtime/worker-version-attestations.json \
@@ -813,23 +316,18 @@ jobs:
             --attestation .artifacts/runtime/worker-version-attestations.json \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$STAGING_D1_DATABASE_ID"
-      - name: Deploy the verified staging Pages tree
+      - name: Deploy and verify the staging Pages tree
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           umask 077
-          node scripts/verify-and-extract-tree-archive.mjs \
-            --archive .artifacts/candidate/web-staging.tar \
-            --expected-archive-sha256 "$STAGING_WEB_ARCHIVE_SHA256" \
-            --expected-tree-sha256 "$STAGING_WEB_TREE_SHA256" \
-            --output .artifacts/web-staging
           : > .artifacts/runtime/pages-deploy.ndjson
           WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/pages-deploy.ndjson \
-            pnpm exec wrangler pages deploy .artifacts/web-staging \
+            pnpm exec wrangler pages deploy apps/web/out \
               --project-name hereisit \
               --branch processing-staging \
-              --commit-hash "$GITHUB_SHA" \
+              --commit-hash "$EXPECTED_HEAD_SHA" \
               --commit-dirty=false \
               --no-bundle
           node scripts/read-wrangler-output.mjs \
@@ -860,19 +358,14 @@ jobs:
             --config-sha256 "$CONFIG_SHA256" \
             > .artifacts/deployment/gate-results.json
       - name: Install browser smoke runtime while queues remain paused
-        run: |
-          set -euo pipefail
-          pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
       - name: Arm primary queue failure cleanup
         id: resume-attempt
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
       - name: Resume only primary delivery
-        id: resume-primary
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+        run: pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
       - name: Verify primary resumed and DLQ remained paused
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -886,15 +379,14 @@ jobs:
         env:
           STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
         run: |
-          set -euo pipefail
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$STAGING_PAGES_ORIGIN" \
             --output .artifacts/deployment/smoke-result.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: processing-staging-deployment-${{ github.sha }}
+          name: processing-staging-deployment-${{ github.event.workflow_run.head_sha }}
           path: |
-            .artifacts/deployment/processing-candidate-identity.json
+            .artifacts/deployment/source-sha.txt
             .artifacts/deployment/cloudflare-image-digest.txt
             .artifacts/deployment/worker-version.json
             .artifacts/deployment/gate-results.json

@@ -21,213 +21,128 @@ function actionStep(job: string, action: string) {
   return nextStep < 0 ? tail : tail.slice(0, nextStep + 1);
 }
 
-function expectMainRepositoryGate(job: string, mode: "build" | "deploy") {
-  expect(job).toContain(`inputs.mode == '${mode}'`);
-  expect(job).toContain("github.repository == 'liorium/hereisit'");
-  expect(job).toContain("github.ref == 'refs/heads/main'");
-}
-
 beforeAll(() => {
   expect(existsSync(workflowPath), `${workflowPath} must be checked in`).toBe(true);
   workflow = readFileSync(workflowPath, "utf8");
 });
 
 describe("processing staging workflow", () => {
-  it("is manual, main-only, repository-bound, and exposes only build/deploy modes", () => {
-    expect(workflow).toContain("workflow_dispatch:");
-    expect(workflow).toContain("type: choice");
-    expect(workflow).toMatch(/options:\s*(?:\[build,\s*deploy\]|\n\s+- build\n\s+- deploy)/);
-    expect(workflow).toContain("permissions:\n  actions: read\n  contents: read");
-    expect(workflow).not.toMatch(/^\s+(?:push|pull_request|schedule):/m);
-
-    expectMainRepositoryGate(jobBody("build"), "build");
-    expectMainRepositoryGate(jobBody("verify-release"), "deploy");
-    expectMainRepositoryGate(jobBody("deploy"), "deploy");
-  });
-
-  it("keeps build and release verification outside the protected Cloudflare environment", () => {
-    const build = jobBody("build");
-    const verify = jobBody("verify-release");
+  it("deploys only a successful main push from this repository's CI", () => {
     const deploy = jobBody("deploy");
 
-    expect(build).not.toContain("environment: processing-staging");
-    expect(build).not.toContain("secrets.");
-    expect(verify).not.toContain("environment: processing-staging");
-    expect(verify).not.toContain("secrets.CLOUDFLARE");
-    expect(workflow.indexOf("  verify-release:\n")).toBeLessThan(workflow.indexOf("  deploy:\n"));
-    expect(deploy).toContain("needs: verify-release");
-    expect(deploy).toContain("environment: processing-staging");
-    expect(deploy.slice(0, deploy.indexOf("    steps:"))).not.toContain("secrets.");
-  });
-
-  it("binds same-run artifact bytes through native and independent exact-ID downloads", () => {
-    const deploy = jobBody("deploy");
-    const native = actionStep(deploy, "actions/download-artifact@");
-    const independent = deploy.indexOf("node scripts/download-and-verify-github-artifact.mjs");
-
-    expect(native).toContain(`artifact-ids: \${{ needs.verify-release.outputs.artifact_id }}`);
-    expect(native).toContain("path: .artifacts/native-download");
-    expect(independent).toBeGreaterThan(deploy.indexOf("actions/download-artifact@"));
-    expect(deploy).toContain('[[ "$ARTIFACT_DIGEST" =~ ^([0-9a-f]{64})$ ]]');
-    expect(deploy).not.toContain('ARTIFACT_DIGEST" =~ ^sha256:');
-    for (const binding of [
-      '--repo "$GITHUB_REPOSITORY"',
-      '--run-id "$GITHUB_RUN_ID"',
-      '--expected-head-sha "$GITHUB_SHA"',
-      '--expected-artifact-id "$ARTIFACT_ID"',
-      "--allow-in-progress true",
-      "--output-dir .artifacts/candidate",
-    ]) {
-      expect(deploy.slice(independent)).toContain(binding);
-    }
-  });
-
-  it("resolves and verifies the complete finalized signed release before mutation", () => {
-    const verify = jobBody("verify-release");
-    const candidate = verify.indexOf("node scripts/verify-processing-candidate.mjs");
-    const report = verify.indexOf("node scripts/verify-processing-release-report.mjs");
-    const signature = verify.indexOf("node scripts/processing-evidence-signature.mjs");
-
-    expect(verify).toContain("node scripts/resolve-github-release-assets.mjs");
-    expect(candidate).toBeGreaterThanOrEqual(0);
-    expect(verify.slice(candidate)).toContain("--required-state finalized");
-    expect(report).toBeGreaterThan(candidate);
-    expect(signature).toBeGreaterThan(report);
-    expect(verify.slice(signature)).toContain("--mode verify");
-    expect(verify.slice(signature)).toContain("processing-evidence.sig");
-    expect(verify.slice(signature)).toContain(
-      "docs/deployment/processing-evidence-ed25519-public.pem",
+    expect(workflow).toContain("workflow_run:");
+    expect(workflow).toContain('workflows: ["CI"]');
+    expect(workflow).toContain("types: [completed]");
+    expect(workflow).not.toContain("workflow_dispatch:");
+    expect(deploy).toContain("github.repository == 'liorium/hereisit'");
+    expect(deploy).toContain("github.event.workflow_run.conclusion == 'success'");
+    expect(deploy).toContain("github.event.workflow_run.event == 'push'");
+    expect(deploy).toContain("github.event.workflow_run.head_branch == 'main'");
+    expect(deploy).toContain(
+      "github.event.workflow_run.head_repository.full_name == github.repository",
     );
-
-    for (const asset of [
-      "security-image-engine-license-gate.json",
-      "security-application-supply-chain-gate.json",
-      "security-vulnerability-gate.json",
-      "security-sbom-engine.cdx.json",
-      "security-sbom-web-staging.cdx.json",
-      "security-sbom-web-production.cdx.json",
-      "security-sbom-worker.cdx.json",
-      "security-sbom-lockfile.cdx.json",
-      "security-trivy-engine.json",
-      "security-trivy-web-staging.json",
-      "security-trivy-web-production.json",
-      "security-trivy-worker.json",
-      "security-trivy-lockfile.json",
-    ]) {
-      expect(verify).toContain(asset);
-    }
-
-    expect(workflow).not.toContain("--mode sign");
-    expect(workflow).not.toContain("--private-key");
-    expect(workflow).not.toMatch(/PRIVATE(?:_|-)KEY/);
+    expect(deploy).toContain("environment: processing-staging");
   });
 
-  it("deploys at zero rollout and resumes only the primary queue after attestation", () => {
+  it("checks out and verifies the exact successful CI commit before using secrets", () => {
     const deploy = jobBody("deploy");
+    const checkout = actionStep(deploy, "actions/checkout@");
+    const verifySource = deploy.indexOf('test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"');
+    const install = deploy.indexOf("pnpm install --frozen-lockfile");
+    const validateEnvironment = deploy.indexOf("verify-processing-deployment-environment.mjs");
+    const firstCloudflareMutation = deploy.indexOf("wrangler containers push");
+
+    expect(checkout).toContain(`ref: \${{ github.event.workflow_run.head_sha }}`);
+    expect(checkout).toContain("persist-credentials: false");
+    expect(deploy).toContain(`EXPECTED_HEAD_SHA: \${{ github.event.workflow_run.head_sha }}`);
+    expect(verifySource).toBeGreaterThanOrEqual(0);
+    expect(install).toBeGreaterThan(verifySource);
+    expect(validateEnvironment).toBeGreaterThan(install);
+    expect(firstCloudflareMutation).toBeGreaterThan(validateEnvironment);
+  });
+
+  it("removes the manual signed-release ceremony", () => {
+    expect(workflow).not.toMatch(
+      /processing-evidence|release_tag|release-input|verify-release|PRIVATE(?:_|-)KEY/,
+    );
+    expect(workflow).not.toContain("gh release");
+    expect(workflow).not.toContain("actions/download-artifact@");
+  });
+
+  it("builds and deploys one immutable rollout-zero staging source", () => {
+    const deploy = jobBody("deploy");
+    const buildImage = deploy.indexOf("docker buildx build");
+    const buildWorker = deploy.indexOf("--dry-run");
+    const buildWeb = deploy.indexOf("NEXT_PUBLIC_PROCESSING_API_ORIGIN");
+    const createCostModel = deploy.indexOf("node scripts/create-live-cost-model.mjs");
+    const pushImage = deploy.indexOf("wrangler containers push");
     const resolveDigest = deploy.indexOf("node scripts/resolve-cloudflare-image-digest.mjs");
     const provision = deploy.indexOf("node scripts/ensure-cloudflare-processing-resources.mjs");
-    const deployments = [...deploy.matchAll(/pnpm exec wrangler deploy/g)];
-    const finalDeployment = deploy.lastIndexOf("pnpm exec wrangler deploy");
-    const secretVerification = deploy.indexOf("node scripts/verify-worker-secret-list.mjs");
-    const versionAttestation = deploy.lastIndexOf("node scripts/verify-worker-version-chain.mjs");
-    const attestationApplication = deploy.indexOf(
-      "node scripts/apply-worker-version-attestations.mjs",
-    );
-    const resumePrimary = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
-    const verifyPrimary = deploy.indexOf('--queue "$QUEUE_NAME" --expected resumed');
-    const verifyDlq = deploy.indexOf('--queue "$DLQ_NAME" --expected paused');
-    const resumeCommands = [
-      ...workflow.matchAll(/^\s*pnpm exec wrangler queues resume-delivery .+$/gm),
-    ].map(([command]) => command.trim());
+    const migrations = deploy.indexOf("wrangler d1 migrations apply");
+    const putSecret = deploy.indexOf("wrangler secret put");
+    const verifySecrets = deploy.indexOf("node scripts/verify-worker-secret-list.mjs");
+    const deployPages = deploy.indexOf("wrangler pages deploy");
+    const verifyPages = deploy.indexOf("node scripts/verify-pages-alias.mjs");
 
-    expect(resolveDigest).toBeGreaterThanOrEqual(0);
+    expect(buildImage).toBeGreaterThanOrEqual(0);
+    expect(buildWorker).toBeGreaterThan(buildImage);
+    expect(buildWeb).toBeGreaterThan(buildWorker);
+    expect(createCostModel).toBeGreaterThan(buildWeb);
+    expect(pushImage).toBeGreaterThan(createCostModel);
+    expect(resolveDigest).toBeGreaterThan(pushImage);
     expect(provision).toBeGreaterThan(resolveDigest);
-    expect(deploy).toContain(".artifacts/deployment/cloudflare-image-digest.txt");
-    expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
-    expect(deploy).toContain("generate_config bootstrap");
-    expect(deploy).toContain("generate_config active");
+    expect(migrations).toBeGreaterThan(provision);
+    expect(putSecret).toBeGreaterThan(migrations);
+    expect(verifySecrets).toBeGreaterThan(putSecret);
+    expect(deployPages).toBeGreaterThan(verifySecrets);
+    expect(verifyPages).toBeGreaterThan(deployPages);
     expect(deploy).toContain("--rollout-percent 0");
     expect(deploy).not.toMatch(/--rollout-percent (?!0\b)\d+/);
-    expect(deployments.length).toBeGreaterThanOrEqual(2);
-    expect(secretVerification).toBeGreaterThanOrEqual(0);
-    expect(versionAttestation).toBeGreaterThan(finalDeployment);
-    expect(attestationApplication).toBeGreaterThan(versionAttestation);
-    expect(resumePrimary).toBeGreaterThan(finalDeployment);
-    expect(resumePrimary).toBeGreaterThan(secretVerification);
-    expect(resumePrimary).toBeGreaterThan(attestationApplication);
-    expect(verifyPrimary).toBeGreaterThan(resumePrimary);
-    expect(verifyDlq).toBeGreaterThan(resumePrimary);
-    expect(resumeCommands).toEqual(['pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"']);
-    expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
+    expect(deploy).toContain(
+      'REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"',
+    );
+    expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
   });
 
-  it("runs the authenticated staging smoke after both queue-state verifications", () => {
+  it("resumes only the primary queue after deployment checks and fails closed", () => {
     const deploy = jobBody("deploy");
+    const verifyPages = deploy.indexOf("node scripts/verify-pages-alias.mjs");
+    const arm = deploy.indexOf("id: resume-attempt");
+    const resume = deploy.indexOf('wrangler queues resume-delivery "$QUEUE_NAME"');
     const verifyPrimary = deploy.indexOf('--queue "$QUEUE_NAME" --expected resumed');
     const verifyDlq = deploy.indexOf('--queue "$DLQ_NAME" --expected paused');
     const smoke = deploy.indexOf("node scripts/smoke-image-compress-server.mjs");
+    const cleanupStep = deploy.indexOf(
+      "      - name: Re-pause and verify both queues after any failed delivery attempt",
+    );
+    const cleanup = deploy.indexOf('wrangler queues pause-delivery "$QUEUE_NAME"');
 
+    expect(arm).toBeGreaterThan(verifyPages);
+    expect(resume).toBeGreaterThan(arm);
+    expect(verifyPrimary).toBeGreaterThan(resume);
+    expect(verifyDlq).toBeGreaterThan(resume);
     expect(smoke).toBeGreaterThan(verifyPrimary);
     expect(smoke).toBeGreaterThan(verifyDlq);
     expect(deploy).toContain(
       `STAGING_MAINTAINER_SESSION_ID: \${{ secrets.STAGING_MAINTAINER_SESSION_ID }}`,
     );
-    expect(deploy.slice(smoke)).toContain("--output .artifacts/deployment/smoke-result.json");
-  });
-
-  it("resolves D1 active state and keeps all mutation gates ahead of primary resume", () => {
-    const deploy = jobBody("deploy");
-    const migrations = deploy.indexOf("wrangler d1 migrations apply");
-    const versionsBefore = deploy.indexOf("versions-before.json");
-    const previous = deploy.indexOf("resolve-previous-active-worker-version.mjs");
-    const bootstrap = deploy.indexOf("bootstrap-deploy.ndjson");
-    const pages = deploy.indexOf("node scripts/verify-pages-alias.mjs");
-    const gate = deploy.indexOf("node scripts/verify-deployment-gate-artifacts.mjs");
-    const playwright = deploy.indexOf("pnpm exec playwright install --with-deps chromium");
-    const resume = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
-
-    expect(versionsBefore).toBeGreaterThan(migrations);
-    expect(previous).toBeGreaterThan(versionsBefore);
-    expect(bootstrap).toBeGreaterThan(previous);
-    expect(pages).toBeGreaterThan(bootstrap);
-    expect(gate).toBeGreaterThan(pages);
-    expect(playwright).toBeGreaterThan(gate);
-    expect(resume).toBeGreaterThan(playwright);
-    expect(deploy).not.toContain("STAGING_PREVIOUS_ACTIVE_VERSION_ID");
-  });
-
-  it("arms fail-safe cleanup before resume and makes cleanup the terminal step", () => {
-    const deploy = jobBody("deploy");
-    const arm = deploy.indexOf("id: resume-attempt");
-    const resume = deploy.indexOf('pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"');
-    const upload = deploy.indexOf("actions/upload-artifact@");
-    const cleanupStep = deploy.indexOf(
-      "      - name: Re-pause and verify both queues after any failed delivery attempt",
-    );
-    const cleanup = deploy.indexOf('pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"');
-
-    expect(arm).toBeGreaterThanOrEqual(0);
-    expect(deploy).toContain("id: resume-primary");
-    expect(deploy.slice(arm, resume)).toContain('run: echo "attempted=true" >> "$GITHUB_OUTPUT"');
-    expect(resume).toBeGreaterThan(arm);
-    expect(upload).toBeGreaterThan(resume);
-    expect(cleanupStep).toBeGreaterThan(upload);
+    expect(cleanupStep).toBeGreaterThan(smoke);
     expect(cleanup).toBeGreaterThan(cleanupStep);
     expect(deploy.slice(cleanupStep + 1)).not.toMatch(/^ {6}- /m);
     expect(deploy).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
-    expect(deploy).not.toContain("steps.resume-primary.outcome");
+    expect(deploy).not.toContain('queues resume-delivery "$DLQ_NAME"');
     expect(deploy.slice(cleanup)).toContain('--queue "$QUEUE_NAME" --expected paused');
     expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
   });
 
-  it("publishes only sanitized deployment evidence for seven days", () => {
+  it("uploads only sanitized deployment evidence", () => {
     const upload = actionStep(jobBody("deploy"), "actions/upload-artifact@");
     const paths = [...upload.matchAll(/^\s+(.artifacts\/deployment\/[^\s]+)$/gm)].map(
       ([, path]) => path,
     );
 
     expect(paths).toEqual([
-      ".artifacts/deployment/processing-candidate-identity.json",
+      ".artifacts/deployment/source-sha.txt",
       ".artifacts/deployment/cloudflare-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
@@ -235,11 +150,9 @@ describe("processing staging workflow", () => {
     ]);
     expect(upload).toContain("if-no-files-found: error");
     expect(upload).toContain("retention-days: 7");
-    expect(upload).not.toContain(".artifacts/candidate");
-    expect(upload).not.toContain("processing-evidence");
   });
 
-  it("pins every action and prevents checkout credential persistence", () => {
+  it("pins every action", () => {
     const actionReferences = [...workflow.matchAll(/^\s+- uses: ([^\s#]+)/gm)].map(
       ([, reference]) => reference,
     );
@@ -254,14 +167,8 @@ describe("processing staging workflow", () => {
       "actions/setup-node@",
       "docker/setup-buildx-action@",
       "actions/upload-artifact@",
-      "actions/download-artifact@",
     ]) {
       expect(actionReferences.some((reference) => reference.startsWith(action))).toBe(true);
-    }
-    for (const name of ["build", "verify-release", "deploy"]) {
-      const job = jobBody(name);
-      expect(job).toContain("actions/checkout@");
-      expect(job).toContain("persist-credentials: false");
     }
   });
 });

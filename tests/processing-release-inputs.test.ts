@@ -14,7 +14,7 @@ import { canonicalJson } from "../scripts/image-lab-common.mjs";
 
 const sha = (character: string) => character.repeat(64);
 const { routeCpuBenchmark: _fixtureRoute, ...modelInput } = JSON.parse(
-  readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"),
+  readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
 );
 const repositoryRoot = process.cwd();
 const releaseInputsCli = resolve(repositoryRoot, "scripts/create-processing-release-inputs.mjs");

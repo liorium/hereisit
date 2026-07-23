@@ -166,7 +166,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
     "live-cost-model.json": Buffer.from(
       canonicalJson(
         createLiveCostModel(
-          JSON.parse(await readFile("tests/fixtures/live-cost-model-pr-input.json", "utf8")),
+          JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
         ),
       ),
     ),
@@ -183,7 +183,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
             artifactSha256: "3".repeat(64),
             modelInput: (() => {
               const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
-                readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"),
+                readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
               );
               return modelInput;
             })(),
@@ -197,8 +197,9 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
           },
           routeCpuBenchmark: {
             artifactSha256: "4".repeat(64),
-            ...JSON.parse(readFileSync("tests/fixtures/live-cost-model-pr-input.json", "utf8"))
-              .routeCpuBenchmark,
+            ...JSON.parse(
+              readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
+            ).routeCpuBenchmark,
           },
         }),
       ),

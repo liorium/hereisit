@@ -96,9 +96,9 @@ required platform or assistive technology is unavailable, write `not run` and th
 are not manual-pass evidence. Never include selected filenames, file contents, thumbnails, object URLs,
 preference values, or other file-derived data in release evidence.
 
-Before the first signed server-processing release, complete the
-[processing evidence signing key ceremony](deployment/processing-evidence-key-ceremony.md). Only the
-public key is committed; the mode-0600 Ed25519 private key remains outside the repository and CI.
+Server-processing staging deploys automatically after a successful `main` CI push. See the
+[processing staging deployment guide](deployment/processing-staging-bootstrap.md). Production uses the
+same push-based path with a protected GitHub environment approval after its resources are provisioned.
 
 Optional account commands:
 
