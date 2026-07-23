@@ -1093,7 +1093,8 @@ test("keeps text length and mode-specific size controls inside the contract", as
   const textSize = page.getByRole("slider", { name: /문구 크기/ });
   await textSize.fill("4");
   const logoMode = page.getByRole("radio", { name: "로고 이미지", exact: true });
-  await logoMode.check();
+  await logoMode.focus();
+  await page.keyboard.press("Space");
   await expect(logoMode).toBeChecked();
   const logoSize = page.getByRole("slider", { name: /로고 크기/ });
   await expect(logoSize).toHaveValue("5");
@@ -1106,6 +1107,7 @@ test("keeps text length and mode-specific size controls inside the contract", as
   await expect(page.getByRole("slider", { name: /문구 크기/ })).toHaveValue("30");
 
   await page.getByRole("button", { name: "처음부터" }).click();
+  await expect(page.getByRole("button", { name: "contract.png 제거" })).toHaveCount(0);
   await setSourceFiles(page, {
     name: "reset.png",
     mimeType: "image/png",
