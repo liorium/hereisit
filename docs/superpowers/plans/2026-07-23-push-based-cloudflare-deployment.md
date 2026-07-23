@@ -31,25 +31,25 @@
 - Consumes: `scripts/create-live-cost-model.mjs --input <path> --schema <path> --output <path>`
 - Produces: a checked-in, schema-validated staging cost input used by tests and deployment.
 
-- [ ] **Step 1: Change the fixture path in the test**
+- [x] **Step 1: Change the fixture path in the test**
 
 ```ts
 readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8");
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `pnpm vitest run tests/processing-release-inputs.test.ts`
 
 Expected: FAIL because the new path does not exist.
 
-- [ ] **Step 3: Move the existing validated JSON**
+- [x] **Step 3: Move the existing validated JSON**
 
 ```bash
 mv tests/fixtures/live-cost-model-pr-input.json docs/deployment/processing-staging-cost-input.json
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `pnpm vitest run tests/processing-release-inputs.test.ts`
 
@@ -68,7 +68,7 @@ Expected: all tests pass.
 - Consumes: successful `CI` `workflow_run`, `processing-staging` variables/secrets, existing deployment scripts.
 - Produces: automatic rollout-zero Worker/Container/Pages staging deployment and sanitized evidence artifacts.
 
-- [ ] **Step 1: Replace the workflow contract test first**
+- [x] **Step 1: Replace the workflow contract test first**
 
 The test must require these literal contracts:
 
@@ -88,13 +88,13 @@ Retain assertions for environment isolation, immutable container digest resoluti
 secret-list verification, Pages alias verification, primary/DLQ state checks, authenticated smoke, and
 failure cleanup.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `pnpm vitest run tests/processing-staging-workflow.test.ts`
 
 Expected: FAIL because the workflow is still manual and signed-release based.
 
-- [ ] **Step 3: Replace the workflow with the direct deployment flow**
+- [x] **Step 3: Replace the workflow with the direct deployment flow**
 
 The workflow header and trust gate must be exactly:
 
@@ -129,7 +129,7 @@ sanitized outputs, and re-pause the primary queue on any post-resume failure. Th
 resolver accepts the locally inspected Docker config digest and returns only the matching immutable
 Cloudflare registry manifest digest.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `pnpm vitest run tests/processing-staging-workflow.test.ts tests/resolve-cloudflare-image-digest.test.ts`
 
@@ -144,12 +144,12 @@ Expected: all tests pass.
 **Interfaces:**
 - Produces: one-time setup and push-based operating instructions matching the workflow.
 
-- [ ] **Step 1: Replace manual release instructions**
+- [x] **Step 1: Replace manual release instructions**
 
 Document that merging to `main` starts deployment after CI success, no key or release tag is required,
 and production later adds only a protected GitHub environment approval.
 
-- [ ] **Step 2: Run repository checks**
+- [x] **Step 2: Run repository checks**
 
 Run:
 
@@ -162,7 +162,7 @@ git diff --check
 
 Expected: all commands exit zero.
 
-- [ ] **Step 3: Commit and push**
+- [x] **Step 3: Commit and push**
 
 ```bash
 git add .github/workflows/processing-staging.yml \
