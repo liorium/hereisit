@@ -284,6 +284,7 @@ describe("engine admission and single-job lifecycle", () => {
     await expect.poll(() => controller.activeJobId).toBeNull();
     await expect(controller.run(second.jobId)).resolves.toBe(false);
     completions.get(second.jobId)?.resolve(terminalFailure(second.jobId));
+    await expect(controller.waitForIdle(1_000)).resolves.toBe(true);
   });
 
   it("rejects new creates during rollout shutdown and reports whether grace reached idle", async () => {
