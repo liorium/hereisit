@@ -17,7 +17,7 @@
     "@hereisit/tool-contracts": "workspace:*",
     "@hereisit/tool-registry": "workspace:*",
     "fflate": "0.8.3",
-    "next": "16.2.10",
+    "next": "16.2.11",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
