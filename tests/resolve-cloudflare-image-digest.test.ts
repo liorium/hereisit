@@ -3,6 +3,7 @@ import { sha256Canonical } from "../scripts/image-lab-common.mjs";
 import {
   candidateIdentityFromManifest,
   resolveCloudflareImageDigest,
+  resolveCloudflareImageDigestFromConfig,
 } from "../scripts/resolve-cloudflare-image-digest.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
@@ -15,6 +16,28 @@ const candidateIdentity = { configDigest, distributionLayerDigests };
 
 function artifact(path: string, sha256: string) {
   return { path, sizeBytes: 1, sha256 };
+}
+
+function securityAssets() {
+  const scoped = (prefix: string, suffix: string) => ({
+    engine: artifact(`${prefix}engine${suffix}`, "1".repeat(64)),
+    webStaging: artifact(`${prefix}web-staging${suffix}`, "2".repeat(64)),
+    webProduction: artifact(`${prefix}web-production${suffix}`, "3".repeat(64)),
+    worker: artifact(`${prefix}worker${suffix}`, "4".repeat(64)),
+    lockfile: artifact(`${prefix}lockfile${suffix}`, "5".repeat(64)),
+  });
+  return {
+    gates: {
+      imageEngine: artifact("security-image-engine-license-gate.json", "6".repeat(64)),
+      applicationSupplyChain: artifact(
+        "security-application-supply-chain-gate.json",
+        "7".repeat(64),
+      ),
+      vulnerability: artifact("security-vulnerability-gate.json", "8".repeat(64)),
+    },
+    sboms: scoped("security-sbom-", ".cdx.json"),
+    vulnerabilityReports: scoped("security-trivy-", ".json"),
+  };
 }
 
 function finalizedCandidate() {
@@ -59,6 +82,7 @@ function finalizedCandidate() {
         staging: { path: "web-staging.tar", sizeBytes: 1, ...staging },
         production: { path: "web-production.tar", sizeBytes: 1, ...production },
       },
+      security: securityAssets(),
       evidence: {
         bundle: artifact(`evidence-v1--${releaseId}--processing-evidence.json`, "b".repeat(64)),
         signature: artifact(`evidence-v1--${releaseId}--processing-evidence.sig`, "c".repeat(64)),
@@ -119,6 +143,26 @@ describe("Cloudflare image digest resolver", () => {
         candidateIdentity,
       }),
     ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+  });
+
+  it("binds a direct deployment to its local Docker config digest", () => {
+    expect(
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor(),
+        imageRef,
+        accountId,
+        expectedConfigDigest: configDigest,
+      }),
+    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+
+    expect(() =>
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor(),
+        imageRef,
+        accountId,
+        expectedConfigDigest: `sha256:${"9".repeat(64)}`,
+      }),
+    ).toThrow(/config/i);
   });
 
   it("selects one runnable image while ignoring unknown-platform attestations", () => {

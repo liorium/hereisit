@@ -1,22 +1,422 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import {
   evaluateSpdxExpression,
+  runImageEngineLicenseCli,
   validateCommercialReview,
   validatePackageLicenses,
   validateRuntimeInventory,
   validateVulnerabilityExceptions,
+  verifyImageEngineLicenseGate,
 } from "../scripts/verify-image-engine-licenses.mjs";
 
 const repositoryRoot = process.cwd();
+const temporaryRoots: string[] = [];
+
+const sha256 = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
+});
 
 async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(join(repositoryRoot, path), "utf8"));
 }
 
+async function licenseGateFixture(scope: "pr" | "release" = "pr") {
+  const root = await mkdtemp(join(tmpdir(), "hereisit-engine-license-gate-"));
+  temporaryRoots.push(root);
+  const sourceLock = (await readJson("apps/image-engine/native/sources.lock.json")) as {
+    schemaVersion: number;
+    sources: Array<Record<string, unknown>>;
+  };
+  const policy = await readJson("apps/image-engine/licenses/policy.json");
+  const exceptions = await readJson("apps/image-engine/security/vulnerability-exceptions.json");
+  const baseImages = await readJson("apps/image-engine/base-images.lock.json");
+  const paths = {
+    sourceLockPath: join(root, "sources.json"),
+    policyPath: join(root, "policy.json"),
+    exceptionsPath: join(root, "exceptions.json"),
+    baseImageLockPath: join(root, "base-images.json"),
+    commercialReviewPath: join(root, "commercial-review.json"),
+    outputPath: join(root, "gate.json"),
+  };
+  const documents = { sourceLock, policy, exceptions, baseImages };
+  await Promise.all([
+    writeFile(paths.sourceLockPath, canonicalJson(sourceLock)),
+    writeFile(paths.policyPath, canonicalJson(policy)),
+    writeFile(paths.exceptionsPath, canonicalJson(exceptions)),
+    writeFile(paths.baseImageLockPath, canonicalJson(baseImages)),
+  ]);
+  if (scope === "release") {
+    await writeFile(
+      paths.commercialReviewPath,
+      canonicalJson({
+        schemaVersion: 1,
+        sourceLockSha256: sha256(canonicalJson(sourceLock)),
+        records: sourceLock.sources
+          .filter((source) => source.production === true)
+          .map((source) => ({
+            component: source.name,
+            revision: source.revision,
+            reviewedFiles: source.noticePaths,
+            reviewer: "Independent counsel",
+            organization: "Review organization",
+            reviewDate: "2026-07-21",
+            decision: "approved",
+            conditions: [],
+            approvalReference: "LEGAL-2026-001",
+          })),
+      }),
+    );
+  }
+
+  const requiredPaths = [
+    "/usr/local/bin/cjpeg",
+    "/usr/local/bin/djpeg",
+    "/usr/local/bin/jpegtran",
+    "/usr/local/bin/jpeg-coeff-verify",
+    "/usr/local/bin/oxipng",
+    "/usr/local/bin/png-smart",
+    "/usr/local/bin/cwebp",
+    "/usr/local/bin/dwebp",
+    "/usr/local/lib/libvips.so",
+    "/app/dist/server.mjs",
+    "/app/dist/job/job-runner.mjs",
+  ];
+  const required = requiredPaths.map((path, index) => ({
+    path,
+    mode: path.startsWith("/usr/local/bin/") ? 0o755 : 0o644,
+    sha256: String(index + 1).padStart(64, "0"),
+  }));
+  const sourcePaths: Record<string, string[]> = {
+    mozjpeg: requiredPaths.slice(0, 4),
+    oxipng: [requiredPaths[4]],
+    quantizr: [requiredPaths[5]],
+    libwebp: requiredPaths.slice(6, 8),
+    libvips: [requiredPaths[8]],
+  };
+  const buildMetadata = Object.fromEntries(
+    sourceLock.sources
+      .filter((source) => source.production === true)
+      .map((source) => [
+        String(source.artifactRecord).split("/").at(-1),
+        {
+          schemaVersion: 1,
+          name: source.name === "quantizr" ? "png-smart" : source.name,
+          revision: source.revision,
+          artifacts: (sourcePaths[String(source.name)] ?? []).map((path) => ({
+            sha256: required.find((record) => record.path === path)?.sha256,
+          })),
+        },
+      ]),
+  );
+  Object.assign(buildMetadata, {
+    "debian-packages.json": {
+      schemaVersion: 1,
+      snapshot: "20260716T000000Z",
+      packages: [{ name: "base-files", version: "1" }],
+      copyrightPaths: ["/usr/share/doc/base-files/copyright"],
+    },
+    "oxipng-cargo-metadata.json": {
+      packages: [{ name: "oxipng", version: "10.1.1", license: "MIT" }],
+    },
+    "png-smart-cargo-metadata.json": {
+      packages: [{ name: "png-smart", version: "0.1.0", license: null }],
+    },
+  });
+  const inventory = {
+    schemaVersion: 1,
+    uid: 10001,
+    entries: sourceLock.sources
+      .filter((source) => source.production === true)
+      .flatMap((source) =>
+        (source.noticePaths as string[]).map((noticePath) => ({
+          path: `/licenses/${String(source.name)}/${noticePath}`,
+          type: "file",
+          sha256: "f".repeat(64),
+        })),
+      ),
+    required,
+    packages: [{ name: "@hereisit/image-engine", version: "0.1.0", license: null }],
+    linkage: [],
+    buildMetadata,
+  };
+  const artifactSha256 = "a".repeat(64);
+  const { commercialReviewPath, ...commonPaths } = paths;
+  return {
+    root,
+    documents,
+    paths,
+    inventory,
+    options: {
+      scope,
+      image: "hereisit-image-engine:test",
+      artifactSha256,
+      ...commonPaths,
+      ...(scope === "release" ? { commercialReviewPath } : {}),
+    },
+  };
+}
+
 describe("image engine native supply-chain policy", () => {
+  it("writes a canonical content-free PR gate bound to one runtime inspection", async () => {
+    const fixture = await licenseGateFixture();
+    const requests: unknown[] = [];
+    const gate = await verifyImageEngineLicenseGate(fixture.options, {
+      inspectRuntimeImage: async (request: unknown) => {
+        requests.push(request);
+        return fixture.inventory;
+      },
+    });
+    const expected = {
+      schema: "hereisit-image-engine-license-gate@1",
+      passed: true,
+      scope: "pr",
+      artifactSha256: "a".repeat(64),
+      sourceLockSha256: sha256(canonicalJson(fixture.documents.sourceLock)),
+      policySha256: sha256(canonicalJson(fixture.documents.policy)),
+      exceptionsSha256: sha256(canonicalJson(fixture.documents.exceptions)),
+      baseImagesSha256: sha256(canonicalJson(fixture.documents.baseImages)),
+    };
+
+    expect(gate).toEqual(expected);
+    expect(requests).toEqual([
+      { image: "hereisit-image-engine:test", artifactSha256: "a".repeat(64) },
+    ]);
+    expect(await readFile(fixture.paths.outputPath, "utf8")).toBe(canonicalJson(expected));
+    expect(await readFile(fixture.paths.outputPath, "utf8")).not.toMatch(
+      /hereisit-image-engine:test|mozjpeg|MIT|sources\.json|licenses\//u,
+    );
+  });
+
+  it("adds only the commercial-review hash to a valid release gate", async () => {
+    const fixture = await licenseGateFixture("release");
+    const gate = await verifyImageEngineLicenseGate(fixture.options, {
+      inspectRuntimeImage: async () => fixture.inventory,
+    });
+
+    expect(gate).toEqual({
+      schema: "hereisit-image-engine-license-gate@1",
+      passed: true,
+      scope: "release",
+      artifactSha256: "a".repeat(64),
+      sourceLockSha256: sha256(canonicalJson(fixture.documents.sourceLock)),
+      policySha256: sha256(canonicalJson(fixture.documents.policy)),
+      exceptionsSha256: sha256(canonicalJson(fixture.documents.exceptions)),
+      baseImagesSha256: sha256(canonicalJson(fixture.documents.baseImages)),
+      commercialReviewSha256: sha256(await readFile(fixture.paths.commercialReviewPath)),
+    });
+  });
+
+  it("rejects invalid artifact identity and scope/review mismatches before inspection", async () => {
+    const fixture = await licenseGateFixture();
+    let inspections = 0;
+    const adapters = {
+      inspectRuntimeImage: async () => {
+        inspections += 1;
+        return fixture.inventory;
+      },
+    };
+    await expect(
+      verifyImageEngineLicenseGate(
+        { ...fixture.options, artifactSha256: `sha256:${"a".repeat(64)}` },
+        adapters,
+      ),
+    ).rejects.toThrow(/SHA-256/u);
+    await expect(
+      verifyImageEngineLicenseGate(
+        { ...fixture.options, commercialReviewPath: fixture.paths.commercialReviewPath },
+        adapters,
+      ),
+    ).rejects.toThrow(/fields/u);
+    await expect(
+      verifyImageEngineLicenseGate({ ...fixture.options, scope: "release" } as never, adapters),
+    ).rejects.toThrow(/fields/u);
+    expect(inspections).toBe(0);
+  });
+
+  it("rejects malformed, symlinked, and oversized JSON inputs", async () => {
+    const malformed = await licenseGateFixture();
+    await writeFile(malformed.paths.policyPath, "{\n");
+    await expect(
+      verifyImageEngineLicenseGate(malformed.options, {
+        inspectRuntimeImage: async () => malformed.inventory,
+      }),
+    ).rejects.toThrow(/JSON/u);
+
+    const linked = await licenseGateFixture();
+    const policyTarget = join(linked.root, "policy-target.json");
+    await writeFile(policyTarget, canonicalJson(linked.documents.policy));
+    await rm(linked.paths.policyPath);
+    await symlink(policyTarget, linked.paths.policyPath);
+    await expect(
+      verifyImageEngineLicenseGate(linked.options, {
+        inspectRuntimeImage: async () => linked.inventory,
+      }),
+    ).rejects.toThrow(/symbolic/u);
+
+    const oversized = await licenseGateFixture();
+    await writeFile(oversized.paths.policyPath, Buffer.alloc(1024 * 1024 + 1, 0x20));
+    await expect(
+      verifyImageEngineLicenseGate(oversized.options, {
+        inspectRuntimeImage: async () => oversized.inventory,
+      }),
+    ).rejects.toThrow(/bounded/u);
+  });
+
+  it("rejects JSON changed while it is being read", async () => {
+    const fixture = await licenseGateFixture();
+    const bytes = Buffer.from(
+      canonicalJson({ ...fixture.documents.sourceLock, padding: "x".repeat(900_000) }),
+    );
+    await writeFile(fixture.paths.sourceLockPath, bytes);
+    const handle = await open(fixture.paths.sourceLockPath, "r+");
+    let active = true;
+    let byte = 0x20;
+    const writer = (async () => {
+      while (active) {
+        await handle.write(Buffer.from([byte]), 0, 1, bytes.length - 1);
+        byte = byte === 0x20 ? 0x0a : 0x20;
+        await new Promise<void>((done) => setImmediate(done));
+      }
+    })();
+    try {
+      await expect(
+        verifyImageEngineLicenseGate(fixture.options, {
+          inspectRuntimeImage: async () => fixture.inventory,
+        }),
+      ).rejects.toThrow(/changed while reading/u);
+    } finally {
+      active = false;
+      await writer;
+      await handle.close();
+    }
+  });
+
+  it("writes mode 0600 without overwriting an existing gate", async () => {
+    const fixture = await licenseGateFixture();
+    const adapters = { inspectRuntimeImage: async () => fixture.inventory };
+    await verifyImageEngineLicenseGate(fixture.options, adapters);
+    expect((await stat(fixture.paths.outputPath)).mode & 0o777).toBe(0o600);
+    await expect(verifyImageEngineLicenseGate(fixture.options, adapters)).rejects.toThrow();
+  });
+
+  it("requires the exact scope-specific CLI fields", async () => {
+    const cases = [
+      [],
+      ["--scope", "pr", "--scope", "pr"],
+      ["--scope", "pr", "--unknown", "value"],
+      ["--scope", "release"],
+      ["--scope", "pr", "--commercial-review", "review.json"],
+    ];
+    for (const argv of cases) {
+      await expect(runImageEngineLicenseCli(argv)).rejects.toThrow();
+    }
+  });
+
+  it("prints only the canonical gate digest for a valid CLI run", async () => {
+    const fixture = await licenseGateFixture();
+    const docker = join(fixture.root, "docker");
+    await writeFile(
+      docker,
+      `#!/usr/bin/env node\nif (process.argv[2] === "image") process.stdout.write("sha256:${fixture.options.artifactSha256}\\n");\nelse process.stdout.write(${JSON.stringify(JSON.stringify(fixture.inventory))});\n`,
+    );
+    await chmod(docker, 0o755);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/verify-image-engine-licenses.mjs",
+        "--scope",
+        "pr",
+        "--image",
+        fixture.options.image,
+        "--artifact-sha256",
+        fixture.options.artifactSha256,
+        "--lock",
+        fixture.paths.sourceLockPath,
+        "--policy",
+        fixture.paths.policyPath,
+        "--exceptions",
+        fixture.paths.exceptionsPath,
+        "--base-lock",
+        fixture.paths.baseImageLockPath,
+        "--output",
+        fixture.paths.outputPath,
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fixture.root}:${process.env.PATH}` },
+      },
+    );
+    const gateBytes = await readFile(fixture.paths.outputPath);
+    const expected = canonicalJson({ gateSha256: sha256(gateBytes), passed: true });
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(expected);
+  });
+
+  it("rejects a runtime image whose config digest does not match the artifact identity", async () => {
+    const fixture = await licenseGateFixture();
+    const docker = join(fixture.root, "docker");
+    await writeFile(
+      docker,
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(fixture.inventory))});\n`,
+    );
+    await chmod(docker, 0o755);
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/verify-image-engine-licenses.mjs",
+        "--scope",
+        "pr",
+        "--image",
+        fixture.options.image,
+        "--artifact-sha256",
+        fixture.options.artifactSha256,
+        "--lock",
+        fixture.paths.sourceLockPath,
+        "--policy",
+        fixture.paths.policyPath,
+        "--exceptions",
+        fixture.paths.exceptionsPath,
+        "--base-lock",
+        fixture.paths.baseImageLockPath,
+        "--output",
+        fixture.paths.outputPath,
+      ],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fixture.root}:${process.env.PATH}` },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("image engine license verification failed\n");
+  });
+
+  it("prints one generic direct-execution error without supplied data", () => {
+    const secret = "/tmp/must-not-appear-source-lock.json";
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/verify-image-engine-licenses.mjs", "--scope", "pr", "--lock", secret],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("image engine license verification failed\n");
+    expect(result.stderr).not.toContain(secret);
+  });
+
   it("builds the complete WebP library set required by libvips inside isolated prefixes", async () => {
     const [webpBuild, mozjpegBuild, jpegliBuild, libjxlMetricsBuild, dockerfile, rootDockerignore] =
       await Promise.all([
@@ -139,6 +539,7 @@ describe("image engine native supply-chain policy", () => {
     const policy = (await readJson("apps/image-engine/licenses/policy.json")) as {
       applicationAndNative: { prohibited: string[] };
       runtime: { prohibitedNames: string[]; benchmarkOnlyNames: string[] };
+      vulnerabilityExceptions: { requiredFields: string[] };
     };
     expect(policy.applicationAndNative.prohibited).toEqual(
       expect.arrayContaining(["GPL-2.0", "GPL-3.0", "AGPL-3.0"]),
@@ -147,6 +548,9 @@ describe("image engine native supply-chain policy", () => {
       expect.arrayContaining(["libimagequant", "pngquant"]),
     );
     expect(policy.runtime.benchmarkOnlyNames).toEqual(expect.arrayContaining(["jpegli", "libjxl"]));
+    expect(policy.vulnerabilityExceptions.requiredFields).toEqual(
+      expect.arrayContaining(["affectedVersion", "affectedScope"]),
+    );
     await expect(
       readJson("apps/image-engine/security/vulnerability-exceptions.json"),
     ).resolves.toEqual({ schemaVersion: 1, exceptions: [] });
@@ -178,11 +582,13 @@ describe("image engine native supply-chain policy", () => {
       exceptions: [
         {
           cve: "CVE-2026-12345",
-          affectedPackage: "example@1.0.0",
+          affectedPackage: "example",
+          affectedVersion: "1.0.0",
+          affectedScope: "engine",
           affectedDigest: `sha256:${"a".repeat(64)}`,
           exploitabilityEvidence: "Unreachable code path in the network-disabled runtime.",
           owner: "security-owner",
-          approvalReference: "SEC-123",
+          approvalReference: "https://github.com/liorium/hereisit/issues/123",
           expiresAt: "2026-07-30T00:00:00.000Z",
         },
       ],

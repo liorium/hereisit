@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.pages.dev/schemas/application-supply-chain-gate.schema.json",
+  "title": "HereIsIt application supply-chain gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "passed",
+    "policySha256",
+    "lockfileSha256",
+    "noticesSha256",
+    "fallbackTextSha256",
+    "pnpmVersion",
+    "syftVersion",
+    "syftImage",
+    "reviewedPackageCount",
+    "scopes"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-application-supply-chain-gate@1" },
+    "passed": { "const": true },
+    "policySha256": { "$ref": "#/$defs/sha256" },
+    "lockfileSha256": { "$ref": "#/$defs/sha256" },
+    "noticesSha256": { "$ref": "#/$defs/sha256" },
+    "fallbackTextSha256": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sha256" },
+      "uniqueItems": true
+    },
+    "pnpmVersion": { "const": "11.11.0" },
+    "syftVersion": { "const": "1.44.0" },
+    "syftImage": {
+      "const": "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d"
+    },
+    "reviewedPackageCount": { "type": "integer", "minimum": 0 },
+    "scopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "web-staging", "web-production", "worker", "lockfile"],
+      "properties": {
+        "engine": { "$ref": "#/$defs/scope" },
+        "web-staging": { "$ref": "#/$defs/scope" },
+        "web-production": { "$ref": "#/$defs/scope" },
+        "worker": { "$ref": "#/$defs/scope" },
+        "lockfile": { "$ref": "#/$defs/scope" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactSha256", "sbomSha256", "componentCount"],
+      "properties": {
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "sbomSha256": { "$ref": "#/$defs/sha256" },
+        "componentCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

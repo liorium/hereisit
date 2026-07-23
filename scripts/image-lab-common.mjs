@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { link, mkdir, open, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 export function isPlainObject(value) {
@@ -76,20 +77,73 @@ export function decimalUsdToMicrousd(value, label) {
   return Number(micros);
 }
 
-export async function writeCanonicalJsonAtomic(path, value, { refuseOverwrite = false } = {}) {
+export async function readBoundedRegularFile(path, maximumBytes, label, expectedMode) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === "ELOOP") throw new TypeError(`${label} must not be symbolic`);
+    throw new Error(`${label} could not be read`);
+  }
+  try {
+    const metadata = await handle.stat({ bigint: true });
+    if (!metadata.isFile() || metadata.size < 1n || metadata.size > BigInt(maximumBytes)) {
+      throw new RangeError(`${label} is not a bounded regular file`);
+    }
+    if (expectedMode !== undefined && (metadata.mode & 0o777n) !== BigInt(expectedMode)) {
+      throw new TypeError(`${label} permissions must be 0600`);
+    }
+    const size = Number(metadata.size);
+    const bytes = Buffer.allocUnsafe(size);
+    let offset = 0;
+    while (offset < size) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        offset,
+        Math.min(64 * 1024, size - offset),
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    const [{ bytesRead: extraBytes }, finalMetadata] = await Promise.all([
+      handle.read(probe, 0, 1, size),
+      handle.stat({ bigint: true }),
+    ]);
+    if (
+      offset !== size ||
+      extraBytes !== 0 ||
+      finalMetadata.size !== metadata.size ||
+      finalMetadata.mtimeNs !== metadata.mtimeNs ||
+      finalMetadata.ctimeNs !== metadata.ctimeNs
+    ) {
+      throw new TypeError(`${label} changed while reading`);
+    }
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function writeCanonicalJsonAtomic(
+  path,
+  value,
+  { refuseOverwrite = false, mode } = {},
+) {
   const bytes = canonicalJson(value);
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, bytes, { encoding: "utf8", flag: refuseOverwrite ? "wx" : "w" });
+  await writeFile(temporary, bytes, { encoding: "utf8", flag: "wx", mode });
   try {
     if (refuseOverwrite) {
-      await writeFile(path, bytes, { encoding: "utf8", flag: "wx" });
-      await import("node:fs/promises").then(({ unlink }) => unlink(temporary));
+      await link(temporary, path);
+      await unlink(temporary);
     } else {
       await rename(temporary, path);
     }
   } catch (error) {
-    await import("node:fs/promises").then(({ unlink }) => unlink(temporary).catch(() => undefined));
+    await unlink(temporary).catch(() => undefined);
     throw error;
   }
   return sha256Bytes(bytes);

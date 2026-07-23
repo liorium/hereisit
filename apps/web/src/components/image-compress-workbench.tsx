@@ -45,6 +45,7 @@ type PolicyView =
 
 type ResultValue =
   | { readonly kind: "remote"; readonly handle: RemoteDownloadHandle }
+  | { readonly kind: "remote-consumed" }
   | {
       readonly kind: "local";
       readonly result: Extract<LocalImageOptimizeResult, { status: "fulfilled" }>;
@@ -112,11 +113,14 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [remoteDeliveryBusy, setRemoteDeliveryBusy] = useState(false);
   const batchRef = useRef<ReturnType<typeof runRemoteImageOptimizeBatch> | null>(null);
   const processingControllerRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<readonly WorkItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasFileSelectionRef = useRef(false);
+  const downloadHandoffRef = useRef(false);
+  const remoteDeliveryLockRef = useRef(false);
 
   useEffect(() => {
     setRuntimeSupported(supportsBrowserImageRuntime());
@@ -254,7 +258,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const executionReady =
     policy.state === "server" || (policy.state === "local" && runtimeSupported);
-  const busy = processing || archiving;
+  const busy = processing || archiving || remoteDeliveryBusy;
 
   usePendingToolFiles({
     toolId,
@@ -349,7 +353,14 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const processItems = async () => {
-    if (processing || archiving || items.length === 0 || policy.state === "checking") return;
+    if (
+      processing ||
+      archiving ||
+      remoteDeliveryBusy ||
+      items.length === 0 ||
+      policy.state === "checking"
+    )
+      return;
     setProcessing(true);
     const processingController = new AbortController();
     processingControllerRef.current = processingController;
@@ -435,7 +446,15 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             height: item.height,
             spec,
           })),
-          { apiOrigin: config.apiOrigin, anonymousSessionId: sessionId, onEvent },
+          {
+            apiOrigin: config.apiOrigin,
+            anonymousSessionId: sessionId,
+            confirmDownloadHandoff: async () => {
+              downloadHandoffRef.current = true;
+              return true;
+            },
+            onEvent,
+          },
         );
         batchRef.current = batch;
         const remoteResults = await batch.result;
@@ -503,18 +522,37 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const downloadItem = async (item: WorkItem) => {
     const result = item.result;
-    if (result === undefined) return;
+    if (result === undefined || result.kind === "remote-consumed") return;
     const filename = suggestSameFormatOptimizedName(item.file.name, item.mime);
     if (result.kind === "remote") {
+      if (remoteDeliveryLockRef.current) return;
+      remoteDeliveryLockRef.current = true;
+      setRemoteDeliveryBusy(true);
+      downloadHandoffRef.current = false;
       try {
         await result.handle.download({ filename });
-        setMessage(
-          isUnprovenInAppBrowser()
-            ? "다운로드가 시작되지 않으면 기본 브라우저에서 열어 다시 다운로드해 주세요."
-            : "다운로드를 시작했어요. 필요하면 다시 다운로드할 수 있어요.",
+        setItems((current) =>
+          updateItem(current, item.id, {
+            result: { kind: "remote-consumed" },
+            message: "다운로드 완료",
+          }),
         );
+        setMessage("다운로드와 서버 결과 삭제 요청을 완료했어요.");
       } catch {
-        setMessage("다운로드를 시작하지 못했어요. 결과는 유지되니 다시 시도해 주세요.");
+        if (downloadHandoffRef.current) {
+          setItems((current) =>
+            updateItem(current, item.id, {
+              result: { kind: "remote-consumed" },
+              message: "다운로드 전달됨",
+            }),
+          );
+          setMessage("파일이 다운로드되었을 수 있어요. 브라우저 다운로드 목록을 확인해 주세요.");
+        } else {
+          setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+        }
+      } finally {
+        remoteDeliveryLockRef.current = false;
+        setRemoteDeliveryBusy(false);
       }
       return;
     }
@@ -531,7 +569,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     setMessage(
       isUnprovenInAppBrowser()
         ? "다운로드가 시작되지 않으면 기본 브라우저에서 열어 다시 다운로드해 주세요."
-        : "다운로드를 시작했어요. 필요하면 다시 다운로드할 수 있어요.",
+        : "다운로드를 시작했어요.",
     );
   };
 
@@ -543,6 +581,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     item.result?.kind === "remote"
       ? [
           {
+            itemId: item.id,
             filename: suggestSameFormatOptimizedName(item.file.name, item.mime),
             handle: item.result.handle,
           },
@@ -563,22 +602,54 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   );
 
   const downloadArchive = async () => {
-    if (archiving || remoteEntries.length < 2 || archiveBytes > budget) return;
+    if (
+      archiving ||
+      remoteDeliveryLockRef.current ||
+      remoteEntries.length < 2 ||
+      archiveBytes > budget
+    )
+      return;
+    const markConsumed = (itemMessage: string) => {
+      const consumed = new Set(remoteEntries.map((entry) => entry.itemId));
+      setItems((current) =>
+        current.map((item) =>
+          consumed.has(item.id)
+            ? { ...item, result: { kind: "remote-consumed" }, message: itemMessage }
+            : item,
+        ),
+      );
+    };
+    remoteDeliveryLockRef.current = true;
+    setRemoteDeliveryBusy(true);
     setArchiving(true);
+    let handedOff = false;
     try {
       const archive = await buildRemoteImageArchive({ entries: remoteEntries, byteBudget: budget });
-      const url = URL.createObjectURL(archive.blob);
       try {
-        downloadUrl(url, "hereisit-images.zip");
+        const url = URL.createObjectURL(archive.blob);
+        try {
+          downloadUrl(url, "hereisit-images.zip");
+          handedOff = true;
+        } finally {
+          setTimeout(() => URL.revokeObjectURL(url), 0);
+        }
+        await archive.acknowledgeAfterHandoff();
+        markConsumed("다운로드 완료");
+        setMessage("ZIP 다운로드와 서버 결과 삭제 요청을 완료했어요.");
       } finally {
-        setTimeout(() => URL.revokeObjectURL(url), 0);
         archive.dispose();
       }
-      setMessage("ZIP 다운로드를 시작했어요. 개별 결과도 다시 받을 수 있어요.");
     } catch {
-      setMessage("ZIP을 만들지 못했어요. 개별 결과는 계속 다운로드할 수 있어요.");
+      if (handedOff) {
+        markConsumed("다운로드 전달됨");
+        setMessage("ZIP이 다운로드되었을 수 있어요. 브라우저 다운로드 목록을 확인해 주세요.");
+      } else {
+        setMessage("ZIP을 만들지 못했어요. 다시 시도해 주세요.");
+      }
     } finally {
       setArchiving(false);
+      remoteDeliveryLockRef.current = false;
+      setRemoteDeliveryBusy(false);
     }
   };
 
@@ -661,7 +732,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                   name="compress-preset"
                   value={value}
                   checked={preset === value}
-                  disabled={processing || archiving}
+                  disabled={processing || archiving || remoteDeliveryBusy}
                   onChange={() => changePreset(value)}
                 />
                 <strong>{label}</strong>
@@ -686,15 +757,26 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                   <strong>{suggestSameFormatOptimizedName(item.file.name, item.mime)}</strong>
                   <span>{item.message}</span>
                 </div>
-                <button type="button" onClick={() => void downloadItem(item)}>
-                  결과 다운로드 ↓
+                <button
+                  type="button"
+                  disabled={
+                    item.result?.kind === "remote-consumed" ||
+                    (item.result?.kind === "remote" && remoteDeliveryBusy)
+                  }
+                  onClick={() => void downloadItem(item)}
+                >
+                  {item.result?.kind === "remote-consumed" ? "다운로드 완료" : "결과 다운로드 ↓"}
                 </button>
               </li>
             ))}
           </ul>
           {remoteEntries.length >= 2 ? (
             archiveBytes <= budget ? (
-              <button type="button" disabled={archiving} onClick={() => void downloadArchive()}>
+              <button
+                type="button"
+                disabled={archiving || remoteDeliveryBusy}
+                onClick={() => void downloadArchive()}
+              >
                 결과 {remoteEntries.length}개 ZIP으로 받기 ↓
               </button>
             ) : (
@@ -718,7 +800,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         ) : (
           <button
             type="button"
-            disabled={actionableCount === 0 || policy.state === "checking" || archiving}
+            disabled={
+              actionableCount === 0 ||
+              policy.state === "checking" ||
+              archiving ||
+              remoteDeliveryBusy
+            }
             onClick={() => void processItems()}
           >
             {items.length}개 이미지 용량 줄이기 →

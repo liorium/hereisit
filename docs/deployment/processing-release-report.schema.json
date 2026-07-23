@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.example/schemas/processing-release-report.schema.json",
+  "title": "HereIsIt processing release report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "passed",
+    "releaseId",
+    "gitSha",
+    "candidateVerificationSha256",
+    "verifiedAt",
+    "expiresAt",
+    "evidence",
+    "security",
+    "artifacts",
+    "verificationSha256"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-processing-release-report@1" },
+    "version": { "const": 1 },
+    "passed": { "const": true },
+    "releaseId": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.[1-9]\\d*$" },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "candidateVerificationSha256": { "$ref": "#/$defs/sha256" },
+    "verifiedAt": { "$ref": "#/$defs/timestamp" },
+    "expiresAt": { "$ref": "#/$defs/timestamp" },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundleSha256", "signatureSha256", "reports"],
+      "properties": {
+        "bundleSha256": { "$ref": "#/$defs/sha256" },
+        "signatureSha256": { "$ref": "#/$defs/sha256" },
+        "reports": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fullCorpusBenchmark",
+            "competitorComparison",
+            "blindedHumanReview",
+            "commercialReview",
+            "privacyReview",
+            "deviceMatrix"
+          ],
+          "properties": {
+            "fullCorpusBenchmark": { "$ref": "#/$defs/reportHashes" },
+            "competitorComparison": { "$ref": "#/$defs/reportHashes" },
+            "blindedHumanReview": { "$ref": "#/$defs/reportHashes" },
+            "commercialReview": { "$ref": "#/$defs/reportHashes" },
+            "privacyReview": { "$ref": "#/$defs/reportHashes" },
+            "deviceMatrix": { "$ref": "#/$defs/reportHashes" }
+          }
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trivyDbDigest", "gates", "sboms", "vulnerabilityReports"],
+      "properties": {
+        "trivyDbDigest": { "$ref": "#/$defs/digest" },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
+          "properties": {
+            "imageEngine": {
+              "$ref": "#/$defs/gateDescriptor",
+              "properties": { "path": { "const": "security-image-engine-license-gate.json" } }
+            },
+            "applicationSupplyChain": {
+              "$ref": "#/$defs/gateDescriptor",
+              "properties": {
+                "path": { "const": "security-application-supply-chain-gate.json" }
+              }
+            },
+            "vulnerability": {
+              "$ref": "#/$defs/gateDescriptor",
+              "properties": { "path": { "const": "security-vulnerability-gate.json" } }
+            }
+          }
+        },
+        "sboms": { "$ref": "#/$defs/sbomDescriptors" },
+        "vulnerabilityReports": { "$ref": "#/$defs/trivyDescriptors" }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engineDockerConfigDigest",
+        "webStagingArchiveSha256",
+        "webProductionArchiveSha256",
+        "workerSha256",
+        "lockfileSha256"
+      ],
+      "properties": {
+        "engineDockerConfigDigest": { "$ref": "#/$defs/digest" },
+        "webStagingArchiveSha256": { "$ref": "#/$defs/sha256" },
+        "webProductionArchiveSha256": { "$ref": "#/$defs/sha256" },
+        "workerSha256": { "$ref": "#/$defs/sha256" },
+        "lockfileSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "verificationSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "reportHashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceSha256", "summarySha256"],
+      "properties": {
+        "sourceSha256": { "$ref": "#/$defs/sha256" },
+        "summarySha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "gateDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "evidenceDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sizeBytes": { "type": "integer", "minimum": 1, "maximum": 8388608 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sbomDescriptors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-sbom-engine.cdx.json" } }
+        },
+        "webStaging": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-sbom-web-staging.cdx.json" } }
+        },
+        "webProduction": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-sbom-web-production.cdx.json" } }
+        },
+        "worker": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-sbom-worker.cdx.json" } }
+        },
+        "lockfile": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-sbom-lockfile.cdx.json" } }
+        }
+      }
+    },
+    "trivyDescriptors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
+      "properties": {
+        "engine": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-trivy-engine.json" } }
+        },
+        "webStaging": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-trivy-web-staging.json" } }
+        },
+        "webProduction": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-trivy-web-production.json" } }
+        },
+        "worker": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-trivy-worker.json" } }
+        },
+        "lockfile": {
+          "$ref": "#/$defs/evidenceDescriptor",
+          "properties": { "path": { "const": "security-trivy-lockfile.json" } }
+        }
+      }
+    }
+  }
+}

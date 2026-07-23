@@ -57,6 +57,19 @@ export HEREISIT_RELEASE_EVIDENCE_PRIVATE_KEY_FILE="$HOME/.config/hereisit/releas
 Never print, base64-encode into a workflow, or add that file to Git. Before signing, confirm that
 `git check-ignore` does not matter because the private key is physically outside the repository.
 
+The repository intentionally has no production public-key file until this ceremony is completed on
+the trusted maintainer workstation. After the reviewed public PEM is copied to the path above, verify
+each detached signature before deployment with the existing fail-closed CLI:
+
+```bash
+: "${RELEASE_ID:?set the immutable YYYY-MM-DD.N release ID}"
+node scripts/processing-evidence-signature.mjs \
+  --mode verify \
+  --bundle ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.json" \
+  --signature ".artifacts/candidate/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
+  --public-key docs/deployment/processing-evidence-ed25519-public.pem
+```
+
 ## Rotation and recovery
 
 Key rotation is a reviewed release-chain change:

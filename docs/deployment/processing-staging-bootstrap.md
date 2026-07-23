@@ -1,214 +1,76 @@
-# Processing staging bootstrap
+# Processing staging deployment
 
-This runbook is the canonical first-deployment sequence for the server image-compression stack. It
-keeps public admission at zero, creates private resources with paused Queue delivery, discovers the
-Cloudflare Container application created by the first Worker deployment, and only then enables active
-provider cost accounting.
+`.github/workflows/processing-staging.yml` deploys the exact successful `main` CI commit. There is no
+release tag, offline key, or manual build/deploy dispatch. Public processing rollout remains zero and
+the DLQ remains paused.
 
-Run it only from a protected `processing-staging` deployment environment at a reviewed commit. Keep all
-tokens and secrets in masked environment variables; none of them belong in command-line arguments,
-artifacts, logs, or the repository.
+## One-time Cloudflare and GitHub setup
 
-## Required environment
+Create the protected GitHub environment `processing-staging`. Add these environment variables:
 
-The deployment environment must provide:
+- `CLOUDFLARE_ACCOUNT_ID`
+- `ALERT_DESTINATION_ADDRESS`
 
-- `CLOUDFLARE_ACCOUNT_ID` as a non-secret environment variable and a least-privilege
-  `CLOUDFLARE_API_TOKEN` secret for Workers, Containers, D1, R2, Queues, and Pages;
-- `CLOUDFLARE_LOGPUSH_API_TOKEN`, limited to Logs configuration;
-- `LOGPUSH_R2_ACCESS_KEY_ID` and `LOGPUSH_R2_SECRET_ACCESS_KEY`, limited to the staging usage bucket;
-- `STAGING_ANALYTICS_READ_TOKEN` and `STAGING_LOGPUSH_STATUS_TOKEN`, both read-only and
-  product-scoped;
-- `STAGING_ABUSE_HMAC_SECRET_CURRENT` and `STAGING_ABUSE_HMAC_SECRET_PREVIOUS`, each a 32-byte
-  base64url secret;
-- `STAGING_MAINTAINER_SESSION_ID`, a canonical UUID reserved for the CI canary, and
-  `STAGING_MAINTAINER_HASHES_JSON`, a non-empty JSON array containing its SHA-256 hash;
-- `ALERT_DESTINATION_ADDRESS`, already verified in Cloudflare Email Routing.
+Add these environment secrets:
 
-Store the account ID and alert address as `processing-staging` environment variables and all other
-values as environment secrets. After this workflow is present on `main`, run
-`Processing staging preflight` once. It validates the sealed inputs without printing their values and
-runs only `wrangler whoami`; it does not create or change Cloudflare resources.
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_D1_API_TOKEN`
+- `CLOUDFLARE_LOGPUSH_API_TOKEN`
+- `LOGPUSH_R2_ACCESS_KEY_ID`
+- `LOGPUSH_R2_SECRET_ACCESS_KEY`
+- `STAGING_ANALYTICS_READ_TOKEN`
+- `STAGING_LOGPUSH_STATUS_TOKEN`
+- `STAGING_ABUSE_HMAC_SECRET_CURRENT`
+- `STAGING_ABUSE_HMAC_SECRET_PREVIOUS`
+- `STAGING_MAINTAINER_SESSION_ID`
+- `STAGING_MAINTAINER_HASHES_JSON`
 
-The finalized release-candidate job must also have restored `.artifacts/candidate`, set `ENGINE_IMAGE`
-to the immutable same-account `registry.cloudflare.com/...@sha256:...` image, and exported the signed
-candidate limits and hashes used below.
+Use least-privilege tokens for their named products. The maintainer session ID must be a canonical UUID
+v4 whose SHA-256 appears in the JSON hash allowlist. Both abuse secrets must be canonical 32-byte
+base64url values. The workflow validates these values without printing them.
 
-## 1. Provision and seal provider resources
+In the existing `hereisit` Pages project, disable automatic production deployments and set preview
+branch deployments to `None`. The workflow owns the `processing-staging` preview alias.
 
-Use a fresh output path. The provisioner deliberately refuses to overwrite an earlier sealed manifest.
+Run `Processing staging preflight` once from `main` after changing any environment variable, secret, or
+Cloudflare token. Port `8976` is only for local interactive Wrangler OAuth; GitHub Actions uses API
+tokens and does not need port forwarding.
 
-```bash
-set -euo pipefail
-umask 077
+## Automatic deployment
 
-export ENVIRONMENT=staging
-export WORKER_SCRIPT_NAME=hereisit-processing-staging
-export D1_NAME=hereisit-processing-staging
-export BUCKET_NAME=hereisit-processing-staging
-export USAGE_LOG_BUCKET_NAME=hereisit-processing-usage-staging
-export USAGE_ANALYTICS_DATASET_NAME=hereisit_processing_usage_staging
-export QUEUE_NAME=hereisit-image-jobs-staging
-export DLQ_NAME=hereisit-image-jobs-dlq-staging
-export PROVISION_MANIFEST=.artifacts/resources-provision-staging.json
+1. Merge reviewed code to `main`.
+2. GitHub runs `CI` for that push.
+3. Only a successful `CI` push from `liorium/hereisit` starts `Processing staging`.
+4. The deploy workflow checks out and verifies the exact successful CI SHA.
+5. It validates the protected environment, builds the linux/amd64 engine, Worker, staging web, and
+   versioned cost model.
+6. It pushes the engine, checks the registry config digest, and resolves the immutable Cloudflare image
+   digest.
+7. It converges D1, R2, Analytics Engine, Logpush, Queue, and DLQ resources with both queues paused.
+8. It deploys the rollout-zero bootstrap Worker, resolves the Container application, installs and
+   verifies Worker secrets, deploys the final Worker, and records its D1 version attestation.
+9. It deploys and verifies the `processing-staging` Pages alias.
+10. It resumes only the primary Queue, verifies the DLQ stayed paused, and runs the authenticated direct
+    download compression smoke.
 
-test ! -e "$PROVISION_MANIFEST"
-node scripts/ensure-cloudflare-processing-resources.mjs \
-  --phase provision \
-  --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-  --environment "$ENVIRONMENT" \
-  --location apac \
-  --bucket-name "$BUCKET_NAME" \
-  --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
-  --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
-  --worker-script-name "$WORKER_SCRIPT_NAME" \
-  --database-name "$D1_NAME" \
-  --queue-name "$QUEUE_NAME" \
-  --dlq-name "$DLQ_NAME" \
-  --output "$PROVISION_MANIFEST"
+If any step after the primary Queue resume attempt fails, cleanup pauses it again and verifies both
+queues are paused.
 
-export STAGING_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
-  --file "$PROVISION_MANIFEST" --field d1.databaseId)"
-export STAGING_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs \
-  --file "$PROVISION_MANIFEST" --field logpush.jobId)"
-```
+## Versioned cost policy
 
-This step converges and then re-reads the exact account-scoped D1, private R2 lifecycle policies,
-paused primary/DLQ Queues, Analytics Engine dataset name, and unsampled Workers Trace Events Logpush
-job. A name collision or policy mismatch stops the deployment.
+`processing-staging-cost-input.json` is the checked-in staging pricing and workload baseline. Changes to
+it use the same pull-request and CI path as code. Staging rollout is zero; review current provider prices,
+measured route CPU data, and production ceilings before enabling any production admission.
 
-## 2. Generate the rollout-zero bootstrap config
+## Outputs
 
-The all-zero UUID is accepted only with `bootstrap` cost accounting and rollout zero. It is not a
-provider identifier and cannot be used by an active config.
+A successful deployment retains only these sanitized artifacts for seven days:
 
-```bash
-export BOOTSTRAP_CONTAINER_APPLICATION_ID=00000000-0000-4000-8000-000000000000
+- `source-sha.txt`
+- `cloudflare-image-digest.txt`
+- `worker-version.json`
+- `gate-results.json`
+- `smoke-result.json`
 
-generate_staging_config() {
-  node scripts/generate-processing-wrangler.mjs \
-    --environment staging \
-    --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-    --database-id "$STAGING_D1_DATABASE_ID" \
-    --app-origin http://127.0.0.1:4173 \
-    --app-origin http://localhost:4173 \
-    --app-origin https://processing-staging.hereisit.pages.dev \
-    --bucket-name "$BUCKET_NAME" \
-    --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
-    --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
-    --cost-accounting-mode "$1" \
-    --logpush-job-id "$STAGING_LOGPUSH_JOB_ID" \
-    --container-application-id "$2" \
-    --queue-name "$QUEUE_NAME" \
-    --dlq-name "$DLQ_NAME" \
-    --engine-image "$ENGINE_IMAGE" \
-    --account-daily-weighted-unit-limit 80000000000 \
-    --anonymous-daily-weighted-unit-limit 8000000000 \
-    --network-daily-weighted-unit-limit 24000000000 \
-    --account-pending-job-limit 10 \
-    --network-pending-job-limit 3 \
-    --maximum-queued-age-seconds 600 \
-    --max-live-median-output-ratio-bps "$CANDIDATE_MAX_MEDIAN_OUTPUT_RATIO_BPS" \
-    --max-live-p95-weighted-units "$CANDIDATE_MAX_P95_WEIGHTED_UNITS" \
-    --max-live-original-retained-rate-bps "$CANDIDATE_MAX_ORIGINAL_RETAINED_RATE_BPS" \
-    --max-live-cost-per-1000-microusd "$CANDIDATE_MAX_COST_PER_1000_MICROUSD" \
-    --max-projected-monthly-cost-microusd "$CANDIDATE_MAX_PROJECTED_MONTHLY_COST_MICROUSD" \
-    --live-cost-model .artifacts/candidate/live-cost-model.json \
-    --live-cost-model-sha256 "$CANDIDATE_LIVE_COST_MODEL_SHA256" \
-    --provider-usage-schema-sha256 "$CANDIDATE_PROVIDER_USAGE_SCHEMA_SHA256" \
-    --release-report-sha256 "$CANDIDATE_RELEASE_REPORT_SHA256" \
-    --session-rate-limit-namespace-id 21001 \
-    --network-rate-limit-namespace-id 21002 \
-    --job-read-rate-limit-namespace-id 21003 \
-    --result-download-rate-limit-namespace-id 21004 \
-    --policy-rate-limit-namespace-id 21005 \
-    --job-api-network-rate-limit-namespace-id 21006 \
-    --alert-destination-address "$ALERT_DESTINATION_ADDRESS" \
-    --maintainer-session-hashes-json "$STAGING_MAINTAINER_HASHES_JSON" \
-    --rollout-percent 0
-}
-
-generate_staging_config bootstrap "$BOOTSTRAP_CONTAINER_APPLICATION_ID"
-```
-
-## 3. Deploy once and resolve the Container provider scope
-
-The first deployment creates the Cloudflare Container application. Queue delivery remains paused.
-
-```bash
-export WRANGLER_CONFIG=.wrangler/generated/wrangler.staging.jsonc
-export WORKER_MODULE=.artifacts/candidate/api-worker/worker.mjs
-
-pnpm exec wrangler d1 migrations apply "$D1_NAME" \
-  --config "$WRANGLER_CONFIG" --remote
-pnpm exec wrangler deploy "$WORKER_MODULE" \
-  --config "$WRANGLER_CONFIG" --no-bundle --dry-run
-pnpm exec wrangler deploy "$WORKER_MODULE" \
-  --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout=immediate
-
-pnpm exec wrangler containers list --json \
-  > .artifacts/cloudflare-containers-staging.json
-export STAGING_CONTAINER_APPLICATION_ID="$(node \
-  scripts/resolve-cloudflare-container-application.mjs \
-  --input .artifacts/cloudflare-containers-staging.json \
-  --output .artifacts/container-provider-scope-staging.json \
-  --environment staging \
-  --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-  --worker-script-name "$WORKER_SCRIPT_NAME" \
-  --engine-image "$ENGINE_IMAGE" \
-  --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)")"
-
-generate_staging_config active "$STAGING_CONTAINER_APPLICATION_ID"
-```
-
-The resolver accepts exactly one expected application, the immutable release image, and a healthy
-provider state. The regenerated config rejects the bootstrap UUID in `active` mode.
-
-## 4. Install Worker secrets and record the active config
-
-Supply every value through standard input. The final explicit deployment is the one used for version
-attestation and smoke evidence.
-
-```bash
-printf '%s' "$STAGING_ABUSE_HMAC_SECRET_PREVIOUS" | \
-  pnpm exec wrangler secret put ABUSE_HMAC_SECRET_PREVIOUS --config "$WRANGLER_CONFIG"
-printf '%s' "$STAGING_ABUSE_HMAC_SECRET_CURRENT" | \
-  pnpm exec wrangler secret put ABUSE_HMAC_SECRET_CURRENT --config "$WRANGLER_CONFIG"
-printf '%s' "$STAGING_ANALYTICS_READ_TOKEN" | \
-  pnpm exec wrangler secret put ANALYTICS_READ_TOKEN --config "$WRANGLER_CONFIG"
-printf '%s' "$STAGING_LOGPUSH_STATUS_TOKEN" | \
-  pnpm exec wrangler secret put LOGPUSH_STATUS_TOKEN --config "$WRANGLER_CONFIG"
-
-pnpm exec wrangler secret list --config "$WRANGLER_CONFIG" --format json \
-  > .artifacts/wrangler-staging-secrets.json
-node scripts/verify-worker-secret-list.mjs \
-  --file .artifacts/wrangler-staging-secrets.json
-
-: > .artifacts/wrangler-staging.ndjson
-WRANGLER_OUTPUT_FILE_PATH=.artifacts/wrangler-staging.ndjson \
-pnpm exec wrangler deploy "$WORKER_MODULE" \
-  --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout=none
-```
-
-Run the version-chain verifier and protected D1 attestation gate described in
-`apply-worker-version-attestations.md` before allowing a job to leave the browser.
-
-## 5. Resume and verify Queue delivery
-
-Resume only after migrations, the active cost-accounting config, all secrets, and the Worker version
-attestation have succeeded. A failure before this point leaves both Queues safely paused.
-
-```bash
-pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
-pnpm exec wrangler queues resume-delivery "$DLQ_NAME"
-
-node scripts/verify-queue-delivery-state.mjs \
-  --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
-node scripts/verify-queue-delivery-state.mjs \
-  --queue "$DLQ_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
-```
-
-Now run the telemetry-only probe, authenticated staging end-to-end smoke, retention sweeps, hourly
-provider reconciliation, and the 24-hour observation gate. Public rollout remains zero throughout
-staging. Any provider mismatch, stale cost hour, circuit opening, retention miss, or smoke failure pauses
-both Queues again and prevents production promotion.
+Production will follow the same successful-push pattern after its separate Cloudflare resources and
+GitHub environment exist. Keep GitHub environment approval as the only manual production gate.

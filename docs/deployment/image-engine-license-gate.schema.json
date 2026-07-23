@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.pages.dev/schemas/image-engine-license-gate.schema.json",
+  "title": "HereIsIt image-engine license gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "passed",
+    "scope",
+    "artifactSha256",
+    "sourceLockSha256",
+    "policySha256",
+    "exceptionsSha256",
+    "baseImagesSha256"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-image-engine-license-gate@1" },
+    "passed": { "const": true },
+    "scope": { "enum": ["pr", "release"] },
+    "artifactSha256": { "$ref": "#/$defs/sha256" },
+    "sourceLockSha256": { "$ref": "#/$defs/sha256" },
+    "policySha256": { "$ref": "#/$defs/sha256" },
+    "exceptionsSha256": { "$ref": "#/$defs/sha256" },
+    "baseImagesSha256": { "$ref": "#/$defs/sha256" },
+    "commercialReviewSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "scope": { "const": "pr" } } },
+      "then": { "not": { "required": ["commercialReviewSha256"] } }
+    },
+    {
+      "if": { "properties": { "scope": { "const": "release" } } },
+      "then": { "required": ["commercialReviewSha256"] }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

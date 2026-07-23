@@ -17,6 +17,29 @@ function artifact(path: string, sha256: string, sizeBytes: number) {
   return { path, sizeBytes, sha256 };
 }
 
+function securityAssets() {
+  const scoped = (prefix: string, suffix: string) => ({
+    engine: artifact(`${prefix}engine${suffix}`, "1".repeat(64), 1),
+    webStaging: artifact(`${prefix}web-staging${suffix}`, "2".repeat(64), 1),
+    webProduction: artifact(`${prefix}web-production${suffix}`, "3".repeat(64), 1),
+    worker: artifact(`${prefix}worker${suffix}`, "4".repeat(64), 1),
+    lockfile: artifact(`${prefix}lockfile${suffix}`, "5".repeat(64), 1),
+  });
+  return {
+    gates: {
+      imageEngine: artifact("security-image-engine-license-gate.json", "6".repeat(64), 1),
+      applicationSupplyChain: artifact(
+        "security-application-supply-chain-gate.json",
+        "7".repeat(64),
+        1,
+      ),
+      vulnerability: artifact("security-vulnerability-gate.json", "8".repeat(64), 1),
+    },
+    sboms: scoped("security-sbom-", ".cdx.json"),
+    vulnerabilityReports: scoped("security-trivy-", ".json"),
+  };
+}
+
 function candidate() {
   const payload = {
     schema: "hereisit-processing-candidate@1",
@@ -77,6 +100,7 @@ function candidate() {
           processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
         },
       },
+      security: securityAssets(),
       evidence: {
         bundle: artifact(
           `evidence-v1--${releaseId}--processing-evidence.json`,

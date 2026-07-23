@@ -1,15 +1,27 @@
+import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
+import { experimental_readRawConfig } from "wrangler";
+import { createVitestWranglerConfig } from "./vitest-wrangler-config";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
+const generatedConfigPath = join(projectDirectory, "wrangler.vitest.generated.jsonc");
+const { rawConfig } = experimental_readRawConfig({
+  config: join(projectDirectory, "wrangler.local.jsonc"),
+});
+writeFileSync(
+  generatedConfigPath,
+  `${JSON.stringify(createVitestWranglerConfig(rawConfig), null, 2)}\n`,
+  "utf8",
+);
 
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
       wrangler: {
-        configPath: "./wrangler.local.jsonc",
+        configPath: generatedConfigPath,
       },
       miniflare: {
         bindings: {

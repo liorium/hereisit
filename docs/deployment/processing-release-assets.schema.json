@@ -18,6 +18,7 @@
     "costModel",
     "web",
     "evidence",
+    "security",
     "verificationSha256"
   ],
   "properties": {
@@ -70,6 +71,7 @@
         "signature": { "$ref": "#/$defs/asset" }
       }
     },
+    "security": { "$ref": "#/$defs/securityAssets" },
     "verificationSha256": { "$ref": "#/$defs/sha256" }
   },
   "$defs": {
@@ -110,6 +112,49 @@
         "archiveSha256": { "$ref": "#/$defs/sha256" },
         "treeSha256": { "$ref": "#/$defs/sha256" },
         "processingApiOrigin": { "type": "string", "format": "uri" }
+      }
+    },
+    "securityGateAsset": {
+      "allOf": [
+        { "$ref": "#/$defs/asset" },
+        { "properties": { "sizeBytes": { "maximum": 1048576 } } }
+      ]
+    },
+    "securityEvidenceAsset": {
+      "allOf": [
+        { "$ref": "#/$defs/asset" },
+        { "properties": { "sizeBytes": { "maximum": 8388608 } } }
+      ]
+    },
+    "securityScopedAssets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
+      "properties": {
+        "engine": { "$ref": "#/$defs/securityEvidenceAsset" },
+        "webStaging": { "$ref": "#/$defs/securityEvidenceAsset" },
+        "webProduction": { "$ref": "#/$defs/securityEvidenceAsset" },
+        "worker": { "$ref": "#/$defs/securityEvidenceAsset" },
+        "lockfile": { "$ref": "#/$defs/securityEvidenceAsset" }
+      }
+    },
+    "securityAssets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gates", "sboms", "vulnerabilityReports"],
+      "properties": {
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
+          "properties": {
+            "imageEngine": { "$ref": "#/$defs/securityGateAsset" },
+            "applicationSupplyChain": { "$ref": "#/$defs/securityGateAsset" },
+            "vulnerability": { "$ref": "#/$defs/securityGateAsset" }
+          }
+        },
+        "sboms": { "$ref": "#/$defs/securityScopedAssets" },
+        "vulnerabilityReports": { "$ref": "#/$defs/securityScopedAssets" }
       }
     }
   }

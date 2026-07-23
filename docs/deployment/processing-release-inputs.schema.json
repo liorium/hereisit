@@ -35,9 +35,30 @@
     "ceilings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["maxCostPer1000JobsMicrousd", "maxProjectedMonthlyCostMicrousd"],
+      "required": [
+        "maxCostPer1000JobsMicrousd",
+        "maxLiveMedianOutputRatioBps",
+        "maxLiveP95WeightedUnits",
+        "maxLiveOriginalRetainedRateBps",
+        "maxProjectedMonthlyCostMicrousd"
+      ],
       "properties": {
         "maxCostPer1000JobsMicrousd": { "type": "integer", "minimum": 0 },
+        "maxLiveMedianOutputRatioBps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxLiveP95WeightedUnits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxLiveOriginalRetainedRateBps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
         "maxProjectedMonthlyCostMicrousd": { "type": "integer", "minimum": 0 }
       }
     },

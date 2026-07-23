@@ -90,11 +90,11 @@ export function validateProcessingDeploymentEnvironment(environment) {
   );
   const maintainerHashCount = validateMaintainerHashes(environment.STAGING_MAINTAINER_HASHES_JSON);
   if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       environment.STAGING_MAINTAINER_SESSION_ID,
     )
   ) {
-    throw new TypeError("STAGING_MAINTAINER_SESSION_ID must be a canonical UUID");
+    throw new TypeError("STAGING_MAINTAINER_SESSION_ID must be a canonical UUID v4");
   }
   const maintainerHashes = JSON.parse(environment.STAGING_MAINTAINER_HASHES_JSON);
   const expectedMaintainerHash = createHash("sha256")

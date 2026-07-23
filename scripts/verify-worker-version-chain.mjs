@@ -83,7 +83,7 @@ function validateVersion(value, label) {
   return version;
 }
 
-function validateSnapshot(value, label) {
+export function validateWorkerVersionSnapshot(value, label = "Worker version") {
   if (!Array.isArray(value) || value.length > 10) {
     throw new TypeError(`${label} snapshot must contain at most ten versions`);
   }
@@ -708,10 +708,10 @@ export function verifyWorkerVersionChain(inputValue) {
     ["before", "afterBootstrap", "afterSecrets", "afterFinal"],
     "Worker version snapshots",
   );
-  const before = validateSnapshot(snapshots.before, "before");
-  const afterBootstrap = validateSnapshot(snapshots.afterBootstrap, "after-bootstrap");
-  const afterSecrets = validateSnapshot(snapshots.afterSecrets, "after-secrets");
-  const afterFinal = validateSnapshot(snapshots.afterFinal, "after-final");
+  const before = validateWorkerVersionSnapshot(snapshots.before, "before");
+  const afterBootstrap = validateWorkerVersionSnapshot(snapshots.afterBootstrap, "after-bootstrap");
+  const afterSecrets = validateWorkerVersionSnapshot(snapshots.afterSecrets, "after-secrets");
+  const afterFinal = validateWorkerVersionSnapshot(snapshots.afterFinal, "after-final");
 
   const [bootstrap] = verifyTransition(before, afterBootstrap, 1, "bootstrap", "upload");
   const secretVersions = verifyTransition(afterBootstrap, afterSecrets, 4, "secret", "secret");

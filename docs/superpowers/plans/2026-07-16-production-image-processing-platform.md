@@ -6,7 +6,7 @@
 
 **Architecture:** A static Next.js web client creates versioned jobs through one Cloudflare Worker, streams each authenticated exact-length upload through that Worker into temporary R2 storage, and observes D1-backed Queue jobs processed by one portable native image container. Public tool/job contracts, internal server contracts, pure job policy, browser orchestration, control-plane bindings, and native codecs remain separate packages so later image and PDF engines can reuse the platform. The server returns only verified outputs that are smaller than the source; otherwise the browser retains and downloads its original local file.
 
-**Tech Stack:** Node.js 24.13.0, pnpm 11.11.0, TypeScript 6.0.3, React 19.2.7, Next.js 16.2.10 static export, Zod 4.4.3, Wrangler 4.110.0, Cloudflare Workers/Queues/D1/R2/Containers/Analytics Engine/Workers Logpush, `@cloudflare/containers` 0.3.7, `@cloudflare/vitest-pool-workers` 0.18.5, Sharp 0.35.3, libvips 8.18.4, MozJPEG 4.1.1, OxiPNG 10.1.1, Quantizr 1.4.3, libwebp 1.6.0, esbuild 0.28.1, Vitest 4.1.10, and Playwright 1.61.1.
+**Tech Stack:** Node.js 24.13.0, pnpm 11.11.0, TypeScript 6.0.3, React 19.2.7, Next.js 16.2.11 static export, Zod 4.4.3, Wrangler 4.110.0, Cloudflare Workers/Queues/D1/R2/Containers/Analytics Engine/Workers Logpush, `@cloudflare/containers` 0.3.7, `@cloudflare/vitest-pool-workers` 0.18.5, Sharp 0.35.3, libvips 8.18.4, MozJPEG 4.1.1, OxiPNG 10.1.1, Quantizr 1.4.3, libwebp 1.6.0, esbuild 0.28.1, Vitest 4.1.10, and Playwright 1.61.1.
 
 ## Global Constraints
 

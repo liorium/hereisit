@@ -122,6 +122,9 @@ describe("canonical live-cost model", () => {
       pricesAndResources: { version: 1, artifactSha256: "c".repeat(64), modelInput },
       ceilings: {
         maxCostPer1000JobsMicrousd: 500_000,
+        maxLiveMedianOutputRatioBps: 8_000,
+        maxLiveP95WeightedUnits: 12_000,
+        maxLiveOriginalRetainedRateBps: 2_500,
         maxProjectedMonthlyCostMicrousd: 5_000_000,
       },
       routeCpuBenchmark: { artifactSha256: "d".repeat(64), ...routeCpuBenchmark },

@@ -157,6 +157,114 @@
         "production": { "$ref": "#/$defs/webReleaseAsset" }
       }
     },
+    "securityGateArtifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "properties": { "sizeBytes": { "maximum": 1048576 } } }
+      ]
+    },
+    "securityEvidenceArtifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "properties": { "sizeBytes": { "maximum": 8388608 } } }
+      ]
+    },
+    "securityScopeArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
+      "properties": {
+        "engine": { "$ref": "#/$defs/securityEvidenceArtifact" },
+        "webStaging": { "$ref": "#/$defs/securityEvidenceArtifact" },
+        "webProduction": { "$ref": "#/$defs/securityEvidenceArtifact" },
+        "worker": { "$ref": "#/$defs/securityEvidenceArtifact" },
+        "lockfile": { "$ref": "#/$defs/securityEvidenceArtifact" }
+      }
+    },
+    "securityReleaseAssets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gates", "sboms", "vulnerabilityReports"],
+      "properties": {
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
+          "properties": {
+            "imageEngine": {
+              "allOf": [
+                { "$ref": "#/$defs/securityGateArtifact" },
+                {
+                  "properties": {
+                    "path": { "const": "security-image-engine-license-gate.json" }
+                  }
+                }
+              ]
+            },
+            "applicationSupplyChain": {
+              "allOf": [
+                { "$ref": "#/$defs/securityGateArtifact" },
+                {
+                  "properties": {
+                    "path": { "const": "security-application-supply-chain-gate.json" }
+                  }
+                }
+              ]
+            },
+            "vulnerability": {
+              "allOf": [
+                { "$ref": "#/$defs/securityGateArtifact" },
+                { "properties": { "path": { "const": "security-vulnerability-gate.json" } } }
+              ]
+            }
+          }
+        },
+        "sboms": {
+          "allOf": [
+            { "$ref": "#/$defs/securityScopeArtifacts" },
+            {
+              "properties": {
+                "engine": {
+                  "properties": { "path": { "const": "security-sbom-engine.cdx.json" } }
+                },
+                "webStaging": {
+                  "properties": { "path": { "const": "security-sbom-web-staging.cdx.json" } }
+                },
+                "webProduction": {
+                  "properties": { "path": { "const": "security-sbom-web-production.cdx.json" } }
+                },
+                "worker": {
+                  "properties": { "path": { "const": "security-sbom-worker.cdx.json" } }
+                },
+                "lockfile": {
+                  "properties": { "path": { "const": "security-sbom-lockfile.cdx.json" } }
+                }
+              }
+            }
+          ]
+        },
+        "vulnerabilityReports": {
+          "allOf": [
+            { "$ref": "#/$defs/securityScopeArtifacts" },
+            {
+              "properties": {
+                "engine": { "properties": { "path": { "const": "security-trivy-engine.json" } } },
+                "webStaging": {
+                  "properties": { "path": { "const": "security-trivy-web-staging.json" } }
+                },
+                "webProduction": {
+                  "properties": { "path": { "const": "security-trivy-web-production.json" } }
+                },
+                "worker": { "properties": { "path": { "const": "security-trivy-worker.json" } } },
+                "lockfile": {
+                  "properties": { "path": { "const": "security-trivy-lockfile.json" } }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "evidenceReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
@@ -169,19 +277,29 @@
     "builtReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "worker", "web", "releaseInputs", "costModel"],
+      "required": ["engine", "worker", "web", "releaseInputs", "costModel", "security"],
       "properties": {
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
         "worker": { "$ref": "#/$defs/artifact" },
         "web": { "$ref": "#/$defs/webReleaseAssets" },
         "releaseInputs": { "$ref": "#/$defs/artifact" },
-        "costModel": { "$ref": "#/$defs/artifact" }
+        "costModel": { "$ref": "#/$defs/artifact" },
+        "security": { "$ref": "#/$defs/securityReleaseAssets" }
       }
     },
     "finalizedReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["report", "engine", "worker", "web", "releaseInputs", "costModel", "evidence"],
+      "required": [
+        "report",
+        "engine",
+        "worker",
+        "web",
+        "releaseInputs",
+        "costModel",
+        "security",
+        "evidence"
+      ],
       "properties": {
         "report": { "$ref": "#/$defs/artifact" },
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
@@ -189,6 +307,7 @@
         "web": { "$ref": "#/$defs/webReleaseAssets" },
         "releaseInputs": { "$ref": "#/$defs/artifact" },
         "costModel": { "$ref": "#/$defs/artifact" },
+        "security": { "$ref": "#/$defs/securityReleaseAssets" },
         "evidence": { "$ref": "#/$defs/evidenceReleaseAssets" }
       }
     }
