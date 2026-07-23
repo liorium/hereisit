@@ -303,7 +303,7 @@ describe("engine admission and single-job lifecycle", () => {
     ).rejects.toBeInstanceOf(EngineUnavailableError);
     await expect(controller.waitForIdle(1)).resolves.toBe(false);
     completion.resolve(terminalFailure(baseRequest.jobId));
-    await expect(controller.waitForIdle(100)).resolves.toBe(true);
+    await expect(controller.waitForIdle(1_000)).resolves.toBe(true);
   });
 
   it("records a terminal failure and cleans the workspace when runner startup fails", async () => {

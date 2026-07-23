@@ -36,8 +36,8 @@ const policy = {
       kind: "package",
       package: "@napi-rs/canvas@1.0.2",
     },
-    "@next/env@16.2.10": { kind: "package", package: "next@16.2.10" },
-    "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "next@16.2.10" },
+    "@next/env@16.2.11": { kind: "package", package: "next@16.2.11" },
+    "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "next@16.2.11" },
     "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
   },
   mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2"],
@@ -59,9 +59,9 @@ const packageSpecs: PackageSpec[] = [
   { name: "allow-combined", version: "1.0.0", license: "(MIT AND Zlib)" },
   { name: "@napi-rs/canvas", version: "1.0.2", license: "MIT" },
   { name: "@napi-rs/canvas-linux-x64-gnu", version: "1.0.2", license: "MIT", text: null },
-  { name: "next", version: "16.2.10", license: "MIT" },
-  { name: "@next/env", version: "16.2.10", license: "MIT", text: null },
-  { name: "@next/swc-linux-x64-gnu", version: "16.2.10", license: "MIT", text: null },
+  { name: "next", version: "16.2.11", license: "MIT" },
+  { name: "@next/env", version: "16.2.11", license: "MIT", text: null },
+  { name: "@next/swc-linux-x64-gnu", version: "16.2.11", license: "MIT", text: null },
   { name: "react", version: "19.2.7", license: "MIT" },
   { name: "client-only", version: "0.0.1", license: "MIT", text: null },
   { name: "@cloudflare/containers", version: "0.3.7", license: "MIT OR Apache-2.0", text: null },
@@ -217,7 +217,7 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "af6bc3c322a72cf1c621b4c86db77b39ef7708851ec9c3908e89e3022c69f97d",
+      noticeSha256: "2d1c230bd2a8a86bf53b1f6d98818c02b1ebcdcf2ee9b31ecee1081b3004788f",
       packageCount: 46,
     });
   });
@@ -417,22 +417,22 @@ describe("application supply-chain gate", () => {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.10": { kind: "package", package: "missing@1.0.0" },
+          "@next/env@16.2.11": { kind: "package", package: "missing@1.0.0" },
         },
       },
       {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.10": { kind: "package", package: "react@19.2.7" },
+          "@next/env@16.2.11": { kind: "package", package: "react@19.2.7" },
         },
       },
       {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.10": { kind: "package", package: "@next/swc-linux-x64-gnu@16.2.10" },
-          "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "@next/env@16.2.10" },
+          "@next/env@16.2.11": { kind: "package", package: "@next/swc-linux-x64-gnu@16.2.11" },
+          "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "@next/env@16.2.11" },
         },
       },
       {

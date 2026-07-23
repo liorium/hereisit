@@ -51,8 +51,8 @@ const EXPECTED_FALLBACKS = {
     kind: "package",
     package: "@napi-rs/canvas@1.0.2",
   },
-  "@next/env@16.2.10": { kind: "package", package: "next@16.2.10" },
-  "@next/swc-linux-x64-gnu@16.2.10": { kind: "package", package: "next@16.2.10" },
+  "@next/env@16.2.11": { kind: "package", package: "next@16.2.11" },
+  "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "next@16.2.11" },
   "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
 };
 const PNPM_REQUEST = Object.freeze({
