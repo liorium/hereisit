@@ -2814,7 +2814,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 ========================================================================
 Package: postcss
-Version: 8.5.16
+Version: 8.5.18
 License: MIT
 
 --- LICENSE ---

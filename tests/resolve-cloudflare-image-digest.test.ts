@@ -165,6 +165,22 @@ describe("Cloudflare image digest resolver", () => {
     ).toThrow(/config/i);
   });
 
+  it("accepts the tag-only Ref Docker returns for a single manifest", () => {
+    const manifest = descriptor({ ref: imageRef });
+
+    expect(resolveCloudflareImageDigest({ manifest, imageRef, accountId, candidateIdentity })).toBe(
+      `registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`,
+    );
+    expect(
+      resolveCloudflareImageDigestFromConfig({
+        manifest,
+        imageRef,
+        accountId,
+        expectedConfigDigest: configDigest,
+      }),
+    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+  });
+
   it("selects one runnable image while ignoring unknown-platform attestations", () => {
     const attestationDigest = `sha256:${"f".repeat(64)}`;
     const attestation = descriptor({

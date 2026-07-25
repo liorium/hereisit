@@ -84,7 +84,7 @@ export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, ca
   const selected = selectRunnableDescriptor(manifest);
   const descriptor = assertObject(selected.Descriptor, "selected registry descriptor");
   const digest = assertDigest(descriptor.digest, "selected registry manifest digest");
-  if (selected.Ref !== `${imageRef}@${digest}`) {
+  if (selected.Ref !== imageRef && selected.Ref !== `${imageRef}@${digest}`) {
     throw new TypeError("selected registry Ref does not match the requested image and digest");
   }
   const imageManifest = assertObject(selected.SchemaV2Manifest, "selected registry image manifest");
@@ -124,7 +124,7 @@ export function resolveCloudflareImageDigestFromConfig({
   const selected = selectRunnableDescriptor(manifest);
   const descriptor = assertObject(selected.Descriptor, "selected registry descriptor");
   const digest = assertDigest(descriptor.digest, "selected registry manifest digest");
-  if (selected.Ref !== `${imageRef}@${digest}`) {
+  if (selected.Ref !== imageRef && selected.Ref !== `${imageRef}@${digest}`) {
     throw new TypeError("selected registry Ref does not match the requested image and digest");
   }
   const imageManifest = assertObject(selected.SchemaV2Manifest, "selected registry image manifest");
