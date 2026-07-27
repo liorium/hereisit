@@ -57,6 +57,10 @@ describe("Cloudflare processing resource API", () => {
         expect(authorization).toBe("Bearer logs-token");
         return response([]);
       }
+      if (path.endsWith("/d1/database")) {
+        expect(authorization).toBe("Bearer d1-token");
+        return response([]);
+      }
       expect(authorization).toBe("Bearer resource-token");
       if (path.endsWith("/r2/buckets")) return response({ buckets: [] });
       return response([]);
@@ -65,6 +69,7 @@ describe("Cloudflare processing resource API", () => {
       config,
       fetcher,
       apiToken: "resource-token",
+      d1ApiToken: "d1-token",
       logpushApiToken: "logs-token",
       logpushR2AccessKeyId: "access-key",
       logpushR2SecretAccessKey: "secret-key",
@@ -72,6 +77,38 @@ describe("Cloudflare processing resource API", () => {
 
     await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
     expect(JSON.stringify(await api.readInventory())).not.toMatch(/token|access-key|secret-key/);
+  });
+
+  it("identifies a rejected Cloudflare service without exposing its message", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/d1/database")) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            errors: [{ code: 9109, message: "do-not-print-this-provider-message" }],
+            messages: [],
+            result: null,
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (path.endsWith("/r2/buckets")) return response({ buckets: [] });
+      return response([]);
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.readInventory()).rejects.toThrow(
+      /^Cloudflare D1 API rejected the request \(code 9109\)$/,
+    );
   });
 
   it("creates private resources with bounded, fail-closed settings", async () => {
@@ -98,6 +135,7 @@ describe("Cloudflare processing resource API", () => {
       config,
       fetcher,
       apiToken: "resource-token",
+      d1ApiToken: "d1-token",
       logpushApiToken: "logs-token",
       logpushR2AccessKeyId: "access-key",
       logpushR2SecretAccessKey: "secret-key",
@@ -121,6 +159,7 @@ describe("Cloudflare processing resource API", () => {
       "POST",
     ]);
     expect(calls[0]?.body).toEqual({ name: config.databaseName, primary_location_hint: "apac" });
+    expect(calls[0]?.authorization).toBe("Bearer d1-token");
     expect(calls[1]?.body).toEqual({
       name: config.bucketName,
       location: "apac",

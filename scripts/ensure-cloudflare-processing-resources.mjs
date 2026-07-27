@@ -313,6 +313,7 @@ export async function runProcessingResourceProvisioner(
   const api = createCloudflareProcessingResourceApi({
     config,
     apiToken: environment.CLOUDFLARE_API_TOKEN,
+    d1ApiToken: environment.CLOUDFLARE_D1_API_TOKEN,
     logpushApiToken: environment.CLOUDFLARE_LOGPUSH_API_TOKEN,
     logpushR2AccessKeyId: environment.LOGPUSH_R2_ACCESS_KEY_ID,
     logpushR2SecretAccessKey: environment.LOGPUSH_R2_SECRET_ACCESS_KEY,
