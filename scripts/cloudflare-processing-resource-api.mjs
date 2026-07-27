@@ -30,8 +30,17 @@ function asArray(value, label) {
   return value;
 }
 
-async function readEnvelope(response) {
-  if (!response.ok) throw new Error(`Cloudflare resource API failed with HTTP ${response.status}`);
+function serviceForPath(path) {
+  if (path.includes("/d1/")) return "D1";
+  if (path.includes("/r2/")) return "R2";
+  if (path.includes("/queues")) return "Queues";
+  if (path.includes("/logpush/")) return "Logpush";
+  return "resource";
+}
+
+async function readEnvelope(response, service) {
+  if (!response.ok)
+    throw new Error(`Cloudflare ${service} API failed with HTTP ${response.status}`);
   const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
   if (contentType !== "application/json")
     throw new TypeError("Cloudflare resource API was not JSON");
@@ -51,7 +60,17 @@ async function readEnvelope(response) {
     !Array.isArray(envelope.errors) ||
     envelope.errors.length !== 0
   ) {
-    throw new Error("Cloudflare resource API rejected the request");
+    const providerError = Array.isArray(envelope.errors)
+      ? envelope.errors.find(
+          (error) =>
+            error !== null &&
+            typeof error === "object" &&
+            !Array.isArray(error) &&
+            Number.isSafeInteger(error.code),
+        )
+      : undefined;
+    const code = providerError === undefined ? "" : ` (code ${providerError.code})`;
+    throw new Error(`Cloudflare ${service} API rejected the request${code}`);
   }
   return envelope.result;
 }
@@ -133,12 +152,14 @@ export function createCloudflareProcessingResourceApi({
   config,
   fetcher = fetch,
   apiToken,
+  d1ApiToken,
   logpushApiToken,
   logpushR2AccessKeyId,
   logpushR2SecretAccessKey,
 }) {
   const accountId = config.accountId;
   const resourceToken = assertCredential(apiToken, "Cloudflare resource token");
+  const d1Token = assertCredential(d1ApiToken, "Cloudflare D1 token");
   const logsToken = assertCredential(logpushApiToken, "Cloudflare Logs token");
   const accessKeyId = assertCredential(logpushR2AccessKeyId, "Logpush R2 access key ID");
   const secretAccessKey = assertCredential(
@@ -159,6 +180,7 @@ export function createCloudflareProcessingResourceApi({
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
+      serviceForPath(path),
     );
 
   const readR2Bucket = async (name) => {
@@ -187,7 +209,7 @@ export function createCloudflareProcessingResourceApi({
     const [d1Result, r2Result, queueResult, logpushResult] = await Promise.all([
       request(
         `${accountPath}/d1/database?name=${encodeURIComponent(config.databaseName)}&per_page=100`,
-        resourceToken,
+        d1Token,
       ),
       request(`${accountPath}/r2/buckets`, resourceToken),
       request(`${accountPath}/queues?page=1`, resourceToken),
@@ -249,7 +271,7 @@ export function createCloudflareProcessingResourceApi({
 
   const applyAction = async (action) => {
     if (action.type === "create-d1") {
-      await request(`${accountPath}/d1/database`, resourceToken, {
+      await request(`${accountPath}/d1/database`, d1Token, {
         method: "POST",
         body: { name: action.name, primary_location_hint: action.location },
       });
