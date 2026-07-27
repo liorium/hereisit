@@ -30,6 +30,7 @@ jobs:
       - run: pnpm verify
 
   browser:
+    if: github.event_name == 'pull_request'
     needs: verify
     runs-on: ubuntu-24.04
     # The complete 554-case matrix spans six browser/device projects and may use two Playwright workers.

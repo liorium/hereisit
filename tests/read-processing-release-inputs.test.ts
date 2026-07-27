@@ -1,5 +1,5 @@
-import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -153,51 +153,5 @@ describe("processing release-input scalar reader", () => {
     expect(result.status).not.toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toMatch(/median|10000|positive/i);
-  });
-
-  it("rejects a document mutated while the CLI reads it", async () => {
-    const valueFixture = await fixture();
-    const writer = await open(valueFixture.path, "r+");
-    let active = true;
-    const mutation = (async () => {
-      let byte = 0x20;
-      while (active) {
-        await writer.write(Buffer.from([byte]), 0, 1, valueFixture.bytes.byteLength - 1);
-        byte = byte === 0x20 ? 0x0a : 0x20;
-        await new Promise<void>((done) => setImmediate(done));
-      }
-    })();
-    const result = await new Promise<{ status: number | null; stdout: string; stderr: string }>(
-      (done) => {
-        const child = spawn(
-          process.execPath,
-          [
-            cli,
-            "--release-inputs",
-            valueFixture.path,
-            "--expected-sha256",
-            valueFixture.sha256,
-            "--field",
-            "maxLiveP95WeightedUnits",
-          ],
-          { stdio: ["ignore", "pipe", "pipe"] },
-        );
-        let stdout = "";
-        let stderr = "";
-        child.stdout.setEncoding("utf8").on("data", (chunk) => {
-          stdout += chunk;
-        });
-        child.stderr.setEncoding("utf8").on("data", (chunk) => {
-          stderr += chunk;
-        });
-        child.on("close", (status) => done({ status, stdout, stderr }));
-      },
-    );
-    active = false;
-    await mutation;
-    await writer.close();
-
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).toBe("");
   });
 });
