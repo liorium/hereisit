@@ -70,6 +70,8 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("maintainer: true");
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
+    expect(source).toContain("request.postDataBuffer()?.byteLength ?? -1");
+    expect(source).not.toContain("request.sizes()");
     expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
       source.indexOf("await page.locator('[data-policy=\"server\"] strong')"),
     );

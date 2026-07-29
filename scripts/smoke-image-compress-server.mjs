@@ -241,7 +241,6 @@ async function assertMaintainerServer(
     policies: [],
     policyReads: [],
   };
-  const sizeReads = [];
   assertQuietPage(page, state);
   observePolicies(page, state);
   cdp.on("Network.requestWillBeSent", ({ request: { method, url } }) => {
@@ -252,19 +251,13 @@ async function assertMaintainerServer(
     const url = request.url();
     const path = new URL(url).pathname;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
-    if (inputPathPattern.test(path) && request.method() === "PUT") state.inputPuts += 1;
+    if (inputPathPattern.test(path) && request.method() === "PUT") {
+      state.inputPuts += 1;
+      state.putBodyBytes.push(request.postDataBuffer()?.byteLength ?? -1);
+    }
     if (downloadedPathPattern.test(path) && request.method() === "POST") {
       state.downloadAcknowledgements += 1;
     }
-  });
-  page.on("requestfinished", (request) => {
-    const path = new URL(request.url()).pathname;
-    if (!inputPathPattern.test(path) || request.method() !== "PUT") return;
-    sizeReads.push(
-      request.sizes().then((sizes) => {
-        state.putBodyBytes.push(sizes.requestBodySize);
-      }),
-    );
   });
   page.on("response", (response) => {
     const request = response.request();
@@ -321,7 +314,6 @@ async function assertMaintainerServer(
     let downloadBytes = 0;
     for await (const chunk of stream) downloadBytes += chunk.byteLength;
     if (downloadBytes < 1) throw new Error(stableFailure);
-    await Promise.all(sizeReads);
     await page.waitForTimeout(250);
     if (state.consoleError) throw new Error(`${stableFailure} [maintainer-console]`);
     if (state.pageError) throw new Error(`${stableFailure} [maintainer-page-error]`);
