@@ -244,6 +244,7 @@ async function assertMaintainerServer(
     });
     await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs });
+    await page.getByRole("radio", { name: /최소 용량/ }).check();
     const source = await readFile(sourcePath);
     await page.locator('input[type="file"]').setInputFiles({
       name: privateSourceName,

@@ -73,6 +73,7 @@ describe("authenticated processing staging smoke", () => {
     expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
       source.indexOf("await page.locator('[data-policy=\"server\"] strong')"),
     );
+    expect(source).toContain('getByRole("radio", { name: /최소 용량/ }).check()');
   });
 
   it("does not expose a production result-minting dependency parameter", async () => {
