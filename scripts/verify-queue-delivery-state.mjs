@@ -31,10 +31,15 @@ function validateQueueName(value) {
 function validateEnvelope(document, label) {
   const envelope = assertObject(document, label);
   if (envelope.success !== true) throw new Error(`${label} was not successful`);
-  if (!Array.isArray(envelope.errors) || envelope.errors.length !== 0) {
+  if (
+    envelope.errors != null &&
+    (!Array.isArray(envelope.errors) || envelope.errors.length !== 0)
+  ) {
     throw new Error(`${label} contains API errors`);
   }
-  if (!Array.isArray(envelope.messages)) throw new TypeError(`${label} messages are malformed`);
+  if (envelope.messages != null && !Array.isArray(envelope.messages)) {
+    throw new TypeError(`${label} messages are malformed`);
+  }
   return envelope;
 }
 

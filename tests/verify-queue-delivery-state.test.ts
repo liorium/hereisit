@@ -122,6 +122,17 @@ describe("Queue delivery state verifier", () => {
     ).toEqual({ queue: queueName, state: "resumed", verified: true });
   });
 
+  it("accepts successful Cloudflare responses with nullable metadata", () => {
+    expect(
+      verifyQueueDeliveryState({
+        document: { success: true, errors: null, messages: null, result: queue() },
+        expectedQueueId: queueId,
+        queueName,
+        expected: "paused",
+      }),
+    ).toEqual({ queue: queueName, state: "paused", verified: true });
+  });
+
   it.each([
     ["wrong state", envelope(queue(false)), "paused"],
     ["wrong queue", envelope({ ...queue(), queue_name: "other" }), "paused"],
