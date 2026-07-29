@@ -33,7 +33,15 @@ const safeFailures = new Set([
   `${stableFailure} [job-submit]`,
   `${stableFailure} [job-completion]`,
   `${stableFailure} [download-handoff]`,
-  `${stableFailure} [maintainer-invariants]`,
+  `${stableFailure} [maintainer-console]`,
+  `${stableFailure} [maintainer-page-error]`,
+  `${stableFailure} [maintainer-request-failed]`,
+  `${stableFailure} [maintainer-source-leak]`,
+  `${stableFailure} [maintainer-input-options]`,
+  `${stableFailure} [maintainer-input-put]`,
+  `${stableFailure} [maintainer-input-size]`,
+  `${stableFailure} [maintainer-download-ack-count]`,
+  `${stableFailure} [maintainer-download-ack-status]`,
 ]);
 
 async function runSmokeStage(stage, action) {
@@ -317,19 +325,20 @@ async function assertMaintainerServer(
     if (downloadBytes < 1) throw new Error(stableFailure);
     await Promise.all(sizeReads);
     await page.waitForTimeout(250);
-    if (
-      state.consoleError ||
-      state.pageError ||
-      state.requestFailed ||
-      state.sourceFilenameLeak ||
-      state.inputOptions !== 1 ||
-      state.inputPuts !== 1 ||
-      state.putBodyBytes.length !== 1 ||
-      state.putBodyBytes[0] !== source.byteLength ||
-      state.downloadAcknowledgements !== 1 ||
-      !state.downloadAcknowledged
-    ) {
-      throw new Error(`${stableFailure} [maintainer-invariants]`);
+    if (state.consoleError) throw new Error(`${stableFailure} [maintainer-console]`);
+    if (state.pageError) throw new Error(`${stableFailure} [maintainer-page-error]`);
+    if (state.requestFailed) throw new Error(`${stableFailure} [maintainer-request-failed]`);
+    if (state.sourceFilenameLeak) throw new Error(`${stableFailure} [maintainer-source-leak]`);
+    if (state.inputOptions !== 1) throw new Error(`${stableFailure} [maintainer-input-options]`);
+    if (state.inputPuts !== 1) throw new Error(`${stableFailure} [maintainer-input-put]`);
+    if (state.putBodyBytes.length !== 1 || state.putBodyBytes[0] !== source.byteLength) {
+      throw new Error(`${stableFailure} [maintainer-input-size]`);
+    }
+    if (state.downloadAcknowledgements !== 1) {
+      throw new Error(`${stableFailure} [maintainer-download-ack-count]`);
+    }
+    if (!state.downloadAcknowledged) {
+      throw new Error(`${stableFailure} [maintainer-download-ack-status]`);
     }
   } finally {
     await context.close().catch(() => undefined);
