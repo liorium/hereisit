@@ -57,8 +57,7 @@ async function readEnvelope(response, service) {
   const envelope = asObject(parsed, "Cloudflare resource API envelope");
   if (
     envelope.success !== true ||
-    !Array.isArray(envelope.errors) ||
-    envelope.errors.length !== 0
+    (envelope.errors != null && (!Array.isArray(envelope.errors) || envelope.errors.length !== 0))
   ) {
     const providerError = Array.isArray(envelope.errors)
       ? envelope.errors.find(

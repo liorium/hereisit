@@ -23,6 +23,12 @@ function response(result: unknown) {
   });
 }
 
+function nullableMetadataResponse(result: unknown) {
+  return new Response(JSON.stringify({ success: true, errors: null, messages: null, result }), {
+    headers: { "content-type": "application/json" },
+  });
+}
+
 describe("Cloudflare processing resource API", () => {
   it("accepts only the exact private Logpush destination and credential scope", () => {
     const destination =
@@ -77,6 +83,26 @@ describe("Cloudflare processing resource API", () => {
 
     await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
     expect(JSON.stringify(await api.readInventory())).not.toMatch(/token|access-key|secret-key/);
+  });
+
+  it("accepts successful Cloudflare responses with nullable error metadata", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/queues")) return nullableMetadataResponse([]);
+      if (path.endsWith("/r2/buckets")) return response({ buckets: [] });
+      return response([]);
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
   });
 
   it("identifies a rejected Cloudflare service without exposing its message", async () => {
