@@ -160,6 +160,9 @@ describe("processing staging workflow", () => {
     expect(discover).toBeGreaterThanOrEqual(0);
     expect(info).toBeGreaterThan(discover);
     expect(verify).toBeGreaterThan(info);
+    expect(deploy).toContain("for attempt in {1..30}; do");
+    expect(deploy).toContain("if (( attempt == 30 )); then");
+    expect(deploy).toContain("sleep 10");
     expect(deploy).toContain('--application-id "$STAGING_CONTAINER_APPLICATION_ID"');
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
   });
