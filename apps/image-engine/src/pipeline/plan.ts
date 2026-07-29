@@ -112,9 +112,13 @@ function planJpeg(
   const qualities = spec.preset === "balanced" ? [82, 78, 86] : [74, 68, 80];
   return finalize(
     contentClass,
-    qualities.map((quality) =>
-      candidate(`jpeg-q${quality}-${chroma}`, "mozjpeg", "lossy", 3, { quality, chroma }),
-    ),
+    qualities.map((quality, index) => {
+      const candidateChroma = chroma === "420" && index === 2 ? "444" : chroma;
+      return candidate(`jpeg-q${quality}-${candidateChroma}`, "mozjpeg", "lossy", 3, {
+        quality,
+        chroma: candidateChroma,
+      });
+    }),
     spec,
     { normalizeColorWithLcms, requirePixelExact: false, requireAlphaExact: true },
   );

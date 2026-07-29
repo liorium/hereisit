@@ -57,6 +57,20 @@ describe("planOptimization", () => {
     }
   });
 
+  it.each([
+    ["balanced", 86],
+    ["smallest", 80],
+  ] as const)("keeps a 4:4:4 fallback for %s photo JPEGs", (preset, quality) => {
+    const result = planOptimization(inspection({}), "photo", { ...balanced, preset });
+
+    expect(result).toMatchObject({
+      kind: "plan",
+      plan: {
+        candidates: [{ chroma: "420" }, { chroma: "420" }, { chroma: "444", quality }],
+      },
+    });
+  });
+
   it("normalizes trusted CMYK smart inputs and rejects unsafe interpretations", () => {
     expect(
       planOptimization(

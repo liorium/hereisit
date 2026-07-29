@@ -56,14 +56,18 @@ export const liveQualityFloor = {
   balanced: {
     defaultSsim: 0.97,
     screenshotTextSsim: 0.985,
-    maxMeanChannelDelta: 2 / 255,
-    maxEdgeLoss: 0.02,
+    maxMeanChannelDelta: 5 / 255,
+    screenshotTextMaxMeanChannelDelta: 2 / 255,
+    maxEdgeLoss: 0.03,
+    screenshotTextMaxEdgeLoss: 0.02,
   },
   smallest: {
     defaultSsim: 0.94,
     screenshotTextSsim: 0.97,
-    maxMeanChannelDelta: 3 / 255,
+    maxMeanChannelDelta: 8 / 255,
+    screenshotTextMaxMeanChannelDelta: 3 / 255,
     maxEdgeLoss: 0.04,
+    screenshotTextMaxEdgeLoss: 0.04,
   },
 } as const;
 
@@ -452,12 +456,16 @@ export async function verifyCandidate(input: {
     channels: input.normalized.channels,
   });
   const floor = liveQualityFloor[input.preset];
-  const minimumSsim =
-    input.contentClass === "screenshot-text" ? floor.screenshotTextSsim : floor.defaultSsim;
+  const screenshotText = input.contentClass === "screenshot-text";
+  const minimumSsim = screenshotText ? floor.screenshotTextSsim : floor.defaultSsim;
+  const maximumMeanChannelDelta = screenshotText
+    ? floor.screenshotTextMaxMeanChannelDelta
+    : floor.maxMeanChannelDelta;
+  const maximumEdgeLoss = screenshotText ? floor.screenshotTextMaxEdgeLoss : floor.maxEdgeLoss;
   if (
     quality.worstSsim < minimumSsim ||
-    quality.worstMeanChannelDelta > floor.maxMeanChannelDelta ||
-    quality.worstEdgeLoss > floor.maxEdgeLoss
+    quality.worstMeanChannelDelta > maximumMeanChannelDelta ||
+    quality.worstEdgeLoss > maximumEdgeLoss
   ) {
     return { accepted: false, reason: "quality", liveQuality: quality };
   }

@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CodecCandidate } from "../codecs/jpeg";
 import { encodePngCandidate } from "../codecs/png";
-import type { ImageInspection } from "./inspect";
-import type { NormalizedImage } from "./normalize";
+import { type ImageInspection, inspectImage } from "./inspect";
+import { type NormalizedImage, normalizeImage } from "./normalize";
 import {
   computeLiveQuality,
   liveQualityFloor,
@@ -111,6 +111,8 @@ describe("live quality v1", () => {
       worstEdgeLoss: 0,
     });
     expect(liveQualityFloor.balanced.screenshotTextSsim).toBe(0.985);
+    expect(liveQualityFloor.balanced.screenshotTextMaxMeanChannelDelta).toBe(2 / 255);
+    expect(liveQualityFloor.balanced.screenshotTextMaxEdgeLoss).toBe(0.02);
   });
 });
 
@@ -177,6 +179,50 @@ describe("verifyCandidate", () => {
       reason: "accepted",
       liveQuality: { metricVersion: "hereisit-live-quality-v1", worstSsim: 1 },
     });
+  });
+
+  it("accepts a smaller 4:4:4 fallback for the false original-retained JPEG corpus", async () => {
+    const directory = await root();
+    const sourcePath = "tests/image-corpus/public/photo-ordinary-jpeg.jpg";
+    const rawPath = join(directory, "normalized.raw");
+    const candidatePath = join(directory, "candidate.jpg");
+    const sourceInspection = await inspectImage(sourcePath, "image/jpeg");
+    const normalized = await normalizeImage({
+      sourcePath,
+      rawPath,
+      inspection: sourceInspection,
+    });
+    await sharp(await readFile(rawPath), {
+      raw: {
+        width: normalized.width,
+        height: normalized.height,
+        channels: normalized.channels,
+      },
+    })
+      .jpeg({ quality: 80, progressive: true, chromaSubsampling: "4:4:4", mozjpeg: true })
+      .toFile(candidatePath);
+    const candidateBytes = (await stat(candidatePath)).size;
+
+    await expect(
+      verifyCandidate({
+        candidate: {
+          id: "jpeg-q80-444",
+          path: candidatePath,
+          mime: "image/jpeg",
+          byteLength: candidateBytes,
+          encodeMs: 1,
+          codecBuildId: "test",
+          mode: "lossy",
+        },
+        sourceBytes: (await stat(sourcePath)).size,
+        minimumSavingsPercent: 1,
+        inspection: sourceInspection,
+        normalized,
+        mode: "smart",
+        preset: "smallest",
+        contentClass: "photo",
+      }),
+    ).resolves.toMatchObject({ accepted: true, reason: "accepted" });
   });
 
   it("compares canonical little-endian 16-bit samples exactly", async () => {
