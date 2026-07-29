@@ -235,11 +235,11 @@ export function createCloudflareProcessingResourceApi({
       const settings = asObject(entry.settings, "Queue settings");
       const consumerScriptNames = asArray(entry.consumers, "Queue consumers").map(
         (consumerValue) => {
-          const scriptName = asObject(consumerValue, "Queue consumer").script_name;
-          if (typeof scriptName !== "string") {
+          const consumer = asObject(consumerValue, "Queue consumer");
+          if (consumer.type !== "worker" || typeof consumer.script !== "string") {
             throw new TypeError("Queue consumer must be a Worker");
           }
-          return scriptName;
+          return consumer.script;
         },
       );
       return {

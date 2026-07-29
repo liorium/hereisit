@@ -127,7 +127,7 @@ describe("Cloudflare processing resource API", () => {
             queue_name: config.queueName,
             settings: { delivery_paused: true },
             consumers_total_count: 1,
-            consumers: [{ script_name: config.workerScriptName }],
+            consumers: [{ type: "worker", script: config.workerScriptName }],
           },
         ]);
       }
