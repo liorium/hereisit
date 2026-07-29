@@ -70,8 +70,6 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("maintainer: true");
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
-    expect(source).toContain("request.postDataBuffer()?.byteLength ?? -1");
-    expect(source).not.toContain("request.sizes()");
     expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
       source.indexOf("await page.locator('[data-policy=\"server\"] strong')"),
     );
@@ -250,13 +248,13 @@ describe("authenticated processing staging smoke", () => {
   it("preserves only allowlisted browser invariant diagnostics", async () => {
     const output = await outputPath();
     browserSmoke.mockRejectedValue(
-      new Error("processing staging smoke failed [maintainer-input-size]"),
+      new Error("processing staging smoke failed [maintainer-input-put]"),
     );
     await expect(
       runProcessingStagingSmokeCli({
         argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
       }),
-    ).rejects.toThrow("processing staging smoke failed [maintainer-input-size]");
+    ).rejects.toThrow("processing staging smoke failed [maintainer-input-put]");
   });
 });

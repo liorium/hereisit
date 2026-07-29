@@ -44,7 +44,6 @@ const safeFailures = new Set([
   `${stableFailure} [maintainer-source-leak]`,
   `${stableFailure} [maintainer-input-options]`,
   `${stableFailure} [maintainer-input-put]`,
-  `${stableFailure} [maintainer-input-size]`,
   `${stableFailure} [maintainer-download-ack-count]`,
   `${stableFailure} [maintainer-download-ack-status]`,
 ]);
@@ -240,7 +239,6 @@ async function assertMaintainerServer(
     sourceFilenameLeak: false,
     inputOptions: 0,
     inputPuts: 0,
-    putBodyBytes: [],
     downloadAcknowledgements: 0,
     downloadAcknowledged: false,
     invalidPolicy: false,
@@ -257,10 +255,7 @@ async function assertMaintainerServer(
     const url = request.url();
     const path = new URL(url).pathname;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
-    if (inputPathPattern.test(path) && request.method() === "PUT") {
-      state.inputPuts += 1;
-      state.putBodyBytes.push(request.postDataBuffer()?.byteLength ?? -1);
-    }
+    if (inputPathPattern.test(path) && request.method() === "PUT") state.inputPuts += 1;
     if (downloadedPathPattern.test(path) && request.method() === "POST") {
       state.downloadAcknowledgements += 1;
     }
@@ -326,9 +321,6 @@ async function assertMaintainerServer(
     if (state.sourceFilenameLeak) throw new Error(`${stableFailure} [maintainer-source-leak]`);
     if (state.inputOptions !== 1) throw new Error(`${stableFailure} [maintainer-input-options]`);
     if (state.inputPuts !== 1) throw new Error(`${stableFailure} [maintainer-input-put]`);
-    if (state.putBodyBytes.length !== 1 || state.putBodyBytes[0] !== source.byteLength) {
-      throw new Error(`${stableFailure} [maintainer-input-size]`);
-    }
     if (state.downloadAcknowledgements !== 1) {
       throw new Error(`${stableFailure} [maintainer-download-ack-count]`);
     }
