@@ -43,7 +43,7 @@ async function readEnvelope(response, service) {
     throw new Error(`Cloudflare ${service} API failed with HTTP ${response.status}`);
   const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
   if (contentType !== "application/json")
-    throw new TypeError("Cloudflare resource API was not JSON");
+    throw new TypeError(`Cloudflare ${service} API was not JSON`);
   const text = await response.text();
   if (Buffer.byteLength(text) > maximumResponseBytes) {
     throw new RangeError("Cloudflare resource API response exceeded its bound");

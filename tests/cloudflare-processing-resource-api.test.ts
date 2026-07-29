@@ -105,6 +105,30 @@ describe("Cloudflare processing resource API", () => {
     await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
   });
 
+  it("identifies a Cloudflare service that returns a non-JSON response", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/queues")) {
+        return new Response("unexpected response", {
+          headers: { "content-type": "text/plain" },
+        });
+      }
+      if (path.endsWith("/r2/buckets")) return response({ buckets: [] });
+      return response([]);
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.readInventory()).rejects.toThrow(/^Cloudflare Queues API was not JSON$/);
+  });
+
   it("identifies a rejected Cloudflare service without exposing its message", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
