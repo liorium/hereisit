@@ -19,7 +19,10 @@ const downloadedPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/download
 const stableFailure = "processing staging smoke failed";
 const safeFailures = new Set([
   `${stableFailure} [public-policy]`,
+  `${stableFailure} [public-invariants]`,
   `${stableFailure} [maintainer-policy]`,
+  `${stableFailure} [preset-selection]`,
+  `${stableFailure} [maintainer-invariants]`,
 ]);
 
 export function projectSmokeRequest({ method, url, bodyBytes }) {
@@ -169,7 +172,7 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
       state.requestFailed ||
       state.sourceFilenameLeak
     ) {
-      throw new Error(stableFailure);
+      throw new Error(`${stableFailure} [public-invariants]`);
     }
   } finally {
     await context.close();
@@ -244,7 +247,11 @@ async function assertMaintainerServer(
     });
     await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs });
-    await page.getByRole("radio", { name: /최소 용량/ }).check();
+    try {
+      await page.getByRole("radio", { name: /최소 용량/ }).check();
+    } catch {
+      throw new Error(`${stableFailure} [preset-selection]`);
+    }
     const source = await readFile(sourcePath);
     await page.locator('input[type="file"]').setInputFiles({
       name: privateSourceName,
@@ -284,7 +291,7 @@ async function assertMaintainerServer(
       state.downloadAcknowledgements !== 1 ||
       !state.downloadAcknowledged
     ) {
-      throw new Error(stableFailure);
+      throw new Error(`${stableFailure} [maintainer-invariants]`);
     }
   } finally {
     await context.close();

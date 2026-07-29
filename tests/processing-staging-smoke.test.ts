@@ -244,4 +244,15 @@ describe("authenticated processing staging smoke", () => {
       }),
     ).rejects.toThrow("processing staging smoke failed [maintainer-policy]");
   });
+
+  it("preserves only allowlisted browser invariant diagnostics", async () => {
+    const output = await outputPath();
+    browserSmoke.mockRejectedValue(new Error("processing staging smoke failed [preset-selection]"));
+    await expect(
+      runProcessingStagingSmokeCli({
+        argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
+        environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
+      }),
+    ).rejects.toThrow("processing staging smoke failed [preset-selection]");
+  });
 });
