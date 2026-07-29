@@ -9,6 +9,22 @@ import type { Env } from "./env";
 
 const ENGINE_ORIGIN = "http://image-engine";
 const MAX_STATUS_BYTES = 64 * 1024;
+const ENGINE_IMAGE_PATTERN =
+  /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-image-engine@sha256:([0-9a-f]{64})$/;
+
+export function createImageEngineEnvironment(engineImage: string): Record<string, string> {
+  const digest = ENGINE_IMAGE_PATTERN.exec(engineImage)?.[1];
+  if (digest === undefined && engineImage !== "local-dockerfile") {
+    throw new TypeError("Engine image identity is invalid.");
+  }
+  return {
+    ENGINE_BUILD_ID: digest === undefined ? engineImage : `sha256:${digest}`,
+    JPEG_CODEC_BUILD_ID: "mozjpeg-4.1.1+a2d2907",
+    PNG_CODEC_BUILD_ID: "quantizr-1.4.3+oxipng-10.1.1",
+    WEBP_CODEC_BUILD_ID: "libwebp-1.6.0+4fa2191",
+    TRANSFORM_BUILD_ID: "libvips-8.18.4+e01a479",
+  };
+}
 
 export interface EngineClient {
   create(request: EngineCreateJobRequest): Promise<{
@@ -57,12 +73,17 @@ export class EngineHttpError extends Error {
   }
 }
 
-export class ImageEngineContainer extends Container {
+export class ImageEngineContainer extends Container<Env> {
   override defaultPort = 8080;
   override requiredPorts = [8080];
   override pingEndpoint = "/healthz";
   override sleepAfter = "60s";
   override enableInternet = false;
+
+  constructor(ctx: ConstructorParameters<typeof Container<Env>>[0], env: Env) {
+    super(ctx, env);
+    this.envVars = createImageEngineEnvironment(env.ENGINE_IMAGE_DIGEST);
+  }
 
   override onError(_error: unknown): void {
     // Platform Error objects and container stderr are deliberately not serialized.

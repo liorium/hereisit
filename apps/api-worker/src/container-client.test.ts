@@ -8,8 +8,10 @@ vi.mock("@cloudflare/containers", () => ({
 
 import {
   createEngineClientFromStub,
+  createImageEngineEnvironment,
   EngineCrashError,
   EngineProtocolError,
+  ImageEngineContainer,
 } from "./container-client";
 
 const jobId = "550e8400-e29b-41d4-a716-446655440000";
@@ -35,6 +37,29 @@ const request = {
 } satisfies EngineCreateJobRequest;
 
 describe("fixed-slot engine client", () => {
+  it("passes immutable build identities into every Cloudflare Container start", () => {
+    const digest = "d".repeat(64);
+    const engineImage = `registry.cloudflare.com/${"a".repeat(32)}/hereisit-image-engine@sha256:${digest}`;
+    const container = new ImageEngineContainer(
+      {} as never,
+      {
+        ENGINE_IMAGE_DIGEST: engineImage,
+      } as never,
+    );
+
+    expect(container.envVars).toEqual({
+      ENGINE_BUILD_ID: `sha256:${digest}`,
+      JPEG_CODEC_BUILD_ID: "mozjpeg-4.1.1+a2d2907",
+      PNG_CODEC_BUILD_ID: "quantizr-1.4.3+oxipng-10.1.1",
+      WEBP_CODEC_BUILD_ID: "libwebp-1.6.0+4fa2191",
+      TRANSFORM_BUILD_ID: "libvips-8.18.4+e01a479",
+    });
+    expect(createImageEngineEnvironment("local-dockerfile").ENGINE_BUILD_ID).toBe(
+      "local-dockerfile",
+    );
+    expect(() => createImageEngineEnvironment("registry.example/image:latest")).toThrow(/identity/);
+  });
+
   it("uses the protocol endpoints and streams upload bodies without buffering", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const stream = new ReadableStream<Uint8Array>({
