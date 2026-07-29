@@ -18,10 +18,13 @@ const inputPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/input$`);
 const downloadedPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/downloaded$`);
 const stableFailure = "processing staging smoke failed";
 const safeFailures = new Set([
+  `${stableFailure} [browser-launch]`,
+  `${stableFailure} [public-context]`,
   `${stableFailure} [public-navigation]`,
   `${stableFailure} [public-policy]`,
   `${stableFailure} [public-ui]`,
   `${stableFailure} [public-invariants]`,
+  `${stableFailure} [maintainer-context]`,
   `${stableFailure} [maintainer-navigation]`,
   `${stableFailure} [maintainer-policy]`,
   `${stableFailure} [maintainer-ui]`,
@@ -146,11 +149,13 @@ async function assertPolicies(state, expected) {
 }
 
 async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
-  const context = await browser.newContext();
-  await injectSession(context, pageOrigin, PUBLIC_BUCKET_ZERO_SESSION_ID);
-  const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Network.enable");
+  const context = await runSmokeStage("public-context", () => browser.newContext());
+  await runSmokeStage("public-context", () =>
+    injectSession(context, pageOrigin, PUBLIC_BUCKET_ZERO_SESSION_ID),
+  );
+  const page = await runSmokeStage("public-context", () => context.newPage());
+  const cdp = await runSmokeStage("public-context", () => context.newCDPSession(page));
+  await runSmokeStage("public-context", () => cdp.send("Network.enable"));
   const state = {
     jobRequest: false,
     consoleError: false,
@@ -196,7 +201,7 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
       throw new Error(`${stableFailure} [public-invariants]`);
     }
   } finally {
-    await context.close();
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -207,11 +212,15 @@ async function assertMaintainerServer(
   sourcePath,
   timeoutMs,
 ) {
-  const context = await browser.newContext({ acceptDownloads: true });
-  await injectSession(context, pageOrigin, maintainerSessionId);
-  const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Network.enable");
+  const context = await runSmokeStage("maintainer-context", () =>
+    browser.newContext({ acceptDownloads: true }),
+  );
+  await runSmokeStage("maintainer-context", () =>
+    injectSession(context, pageOrigin, maintainerSessionId),
+  );
+  const page = await runSmokeStage("maintainer-context", () => context.newPage());
+  const cdp = await runSmokeStage("maintainer-context", () => context.newCDPSession(page));
+  await runSmokeStage("maintainer-context", () => cdp.send("Network.enable"));
   const state = {
     consoleError: false,
     pageError: false,
@@ -323,7 +332,7 @@ async function assertMaintainerServer(
       throw new Error(`${stableFailure} [maintainer-invariants]`);
     }
   } finally {
-    await context.close();
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -350,7 +359,7 @@ async function performImageCompressServerSmoke({
   maintainerSessionId,
 }) {
   const origin = pageOrigin;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await runSmokeStage("browser-launch", () => chromium.launch({ headless: true }));
   try {
     if (maintainerSessionId !== undefined) {
       if (origin !== PROCESSING_STAGING_ORIGIN || !SESSION_UUID_PATTERN.test(maintainerSessionId)) {
@@ -404,7 +413,7 @@ async function performImageCompressServerSmoke({
       await context.close();
     }
   } finally {
-    await browser.close();
+    await browser.close().catch(() => undefined);
   }
 }
 
