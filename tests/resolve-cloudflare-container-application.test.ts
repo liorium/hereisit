@@ -15,13 +15,13 @@ const input = {
 function application(overrides: Record<string, unknown> = {}) {
   return {
     id: applicationId,
-    name: "hereisit-processing-staging-ImageEngineContainer",
+    name: "hereisit-processing-staging-imageenginecontainer",
     state: "ready",
     instances: 0,
     image,
     version: 1,
-    updated_at: "2026-07-19T10:59:00.000Z",
-    created_at: "2026-07-19T10:58:00.000Z",
+    updated_at: "2026-07-29T09:49:00.377999872Z",
+    created_at: "2026-07-29T09:48:59.340999936Z",
     ...overrides,
   };
 }
@@ -44,7 +44,7 @@ describe("Cloudflare Container application resolver", () => {
       observedAt: input.observedAt,
       application: {
         id: applicationId,
-        name: "hereisit-processing-staging-ImageEngineContainer",
+        name: "hereisit-processing-staging-imageenginecontainer",
         image,
         version: 1,
       },

@@ -15,13 +15,16 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const workerNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const digestImagePattern =
   /^registry\.cloudflare\.com\/([0-9a-f]{32})\/hereisit-image-engine@sha256:([0-9a-f]{64})$/;
+const utcTimestampPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/;
 const acceptedStates = new Set(["provisioning", "ready", "active"]);
 
 function assertIsoTimestamp(value, label) {
+  const match = typeof value === "string" ? utcTimestampPattern.exec(value) : null;
+  const normalized = match ? `${match[1]}.${(match[2] ?? "").padEnd(3, "0").slice(0, 3)}Z` : "";
   if (
-    typeof value !== "string" ||
+    !match ||
     !Number.isFinite(Date.parse(value)) ||
-    new Date(value).toISOString() !== value
+    new Date(value).toISOString() !== normalized
   ) {
     throw new TypeError(`${label} is invalid`);
   }
@@ -85,7 +88,7 @@ export function resolveContainerApplication(inputValue) {
   if (!Array.isArray(input.applications) || input.applications.length > 1_000) {
     throw new TypeError("Container application inventory is invalid");
   }
-  const expectedName = `${input.workerScriptName}-ImageEngineContainer`;
+  const expectedName = `${input.workerScriptName}-ImageEngineContainer`.toLowerCase();
   const matches = input.applications
     .map(validateApplication)
     .filter((application) => application.name === expectedName);
