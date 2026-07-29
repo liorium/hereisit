@@ -38,12 +38,7 @@ function serviceForPath(path) {
   return "resource";
 }
 
-async function readEnvelope(response, service) {
-  if (!response.ok)
-    throw new Error(`Cloudflare ${service} API failed with HTTP ${response.status}`);
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
-  if (contentType !== "application/json")
-    throw new TypeError(`Cloudflare ${service} API was not JSON`);
+async function readEnvelope(response, service, acceptedMissingCode) {
   const text = await response.text();
   if (Buffer.byteLength(text) > maximumResponseBytes) {
     throw new RangeError("Cloudflare resource API response exceeded its bound");
@@ -52,23 +47,27 @@ async function readEnvelope(response, service) {
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new TypeError("Cloudflare resource API response was invalid JSON");
+    throw new TypeError(`Cloudflare ${service} API response was invalid JSON`);
   }
   const envelope = asObject(parsed, "Cloudflare resource API envelope");
+  const providerError = Array.isArray(envelope.errors)
+    ? envelope.errors.find(
+        (error) =>
+          error !== null &&
+          typeof error === "object" &&
+          !Array.isArray(error) &&
+          Number.isSafeInteger(error.code),
+      )
+    : undefined;
+  const code = providerError === undefined ? "" : ` (code ${providerError.code})`;
+  if (!response.ok) {
+    if (response.status === 404 && providerError?.code === acceptedMissingCode) return null;
+    throw new Error(`Cloudflare ${service} API failed with HTTP ${response.status}${code}`);
+  }
   if (
     envelope.success !== true ||
     (envelope.errors != null && (!Array.isArray(envelope.errors) || envelope.errors.length !== 0))
   ) {
-    const providerError = Array.isArray(envelope.errors)
-      ? envelope.errors.find(
-          (error) =>
-            error !== null &&
-            typeof error === "object" &&
-            !Array.isArray(error) &&
-            Number.isSafeInteger(error.code),
-        )
-      : undefined;
-    const code = providerError === undefined ? "" : ` (code ${providerError.code})`;
     throw new Error(`Cloudflare ${service} API rejected the request${code}`);
   }
   return envelope.result;
@@ -167,7 +166,7 @@ export function createCloudflareProcessingResourceApi({
   );
   const accountPath = `/client/v4/accounts/${accountId}`;
 
-  const request = async (path, token, { method = "GET", body } = {}) =>
+  const request = async (path, token, { method = "GET", body, acceptedMissingCode } = {}) =>
     readEnvelope(
       await fetcher(`${apiOrigin}${path}`, {
         method,
@@ -180,17 +179,19 @@ export function createCloudflareProcessingResourceApi({
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
       serviceForPath(path),
+      acceptedMissingCode,
     );
 
   const readR2Bucket = async (name) => {
     const path = `${accountPath}/r2/buckets/${encodeURIComponent(name)}`;
-    const [lifecycle, cors, custom, managed, sippy] = await Promise.all([
+    const [lifecycle, corsResult, custom, managed, sippy] = await Promise.all([
       request(`${path}/lifecycle`, resourceToken),
-      request(`${path}/cors`, resourceToken),
+      request(`${path}/cors`, resourceToken, { acceptedMissingCode: 10059 }),
       request(`${path}/domains/custom`, resourceToken),
       request(`${path}/domains/managed`, resourceToken),
       request(`${path}/sippy`, resourceToken),
     ]);
+    const cors = corsResult ?? { rules: [] };
     const corsRules = asArray(asObject(cors, "R2 CORS response").rules ?? [], "R2 CORS rules");
     const domains = resultArray(custom, "domains", "R2 custom domains");
     return {

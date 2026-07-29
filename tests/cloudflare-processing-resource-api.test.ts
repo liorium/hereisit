@@ -29,6 +29,18 @@ function nullableMetadataResponse(result: unknown) {
   });
 }
 
+function errorResponse(status: number, code: number) {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      errors: [{ code, message: "provider message must remain private" }],
+      messages: [],
+      result: null,
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+}
+
 describe("Cloudflare processing resource API", () => {
   it("accepts only the exact private Logpush destination and credential scope", () => {
     const destination =
@@ -105,7 +117,7 @@ describe("Cloudflare processing resource API", () => {
     await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
   });
 
-  it("identifies a Cloudflare service that returns a non-JSON response", async () => {
+  it("identifies a Cloudflare service that returns invalid JSON", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
       if (path.endsWith("/queues")) {
@@ -126,7 +138,51 @@ describe("Cloudflare processing resource API", () => {
       logpushR2SecretAccessKey: "secret-key",
     });
 
-    await expect(api.readInventory()).rejects.toThrow(/^Cloudflare Queues API was not JSON$/);
+    await expect(api.readInventory()).rejects.toThrow(
+      /^Cloudflare Queues API response was invalid JSON$/,
+    );
+  });
+
+  it("reads private R2 state when CORS is unset and Sippy JSON is text/plain", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/r2/buckets")) {
+        return response({ buckets: [{ name: config.usageLogBucketName }] });
+      }
+      if (path.endsWith("/cors")) return errorResponse(404, 10059);
+      if (path.endsWith("/lifecycle")) return response({ rules: [] });
+      if (path.endsWith("/domains/custom")) return response({ domains: [] });
+      if (path.endsWith("/domains/managed")) return response({ enabled: false });
+      if (path.endsWith("/sippy")) {
+        return new Response(
+          JSON.stringify({ success: true, errors: [], messages: [], result: { enabled: false } }),
+          { headers: { "content-type": "text/plain; charset=UTF-8" } },
+        );
+      }
+      return response([]);
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.readInventory()).resolves.toMatchObject({
+      r2: [
+        {
+          name: config.usageLogBucketName,
+          lifecycleDays: -1,
+          cors: [],
+          customDomains: [],
+          r2DevEnabled: false,
+          sippyEnabled: false,
+        },
+      ],
+    });
   });
 
   it("identifies a rejected Cloudflare service without exposing its message", async () => {
