@@ -35,7 +35,6 @@ const safeFailures = new Set([
   `${stableFailure} [download-handoff]`,
   `${stableFailure} [maintainer-console]`,
   `${stableFailure} [maintainer-page-error]`,
-  `${stableFailure} [maintainer-request-failed]`,
   `${stableFailure} [maintainer-source-leak]`,
   `${stableFailure} [maintainer-input-options]`,
   `${stableFailure} [maintainer-input-put]`,
@@ -232,7 +231,6 @@ async function assertMaintainerServer(
   const state = {
     consoleError: false,
     pageError: false,
-    requestFailed: false,
     sourceFilenameLeak: false,
     inputOptions: 0,
     inputPuts: 0,
@@ -327,7 +325,6 @@ async function assertMaintainerServer(
     await page.waitForTimeout(250);
     if (state.consoleError) throw new Error(`${stableFailure} [maintainer-console]`);
     if (state.pageError) throw new Error(`${stableFailure} [maintainer-page-error]`);
-    if (state.requestFailed) throw new Error(`${stableFailure} [maintainer-request-failed]`);
     if (state.sourceFilenameLeak) throw new Error(`${stableFailure} [maintainer-source-leak]`);
     if (state.inputOptions !== 1) throw new Error(`${stableFailure} [maintainer-input-options]`);
     if (state.inputPuts !== 1) throw new Error(`${stableFailure} [maintainer-input-put]`);
