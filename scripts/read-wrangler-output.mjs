@@ -49,8 +49,19 @@ function selectOne(records, type) {
 }
 
 function validateWorker(record) {
-  if (!Array.isArray(record.targets) || record.targets.length !== 1) {
-    throw new TypeError("Worker deploy must contain exactly one target");
+  if (
+    !Array.isArray(record.targets) ||
+    record.targets.length === 0 ||
+    record.targets.length > 100
+  ) {
+    throw new TypeError("Worker deploy targets are invalid");
+  }
+  if (
+    record.targets.some(
+      (target) => typeof target !== "string" || target.length === 0 || target.length > 2_048,
+    )
+  ) {
+    throw new TypeError("Worker deploy target is invalid");
   }
   assertHttps(record.targets[0], "Worker target");
   if (typeof record.version_id !== "string" || record.version_id.length === 0) {

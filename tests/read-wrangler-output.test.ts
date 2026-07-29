@@ -7,7 +7,12 @@ const worker = {
   worker_name: "hereisit-processing-staging",
   worker_tag: "tag",
   version_id: "11111111-2222-3333-4444-555555555555",
-  targets: ["https://hereisit-processing-staging.example.workers.dev"],
+  targets: [
+    "https://hereisit-processing-staging.example.workers.dev",
+    "schedule: */5 * * * *",
+    "Producer for hereisit-image-jobs-staging",
+    "Consumer for hereisit-image-jobs-staging",
+  ],
   wrangler_environment: null,
   worker_name_overridden: false,
 };
@@ -66,6 +71,7 @@ describe("Wrangler NDJSON reader", () => {
     ["missing deploy", ndjson({ type: "notice", version: 1 })],
     ["duplicate deploy", ndjson(worker, worker)],
     ["non-HTTPS target", ndjson({ ...worker, targets: ["http://example.test"] })],
+    ["invalid trigger target", ndjson({ ...worker, targets: [worker.targets[0], 1] })],
   ])("rejects %s", (_label, text) => {
     expect(() => readWranglerOutput({ text, event: "deploy" })).toThrow();
   });
