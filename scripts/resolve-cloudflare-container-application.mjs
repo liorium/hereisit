@@ -59,13 +59,56 @@ function validateApplication(value) {
   return application;
 }
 
-export function resolveContainerApplication(inputValue) {
-  const input = assertObject(inputValue, "Container application resolution input");
-  assertExactKeys(
-    input,
-    ["environment", "accountId", "workerScriptName", "engineImage", "observedAt", "applications"],
-    "Container application resolution input",
+function validateApplicationDetail(value) {
+  const application = assertObject(value, "Container application detail");
+  if (!uuidPattern.test(application.id)) throw new TypeError("Container application ID is invalid");
+  if (typeof application.name !== "string" || application.name.length > 128) {
+    throw new TypeError("Container application name is invalid");
+  }
+  if (!Number.isSafeInteger(application.instances) || application.instances < 0) {
+    throw new TypeError("Container application instance count is invalid");
+  }
+  if (!Number.isSafeInteger(application.version) || application.version < 1) {
+    throw new TypeError("Container application version is invalid");
+  }
+  assertIsoTimestamp(application.updated_at, "Container application update time");
+  assertIsoTimestamp(application.created_at, "Container application creation time");
+  const configuration = assertObject(
+    application.configuration,
+    "Container application configuration",
   );
+  if (typeof configuration.image !== "string" || configuration.image.length > 512) {
+    throw new TypeError("Container application image is invalid");
+  }
+  const health = assertObject(application.health, "Container application health");
+  const healthInstances = assertObject(health.instances, "Container application instance health");
+  for (const key of ["failed", "starting", "scheduling", "active"]) {
+    if (!Number.isSafeInteger(healthInstances[key]) || healthInstances[key] < 0) {
+      throw new TypeError("Container application health is invalid");
+    }
+  }
+  const state =
+    healthInstances.failed > 0
+      ? "degraded"
+      : healthInstances.starting > 0 || healthInstances.scheduling > 0
+        ? "provisioning"
+        : healthInstances.active > 0
+          ? "active"
+          : "ready";
+  return {
+    id: application.id,
+    accountId: application.account_id,
+    name: application.name,
+    state,
+    instances: application.instances,
+    image: configuration.image,
+    version: application.version,
+    updated_at: application.updated_at,
+    created_at: application.created_at,
+  };
+}
+
+function validateIdentity(input) {
   if (input.environment !== "staging" && input.environment !== "production") {
     throw new TypeError("Container application environment is invalid");
   }
@@ -79,29 +122,10 @@ export function resolveContainerApplication(inputValue) {
   ) {
     throw new TypeError("Container application Worker name is invalid");
   }
-  const imageMatch =
-    typeof input.engineImage === "string" ? digestImagePattern.exec(input.engineImage) : null;
-  if (imageMatch?.[1] !== input.accountId) {
-    throw new TypeError("Container application image is not an immutable account image");
-  }
-  assertIsoTimestamp(input.observedAt, "Container application observation time");
-  if (!Array.isArray(input.applications) || input.applications.length > 1_000) {
-    throw new TypeError("Container application inventory is invalid");
-  }
-  const expectedName = `${input.workerScriptName}-ImageEngineContainer`.toLowerCase();
-  const matches = input.applications
-    .map(validateApplication)
-    .filter((application) => application.name === expectedName);
-  if (matches.length !== 1) {
-    throw new TypeError("Container application inventory must contain exactly one expected app");
-  }
-  const application = matches[0];
-  if (application.image !== input.engineImage) {
-    throw new TypeError("Container application image does not match the release digest");
-  }
-  if (!acceptedStates.has(application.state)) {
-    throw new TypeError("Container application is degraded or unavailable");
-  }
+  return `${input.workerScriptName}-ImageEngineContainer`.toLowerCase();
+}
+
+function sealApplication(input, application) {
   const unsigned = {
     schema: "hereisit-container-provider-scope@1",
     version: 1,
@@ -117,6 +141,97 @@ export function resolveContainerApplication(inputValue) {
     },
   };
   return { ...unsigned, verificationSha256: sha256Canonical(unsigned) };
+}
+
+export function resolveContainerApplicationId(inputValue) {
+  const input = assertObject(inputValue, "Container application discovery input");
+  assertExactKeys(
+    input,
+    ["environment", "accountId", "workerScriptName", "applications"],
+    "Container application discovery input",
+  );
+  const expectedName = validateIdentity(input);
+  if (!Array.isArray(input.applications) || input.applications.length > 1_000) {
+    throw new TypeError("Container application inventory is invalid");
+  }
+  const matches = input.applications
+    .map(validateApplication)
+    .filter((application) => application.name === expectedName);
+  if (matches.length !== 1) {
+    throw new TypeError("Container application inventory must contain exactly one expected app");
+  }
+  const application = matches[0];
+  if (digestImagePattern.exec(application.image)?.[1] !== input.accountId) {
+    throw new TypeError("Container application summary image is outside the account registry");
+  }
+  if (!acceptedStates.has(application.state)) {
+    throw new TypeError("Container application is degraded or unavailable");
+  }
+  return application.id;
+}
+
+export function resolveContainerApplicationDetail(inputValue) {
+  const input = assertObject(inputValue, "Container application detail input");
+  assertExactKeys(
+    input,
+    [
+      "environment",
+      "accountId",
+      "workerScriptName",
+      "applicationId",
+      "engineImage",
+      "observedAt",
+      "application",
+    ],
+    "Container application detail input",
+  );
+  const { accountId: detailAccountId, ...application } = validateApplicationDetail(
+    input.application,
+  );
+  if (application.id !== input.applicationId || detailAccountId !== input.accountId) {
+    throw new TypeError("Container application detail identity does not match");
+  }
+  return resolveContainerApplication({
+    environment: input.environment,
+    accountId: input.accountId,
+    workerScriptName: input.workerScriptName,
+    engineImage: input.engineImage,
+    observedAt: input.observedAt,
+    applications: [application],
+  });
+}
+
+export function resolveContainerApplication(inputValue) {
+  const input = assertObject(inputValue, "Container application resolution input");
+  assertExactKeys(
+    input,
+    ["environment", "accountId", "workerScriptName", "engineImage", "observedAt", "applications"],
+    "Container application resolution input",
+  );
+  const expectedName = validateIdentity(input);
+  const imageMatch =
+    typeof input.engineImage === "string" ? digestImagePattern.exec(input.engineImage) : null;
+  if (imageMatch?.[1] !== input.accountId) {
+    throw new TypeError("Container application image is not an immutable account image");
+  }
+  assertIsoTimestamp(input.observedAt, "Container application observation time");
+  if (!Array.isArray(input.applications) || input.applications.length > 1_000) {
+    throw new TypeError("Container application inventory is invalid");
+  }
+  const matches = input.applications
+    .map(validateApplication)
+    .filter((application) => application.name === expectedName);
+  if (matches.length !== 1) {
+    throw new TypeError("Container application inventory must contain exactly one expected app");
+  }
+  const application = matches[0];
+  if (application.image !== input.engineImage) {
+    throw new TypeError("Container application image does not match the release digest");
+  }
+  if (!acceptedStates.has(application.state)) {
+    throw new TypeError("Container application is degraded or unavailable");
+  }
+  return sealApplication(input, application);
 }
 
 async function readBoundedJson(path) {
@@ -139,26 +254,34 @@ async function readBoundedJson(path) {
 
 export async function runContainerApplicationResolver(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
-  const expectedKeys = new Set([
-    "input",
-    "output",
-    "environment",
-    "account-id",
-    "worker-script-name",
-    "engine-image",
-    "observed-at",
-  ]);
-  if (Object.keys(args).some((key) => !expectedKeys.has(key))) {
+  const commonKeys = ["mode", "input", "environment", "account-id", "worker-script-name"];
+  const expectedKeys =
+    args.mode === "discover"
+      ? new Set(commonKeys)
+      : new Set([...commonKeys, "output", "application-id", "engine-image", "observed-at"]);
+  if (
+    (args.mode !== "discover" && args.mode !== "verify") ||
+    Object.keys(args).some((key) => !expectedKeys.has(key))
+  ) {
     throw new TypeError("unknown Container application resolver argument");
   }
   for (const key of expectedKeys) {
     if (args[key] === undefined) throw new TypeError(`--${key} is required`);
   }
-  const result = resolveContainerApplication({
-    applications: await readBoundedJson(resolve(args.input)),
+  const common = {
     environment: args.environment,
     accountId: args["account-id"],
     workerScriptName: args["worker-script-name"],
+  };
+  const document = await readBoundedJson(resolve(args.input));
+  if (args.mode === "discover") {
+    stdout.write(`${resolveContainerApplicationId({ ...common, applications: document })}\n`);
+    return;
+  }
+  const result = resolveContainerApplicationDetail({
+    ...common,
+    application: document,
+    applicationId: args["application-id"],
     engineImage: args["engine-image"],
     observedAt: args["observed-at"],
   });

@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { resolveContainerApplication } from "../scripts/resolve-cloudflare-container-application.mjs";
+import {
+  resolveContainerApplication,
+  resolveContainerApplicationDetail,
+  resolveContainerApplicationId,
+} from "../scripts/resolve-cloudflare-container-application.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const applicationId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const image = `registry.cloudflare.com/${accountId}/hereisit-image-engine@sha256:${"d".repeat(64)}`;
+const previousImage = `registry.cloudflare.com/${accountId}/hereisit-image-engine@sha256:${"a".repeat(64)}`;
 const input = {
   environment: "staging" as const,
   accountId,
@@ -21,6 +26,23 @@ function application(overrides: Record<string, unknown> = {}) {
     image,
     version: 1,
     updated_at: "2026-07-29T09:49:00.377999872Z",
+    created_at: "2026-07-29T09:48:59.340999936Z",
+    ...overrides,
+  };
+}
+
+function applicationDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    id: applicationId,
+    account_id: accountId,
+    name: "hereisit-processing-staging-imageenginecontainer",
+    instances: 1,
+    version: 2,
+    configuration: { image },
+    health: {
+      instances: { failed: 0, starting: 0, scheduling: 0, active: 0 },
+    },
+    updated_at: "2026-07-29T10:54:15.468999936Z",
     created_at: "2026-07-29T09:48:59.340999936Z",
     ...overrides,
   };
@@ -51,6 +73,46 @@ describe("Cloudflare Container application resolver", () => {
     });
     expect(result.verificationSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(result)).not.toMatch(/token|secret/i);
+  });
+
+  it("discovers the exact app while its active summary still has the previous image", () => {
+    expect(
+      resolveContainerApplicationId({
+        environment: input.environment,
+        accountId,
+        workerScriptName: input.workerScriptName,
+        applications: [application({ image: previousImage })],
+      }),
+    ).toBe(applicationId);
+  });
+
+  it("seals the current application detail configuration", () => {
+    const result = resolveContainerApplicationDetail({
+      ...input,
+      applicationId,
+      application: applicationDetail(),
+    });
+
+    expect(result).toMatchObject({
+      application: {
+        id: applicationId,
+        image,
+        version: 2,
+        state: "ready",
+      },
+    });
+  });
+
+  it("rejects a detail configuration with another image", () => {
+    expect(() =>
+      resolveContainerApplicationDetail({
+        ...input,
+        applicationId,
+        application: applicationDetail({
+          configuration: { image: previousImage },
+        }),
+      }),
+    ).toThrow(/image/i);
   });
 
   it.each([

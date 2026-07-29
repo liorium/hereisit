@@ -151,6 +151,19 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain("printf '[]\\n' > .artifacts/runtime/versions-before.json");
   });
 
+  it("discovers the exact Container app and verifies its current configuration", () => {
+    const deploy = jobBody("deploy");
+    const discover = deploy.indexOf("--mode discover");
+    const info = deploy.indexOf('containers info "$STAGING_CONTAINER_APPLICATION_ID"');
+    const verify = deploy.indexOf("--mode verify");
+
+    expect(discover).toBeGreaterThanOrEqual(0);
+    expect(info).toBeGreaterThan(discover);
+    expect(verify).toBeGreaterThan(info);
+    expect(deploy).toContain('--application-id "$STAGING_CONTAINER_APPLICATION_ID"');
+    expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
+  });
+
   it("uploads only sanitized deployment evidence", () => {
     const upload = actionStep(jobBody("deploy"), "actions/upload-artifact@");
     const paths = [...upload.matchAll(/^\s+(.artifacts\/deployment\/[^\s]+)$/gm)].map(
