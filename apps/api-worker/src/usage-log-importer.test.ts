@@ -116,6 +116,27 @@ describe("private R2 usage-log importer", () => {
     expect(deps.openCircuit).not.toHaveBeenCalled();
   });
 
+  it("ignores Cloudflare's documented R2 ownership challenge object", async () => {
+    const challenge = objectMetadata({
+      key: "logs/20260729/test.txt.gz",
+      size: 41,
+    });
+    const deps = dependencies({
+      bucket: {
+        list: vi.fn(async () => completeList([challenge])),
+        get: vi.fn(),
+      },
+    });
+
+    await expect(importUsageLogPage(deps, { observedAt, prefix: "logs/" })).resolves.toEqual({
+      kind: "complete",
+      importedObjects: 0,
+      replayedObjects: 0,
+    });
+    expect(deps.bucket.get).not.toHaveBeenCalled();
+    expect(deps.openCircuit).not.toHaveBeenCalled();
+  });
+
   it("fails closed before GET when the compressed object exceeds its bound", async () => {
     const metadata = objectMetadata({ size: 64 * 1024 * 1024 + 1 });
     const deps = dependencies({

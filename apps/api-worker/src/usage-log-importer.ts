@@ -96,6 +96,12 @@ function isSafeMetadata(object: R2Object, prefix: string): boolean {
   );
 }
 
+function isOwnershipChallenge(object: R2Object, prefix: string): boolean {
+  return (
+    object.key.startsWith(prefix) && /^\d{8}\/test\.txt\.gz$/.test(object.key.slice(prefix.length))
+  );
+}
+
 function hasBody(object: R2ObjectBody | R2Object | null): object is R2ObjectBody {
   return object !== null && "body" in object && object.body instanceof ReadableStream;
 }
@@ -129,6 +135,7 @@ export async function importUsageLogPage(
   const listed = await dependencies.bucket.list(listOptions);
   const openCircuit = dependencies.openCircuit ?? openUsageLogCircuit;
   const record = dependencies.record ?? recordParsedUsageLog;
+  const objects = listed.objects.filter((object) => !isOwnershipChallenge(object, input.prefix));
   let importedObjects = 0;
   let replayedObjects = 0;
 
@@ -139,12 +146,12 @@ export async function importUsageLogPage(
 
   if (
     listed.objects.length > limit ||
-    listed.objects.some((object) => !isSafeMetadata(object, input.prefix))
+    objects.some((object) => !isSafeMetadata(object, input.prefix))
   ) {
     return failClosed("USAGE_LOG_IMPORT_INVALID");
   }
 
-  for (const metadata of listed.objects) {
+  for (const metadata of objects) {
     const object = await dependencies.bucket.get(metadata.key, {
       onlyIf: { etagMatches: metadata.etag },
     });
