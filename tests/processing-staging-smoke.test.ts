@@ -70,6 +70,9 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("maintainer: true");
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
+    expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
+      source.indexOf("await page.locator('[data-policy=\"server\"] strong')"),
+    );
   });
 
   it("does not expose a production result-minting dependency parameter", async () => {
@@ -226,5 +229,18 @@ describe("authenticated processing staging smoke", () => {
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
       }),
     ).rejects.not.toThrow(sessionId);
+  });
+
+  it("preserves only allowlisted policy phase diagnostics", async () => {
+    const output = await outputPath();
+    browserSmoke.mockRejectedValue(
+      new Error("processing staging smoke failed [maintainer-policy]"),
+    );
+    await expect(
+      runProcessingStagingSmokeCli({
+        argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
+        environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
+      }),
+    ).rejects.toThrow("processing staging smoke failed [maintainer-policy]");
   });
 });

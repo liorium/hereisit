@@ -17,6 +17,10 @@ const jobIdPattern = new RegExp(`/v1/jobs/${JOB_UUID_SEGMENT}`, "g");
 const inputPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/input$`);
 const downloadedPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/downloaded$`);
 const stableFailure = "processing staging smoke failed";
+const safeFailures = new Set([
+  `${stableFailure} [public-policy]`,
+  `${stableFailure} [maintainer-policy]`,
+]);
 
 export function projectSmokeRequest({ method, url, bodyBytes }) {
   const path = new URL(url).pathname.replace(jobIdPattern, "/v1/jobs/[job]");
@@ -115,7 +119,9 @@ async function assertPolicies(state, expected) {
         policy.reason !== expected.reason,
     )
   ) {
-    throw new Error(stableFailure);
+    throw new Error(
+      `${stableFailure} [${expected.maintainer ? "maintainer-policy" : "public-policy"}]`,
+    );
   }
 }
 
@@ -149,12 +155,12 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
       waitUntil: "networkidle",
       timeout: timeoutMs,
     });
-    await page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs });
     await assertPolicies(state, {
       maintainer: false,
       execution: "local",
       reason: "LOCAL_FALLBACK_REQUIRED",
     });
+    await page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs });
     await page.waitForTimeout(250);
     if (
       state.jobRequest ||
@@ -236,6 +242,7 @@ async function assertMaintainerServer(
       waitUntil: "networkidle",
       timeout: timeoutMs,
     });
+    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs });
     const source = await readFile(sourcePath);
     await page.locator('input[type="file"]').setInputFiles({
@@ -263,7 +270,6 @@ async function assertMaintainerServer(
     for await (const chunk of stream) downloadBytes += chunk.byteLength;
     if (downloadBytes < 1) throw new Error(stableFailure);
     await Promise.all(sizeReads);
-    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await page.waitForTimeout(250);
     if (
       state.consoleError ||
@@ -417,7 +423,10 @@ export async function runProcessingStagingSmokeCli({ argv, environment }) {
       mode: 0o600,
     });
     return result;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && safeFailures.has(error.message)) {
+      throw new Error(error.message);
+    }
     throw new Error(stableFailure);
   }
 }
