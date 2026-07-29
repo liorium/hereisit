@@ -32,6 +32,7 @@ function model(): LiveCostModelV1 {
     analyticsEngineMillionDataPointsMicrousd: 1_000_000,
     analyticsEngineMillionReadQueriesMicrousd: 1_000_000,
     monthlyFixedMicrousd: 720,
+    projectedMonthlyJobs: 10_000,
     routeCpuBenchmarkSha256: "b".repeat(64),
     routeCpuEnvelopeMs: {
       policy: 1,

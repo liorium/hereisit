@@ -452,7 +452,7 @@ export function generateProcessingWrangler(input) {
       MAX_LIVE_ORIGINAL_RETAINED_RATE_BPS: String(value.maximumLiveOriginalRetainedRateBasisPoints),
       MAX_LIVE_COST_PER_1000_MICROUSD: String(value.maximumLiveCostPer1000Microusd),
       MAX_PROJECTED_MONTHLY_COST_MICROUSD: String(value.maximumProjectedMonthlyCostMicrousd),
-      LIVE_COST_MODEL_JSON: JSON.stringify(value.liveCostModel),
+      LIVE_COST_MODEL_JSON: canonicalJson(value.liveCostModel),
       LIVE_COST_MODEL_SHA256: value.liveCostModelSha256,
       PROVIDER_USAGE_SCHEMA_SHA256: value.providerUsageSchemaSha256,
       RELEASE_REPORT_SHA256: value.releaseReportSha256,
@@ -604,3 +604,4 @@ import { pathToFileURL } from "node:url";
 import providerUsageContract from "../docs/deployment/provider-usage-schema.v1.json" with {
   type: "json",
 };
+import { canonicalJson } from "./image-lab-common.mjs";

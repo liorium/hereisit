@@ -2,7 +2,12 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createLiveCostModel, liveCostModelSha256 } from "../scripts/create-live-cost-model.mjs";
+import { type Env, parseOperationalConfig } from "../apps/api-worker/src/env";
+import {
+  canonicalJson,
+  createLiveCostModel,
+  liveCostModelSha256,
+} from "../scripts/create-live-cost-model.mjs";
 import {
   CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256,
   generateProcessingWrangler,
@@ -201,7 +206,23 @@ describe("processing Wrangler generator", () => {
       liveCostModelSha256: liveCostModelSha256(liveCostModel),
     });
 
-    expect(config.vars.LIVE_COST_MODEL_JSON).toBe(JSON.stringify(liveCostModel));
+    expect(config.vars.LIVE_COST_MODEL_JSON).toBe(canonicalJson(liveCostModel));
+  });
+
+  it("generates variables accepted by the Worker runtime contract", async () => {
+    const raw = JSON.parse(
+      await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
+    );
+    const liveCostModel = createLiveCostModel(raw);
+    const config = generateProcessingWrangler({
+      ...validInput(),
+      liveCostModel,
+      liveCostModelSha256: liveCostModelSha256(liveCostModel),
+    });
+    const operational = await parseOperationalConfig(config.vars as unknown as Env);
+
+    expect(operational.environment).toBe("staging");
+    expect(operational.liveCostModel.projectedMonthlyJobs).toBe(10_000);
   });
 
   it("supports repeated origins and atomically writes the generated environment file", async () => {

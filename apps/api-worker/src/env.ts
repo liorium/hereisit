@@ -36,6 +36,7 @@ export interface LiveCostModelV1 {
   analyticsEngineMillionDataPointsMicrousd: number;
   analyticsEngineMillionReadQueriesMicrousd: number;
   monthlyFixedMicrousd: number;
+  projectedMonthlyJobs: number;
   routeCpuBenchmarkSha256: string;
   routeCpuEnvelopeMs: {
     policy: number;
@@ -146,13 +147,14 @@ const liveCostModelSchema = z
     analyticsEngineMillionDataPointsMicrousd: nonnegativeSafeIntegerSchema,
     analyticsEngineMillionReadQueriesMicrousd: nonnegativeSafeIntegerSchema,
     monthlyFixedMicrousd: nonnegativeSafeIntegerSchema,
+    projectedMonthlyJobs: nonnegativeSafeIntegerSchema.min(1),
     routeCpuBenchmarkSha256: sha256HexSchema,
     routeCpuEnvelopeMs: routeCpuEnvelopeSchema,
     arrivalProjection: arrivalProjectionSchema,
   })
   .strict();
 
-function canonicalJson(value: unknown): string {
+function canonicalJsonValue(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
@@ -163,15 +165,19 @@ function canonicalJson(value: unknown): string {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+    return `[${value.map((entry) => canonicalJsonValue(entry)).join(",")}]`;
   }
   if (typeof value === "object") {
     return `{${Object.entries(value)
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJsonValue(entry)}`)
       .join(",")}}`;
   }
   throw new TypeError("Value is not representable as canonical JSON.");
+}
+
+function canonicalJson(value: unknown): string {
+  return `${canonicalJsonValue(value)}\n`;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -310,9 +316,9 @@ async function parseLiveCostModel(
     sha256Hex(canonicalJson(model.containerEgressRegionPricesMicrousd)),
     sha256Hex(
       canonicalJson({
-        steadyHourlyJobs: model.arrivalProjection.steadyHourlyJobs,
-        burstyHourlyJobs: model.arrivalProjection.burstyHourlyJobs,
-        sparseHourlyJobs: model.arrivalProjection.sparseHourlyJobs,
+        steady: model.arrivalProjection.steadyHourlyJobs,
+        bursty: model.arrivalProjection.burstyHourlyJobs,
+        sparse: model.arrivalProjection.sparseHourlyJobs,
       }),
     ),
   ]);

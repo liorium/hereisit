@@ -31,17 +31,21 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function canonicalJson(value: unknown): string {
+function canonicalJsonValue(value: unknown): string {
   if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+    return `[${value.map((entry) => canonicalJsonValue(entry)).join(",")}]`;
   }
   if (value !== null && typeof value === "object") {
     return `{${Object.entries(value)
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJsonValue(entry)}`)
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function canonicalJson(value: unknown): string {
+  return `${canonicalJsonValue(value)}\n`;
 }
 
 function makeTimingSafeEqualSpy() {
@@ -82,9 +86,9 @@ function arrivalScenariosHash(input: {
 }): string {
   return sha256Hex(
     canonicalJson({
-      steadyHourlyJobs: input.steadyHourlyJobs,
-      burstyHourlyJobs: input.burstyHourlyJobs,
-      sparseHourlyJobs: input.sparseHourlyJobs,
+      steady: input.steadyHourlyJobs,
+      bursty: input.burstyHourlyJobs,
+      sparse: input.sparseHourlyJobs,
     }),
   );
 }
@@ -119,6 +123,7 @@ function makeLiveCostModel() {
     analyticsEngineMillionDataPointsMicrousd: 19,
     analyticsEngineMillionReadQueriesMicrousd: 20,
     monthlyFixedMicrousd: 21,
+    projectedMonthlyJobs: 10_000,
     routeCpuBenchmarkSha256: "1".repeat(64),
     routeCpuEnvelopeMs: {
       policy: 1,
