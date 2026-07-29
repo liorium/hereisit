@@ -58,18 +58,19 @@ function validateVersion(value, label) {
   const metadata = assertObject(version.metadata, `${label} metadata`);
   assertExactKeys(
     metadata,
-    ["author_email", "author_id", "created_on", "hasPreview", "modified_on", "source"],
+    ["author_email", "author_id", "created_on", "has_preview", "source"],
     `${label} metadata`,
   );
-  if (typeof metadata.author_email !== "string" || metadata.author_email.length === 0) {
+  if (typeof metadata.author_email !== "string" || metadata.author_email.length > 320) {
     throw new TypeError(`${label} author email is invalid`);
   }
   if (typeof metadata.author_id !== "string" || !authorIdPattern.test(metadata.author_id)) {
     throw new TypeError(`${label} author ID is invalid`);
   }
   assertCanonicalTimestamp(metadata.created_on, `${label} creation time`);
-  assertCanonicalTimestamp(metadata.modified_on, `${label} modification time`);
-  if (metadata.hasPreview !== true) throw new TypeError(`${label} must be deployable`);
+  if (typeof metadata.has_preview !== "boolean") {
+    throw new TypeError(`${label} preview flag is invalid`);
+  }
   if (!allowedSources.has(metadata.source)) throw new TypeError(`${label} source is invalid`);
 
   const annotations = assertObject(version.annotations, `${label} annotations`);

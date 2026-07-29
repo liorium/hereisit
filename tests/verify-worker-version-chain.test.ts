@@ -29,11 +29,10 @@ function cloudflareVersion(id: string, number: number, trigger: "upload" | "secr
     id,
     number,
     metadata: {
-      author_email: "deployment@example.invalid",
+      author_email: "",
       author_id: "a".repeat(32),
       created_on: timestamp,
-      hasPreview: true,
-      modified_on: timestamp,
+      has_preview: false,
       source: "wrangler",
     },
     annotations: { "workers/triggered_by": trigger },

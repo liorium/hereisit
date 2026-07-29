@@ -11,11 +11,10 @@ const version = {
   id: activeId,
   number: 1,
   metadata: {
-    author_email: "deploy@example.com",
+    author_email: "",
     author_id: "a".repeat(32),
     created_on: "2026-07-22T00:00:00.000Z",
-    hasPreview: true,
-    modified_on: "2026-07-22T00:00:00.000Z",
+    has_preview: false,
     source: "wrangler",
   },
   annotations: { "workers/triggered_by": "upload" },
