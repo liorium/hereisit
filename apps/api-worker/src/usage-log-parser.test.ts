@@ -7,12 +7,12 @@ const versionId = "550e8400-e29b-41d4-a716-446655440000";
 function record(overrides: Record<string, unknown> = {}) {
   return {
     CPUTimeMs: 7,
-    Entrypoint: "fetch",
+    Entrypoint: "",
     EventTimestampMs: 3_600_123,
     EventType: "fetch",
     Outcome: "ok",
     ScriptName: "hereisit-processing-staging",
-    ScriptVersion: { id: versionId, message: "release", tag: "staging" },
+    ScriptVersion: { ID: versionId, Message: "release", Tag: "staging" },
     ...overrides,
   };
 }
@@ -34,7 +34,7 @@ function chunked(text: string, chunkSize: number): ReadableStream<Uint8Array> {
 
 const options = {
   scriptName: "hereisit-processing-staging",
-  handlerEntrypoints: new Set(["fetch", "queue", "scheduled"]),
+  allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
   allowedVersionIds: new Set([versionId]),
   createDigest: () => ({
     update: async () => undefined,
@@ -56,15 +56,21 @@ describe("Workers Trace Events usage-log parser", () => {
   it("aggregates arbitrarily chunked records by event-start hour", async () => {
     const input = `${JSON.stringify(record())}\n${JSON.stringify(
       record({ CPUTimeMs: 5, EventTimestampMs: 3_700_000, EventType: "alarm" }),
+    )}\n${JSON.stringify(
+      record({
+        CPUTimeMs: 2,
+        Entrypoint: "ImageEngineContainer",
+        EventTimestampMs: 3_800_000,
+      }),
     )}\n`;
 
     await expect(parseTraceEventNdjson(chunked(input, 3), options)).resolves.toMatchObject({
-      invocationCount: 2,
+      invocationCount: 3,
       hours: [
         {
           hourKey: 1,
-          invocationCount: 2,
-          workerCpuMs: 12,
+          invocationCount: 3,
+          workerCpuMs: 14,
           handlerInvocationCount: 1,
         },
       ],
@@ -76,7 +82,7 @@ describe("Workers Trace Events usage-log parser", () => {
     record({ EventType: "email" }),
     record({ Outcome: "exceededCpu" }),
     record({ ScriptName: "other-worker" }),
-    record({ ScriptVersion: { id: crypto.randomUUID(), message: "x", tag: "x" } }),
+    record({ ScriptVersion: { ID: crypto.randomUUID(), Message: "x", Tag: "x" } }),
     { ...record(), Event: { request: { url: "https://private.example" } } },
   ])("rejects unapproved values or any extra privacy-sensitive field", async (value) => {
     await expect(

@@ -24,12 +24,12 @@ function nodeDigest(): StreamingDigest {
 function traceRecord(overrides: Record<string, unknown> = {}) {
   return {
     CPUTimeMs: 7,
-    Entrypoint: "default",
+    Entrypoint: "",
     EventTimestampMs: observedAt - 3_600_000,
     EventType: "fetch",
     Outcome: "ok",
     ScriptName: "hereisit-processing-staging",
-    ScriptVersion: { id: versionId, message: null, tag: null },
+    ScriptVersion: { ID: versionId, Message: null, Tag: null },
     ...overrides,
   };
 }
@@ -74,7 +74,7 @@ function dependencies(overrides: Partial<UsageLogImporterDependencies> = {}) {
     database: {} as D1Database,
     parserOptions: {
       scriptName: "hereisit-processing-staging",
-      handlerEntrypoints: new Set(["default"]),
+      allowedEntrypoints: new Set([""]),
       allowedVersionIds: new Set([versionId]),
       createDigest: nodeDigest,
     },

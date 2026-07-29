@@ -168,7 +168,7 @@ export function createCostAccountingRuntime(
           database: env.DB,
           parserOptions: {
             scriptName: config.workerScriptName,
-            handlerEntrypoints: new Set(["default", "queue", "scheduled"]),
+            allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
             allowedVersionIds: new Set(versions.map((entry) => entry.version_id)),
             createDigest: createCloudflareSha256Digest,
           },

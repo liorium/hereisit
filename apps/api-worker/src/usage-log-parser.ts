@@ -10,16 +10,16 @@ const HANDLER_EVENT_TYPES = new Set(["fetch", "queue", "scheduled"]);
 const traceEventSchema = z
   .object({
     CPUTimeMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    Entrypoint: z.string().min(1).max(128),
+    Entrypoint: z.string().max(128),
     EventTimestampMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     EventType: z.enum(["fetch", "scheduled", "alarm", "queue", "worker_rpc"]),
     Outcome: z.enum(["ok", "canceled", "exception", "unknown"]),
     ScriptName: z.string().min(1).max(128),
     ScriptVersion: z
       .object({
-        id: z.string().regex(UUID_PATTERN),
-        message: z.string().max(2_048).nullable(),
-        tag: z.string().max(256).nullable(),
+        ID: z.string().regex(UUID_PATTERN),
+        Message: z.string().max(2_048).nullable(),
+        Tag: z.string().max(256).nullable(),
       })
       .strict(),
   })
@@ -32,7 +32,7 @@ export interface StreamingDigest {
 
 export interface TraceEventParserOptions {
   readonly scriptName: string;
-  readonly handlerEntrypoints: ReadonlySet<string>;
+  readonly allowedEntrypoints: ReadonlySet<string>;
   readonly allowedVersionIds: ReadonlySet<string>;
   readonly createDigest: () => StreamingDigest;
   readonly maximumDecompressedBytes?: number;
@@ -106,7 +106,7 @@ export async function parseTraceEventNdjson(
   if (options.scriptName.length < 1 || options.scriptName.length > 128) {
     throw new TypeError("Trace script name must be bounded.");
   }
-  if (options.handlerEntrypoints.size < 1 || options.allowedVersionIds.size < 1) {
+  if (options.allowedEntrypoints.size < 1 || options.allowedVersionIds.size < 1) {
     throw new TypeError("Trace parser allowlists must not be empty.");
   }
   const maximumDecompressedBytes = options.maximumDecompressedBytes ?? MAXIMUM_DECOMPRESSED_BYTES;
@@ -138,14 +138,11 @@ export async function parseTraceEventNdjson(
     if (event.ScriptName !== options.scriptName) {
       throw new TypeError("Trace log belongs to an unexpected Worker script.");
     }
-    if (!options.allowedVersionIds.has(event.ScriptVersion.id)) {
+    if (!options.allowedVersionIds.has(event.ScriptVersion.ID)) {
       throw new TypeError("Trace log contains an unattested Worker version.");
     }
-    if (
-      HANDLER_EVENT_TYPES.has(event.EventType) &&
-      !options.handlerEntrypoints.has(event.Entrypoint)
-    ) {
-      throw new TypeError("Trace log contains an unexpected handler entrypoint.");
+    if (!options.allowedEntrypoints.has(event.Entrypoint)) {
+      throw new TypeError("Trace log contains an unexpected Worker entrypoint.");
     }
 
     invocationCount = checkedAdd(invocationCount, 1, "Trace invocation count");
@@ -163,7 +160,7 @@ export async function parseTraceEventNdjson(
       workerCpuMs: checkedAdd(prior?.workerCpuMs ?? 0, event.CPUTimeMs, "Hourly Worker CPU"),
       handlerInvocationCount: checkedAdd(
         prior?.handlerInvocationCount ?? 0,
-        HANDLER_EVENT_TYPES.has(event.EventType) ? 1 : 0,
+        HANDLER_EVENT_TYPES.has(event.EventType) && event.Entrypoint === "" ? 1 : 0,
         "Hourly handler invocation count",
       ),
       digest: hourDigest,
