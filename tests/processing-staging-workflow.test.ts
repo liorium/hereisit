@@ -141,6 +141,16 @@ describe("processing staging workflow", () => {
     expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
   });
 
+  it("treats only Cloudflare's missing Worker code as an empty first-deploy snapshot", () => {
+    const deploy = jobBody("deploy");
+
+    expect(deploy).toContain(
+      'if ! pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json',
+    );
+    expect(deploy).toContain("grep -Fq '[code: 10007]'");
+    expect(deploy).toContain("printf '[]\\n' > .artifacts/runtime/versions-before.json");
+  });
+
   it("uploads only sanitized deployment evidence", () => {
     const upload = actionStep(jobBody("deploy"), "actions/upload-artifact@");
     const paths = [...upload.matchAll(/^\s+(.artifacts\/deployment\/[^\s]+)$/gm)].map(
