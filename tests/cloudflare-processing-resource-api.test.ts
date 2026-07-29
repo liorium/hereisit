@@ -117,6 +117,43 @@ describe("Cloudflare processing resource API", () => {
     await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
   });
 
+  it("reads exact Queue Worker consumer identities", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/queues")) {
+        return response([
+          {
+            queue_id: "1".repeat(32),
+            queue_name: config.queueName,
+            settings: { delivery_paused: true },
+            consumers_total_count: 1,
+            consumers: [{ script_name: config.workerScriptName }],
+          },
+        ]);
+      }
+      if (path.endsWith("/r2/buckets")) return response({ buckets: [] });
+      return response([]);
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.readInventory()).resolves.toMatchObject({
+      queues: [
+        {
+          consumerCount: 1,
+          consumerScriptNames: [config.workerScriptName],
+        },
+      ],
+    });
+  });
+
   it("identifies a Cloudflare service that returns invalid JSON", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;

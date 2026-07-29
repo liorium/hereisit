@@ -55,8 +55,16 @@ const inventory = {
       name: config.queueName,
       deliveryPaused: true,
       consumerCount: 0,
+      consumerScriptNames: [],
     },
-    { id: "2".repeat(32), accountId, name: config.dlqName, deliveryPaused: true, consumerCount: 0 },
+    {
+      id: "2".repeat(32),
+      accountId,
+      name: config.dlqName,
+      deliveryPaused: true,
+      consumerCount: 0,
+      consumerScriptNames: [],
+    },
   ],
   logpush: [
     {

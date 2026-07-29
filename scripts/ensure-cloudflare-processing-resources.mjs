@@ -99,8 +99,13 @@ function validateQueue(resource, config) {
   if (resource.deliveryPaused !== true) {
     throw new TypeError("new processing Queues must remain paused during provisioning");
   }
-  if (resource.consumerCount !== 0) {
-    throw new TypeError("new processing Queues must not have consumers during provisioning");
+  if (
+    !Array.isArray(resource.consumerScriptNames) ||
+    resource.consumerCount !== resource.consumerScriptNames.length ||
+    resource.consumerCount > 1 ||
+    resource.consumerScriptNames.some((name) => name !== config.workerScriptName)
+  ) {
+    throw new TypeError("processing Queues may only use the exact processing Worker consumer");
   }
 }
 

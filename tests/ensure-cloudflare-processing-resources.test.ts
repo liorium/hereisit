@@ -57,6 +57,7 @@ function resources() {
         name: config.queueName,
         deliveryPaused: true,
         consumerCount: 0,
+        consumerScriptNames: [],
       },
       {
         id: "2".repeat(32),
@@ -64,6 +65,7 @@ function resources() {
         name: config.dlqName,
         deliveryPaused: true,
         consumerCount: 0,
+        consumerScriptNames: [],
       },
     ],
     logpush: [
@@ -145,6 +147,17 @@ describe("Cloudflare processing resource planner", () => {
     expect(planProcessingResources({ config, inventory: resources() }).actions).toEqual([]);
   });
 
+  it("resumes provisioning with only the exact processing Worker consumer", () => {
+    const inventory = resources();
+    inventory.queues = inventory.queues.map((queue) => ({
+      ...queue,
+      consumerCount: 1,
+      consumerScriptNames: [config.workerScriptName],
+    }));
+
+    expect(planProcessingResources({ config, inventory }).actions).toEqual([]);
+  });
+
   it("seals a converged, credential-free provisioning manifest", () => {
     const manifest = buildProcessingProvisionManifest({
       config,
@@ -172,7 +185,8 @@ describe("Cloudflare processing resource planner", () => {
     ["R2 CORS", "r2", { cors: [{ origins: ["*"] }] }],
     ["wrong lifecycle", "r2", { lifecycleDays: 30 }],
     ["active Queue", "queues", { deliveryPaused: false }],
-    ["existing consumer", "queues", { consumerCount: 1 }],
+    ["foreign consumer", "queues", { consumerCount: 1, consumerScriptNames: ["other-worker"] }],
+    ["incomplete consumer inventory", "queues", { consumerCount: 1 }],
     ["Logpush logs", "logpush", { fields: ["Logs"] }],
     ["Logpush sampling", "logpush", { samplingRate: 0.1 }],
   ])("rejects %s instead of rebinding it", (_label, collection, override) => {

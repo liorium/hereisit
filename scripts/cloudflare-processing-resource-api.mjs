@@ -233,12 +233,22 @@ export function createCloudflareProcessingResourceApi({
     const queues = resultArray(queueResult, "queues", "Queue inventory").map((entryValue) => {
       const entry = asObject(entryValue, "Queue entry");
       const settings = asObject(entry.settings, "Queue settings");
+      const consumerScriptNames = asArray(entry.consumers, "Queue consumers").map(
+        (consumerValue) => {
+          const scriptName = asObject(consumerValue, "Queue consumer").script_name;
+          if (typeof scriptName !== "string") {
+            throw new TypeError("Queue consumer must be a Worker");
+          }
+          return scriptName;
+        },
+      );
       return {
         id: entry.queue_id,
         accountId,
         name: entry.queue_name,
         deliveryPaused: settings.delivery_paused,
         consumerCount: entry.consumers_total_count,
+        consumerScriptNames,
       };
     });
     const logpush = asArray(logpushResult, "Logpush inventory").map((entryValue) => {
