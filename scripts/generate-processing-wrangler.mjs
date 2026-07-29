@@ -138,7 +138,7 @@ function validateLiveCostModel(value, requirePositiveCosts) {
   assertSha256(model.routeCpuBenchmarkSha256, "route CPU benchmark hash");
   for (const key of monetaryCostKeys) {
     assertSafeInteger(model[key], `liveCostModel.${key}`);
-    if (requirePositiveCosts && model[key] === 0) {
+    if (requirePositiveCosts && key !== "monthlyFixedMicrousd" && model[key] === 0) {
       throw new RangeError(`liveCostModel.${key} must be positive while admission is enabled`);
     }
   }

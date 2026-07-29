@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createLiveCostModel, liveCostModelSha256 } from "../scripts/create-live-cost-model.mjs";
 import {
   CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256,
   generateProcessingWrangler,
@@ -37,7 +38,7 @@ const validLiveCostModel = {
   workersLogpushMillionEventsMicrousd: 18,
   analyticsEngineMillionDataPointsMicrousd: 19,
   analyticsEngineMillionReadQueriesMicrousd: 20,
-  monthlyFixedMicrousd: 21,
+  monthlyFixedMicrousd: 0,
   projectedMonthlyJobs: 10_000,
   routeCpuBenchmarkSha256: "b".repeat(64),
   routeCpuEnvelopeMs: {
@@ -189,6 +190,20 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
 }
 
 describe("processing Wrangler generator", () => {
+  it("accepts the canonical staging cost model", async () => {
+    const raw = JSON.parse(
+      await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
+    );
+    const liveCostModel = createLiveCostModel(raw);
+    const config = generateProcessingWrangler({
+      ...validInput(),
+      liveCostModel,
+      liveCostModelSha256: liveCostModelSha256(liveCostModel),
+    });
+
+    expect(config.vars.LIVE_COST_MODEL_JSON).toBe(JSON.stringify(liveCostModel));
+  });
+
   it("supports repeated origins and atomically writes the generated environment file", async () => {
     const root = await mkdtemp(join(tmpdir(), "hereisit-wrangler-"));
     try {
