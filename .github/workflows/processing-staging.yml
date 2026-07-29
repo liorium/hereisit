@@ -96,12 +96,14 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"
+          [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]
           docker buildx build \
             --file apps/image-engine/Dockerfile \
             --platform linux/amd64 \
             --target production \
             --tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" \
-            --output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar \
+            --output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true \
             .
           docker load --input .artifacts/build/image-engine-linux-amd64.docker.tar
           LOCAL_IMAGE_CONFIG_DIGEST="$(docker image inspect --format '{{.Id}}' \

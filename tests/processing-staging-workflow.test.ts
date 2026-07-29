@@ -101,6 +101,12 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain(
       'REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"',
     );
+    expect(deploy).toContain(
+      'SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"',
+    );
+    expect(deploy).toContain(
+      "--output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true",
+    );
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
   });
 

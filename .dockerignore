@@ -1,5 +1,7 @@
 .git
 .worktrees
+.artifacts
+.wrangler
 **/node_modules
 **/.next
 **/.turbo

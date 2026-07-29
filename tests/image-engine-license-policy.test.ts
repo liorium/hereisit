@@ -480,6 +480,8 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile.trimEnd()).toMatch(/FROM runtime AS production$/);
     expect(rootDockerignore).toContain("**/node_modules");
     expect(rootDockerignore).toContain("**/target");
+    expect(rootDockerignore).toContain(".artifacts");
+    expect(rootDockerignore).toContain(".wrangler");
   });
 
   it("locks every production source to reviewable origin and notice metadata", async () => {
