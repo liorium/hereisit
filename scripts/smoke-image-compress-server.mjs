@@ -27,6 +27,12 @@ const safeFailures = new Set([
   `${stableFailure} [maintainer-context]`,
   `${stableFailure} [maintainer-navigation]`,
   `${stableFailure} [maintainer-policy]`,
+  `${stableFailure} [maintainer-policy-invalid]`,
+  `${stableFailure} [maintainer-policy-missing]`,
+  `${stableFailure} [maintainer-policy-status]`,
+  `${stableFailure} [maintainer-policy-identity]`,
+  `${stableFailure} [maintainer-policy-execution]`,
+  `${stableFailure} [maintainer-policy-reason]`,
   `${stableFailure} [maintainer-ui]`,
   `${stableFailure} [preset-selection]`,
   `${stableFailure} [file-selection]`,
@@ -138,20 +144,20 @@ function observePolicies(page, state) {
 
 async function assertPolicies(state, expected) {
   await Promise.all(state.policyReads);
-  if (
-    state.invalidPolicy ||
-    state.policies.length < 1 ||
-    state.policies.some(
-      (policy) =>
-        policy.status !== 200 ||
-        policy.maintainer !== expected.maintainer ||
-        policy.execution !== expected.execution ||
-        policy.reason !== expected.reason,
-    )
-  ) {
-    throw new Error(
-      `${stableFailure} [${expected.maintainer ? "maintainer-policy" : "public-policy"}]`,
-    );
+  let detail = null;
+  if (state.invalidPolicy) detail = "invalid";
+  else if (state.policies.length < 1) detail = "missing";
+  else if (state.policies.some((policy) => policy.status !== 200)) detail = "status";
+  else if (state.policies.some((policy) => policy.maintainer !== expected.maintainer)) {
+    detail = "identity";
+  } else if (state.policies.some((policy) => policy.execution !== expected.execution)) {
+    detail = "execution";
+  } else if (state.policies.some((policy) => policy.reason !== expected.reason)) {
+    detail = "reason";
+  }
+  if (detail !== null) {
+    const stage = expected.maintainer ? `maintainer-policy-${detail}` : "public-policy";
+    throw new Error(`${stableFailure} [${stage}]`);
   }
 }
 

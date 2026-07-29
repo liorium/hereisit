@@ -237,14 +237,14 @@ describe("authenticated processing staging smoke", () => {
   it("preserves only allowlisted policy phase diagnostics", async () => {
     const output = await outputPath();
     browserSmoke.mockRejectedValue(
-      new Error("processing staging smoke failed [maintainer-policy]"),
+      new Error("processing staging smoke failed [maintainer-policy-execution]"),
     );
     await expect(
       runProcessingStagingSmokeCli({
         argv: ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", output],
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
       }),
-    ).rejects.toThrow("processing staging smoke failed [maintainer-policy]");
+    ).rejects.toThrow("processing staging smoke failed [maintainer-policy-execution]");
   });
 
   it("preserves only allowlisted browser invariant diagnostics", async () => {
