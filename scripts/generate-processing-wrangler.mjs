@@ -38,6 +38,7 @@ const liveCostKeys = [
   "analyticsEngineMillionDataPointsMicrousd",
   "analyticsEngineMillionReadQueriesMicrousd",
   "monthlyFixedMicrousd",
+  "projectedMonthlyJobs",
   "routeCpuBenchmarkSha256",
   "routeCpuEnvelopeMs",
   "arrivalProjection",
@@ -129,6 +130,9 @@ function validateLiveCostModel(value, requirePositiveCosts) {
   assertExactKeys(model, liveCostKeys, "liveCostModel");
   if (model.version !== 1 || model.containerSleepAfterSeconds !== 60) {
     throw new TypeError("liveCostModel version and sleep policy must be fixed");
+  }
+  if (assertSafeInteger(model.projectedMonthlyJobs, "liveCostModel.projectedMonthlyJobs") === 0) {
+    throw new RangeError("liveCostModel.projectedMonthlyJobs must be positive");
   }
   assertSha256(model.containerEgressRegionPricesSha256, "container egress price hash");
   assertSha256(model.routeCpuBenchmarkSha256, "route CPU benchmark hash");

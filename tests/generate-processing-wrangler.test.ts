@@ -38,6 +38,7 @@ const validLiveCostModel = {
   analyticsEngineMillionDataPointsMicrousd: 19,
   analyticsEngineMillionReadQueriesMicrousd: 20,
   monthlyFixedMicrousd: 21,
+  projectedMonthlyJobs: 10_000,
   routeCpuBenchmarkSha256: "b".repeat(64),
   routeCpuEnvelopeMs: {
     policy: 1,
