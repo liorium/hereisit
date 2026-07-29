@@ -487,8 +487,10 @@ if (
 ) {
   try {
     await main();
-  } catch {
-    process.stderr.write(`${stableFailure}\n`);
+  } catch (error) {
+    const message =
+      error instanceof Error && safeFailures.has(error.message) ? error.message : stableFailure;
+    process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }
 }
