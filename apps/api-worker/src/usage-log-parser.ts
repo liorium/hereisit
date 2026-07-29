@@ -33,7 +33,6 @@ export interface StreamingDigest {
 export interface TraceEventParserOptions {
   readonly scriptName: string;
   readonly allowedEntrypoints: ReadonlySet<string>;
-  readonly allowedVersionIds: ReadonlySet<string>;
   readonly createDigest: () => StreamingDigest;
   readonly maximumDecompressedBytes?: number;
 }
@@ -106,8 +105,8 @@ export async function parseTraceEventNdjson(
   if (options.scriptName.length < 1 || options.scriptName.length > 128) {
     throw new TypeError("Trace script name must be bounded.");
   }
-  if (options.allowedEntrypoints.size < 1 || options.allowedVersionIds.size < 1) {
-    throw new TypeError("Trace parser allowlists must not be empty.");
+  if (options.allowedEntrypoints.size < 1) {
+    throw new TypeError("Trace parser entrypoint allowlist must not be empty.");
   }
   const maximumDecompressedBytes = options.maximumDecompressedBytes ?? MAXIMUM_DECOMPRESSED_BYTES;
   if (
@@ -137,9 +136,6 @@ export async function parseTraceEventNdjson(
     const event = traceEventSchema.parse(parsedJson);
     if (event.ScriptName !== options.scriptName) {
       throw new TypeError("Trace log belongs to an unexpected Worker script.");
-    }
-    if (!options.allowedVersionIds.has(event.ScriptVersion.ID)) {
-      throw new TypeError("Trace log contains an unattested Worker version.");
     }
     if (!options.allowedEntrypoints.has(event.Entrypoint)) {
       throw new TypeError("Trace log contains an unexpected Worker entrypoint.");

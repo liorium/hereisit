@@ -35,7 +35,6 @@ function chunked(text: string, chunkSize: number): ReadableStream<Uint8Array> {
 const options = {
   scriptName: "hereisit-processing-staging",
   allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
-  allowedVersionIds: new Set([versionId]),
   createDigest: () => ({
     update: async () => undefined,
     finish: async () => "a".repeat(64),
@@ -82,12 +81,21 @@ describe("Workers Trace Events usage-log parser", () => {
     record({ EventType: "email" }),
     record({ Outcome: "exceededCpu" }),
     record({ ScriptName: "other-worker" }),
-    record({ ScriptVersion: { ID: crypto.randomUUID(), Message: "x", Tag: "x" } }),
     { ...record(), Event: { request: { url: "https://private.example" } } },
   ])("rejects unapproved values or any extra privacy-sensitive field", async (value) => {
     await expect(
       parseTraceEventNdjson(chunked(`${JSON.stringify(value)}\n`, 64), options),
     ).rejects.toThrow();
+  });
+
+  it("accepts canonical versions emitted by failed deployments of the exact Worker", async () => {
+    const value = record({
+      ScriptVersion: { ID: crypto.randomUUID(), Message: "failed deployment", Tag: null },
+    });
+
+    await expect(
+      parseTraceEventNdjson(chunked(`${JSON.stringify(value)}\n`, 64), options),
+    ).resolves.toMatchObject({ invocationCount: 1 });
   });
 
   it("cancels after a line crosses the 4 KiB bound", async () => {

@@ -75,7 +75,6 @@ function dependencies(overrides: Partial<UsageLogImporterDependencies> = {}) {
     parserOptions: {
       scriptName: "hereisit-processing-staging",
       allowedEntrypoints: new Set([""]),
-      allowedVersionIds: new Set([versionId]),
       createDigest: nodeDigest,
     },
     record: vi.fn(async () => ({

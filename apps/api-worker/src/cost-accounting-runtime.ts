@@ -19,7 +19,6 @@ const targetRowSchema = z
   })
   .strict();
 const cursorRowSchema = z.object({ cursor: z.string().min(1).max(4_096).nullable() }).strict();
-const versionRowSchema = z.object({ version_id: z.string().uuid() }).strict();
 const attestationRowSchema = z
   .object({
     worker_module_sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -147,16 +146,6 @@ export function createCostAccountingRuntime(
     },
     importUsageLogs: async (now) => {
       const session = env.DB.withSession("first-primary");
-      const versionResult = await session
-        .prepare(
-          `SELECT version_id FROM worker_version_attestations
-           ORDER BY observed_at DESC LIMIT 128`,
-        )
-        .all();
-      const versions = z.array(versionRowSchema).max(128).parse(versionResult.results);
-      if (versions.length === 0) {
-        return "partial";
-      }
       const cursor = cursorRowSchema.safeParse(
         await session
           .prepare("SELECT cursor FROM maintenance_cursors WHERE task = 'usage-log-import'")
@@ -169,7 +158,6 @@ export function createCostAccountingRuntime(
           parserOptions: {
             scriptName: config.workerScriptName,
             allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
-            allowedVersionIds: new Set(versions.map((entry) => entry.version_id)),
             createDigest: createCloudflareSha256Digest,
           },
         },
