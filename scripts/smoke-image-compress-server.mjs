@@ -18,12 +18,29 @@ const inputPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/input$`);
 const downloadedPathPattern = new RegExp(`^/v1/jobs/${JOB_UUID_SEGMENT}/downloaded$`);
 const stableFailure = "processing staging smoke failed";
 const safeFailures = new Set([
+  `${stableFailure} [public-navigation]`,
   `${stableFailure} [public-policy]`,
+  `${stableFailure} [public-ui]`,
   `${stableFailure} [public-invariants]`,
+  `${stableFailure} [maintainer-navigation]`,
   `${stableFailure} [maintainer-policy]`,
+  `${stableFailure} [maintainer-ui]`,
   `${stableFailure} [preset-selection]`,
+  `${stableFailure} [file-selection]`,
+  `${stableFailure} [job-submit]`,
+  `${stableFailure} [job-completion]`,
+  `${stableFailure} [download-handoff]`,
   `${stableFailure} [maintainer-invariants]`,
 ]);
+
+async function runSmokeStage(stage, action) {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof Error && safeFailures.has(error.message)) throw error;
+    throw new Error(`${stableFailure} [${stage}]`);
+  }
+}
 
 export function projectSmokeRequest({ method, url, bodyBytes }) {
   const path = new URL(url).pathname.replace(jobIdPattern, "/v1/jobs/[job]");
@@ -154,16 +171,20 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
   });
   try {
-    await page.goto(`${pageOrigin}/image/compress`, {
-      waitUntil: "networkidle",
-      timeout: timeoutMs,
-    });
+    await runSmokeStage("public-navigation", () =>
+      page.goto(`${pageOrigin}/image/compress`, {
+        waitUntil: "networkidle",
+        timeout: timeoutMs,
+      }),
+    );
     await assertPolicies(state, {
       maintainer: false,
       execution: "local",
       reason: "LOCAL_FALLBACK_REQUIRED",
     });
-    await page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs });
+    await runSmokeStage("public-ui", () =>
+      page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs }),
+    );
     await page.waitForTimeout(250);
     if (
       state.jobRequest ||
@@ -241,26 +262,32 @@ async function assertMaintainerServer(
     }
   });
   try {
-    await page.goto(`${pageOrigin}/image/compress`, {
-      waitUntil: "networkidle",
-      timeout: timeoutMs,
-    });
+    await runSmokeStage("maintainer-navigation", () =>
+      page.goto(`${pageOrigin}/image/compress`, {
+        waitUntil: "networkidle",
+        timeout: timeoutMs,
+      }),
+    );
     await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
-    await page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs });
-    try {
-      await page.getByRole("radio", { name: /최소 용량/ }).check();
-    } catch {
-      throw new Error(`${stableFailure} [preset-selection]`);
-    }
+    await runSmokeStage("maintainer-ui", () =>
+      page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs }),
+    );
+    await runSmokeStage("preset-selection", () =>
+      page.getByRole("radio", { name: /최소 용량/ }).check(),
+    );
     const source = await readFile(sourcePath);
-    await page.locator('input[type="file"]').setInputFiles({
-      name: privateSourceName,
-      mimeType: "image/jpeg",
-      buffer: source,
-    });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+    await runSmokeStage("file-selection", () =>
+      page.locator('input[type="file"]').setInputFiles({
+        name: privateSourceName,
+        mimeType: "image/jpeg",
+        buffer: source,
+      }),
+    );
+    await runSmokeStage("job-submit", () =>
+      page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click(),
+    );
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
-    await downloadButton.waitFor({ timeout: timeoutMs });
+    await runSmokeStage("job-completion", () => downloadButton.waitFor({ timeout: timeoutMs }));
     const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
     const acknowledgementPromise = page.waitForResponse(
       (response) =>
@@ -269,8 +296,10 @@ async function assertMaintainerServer(
         response.ok(),
       { timeout: timeoutMs },
     );
-    await downloadButton.click();
-    const [download] = await Promise.all([downloadPromise, acknowledgementPromise]);
+    const [download] = await runSmokeStage("download-handoff", async () => {
+      await downloadButton.click();
+      return Promise.all([downloadPromise, acknowledgementPromise]);
+    });
     if (download.suggestedFilename() !== expectedDownloadName) throw new Error(stableFailure);
     const stream = await download.createReadStream();
     if (stream === null) throw new Error(stableFailure);
