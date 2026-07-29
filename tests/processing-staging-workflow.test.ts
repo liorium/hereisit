@@ -104,6 +104,7 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain(
       'SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"',
     );
+    expect(deploy).toContain('--build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"');
     expect(deploy).toContain(
       "--output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true",
     );
