@@ -135,6 +135,46 @@
   color: #fff;
 }
 
+.resultStage {
+  display: grid;
+  gap: 18px;
+  padding: clamp(24px, 5vw, 48px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  text-align: center;
+}
+
+.resultStage h2,
+.resultStage p {
+  margin: 0;
+}
+
+.sizeComparison {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4em;
+  font-size: clamp(1.75rem, 6vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.reduction {
+  color: #2f6b55;
+  font-weight: 700;
+}
+
+.textAction {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--muted, #667085);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .secondaryAction {
   border: 1px solid var(--line);
   background: transparent;
@@ -173,6 +213,11 @@
 .settings summary:focus-visible,
 .presets input:focus-visible,
 .stage button:focus-visible {
+  outline: 3px solid #4057f4;
+  outline-offset: 3px;
+}
+
+.resultStage button:focus-visible {
   outline: 3px solid #4057f4;
   outline-offset: 3px;
 }

@@ -338,10 +338,14 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
     buffer: input,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible({
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible({
     timeout: 20_000,
   });
+  await expect(page.getByText(/KB →/)).toBeVisible();
+  await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+  await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -366,17 +370,14 @@ test("retains and downloads the original when compression cannot make it smaller
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(
-    page
-      .getByLabel("3. 결과")
-      .getByText("원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요", {
-        exact: true,
-      }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "원본 유지" })).toBeVisible();
+  await expect(page.getByText("이미 충분히 작아 원본을 유지했어요")).toBeVisible();
+  await expect(page.getByText("68B → 68B")).toBeVisible();
+  await expect(page.getByRole("button", { name: "원본 다운로드 ↓" })).toBeVisible();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "원본 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("tiny-hereisit.png");
   const downloadPath = await download.path();

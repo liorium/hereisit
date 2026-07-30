@@ -295,7 +295,9 @@ test.describe("configured processing server", () => {
     });
 
     await page.goto("/image/compress");
-    await expect(page.getByText("처리 방식을 확인하고 있어요.")).toBeVisible();
+    await expect(page.getByTestId("image-workbench-status")).toHaveText(
+      "처리 방식을 확인하고 있어요.",
+    );
     await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
     await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     const picker = page.getByRole("button", { name: "이미지 선택" });
@@ -305,7 +307,7 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: progressPng,
     });
-    await page.getByRole("button", { name: "용량 줄이기" }).click();
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await expect(page.getByRole("heading", { name: "이미지 압축 중" })).toBeVisible();
     await expect(page.getByRole("button", { name: "이미지 선택" })).toHaveCount(0);
     await expect(page.getByText("안전하게 업로드 중")).toBeVisible();
@@ -318,15 +320,18 @@ test.describe("configured processing server", () => {
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await expect(downloadButton).toBeVisible();
+    await expect(page.getByText(new RegExp(`→ ${onePixelPng.byteLength}B`))).toBeVisible();
+    await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "중단" })).toHaveCount(0);
+    await expect(page.locator("progress")).toHaveCount(0);
     const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
     expect(download.suggestedFilename()).toBe("server-hereisit.png");
     await expect(page.getByText("다운로드와 서버 결과 삭제 요청을 완료했어요.")).toBeVisible();
     await expect(page.getByRole("button", { name: "다운로드 완료" })).toBeDisabled();
     expect(requestBodies.every((body) => !body.includes("server.png"))).toBe(true);
     expect(calls.some((call) => call.includes("/downloaded"))).toBe(true);
-    await page.getByRole("radio", { name: /최소 용량/ }).check();
+    await page.getByRole("button", { name: "다른 이미지 압축" }).click();
     await expect(downloadButton).toHaveCount(0);
-    await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
   });
 
   test("downloads an original-retained item locally without requesting a server result", async ({
@@ -396,19 +401,17 @@ test.describe("configured processing server", () => {
     });
 
     await page.goto("/image/compress");
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "retained.png",
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-    await expect(
-      page
-        .getByLabel("3. 결과")
-        .getByText("원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요"),
-    ).toBeVisible();
-    const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "원본 유지" })).toBeVisible();
+    await expect(page.getByText("이미 충분히 작아 원본을 유지했어요")).toBeVisible();
+    await expect(page.getByText("68B → 68B")).toBeVisible();
+    const downloadButton = page.getByRole("button", { name: "원본 다운로드 ↓" });
     const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
     expect(download.suggestedFilename()).toBe("retained-hereisit.png");
     const downloadedPath = await download.path();

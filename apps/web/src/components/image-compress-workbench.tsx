@@ -16,7 +16,10 @@ import type {
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes } from "../lib/files";
-import { deriveImageCompressScreen } from "../lib/image-compress-presentation";
+import {
+  deriveImageCompressScreen,
+  summarizeImageCompression,
+} from "../lib/image-compress-presentation";
 import {
   type LocalImageOptimizeResult,
   runLocalImageOptimizeFallback,
@@ -26,7 +29,6 @@ import {
   isUnprovenInAppBrowser,
   readProcessingClientConfig,
 } from "../lib/processing-config";
-import { buildRemoteImageArchive, remoteArchiveByteBudget } from "../lib/remote-image-archive";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-compress-workbench.module.css";
 
@@ -64,6 +66,7 @@ interface WorkItem {
   readonly fraction: number | null;
   readonly message: string;
   readonly result?: ResultValue;
+  readonly outputByteLength?: number;
 }
 
 function optimizeSpec(preset: Preset): ImageOptimizeSpecV1 {
@@ -113,7 +116,6 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [message, setMessage] = useState("처리 방식을 확인하고 있어요.");
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [archiving, setArchiving] = useState(false);
   const [remoteDeliveryBusy, setRemoteDeliveryBusy] = useState(false);
   const batchRef = useRef<ReturnType<typeof runRemoteImageOptimizeBatch> | null>(null);
   const processingControllerRef = useRef<AbortController | null>(null);
@@ -256,7 +258,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const executionReady =
     policy.state === "server" || (policy.state === "local" && runtimeSupported);
-  const busy = processing || archiving || remoteDeliveryBusy;
+  const busy = processing || remoteDeliveryBusy;
 
   usePendingToolFiles({
     toolId,
@@ -270,7 +272,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     if (!itemsRef.current.some((item) => item.result !== undefined)) return;
     void disposeRemoteItems(itemsRef.current);
     const reset = itemsRef.current.map<WorkItem>((item) => {
-      const { result: _result, ...source } = item;
+      const { result: _result, outputByteLength: _outputByteLength, ...source } = item;
       return {
         ...source,
         status: "ready",
@@ -320,6 +322,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             status: "completed",
             phase: "completed",
             result: { kind: "local", result },
+            outputByteLength: result.byteLength,
             message: result.warnings.includes("SMART_PNG_FELL_BACK_TO_LOSSLESS")
               ? "PNG는 무손실 메타데이터 정리로 완료했어요."
               : "압축을 완료했어요.",
@@ -331,6 +334,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             status: "completed",
             phase: "completed",
             result: { kind: "original" },
+            outputByteLength: item.file.size,
             message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
           }),
         );
@@ -351,13 +355,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const processItems = async () => {
-    if (
-      processing ||
-      archiving ||
-      remoteDeliveryBusy ||
-      items.length === 0 ||
-      policy.state === "checking"
-    )
+    if (processing || remoteDeliveryBusy || items.length === 0 || policy.state === "checking")
       return;
     setProcessing(true);
     const processingController = new AbortController();
@@ -412,12 +410,15 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           } else if (event.type === "item-complete") {
             const completedResult = event.result;
             const completedItemId = event.itemId;
+            const source = sourceItems.find((item) => item.id === completedItemId);
+            if (source === undefined) return;
             if (completedResult.status === "fulfilled") {
               setItems((current) =>
                 updateItem(current, completedItemId, {
                   status: "completed",
                   phase: "completed",
                   result: { kind: "remote", handle: completedResult.value },
+                  outputByteLength: completedResult.value.descriptor.byteLength,
                   message: "서버 압축을 완료했어요.",
                 }),
               );
@@ -427,6 +428,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                   status: "completed",
                   phase: "completed",
                   result: { kind: "original" },
+                  outputByteLength: source.file.size,
                   message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
                 }),
               );
@@ -463,6 +465,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                 status: "completed",
                 phase: "completed",
                 result: { kind: "remote", handle: result.value },
+                outputByteLength: result.value.descriptor.byteLength,
                 message: "서버 압축을 완료했어요.",
               }),
             );
@@ -472,6 +475,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                 status: "completed",
                 phase: "completed",
                 result: { kind: "original" },
+                outputByteLength: source.file.size,
                 message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
               }),
             );
@@ -569,9 +573,21 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const completed = items.filter((item) => item.status === "completed");
+  const resultItems = completed.filter(
+    (item): item is WorkItem & { readonly outputByteLength: number } =>
+      item.outputByteLength !== undefined,
+  );
+  const resultSummary = summarizeImageCompression(
+    resultItems.map((item) => ({ inputBytes: item.file.size, outputBytes: item.outputByteLength })),
+  );
+  const reductionText =
+    resultSummary === null
+      ? null
+      : `${resultSummary.reductionPercent.toFixed(1).replace(/\\.0$/, "")}% 줄였어요`;
+  const resultItem = resultItems[0] ?? null;
   const screen = deriveImageCompressScreen({
     processing,
-    archiving,
+    archiving: false,
     completedCount: completed.length,
   });
   const totalInputBytes = items.reduce((sum, item) => sum + item.file.size, 0);
@@ -587,93 +603,32 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const actionableCount = items.filter(
     (item) => item.status === "ready" || item.status === "failed",
   ).length;
-  const runDisabled =
-    actionableCount === 0 || policy.state === "checking" || archiving || remoteDeliveryBusy;
+  const runDisabled = actionableCount === 0 || policy.state === "checking" || remoteDeliveryBusy;
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     void chooseFiles(input.files).finally(() => {
       input.value = "";
     });
   };
-  const remoteEntries = completed.flatMap((item) =>
-    item.result?.kind === "remote"
-      ? [
-          {
-            itemId: item.id,
-            filename: suggestSameFormatOptimizedName(item.file.name, item.mime),
-            handle: item.result.handle,
-          },
-        ]
-      : [],
-  );
-  const budget = remoteArchiveByteBudget({
-    deviceMemoryGiB:
-      typeof navigator === "undefined"
-        ? null
-        : ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null),
-    coarsePointer:
-      typeof matchMedia === "undefined" ? false : matchMedia("(pointer: coarse)").matches,
-  });
-  const archiveBytes = remoteEntries.reduce(
-    (sum, entry) => sum + entry.handle.descriptor.byteLength,
-    0,
-  );
-
-  const downloadArchive = async () => {
-    if (
-      archiving ||
-      remoteDeliveryLockRef.current ||
-      remoteEntries.length < 2 ||
-      archiveBytes > budget
-    )
-      return;
-    const markConsumed = (itemMessage: string) => {
-      const consumed = new Set(remoteEntries.map((entry) => entry.itemId));
-      setItems((current) =>
-        current.map((item) =>
-          consumed.has(item.id)
-            ? { ...item, result: { kind: "remote-consumed" }, message: itemMessage }
-            : item,
-        ),
-      );
-    };
-    remoteDeliveryLockRef.current = true;
-    setRemoteDeliveryBusy(true);
-    setArchiving(true);
-    let handedOff = false;
-    try {
-      const archive = await buildRemoteImageArchive({ entries: remoteEntries, byteBudget: budget });
-      try {
-        const url = URL.createObjectURL(archive.blob);
-        try {
-          downloadUrl(url, "hereisit-images.zip");
-          handedOff = true;
-        } finally {
-          setTimeout(() => URL.revokeObjectURL(url), 0);
-        }
-        await archive.acknowledgeAfterHandoff();
-        markConsumed("다운로드 완료");
-        setMessage("ZIP 다운로드와 서버 결과 삭제 요청을 완료했어요.");
-      } finally {
-        archive.dispose();
-      }
-    } catch {
-      if (handedOff) {
-        markConsumed("다운로드 전달됨");
-        setMessage("ZIP이 다운로드되었을 수 있어요. 브라우저 다운로드 목록을 확인해 주세요.");
-      } else {
-        setMessage("ZIP을 만들지 못했어요. 다시 시도해 주세요.");
-      }
-    } finally {
-      setArchiving(false);
-      remoteDeliveryLockRef.current = false;
-      setRemoteDeliveryBusy(false);
-    }
-  };
-
   const cancelProcessing = () => {
     processingControllerRef.current?.abort();
     batchRef.current?.cancel();
+  };
+
+  const resetWorkbench = async () => {
+    processingControllerRef.current?.abort();
+    batchRef.current?.cancel();
+    const previous = itemsRef.current;
+    itemsRef.current = [];
+    setItems([]);
+    await disposeRemoteItems(previous);
+    setMessage(
+      policy.state === "checking"
+        ? "처리 방식을 확인하고 있어요."
+        : policy.state === "server"
+          ? "서버 처리 정책을 확인했어요."
+          : policy.text,
+    );
   };
 
   return (
@@ -764,7 +719,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             {Math.min(items.length, settledCount + 1)}/{items.length}
           </p>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
-            {archiving ? "ZIP을 준비하고 있어요." : phaseLabel(activeItem?.phase ?? null)}
+            {phaseLabel(activeItem?.phase ?? null)}
           </p>
           <progress value={activeItem?.fraction ?? undefined} max={1} />
           <button type="button" className={styles.secondaryAction} onClick={cancelProcessing}>
@@ -773,45 +728,40 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         </section>
       ) : null}
 
-      {screen === "result" ? (
-        <section className={styles.stage} aria-label="결과">
+      {screen === "result" && resultItem !== null ? (
+        <section className={styles.resultStage} aria-labelledby="compress-result-title">
+          <h2 id="compress-result-title">
+            {resultItem.result?.kind === "original" ? "원본 유지" : "압축 완료"}
+          </h2>
+          <p className={styles.sizeComparison}>
+            {formatBytes(resultItem.file.size)} → {formatBytes(resultItem.outputByteLength)}
+          </p>
+          <p className={styles.reduction}>
+            {resultItem.result?.kind === "original"
+              ? "이미 충분히 작아 원본을 유지했어요"
+              : reductionText}
+          </p>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
           </p>
-          <ul className={styles.resultList}>
-            {completed.map((item) => (
-              <li key={item.id}>
-                <div>
-                  <strong>{suggestSameFormatOptimizedName(item.file.name, item.mime)}</strong>
-                  <span>{item.message}</span>
-                </div>
-                <button
-                  type="button"
-                  disabled={
-                    item.result?.kind === "remote-consumed" ||
-                    (item.result?.kind === "remote" && remoteDeliveryBusy)
-                  }
-                  onClick={() => void downloadItem(item)}
-                >
-                  {item.result?.kind === "remote-consumed" ? "다운로드 완료" : "결과 다운로드 ↓"}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {remoteEntries.length >= 2 ? (
-            archiveBytes <= budget ? (
-              <button
-                type="button"
-                className={styles.primaryAction}
-                disabled={archiving || remoteDeliveryBusy}
-                onClick={() => void downloadArchive()}
-              >
-                결과 {remoteEntries.length}개 ZIP으로 받기 ↓
-              </button>
-            ) : (
-              <p>용량이 커서 개별 다운로드만 지원해요.</p>
-            )
-          ) : null}
+          <button
+            className={styles.primaryAction}
+            type="button"
+            disabled={
+              resultItem.result?.kind === "remote-consumed" ||
+              (resultItem.result?.kind === "remote" && remoteDeliveryBusy)
+            }
+            onClick={() => void downloadItem(resultItem)}
+          >
+            {resultItem.result?.kind === "remote-consumed"
+              ? "다운로드 완료"
+              : resultItem.result?.kind === "original"
+                ? "원본 다운로드 ↓"
+                : "결과 다운로드 ↓"}
+          </button>
+          <button className={styles.textAction} type="button" onClick={() => void resetWorkbench()}>
+            다른 이미지 압축
+          </button>
         </section>
       ) : null}
     </section>
