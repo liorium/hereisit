@@ -13,6 +13,13 @@ const onePixelPng = Buffer.from(
   "base64",
 );
 
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
+}
+
 async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
   const bytes = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
@@ -342,7 +349,8 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText(/KB →/)).toBeVisible();
+  const result = page.getByRole("region", { name: "압축 완료" });
+  await expect(result.getByText(formatByteSize(input.byteLength), { exact: true })).toBeVisible();
   await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
   await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
   await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
@@ -356,6 +364,7 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   expect(downloadPath).not.toBeNull();
   const output = new Uint8Array(await readFile(downloadPath as string));
   expect(output.byteLength).toBeLessThan(input.byteLength);
+  await expect(result.getByText(formatByteSize(output.byteLength), { exact: true })).toBeVisible();
   expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
 });
 

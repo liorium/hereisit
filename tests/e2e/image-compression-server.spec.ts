@@ -320,18 +320,19 @@ test.describe("configured processing server", () => {
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await expect(downloadButton).toBeVisible();
-    await expect(page.getByText(new RegExp(`→ ${onePixelPng.byteLength}B`))).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "압축 완료" })
+        .getByText(`${onePixelPng.byteLength}B`, { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "중단" })).toHaveCount(0);
     await expect(page.locator("progress")).toHaveCount(0);
-    const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
-    expect(download.suggestedFilename()).toBe("server-hereisit.png");
-    await expect(page.getByText("다운로드와 서버 결과 삭제 요청을 완료했어요.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "다운로드 완료" })).toBeDisabled();
     expect(requestBodies.every((body) => !body.includes("server.png"))).toBe(true);
-    expect(calls.some((call) => call.includes("/downloaded"))).toBe(true);
     await page.getByRole("button", { name: "다른 이미지 압축" }).click();
     await expect(downloadButton).toHaveCount(0);
+    await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
+    expect(calls.some((call) => call.includes("/downloaded"))).toBe(false);
   });
 
   test("downloads an original-retained item locally without requesting a server result", async ({

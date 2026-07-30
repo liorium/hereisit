@@ -734,7 +734,9 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             {resultItem.result?.kind === "original" ? "원본 유지" : "압축 완료"}
           </h2>
           <p className={styles.sizeComparison}>
-            {formatBytes(resultItem.file.size)} → {formatBytes(resultItem.outputByteLength)}
+            <span>{formatBytes(resultItem.file.size)}</span>
+            <span aria-hidden="true">→</span>
+            <span>{formatBytes(resultItem.outputByteLength)}</span>
           </p>
           <p className={styles.reduction}>
             {resultItem.result?.kind === "original"
