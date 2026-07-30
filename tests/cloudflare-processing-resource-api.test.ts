@@ -254,6 +254,38 @@ describe("Cloudflare processing resource API", () => {
     );
   });
 
+  it("pauses an existing processing Queue by its verified ID", async () => {
+    const queueId = "1".repeat(32);
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body === undefined ? null : JSON.parse(String(init.body)),
+      });
+      return response({});
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await api.applyAction({ type: "pause-queue", id: queueId, name: config.queueName });
+
+    expect(calls).toEqual([
+      {
+        url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/queues/${queueId}`,
+        method: "PATCH",
+        body: { settings: { delivery_paused: true } },
+      },
+    ]);
+  });
+
   it("creates private resources with bounded, fail-closed settings", async () => {
     const calls: Array<{
       url: string;

@@ -96,8 +96,8 @@ function validateQueue(resource, config) {
   if (typeof resource.id !== "string" || !queueIdPattern.test(resource.id)) {
     throw new TypeError("Queue ID is invalid");
   }
-  if (resource.deliveryPaused !== true) {
-    throw new TypeError("new processing Queues must remain paused during provisioning");
+  if (typeof resource.deliveryPaused !== "boolean") {
+    throw new TypeError("processing Queue delivery state is invalid");
   }
   if (
     !Array.isArray(resource.consumerScriptNames) ||
@@ -153,7 +153,10 @@ export function planProcessingResources({ config: configValue, inventory: invent
     const queue = exactNamed(inventory.queues, name, "Queue");
     if (queue === null) {
       actions.push({ type: "create-queue", name, deliveryPaused: true });
-    } else validateQueue(queue, config);
+    } else {
+      validateQueue(queue, config);
+      if (!queue.deliveryPaused) actions.push({ type: "pause-queue", id: queue.id, name });
+    }
   }
 
   const logpushMatches = assertArray(inventory.logpush, "Logpush").filter((entryValue) => {
