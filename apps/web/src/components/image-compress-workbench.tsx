@@ -526,7 +526,15 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           : "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
       );
     } catch {
-      setMessage("처리를 완료하지 못했어요. 다시 시도해 주세요.");
+      const failureMessage = "처리를 완료하지 못했어요. 다시 시도해 주세요.";
+      setItems((current) =>
+        current.map((item) =>
+          item.status === "completed"
+            ? item
+            : { ...item, status: "failed", message: failureMessage },
+        ),
+      );
+      setMessage(failureMessage);
     } finally {
       batchRef.current = null;
       if (processingControllerRef.current === processingController) {
@@ -579,14 +587,16 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     const url = URL.createObjectURL(blob);
     try {
       downloadUrl(url, filename);
+      setMessage(
+        isUnprovenInAppBrowser()
+          ? "다운로드가 시작되지 않으면 기본 브라우저에서 열어 다시 다운로드해 주세요."
+          : "다운로드를 시작했어요.",
+      );
+    } catch {
+      setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setTimeout(() => URL.revokeObjectURL(url), 0);
     }
-    setMessage(
-      isUnprovenInAppBrowser()
-        ? "다운로드가 시작되지 않으면 기본 브라우저에서 열어 다시 다운로드해 주세요."
-        : "다운로드를 시작했어요.",
-    );
   };
 
   const completed = items.filter((item) => item.status === "completed");
@@ -709,6 +719,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const actionableCount = items.filter(
     (item) => item.status === "ready" || item.status === "failed",
   ).length;
+  const terminalFailure =
+    !processing &&
+    items.length > 0 &&
+    items.every((item) => item.status === "failed") &&
+    message !== "작업을 중단했어요.";
+  const statusMessage = terminalFailure ? (items[0]?.message ?? message) : message;
   const runDisabled = actionableCount === 0 || policy.state === "checking" || remoteDeliveryBusy;
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -804,8 +820,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
               <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
             ) : null}
           </details>
-          <p role="status" aria-live="polite" data-testid="image-workbench-status">
-            {message}
+          <p
+            role={terminalFailure ? "alert" : "status"}
+            aria-live={terminalFailure ? "assertive" : "polite"}
+            data-testid="image-workbench-status"
+          >
+            {statusMessage}
           </p>
           <button
             type="button"

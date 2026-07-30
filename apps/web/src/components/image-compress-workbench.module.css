@@ -40,10 +40,9 @@
   cursor: pointer;
 }
 
-.picker:disabled,
-.stage button:disabled {
-  opacity: 0.5;
+button:disabled {
   cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .fileInput {
@@ -222,17 +221,19 @@
   white-space: nowrap;
 }
 
+.primaryAction:focus-visible,
+.secondaryAction:focus-visible,
+.textAction:focus-visible,
 .picker:focus-visible,
 .settings summary:focus-visible,
-.presets input:focus-visible,
-.stage button:focus-visible {
-  outline: 3px solid #4057f4;
+.individualResults summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
   outline-offset: 3px;
 }
 
-.resultStage button:focus-visible,
-.individualResults summary:focus-visible {
-  outline: 3px solid #4057f4;
+.presets input:focus-visible,
+.individualResults button:focus-visible {
+  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
   outline-offset: 3px;
 }
 

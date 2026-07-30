@@ -140,20 +140,54 @@ test("discloses local processing before selection and preserves PNG", async ({ p
 
 test("keeps the mobile workbench in one column without horizontal overflow", async ({ page }) => {
   test.skip(serverModeEnabled, "requires the default local-only build");
-  await page.setViewportSize({ width: 320, height: 720 });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto("/image/compress");
+    await expect(page.locator('[data-policy="local"]')).toHaveText(
+      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    expect(
+      (await page.getByRole("button", { name: "이미지 선택" }).boundingBox())?.height ?? 0,
+    ).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("supports keyboard setup with named compression presets", async ({ page }) => {
+  test.skip(serverModeEnabled, "requires the default local-only build");
   await page.goto("/image/compress");
-  await expect(page.getByText("파일은 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-    ),
-  ).toBe(true);
-  const action = page.getByRole("button", { name: "용량 줄이기" });
-  await expect(action).toBeVisible();
-  expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  expect(
-    (await page.getByRole("button", { name: "이미지 선택" }).boundingBox())?.height,
-  ).toBeGreaterThanOrEqual(44);
+  const homeLink = page.getByRole("link", { name: "HereIsIt 홈" });
+  const picker = page.getByRole("button", { name: "이미지 선택" });
+  await expect(picker).toBeEnabled();
+
+  await page.keyboard.press("Tab");
+  await expect(homeLink).toBeFocused();
+  for (
+    let index = 0;
+    index < 12 && !(await picker.evaluate((node) => node === document.activeElement));
+    index += 1
+  ) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(picker).toBeFocused();
+
+  const settings = page.getByText("압축 설정 · 추천");
+  for (
+    let index = 0;
+    index < 12 && !(await settings.evaluate((node) => node === document.activeElement));
+    index += 1
+  ) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(settings).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("radio", { name: /추천.*품질과 용량의 균형/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /최소 용량.*더 강한 시각적 압축/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /무손실.*픽셀을 바꾸지 않고 정리/ })).toBeVisible();
 });
 
 test.describe("configured processing server", () => {
@@ -334,7 +368,8 @@ test.describe("configured processing server", () => {
     await expect(page.locator("progress")).toHaveCount(0);
     expect(requestBodies.every((body) => !body.includes("server.png"))).toBe(true);
     await page.getByRole("button", { name: "다른 이미지 압축" }).click();
-    await expect(downloadButton).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "이미지 선택" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toHaveCount(0);
     await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
     expect(calls.some((call) => call.includes("/downloaded"))).toBe(false);
   });
@@ -495,14 +530,14 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
-    await page.getByRole("button", { name: "처리 중단" }).click();
+    await page.getByRole("button", { name: "중단" }).click();
     await expect.poll(() => calls.includes(`POST /v1/jobs/${jobId}/cancel`)).toBe(true);
     await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
     await expect(page.getByText("작업을 중단했어요.")).toBeVisible();
     await expect(page.locator("progress")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeVisible();
   });
 
   test("downloads two remote compression results as one acknowledged ZIP", async ({ page }) => {
@@ -710,6 +745,108 @@ test.describe("configured processing server", () => {
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
   });
 
+  test("summarizes only downloadable items when part of a server batch fails", async ({ page }) => {
+    const ids = [jobId, secondJobId];
+    let created = 0;
+    await page.route("**/v1/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === "/v1/policy") {
+        await route.fulfill({ status: 200, json: serverPolicy() });
+      } else if (path === "/v1/jobs" && request.method() === "POST") {
+        const currentJobId = ids[created] as string;
+        created += 1;
+        await route.fulfill({
+          status: 201,
+          json: {
+            contract: "tool-job@1",
+            mode: "upload-required",
+            jobId: currentJobId,
+            upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
+              path: `/v1/jobs/${currentJobId}/input`,
+              contentType: "image/png",
+              byteLength: onePixelPng.byteLength,
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+            reservedWeightedUnits: 1,
+          },
+        });
+      } else if (path.endsWith("/input")) {
+        await route.fulfill({ status: 204 });
+      } else if (path === `/v1/jobs/${jobId}` && request.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          json: {
+            contract: "tool-job@1",
+            jobId,
+            state: "succeeded",
+            phase: "completed",
+            phaseFraction: 1,
+            sequence: 3,
+            attempt: 1,
+            result: {
+              kind: "download",
+              mime: "image/png",
+              byteLength: onePixelPng.byteLength,
+              width: 1,
+              height: 1,
+              engineBuildId: "engine-test",
+              codecBuildId: "codec-test",
+              warnings: [],
+              timing: { queueMs: 1, processingMs: 1, totalMs: 2 },
+              expiresAt: "2099-01-01T00:00:01.000Z",
+            },
+            updatedAt: "2026-07-16T00:00:01.000Z",
+          },
+        });
+      } else if (path === `/v1/jobs/${secondJobId}` && request.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          json: {
+            contract: "tool-job@1",
+            jobId: secondJobId,
+            state: "failed",
+            phase: "optimizing",
+            phaseFraction: 0.5,
+            sequence: 3,
+            attempt: 1,
+            error: {
+              code: "ENGINE_TIMEOUT",
+              message: "처리 시간이 초과됐어요. 추천 설정으로 다시 시도해 주세요.",
+              retryable: false,
+              guidance: "TRY_BALANCED_PRESET",
+            },
+            updatedAt: "2026-07-16T00:00:01.000Z",
+          },
+        });
+      } else if (path.endsWith("/result")) {
+        await route.fulfill({ status: 200, body: onePixelPng, headers: resultHeaders });
+      } else {
+        await route.fulfill({ status: 204 });
+      }
+    });
+
+    await page.goto("/image/compress");
+    await page.locator('input[type="file"]').setInputFiles([
+      { name: "ready.png", mimeType: "image/png", buffer: onePixelPng },
+      { name: "failed.png", mimeType: "image/png", buffer: onePixelPng },
+    ]);
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+
+    await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" })).toHaveCount(0);
+    await page.getByText("파일별 결과 보기").click();
+    await expect(page.getByText("failed.png", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("처리 시간이 초과됐어요. 추천 설정으로 다시 시도해 주세요.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+  });
+
   test("shows retry guidance without presenting it as a local usage fallback", async ({ page }) => {
     await page.route("**/v1/**", async (route) => {
       const request = route.request();
@@ -767,36 +904,34 @@ test.describe("configured processing server", () => {
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-    await expect(page.getByText(/처리 시간이 초과됐어요/)).toBeVisible();
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    const terminalError = page.getByTestId("image-workbench-status");
+    await expect(terminalError).toHaveAttribute("role", "alert");
+    await expect(terminalError).toHaveAttribute("aria-live", "assertive");
+    await expect(terminalError).toContainText(
+      "처리 시간이 초과됐어요. 추천 설정으로 다시 시도해 주세요.",
+    );
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     await expect(page.getByText(/사용량 보호/)).toHaveCount(0);
   });
 
-  test("keeps the server workbench within a 320px viewport and safe bottom action", async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 320, height: 720 });
+  test("keeps the server workbench within narrow viewports", async ({ page }) => {
     await page.route("**/v1/policy", (route) =>
       route.fulfill({ status: 200, json: serverPolicy() }),
     );
-    await page.goto("/image/compress");
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-    const action = page.getByRole("button", { name: "0개 이미지 용량 줄이기 →" });
-    const box = await action.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
-    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(708);
-    expect(
-      await action.evaluate(
-        (element) => getComputedStyle(element.parentElement as Element).position,
-      ),
-    ).toBe("fixed");
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 720 });
+      await page.goto("/image/compress");
+      await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      expect(
+        (await page.getByRole("button", { name: "이미지 선택" }).boundingBox())?.height ?? 0,
+      ).toBeGreaterThanOrEqual(44);
+    }
   });
 
   test("falls back locally after a policy network failure without creating a job", async ({
@@ -808,8 +943,8 @@ test.describe("configured processing server", () => {
       if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobCalls.push(request.url());
     });
     await page.goto("/image/compress");
-    await expect(page.getByText("서버 연결 실패 · 업로드 없이 내 기기에서 처리")).toBeVisible();
-    await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+    await expect(page.getByText("서버에 연결하지 못해 로컬 처리로 전환했어요.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
     expect(jobCalls).toEqual([]);
   });
 
@@ -829,15 +964,18 @@ test.describe("configured processing server", () => {
       if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobCalls.push(request.url());
     });
     await page.goto("/image/compress");
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "lossless.webp",
       mimeType: "image/webp",
       buffer: structuralWebp(),
     });
+    await page.getByText("압축 설정 · 추천").click();
     await page.getByRole("radio", { name: /무손실/ }).check();
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-    await expect(page.getByText("사용량 보호 · 업로드 없이 내 기기에서 처리")).toBeVisible();
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.locator('[data-policy="local"]')).toHaveText(
+      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    );
     await expect(page.getByText(/무손실 서버 처리가 필요한 이미지/)).toBeVisible();
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
     expect(jobCalls).toEqual([]);
@@ -872,16 +1010,19 @@ test.describe("configured processing server", () => {
       }
     });
     await page.goto("/image/compress");
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "quota.png",
       mimeType: "image/png",
       buffer: onePixelPng,
     });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-    await expect(page.getByText("사용량 보호 · 업로드 없이 내 기기에서 처리")).toBeVisible();
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await page.getByText("파일별 결과 보기").click();
-    await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /원본 다운로드|결과 다운로드/ })).toBeVisible();
+    await page.getByRole("button", { name: "다른 이미지 압축" }).click();
+    await expect(page.locator('[data-policy="local"]')).toHaveText(
+      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    );
     expect(uploadCalls).toBe(0);
   });
 });

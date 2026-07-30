@@ -350,16 +350,33 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
     timeout: 20_000,
   });
   const result = page.getByRole("region", { name: "1개 이미지 압축 완료" });
+  await expect(result.getByRole("status")).toHaveAttribute("aria-live", "polite");
   await expect(result.getByText(formatByteSize(input.byteLength), { exact: true })).toBeVisible();
   await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
   await page.getByText("파일별 결과 보기").click();
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+  const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  await expect(downloadButton).toBeVisible();
   await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
+  expect(
+    await result.evaluate((section) => {
+      const heading = section.querySelector("h2");
+      const sizeComparison = section.querySelector("p");
+      const download = [...section.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes("결과 다운로드"),
+      );
+      return (
+        heading !== null &&
+        sizeComparison !== null &&
+        download !== undefined &&
+        Boolean(
+          heading.compareDocumentPosition(sizeComparison) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ) &&
+        Boolean(sizeComparison.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+    }),
+  ).toBe(true);
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
   expect(download.suggestedFilename()).toBe("photo-hereisit.jpg");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
@@ -367,6 +384,31 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   expect(output.byteLength).toBeLessThan(input.byteLength);
   await expect(result.getByText(formatByteSize(output.byteLength), { exact: true })).toBeVisible();
   expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
+
+  await page.getByRole("button", { name: "다른 이미지 압축" }).click();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toHaveCount(0);
+});
+
+test("keeps a local compression result retryable when download activation throws", async ({
+  page,
+}) => {
+  await installDownloadActivationController(page);
+  await page.goto("/image/compress");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles({
+    name: "retry.jpg",
+    mimeType: "image/jpeg",
+    buffer: input,
+  });
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible();
+  await page.getByText("파일별 결과 보기").click();
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "결과 다운로드 ↓" }).click();
+  await expect(page.getByText("다운로드를 시작하지 못했어요. 다시 시도해 주세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
 });
 
 test("downloads two local compression results together and individually", async ({ page }) => {
@@ -458,9 +500,11 @@ test("uses compression progress copy during local source-preserving work", async
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: "용량 줄이기" }).click();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
   await expect(page.getByRole("heading", { name: "이미지 압축 중" })).toBeVisible();
-  await expect(page.getByText("용량 최적화 중", { exact: true })).toBeVisible();
+  const liveStatus = page.getByRole("status").filter({ hasText: "용량 최적화 중" });
+  await expect(liveStatus).toBeVisible();
+  await expect(liveStatus).toHaveAttribute("aria-live", "polite");
   await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
   await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
   await page.evaluate(() =>
