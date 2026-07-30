@@ -802,6 +802,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             archiveBytes <= budget ? (
               <button
                 type="button"
+                className={styles.primaryAction}
                 disabled={archiving || remoteDeliveryBusy}
                 onClick={() => void downloadArchive()}
               >

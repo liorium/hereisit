@@ -120,8 +120,7 @@
 
 .primaryAction,
 .secondaryAction,
-.resultList button,
-.stage > button {
+.resultList button {
   min-height: 48px;
   border: 0;
   border-radius: 12px;

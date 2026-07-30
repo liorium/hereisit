@@ -109,22 +109,26 @@ test("discloses local processing before selection and preserves PNG", async ({ p
     if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobRequests.push(request.url());
   });
   await page.goto("/image/compress");
-  await expect(page.getByText("파일은 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
+  await expect(page.locator('[data-policy="local"]')).toHaveText(
+    "파일은 업로드하지 않고 이 기기에서 처리해요.",
+  );
   await expect(page.getByText("내 기기에서만 처리")).toHaveCount(0);
   const picker = page.getByRole("button", { name: "이미지 선택" });
   await expect(picker).toBeEnabled();
+  await expect(picker).toHaveCSS("border-top-style", "dashed");
+  await expect(picker).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(page.getByText("압축 설정 · 추천")).toBeVisible();
   await expect(page.getByRole("radio", { name: /최소 용량/ })).not.toBeVisible();
   await page.getByText("압축 설정 · 추천").click();
   await expect(page.getByRole("radio", { name: /최소 용량/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "용량 줄이기" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeDisabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "sample.png",
     mimeType: "image/png",
     buffer: onePixelPng,
   });
   await expect(page.getByText("sample.png")).toBeVisible();
-  await page.getByRole("button", { name: "용량 줄이기" }).click();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
   const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   await expect(downloadButton).toBeVisible({ timeout: 20_000 });
   const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
