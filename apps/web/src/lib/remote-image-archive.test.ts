@@ -111,4 +111,39 @@ describe("remote image archive", () => {
     expect(order).toContain("ack:remote");
     archive.dispose();
   });
+
+  it("cancels a local entry when aborted between streamed chunks", async () => {
+    const controller = new AbortController();
+    const blob = new Blob(["ab"]);
+    let pulls = 0;
+    let cancelled = false;
+    vi.spyOn(blob, "stream").mockReturnValue(
+      new ReadableStream<Uint8Array<ArrayBuffer>>(
+        {
+          pull(streamController) {
+            pulls += 1;
+            if (pulls === 1) {
+              streamController.enqueue(new Uint8Array(new ArrayBuffer(1)));
+              controller.abort();
+            } else {
+              streamController.close();
+            }
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+
+    await expect(
+      buildImageArchive({
+        entries: [{ kind: "local", filename: "local.bin", blob }],
+        byteBudget: 2,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toBe(true);
+  });
 });

@@ -93,6 +93,10 @@ export async function buildImageArchive(input: {
       const reader = stream.getReader();
       try {
         while (true) {
+          if (input.signal?.aborted) {
+            await reader.cancel().catch(() => undefined);
+            throw new DOMException("Aborted", "AbortError");
+          }
           const next = await reader.read();
           if (next.done) break;
           entry.push(next.value, false);
