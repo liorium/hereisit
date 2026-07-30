@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 import {
   expectWebShareUnused,
@@ -515,6 +515,53 @@ test("uses compression progress copy during local source-preserving work", async
   await expect(page.getByTestId("image-workbench-status")).toHaveText(
     "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
   );
+});
+
+test("keeps populated setup, processing, and result actions visible at narrow widths", async ({
+  page,
+}) => {
+  await installHeldTransformingWorker(page);
+  const expectStateWithinViewport = async (action: Locator) => {
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await expect(action).toBeVisible();
+    const box = await action.boundingBox();
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? viewportWidth) + (box?.width ?? 1)).toBeLessThanOrEqual(viewportWidth);
+  };
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto("/image/compress");
+    await page.locator("input[type=file]").setInputFiles({
+      name: `narrow-${width}.png`,
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+
+    await expectStateWithinViewport(page.getByRole("button", { name: "용량 줄이기", exact: true }));
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expectStateWithinViewport(page.getByRole("button", { name: "중단" }));
+
+    await page.evaluate(() =>
+      (
+        window as Window & { __hereisitCompleteImageTransform?: () => void }
+      ).__hereisitCompleteImageTransform?.(),
+    );
+    await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible();
+    const individualResults = page.getByText("파일별 결과 보기");
+    const individualResultsBox = await individualResults.boundingBox();
+    expect(individualResultsBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(individualResultsBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await individualResults.click();
+    await expectStateWithinViewport(
+      page.getByRole("button", { name: /원본 다운로드|결과 다운로드/ }),
+    );
+  }
 });
 
 test("explains why HEIC cannot be compressed while preserving its format", async ({ page }) => {

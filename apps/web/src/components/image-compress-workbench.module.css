@@ -68,7 +68,19 @@ button:disabled {
   font-size: 0.88rem;
 }
 
-.settings summary {
+.disclosure a {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings summary,
+.individualResults summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
   cursor: pointer;
   font-weight: 800;
 }
@@ -182,11 +194,6 @@ button:disabled {
 
 .individualResults {
   text-align: left;
-}
-
-.individualResults summary {
-  cursor: pointer;
-  font-weight: 800;
 }
 
 .individualResults[open] summary {

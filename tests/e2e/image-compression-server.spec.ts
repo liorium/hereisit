@@ -184,6 +184,9 @@ test("supports keyboard setup with named compression presets", async ({ page }) 
     await page.keyboard.press("Tab");
   }
   await expect(settings).toBeFocused();
+  const settingsBox = await settings.boundingBox();
+  expect(settingsBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(settingsBox?.height ?? 0).toBeGreaterThanOrEqual(44);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("radio", { name: /추천.*품질과 용량의 균형/ })).toBeVisible();
   await expect(page.getByRole("radio", { name: /최소 용량.*더 강한 시각적 압축/ })).toBeVisible();
@@ -336,6 +339,9 @@ test.describe("configured processing server", () => {
     );
     await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
     await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    const policyLinkBox = await page.getByRole("link", { name: "자세히" }).boundingBox();
+    expect(policyLinkBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(policyLinkBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     const picker = page.getByRole("button", { name: "이미지 선택" });
     await expect(picker).toBeEnabled();
     await page.locator('input[type="file"]').setInputFiles({
