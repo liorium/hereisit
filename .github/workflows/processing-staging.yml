@@ -350,6 +350,15 @@ jobs:
             --attestation .artifacts/runtime/worker-version-attestations.json \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$STAGING_D1_DATABASE_ID"
+      - name: Begin the release-bound staging cost-accounting epoch
+        env:
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/rotate-staging-accounting-epoch.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$STAGING_D1_DATABASE_ID" \
+            --release-report-sha256 "$SOURCE_SHA256"
       - name: Deploy and verify the staging Pages tree
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
