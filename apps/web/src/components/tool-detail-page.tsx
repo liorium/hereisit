@@ -50,16 +50,12 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
           </div>
           <p className={styles.description}>{tool.shortDescription}</p>
           <p className={styles.summary}>{implementation.defaultSummary}</p>
-          <section aria-label="처리 방식" className={styles.execution}>
-            <strong>
-              {tool.execution === "browser" ? "이 기기에서 처리" : "처리 방식 자동 확인"}
-            </strong>
-            <span>
-              {tool.execution === "browser"
-                ? "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요."
-                : "서버 처리가 가능할 때만 전송하며, 실제 처리 위치와 보관 정책을 파일 선택 전에 아래에서 알려드려요."}
-            </span>
-          </section>
+          {tool.execution === "browser" ? (
+            <section aria-label="처리 방식" className={styles.execution}>
+              <strong>이 기기에서 처리</strong>
+              <span>파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.</span>
+            </section>
+          ) : null}
           {implementation.notices.map((notice) => (
             <p
               className={notice.tone === "warning" ? styles.warning : styles.support}

@@ -335,9 +335,10 @@ test.describe("configured processing server", () => {
     });
 
     await page.goto("/image/compress");
-    await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    await expect(page.locator('[data-policy="checking"]')).toHaveText(
       "처리 방식을 확인하고 있어요.",
     );
+    await expect(page.getByTestId("image-workbench-status")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
     await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
     const policyLinkBox = await page.getByRole("link", { name: "자세히" }).boundingBox();

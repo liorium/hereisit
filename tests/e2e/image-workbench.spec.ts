@@ -338,6 +338,10 @@ test("reaches the upload action through the real tab order", async ({ page }) =>
 
 test("makes a photo-like JPEG smaller while preserving its format", async ({ page }) => {
   await page.goto("/image/compress");
+  await expect(page.getByRole("heading", { name: "이미지 용량 줄이기", exact: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByRole("region", { name: "압축 설정" })).toBeVisible();
   const input = await createPhotoLikeJpeg(page);
   await page.locator("input[type=file]").setInputFiles({
     name: "photo.jpg",

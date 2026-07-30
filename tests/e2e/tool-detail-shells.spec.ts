@@ -33,19 +33,17 @@ async function expectCatalogShell(
   await expect(heading).toBeVisible();
   await expect(heading.locator("..").getByRole("button", { name: /즐겨찾기/ })).toBeVisible();
   const disclosure = page.getByRole("region", { name: "처리 방식" });
-  await expect(
-    disclosure.getByText(execution === "local" ? "이 기기에서 처리" : "처리 방식 자동 확인", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await expect(disclosure).toContainText(
-    execution === "local"
-      ? "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요."
-      : "실제 처리 위치와 보관 정책을 파일 선택 전에 아래에서 알려드려요.",
-  );
-  expect(
-    await disclosure.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
-  ).toBeGreaterThanOrEqual(12);
+  if (execution === "local") {
+    await expect(disclosure.getByText("이 기기에서 처리", { exact: true })).toBeVisible();
+    await expect(disclosure).toContainText(
+      "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.",
+    );
+    expect(
+      await disclosure.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    ).toBeGreaterThanOrEqual(12);
+  } else {
+    await expect(disclosure).toHaveCount(0);
+  }
   await expect(page.getByRole("region", { name: workAreaLabel })).toBeVisible();
 
   for (const copy of oldStepsCopy) {
