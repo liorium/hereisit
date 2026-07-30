@@ -200,7 +200,7 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
       reason: "LOCAL_FALLBACK_REQUIRED",
     });
     await runSmokeStage("public-ui", () =>
-      page.locator('[data-policy="local"] strong').waitFor({ timeout: timeoutMs }),
+      page.locator('[data-policy="local"]').waitFor({ timeout: timeoutMs }),
     );
     await page.waitForTimeout(250);
     if (
@@ -279,7 +279,10 @@ async function assertMaintainerServer(
     );
     await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     await runSmokeStage("maintainer-ui", () =>
-      page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs }),
+      page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs }),
+    );
+    await runSmokeStage("preset-selection", () =>
+      page.getByText("압축 설정 · 추천", { exact: true }).click(),
     );
     await runSmokeStage("preset-selection", () =>
       page.getByRole("radio", { name: /최소 용량/ }).check(),
@@ -293,7 +296,7 @@ async function assertMaintainerServer(
       }),
     );
     await runSmokeStage("job-submit", () =>
-      page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click(),
+      page.getByRole("button", { name: "용량 줄이기", exact: true }).click(),
     );
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await runSmokeStage("job-completion", () => downloadButton.waitFor({ timeout: timeoutMs }));
@@ -379,14 +382,14 @@ async function performImageCompressServerSmoke({
     });
     try {
       await page.goto(`${origin}/image/compress`, { waitUntil: "networkidle", timeout: timeoutMs });
-      await page.locator('[data-policy="server"] strong').waitFor({ timeout: timeoutMs });
+      await page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs });
       const source = await readFile(sourcePath);
       await page.locator('input[type="file"]').setInputFiles({
         name: privateSourceName,
         mimeType: "image/jpeg",
         buffer: source,
       });
-      await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+      await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
       const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
       await downloadButton.waitFor({ timeout: timeoutMs });
       const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });

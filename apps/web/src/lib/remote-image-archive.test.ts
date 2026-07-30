@@ -1,7 +1,8 @@
 import type { RemoteDownloadHandle } from "@hereisit/server-runtime";
+import { unzipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildRemoteImageArchive,
+  buildImageArchive,
   REMOTE_ARCHIVE_CONSTRAINED_MAX_BYTES,
   REMOTE_ARCHIVE_DESKTOP_MAX_BYTES,
   remoteArchiveByteBudget,
@@ -67,8 +68,8 @@ describe("remote image archive", () => {
   it("refuses an over-budget archive before fetching", async () => {
     const remote = handle("one", []);
     await expect(
-      buildRemoteImageArchive({
-        entries: [{ filename: "one.jpg", handle: remote }],
+      buildImageArchive({
+        entries: [{ kind: "remote", filename: "one.jpg", handle: remote }],
         byteBudget: 1,
       }),
     ).rejects.toThrow("budget");
@@ -79,17 +80,72 @@ describe("remote image archive", () => {
     const order: string[] = [];
     const first = handle("first", order);
     const second = handle("second", order);
-    const archive = await buildRemoteImageArchive({
+    const archive = await buildImageArchive({
       entries: [
-        { filename: "same.jpg", handle: first },
-        { filename: "same.jpg", handle: second },
+        { kind: "remote", filename: "same.jpg", handle: first },
+        { kind: "remote", filename: "same.jpg", handle: second },
       ],
       byteBudget: 1_024,
     });
     expect(archive.blob.type).toBe("application/zip");
+    const files = unzipSync(new Uint8Array(await archive.blob.arrayBuffer()));
+    expect(Object.keys(files).sort()).toEqual(["same-2.jpg", "same.jpg"]);
     expect(order).toEqual(["fetch:first", "chunk:first", "fetch:second", "chunk:second"]);
     await archive.acknowledgeAfterHandoff();
     expect(order.slice(-2)).toEqual(["ack:first", "ack:second"]);
     archive.dispose();
+  });
+
+  it("archives local and remote entries together and acknowledges only the remote result", async () => {
+    const order: string[] = [];
+    const remote = handle("remote", order);
+    const archive = await buildImageArchive({
+      entries: [
+        { kind: "local", filename: "local.txt", blob: new Blob(["local"]) },
+        { kind: "remote", filename: "remote.txt", handle: remote },
+      ],
+      byteBudget: 1_024,
+    });
+    const files = unzipSync(new Uint8Array(await archive.blob.arrayBuffer()));
+    expect(new TextDecoder().decode(files["local.txt"])).toBe("local");
+    expect(new TextDecoder().decode(files["remote.txt"])).toBe("remote");
+    await archive.acknowledgeAfterHandoff();
+    expect(order).toContain("ack:remote");
+    archive.dispose();
+  });
+
+  it("cancels a local entry when aborted between streamed chunks", async () => {
+    const controller = new AbortController();
+    const blob = new Blob(["ab"]);
+    let pulls = 0;
+    let cancelled = false;
+    vi.spyOn(blob, "stream").mockReturnValue(
+      new ReadableStream<Uint8Array<ArrayBuffer>>(
+        {
+          pull(streamController) {
+            pulls += 1;
+            if (pulls === 1) {
+              streamController.enqueue(new Uint8Array(new ArrayBuffer(1)));
+              controller.abort();
+            } else {
+              streamController.close();
+            }
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+
+    await expect(
+      buildImageArchive({
+        entries: [{ kind: "local", filename: "local.bin", blob }],
+        byteBudget: 2,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toBe(true);
   });
 });

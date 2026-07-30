@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 import {
   expectWebShareUnused,
@@ -12,6 +12,13 @@ const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
+}
 
 async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
   const bytes = await page.evaluate(async () => {
@@ -338,21 +345,128 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
     buffer: input,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible({
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible({
     timeout: 20_000,
   });
+  const result = page.getByRole("region", { name: "압축 완료" });
+  await expect(result.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  await expect(result.getByText(formatByteSize(input.byteLength), { exact: true })).toBeVisible();
+  const sizeComparison = result.locator("p").filter({ hasText: "→" }).first();
+  await expect(sizeComparison.getByText("압축 전", { exact: true })).toBeAttached();
+  await expect(sizeComparison.getByText("압축 후", { exact: true })).toBeAttached();
+  await expect(sizeComparison.getByText("→", { exact: true })).toHaveAttribute(
+    "aria-hidden",
+    "true",
+  );
+  await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
+  const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
+  await expect(downloadButton).toBeVisible();
+  await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
+  expect(
+    await result.evaluate((section) => {
+      const heading = section.querySelector("h2");
+      const sizeComparison = section.querySelector("p");
+      const download = [...section.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes("결과 다운로드"),
+      );
+      return (
+        heading !== null &&
+        sizeComparison !== null &&
+        download !== undefined &&
+        Boolean(
+          heading.compareDocumentPosition(sizeComparison) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ) &&
+        Boolean(sizeComparison.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+    }),
+  ).toBe(true);
 
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
   expect(download.suggestedFilename()).toBe("photo-hereisit.jpg");
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   const output = new Uint8Array(await readFile(downloadPath as string));
   expect(output.byteLength).toBeLessThan(input.byteLength);
+  await expect(result.getByText(formatByteSize(output.byteLength), { exact: true })).toBeVisible();
   expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
+
+  await page.getByRole("button", { name: "다른 이미지 압축" }).click();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toHaveCount(0);
+});
+
+test("keeps a local compression result retryable when download activation throws", async ({
+  page,
+}) => {
+  await installDownloadActivationController(page);
+  await page.goto("/image/compress");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles({
+    name: "retry.jpg",
+    mimeType: "image/jpeg",
+    buffer: input,
+  });
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "결과 다운로드 ↓" }).click();
+  await expect(page.getByText("다운로드를 시작하지 못했어요. 다시 시도해 주세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
+});
+
+test("downloads two local compression results together and individually", async ({ page }) => {
+  await installAvailableWebShare(page);
+  await installDownloadActivationController(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/image/compress");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.jpg", mimeType: "image/jpeg", buffer: input },
+    { name: "second.jpg", mimeType: "image/jpeg", buffer: input },
+  ]);
+
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(
+    page
+      .getByRole("region", { name: "2개 이미지 압축 완료" })
+      .locator("p")
+      .filter({ hasText: /KB.*→.*KB/ })
+      .first(),
+  ).toBeVisible();
+  const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+  await expect(archiveButton).toBeVisible();
+  await expect(page.getByRole("button", { name: /개별 다운로드/ })).toHaveCount(0);
+
+  await page.getByText("파일별 결과 보기").click();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(2);
+
+  await setDownloadActivationBlocked(page, true);
+  await archiveButton.click();
+  await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  expect(downloadCount).toBe(0);
+  await expect(archiveButton).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([page.waitForEvent("download"), archiveButton.click()]);
+  expect(download.suggestedFilename()).toBe("hereisit-images.zip");
+  const zipPath = await download.path();
+  expect(zipPath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+  expect(Object.keys(archive).sort()).toEqual(["first-hereisit.jpg", "second-hereisit.jpg"]);
+  expect(downloadCount).toBe(1);
+  await page.getByText("파일별 결과 보기").click();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(2);
+  await expectWebShareUnused(page);
 });
 
 test("retains and downloads the original when compression cannot make it smaller", async ({
@@ -366,17 +480,14 @@ test("retains and downloads the original when compression cannot make it smaller
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(
-    page
-      .getByLabel("3. 결과")
-      .getByText("원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요", {
-        exact: true,
-      }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "원본 유지" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "원본 유지" }).getByText("68B")).toHaveCount(2);
+  await expect(page.getByText("이미 충분히 작아 원본을 유지했어요", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "원본 다운로드 ↓" })).toBeVisible();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "원본 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("tiny-hereisit.png");
   const downloadPath = await download.path();
@@ -393,8 +504,12 @@ test("uses compression progress copy during local source-preserving work", async
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
-  await expect(page.getByText("용량 최적화 중", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "이미지 압축 중" })).toBeVisible();
+  const liveStatus = page.getByRole("status").filter({ hasText: "용량 최적화 중" });
+  await expect(liveStatus).toBeVisible();
+  await expect(liveStatus).toHaveAttribute("aria-live", "polite");
+  await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
   await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
   await page.evaluate(() =>
     (
@@ -404,6 +519,79 @@ test("uses compression progress copy during local source-preserving work", async
   await expect(page.getByTestId("image-workbench-status")).toHaveText(
     "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
   );
+});
+
+test("keeps populated setup, processing, and result actions visible at narrow widths", async ({
+  page,
+}) => {
+  await installHeldTransformingWorker(page);
+  const expectStateWithinViewport = async (action: Locator) => {
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await expect(action).toBeVisible();
+    const box = await action.boundingBox();
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? viewportWidth) + (box?.width ?? 1)).toBeLessThanOrEqual(viewportWidth);
+  };
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto("/image/compress");
+    await page.locator("input[type=file]").setInputFiles({
+      name: `narrow-${width}.png`,
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+
+    await expectStateWithinViewport(page.getByRole("button", { name: "용량 줄이기", exact: true }));
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expectStateWithinViewport(page.getByRole("button", { name: "중단" }));
+
+    await page.evaluate(() =>
+      (
+        window as Window & { __hereisitCompleteImageTransform?: () => void }
+      ).__hereisitCompleteImageTransform?.(),
+    );
+    await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toBeVisible();
+    await expectStateWithinViewport(
+      page.getByRole("button", { name: /원본 다운로드|결과 다운로드/ }),
+    );
+  }
+});
+
+test("reports each file inspection while validating a large selection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeArrayBuffer = Blob.prototype.arrayBuffer;
+    let release: (() => void) | undefined;
+    (
+      window as Window & { __hereisitReleaseFileInspection?: () => void }
+    ).__hereisitReleaseFileInspection = () => release?.();
+    Blob.prototype.arrayBuffer = async function controlledArrayBuffer() {
+      if (this instanceof File && this.name === "second.png") {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return nativeArrayBuffer.call(this);
+    };
+  });
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
+    { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
+  ]);
+
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("2/2 이미지 확인 중");
+  await page.evaluate(() =>
+    (
+      window as Window & { __hereisitReleaseFileInspection?: () => void }
+    ).__hereisitReleaseFileInspection?.(),
+  );
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("2개 이미지를 확인했어요.");
 });
 
 test("explains why HEIC cannot be compressed while preserving its format", async ({ page }) => {
@@ -436,7 +624,7 @@ test("uses detected bytes for same-format PNG guidance", async ({ page }) => {
     mimeType: "image/png",
     buffer: jpeg,
   });
-  await expect(page.getByText("misleading.png", { exact: true })).toBeVisible();
+  await expect(page.getByText(/misleading\.png · /)).toBeVisible();
   await expect(page.getByText(/PNG 스마트 모드/)).toHaveCount(0);
 
   await fileInput.setInputFiles({
@@ -444,6 +632,7 @@ test("uses detected bytes for same-format PNG guidance", async ({ page }) => {
     mimeType: "application/octet-stream",
     buffer: onePixelPng,
   });
+  await page.getByText("압축 설정 · 추천", { exact: true }).click();
   await expect(
     page.getByText("PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.", {
       exact: true,

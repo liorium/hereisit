@@ -348,7 +348,7 @@ test("keeps an empty personal page useful when browser storage is denied", async
 
   await emptyState.getByRole("link", { name: "이미지 용량 줄이기" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
 });
 
 test("presents workflows as honest preparation-only examples", async ({ page }) => {
@@ -913,8 +913,8 @@ test("hands a chosen file to the canonical destination without auto-processing",
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByText("handoff.png", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByText(/handoff\.png · 68B/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeEnabled();
   await expect(page.getByText(/이미지 변환을 완료했어요/)).toHaveCount(0);
 });
 
@@ -931,8 +931,8 @@ test("revalidates detected bytes instead of filename hints at the destination bo
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByText("revalidate-at-destination.bin", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByText(/revalidate-at-destination\.bin · 68B/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeEnabled();
 });
 
 test("consumes a handoff only once during client navigation", async ({ page }) => {
@@ -944,14 +944,14 @@ test("consumes a handoff only once during client navigation", async ({ page }) =
   });
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
-  await expect(page.getByText("one-use-handoff.png", { exact: true })).toBeVisible();
+  await expect(page.getByText(/one-use-handoff\.png · 68B/)).toBeVisible();
   await page.getByRole("link", { name: "HereIsIt 홈" }).click();
   await expect(page).toHaveURL(/\/$/);
   await page.goBack();
 
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByText("one-use-handoff.png", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText(/one-use-handoff\.png/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
 });
 
@@ -964,11 +964,11 @@ test("shows the ordinary selector after a handed-off destination reload", async 
   });
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
-  await expect(page.getByText("reload-clears-handoff.png", { exact: true })).toBeVisible();
+  await expect(page.getByText(/reload-clears-handoff\.png · 68B/)).toBeVisible();
   await page.reload();
 
-  await expect(page.getByText("reload-clears-handoff.png", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText(/reload-clears-handoff\.png/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
 });
 
@@ -1008,7 +1008,7 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
@@ -1026,8 +1026,8 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
 
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByTestId("image-workbench-status")).toHaveText("파일을 다시 선택해 주세요");
-  await expect(page.getByText("expires-locally.png", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByText(/expires-locally\.png/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
 });
 
 test("asks for reselect when a pending handoff reaches a different tool", async ({ page }) => {
@@ -1054,7 +1054,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
@@ -1071,7 +1071,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
   await expect(
     page.getByText("파일을 다시 선택해 주세요", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
-  await expect(page.getByText("target-mismatch.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/target-mismatch\.png/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 파일 선택" })).toBeEnabled();
 });
 
