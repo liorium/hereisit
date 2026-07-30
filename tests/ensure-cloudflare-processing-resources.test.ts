@@ -158,6 +158,24 @@ describe("Cloudflare processing resource planner", () => {
     expect(planProcessingResources({ config, inventory }).actions).toEqual([]);
   });
 
+  it("pauses an active exact processing Queue before provisioning", () => {
+    const inventory = resources();
+    inventory.queues[0] = {
+      ...inventory.queues[0],
+      deliveryPaused: false,
+      consumerCount: 1,
+      consumerScriptNames: [config.workerScriptName],
+    };
+
+    expect(planProcessingResources({ config, inventory }).actions).toEqual([
+      {
+        type: "pause-queue",
+        id: inventory.queues[0]?.id,
+        name: config.queueName,
+      },
+    ]);
+  });
+
   it("seals a converged, credential-free provisioning manifest", () => {
     const manifest = buildProcessingProvisionManifest({
       config,
@@ -184,7 +202,6 @@ describe("Cloudflare processing resource planner", () => {
     ["public R2", "r2", { r2DevEnabled: true }],
     ["R2 CORS", "r2", { cors: [{ origins: ["*"] }] }],
     ["wrong lifecycle", "r2", { lifecycleDays: 30 }],
-    ["active Queue", "queues", { deliveryPaused: false }],
     ["foreign consumer", "queues", { consumerCount: 1, consumerScriptNames: ["other-worker"] }],
     ["incomplete consumer inventory", "queues", { consumerCount: 1 }],
     ["Logpush logs", "logpush", { fields: ["Logs"] }],

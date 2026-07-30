@@ -330,6 +330,13 @@ export function createCloudflareProcessingResourceApi({
       });
       return;
     }
+    if (action.type === "pause-queue") {
+      await request(`${accountPath}/queues/${action.id}`, resourceToken, {
+        method: "PATCH",
+        body: { settings: { delivery_paused: true } },
+      });
+      return;
+    }
     if (action.type === "create-logpush") {
       const destination = new URL(
         `r2://${config.usageLogBucketName}/workers-trace-events/${config.environment}/{DATE}`,
