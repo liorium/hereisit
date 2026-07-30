@@ -49,8 +49,11 @@ tokens and does not need port forwarding.
 7. It converges D1, R2, Analytics Engine, Logpush, Queue, and DLQ resources with both queues paused.
 8. It deploys the rollout-zero bootstrap Worker, resolves the Container application, installs and
    verifies Worker secrets, deploys the final Worker, and records its D1 version attestation.
-9. It deploys and verifies the `processing-staging` Pages alias.
-10. It resumes only the primary Queue, verifies the DLQ stayed paused, and runs the authenticated direct
+9. For a new attested release, it starts a fresh cost-accounting epoch at the next UTC hour while both
+   Queues and public rollout remain closed. The guarded write refuses active jobs, overdue deletion, or
+   a non-accounting circuit reason, and a same-release retry cannot reopen a later circuit.
+10. It deploys and verifies the `processing-staging` Pages alias.
+11. It resumes only the primary Queue, verifies the DLQ stayed paused, and runs the authenticated direct
     download compression smoke.
 
 If any step after the primary Queue resume attempt fails, cleanup pauses it again and verifies both

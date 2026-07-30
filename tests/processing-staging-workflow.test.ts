@@ -142,6 +142,24 @@ describe("processing staging workflow", () => {
     expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
   });
 
+  it("rotates staging cost accounting after attestation while rollout and queues remain closed", () => {
+    const deploy = jobBody("deploy");
+    const attestation = deploy.indexOf("node scripts/apply-worker-version-attestations.mjs");
+    const rotation = deploy.indexOf("node scripts/rotate-staging-accounting-epoch.mjs");
+    const deployPages = deploy.indexOf("wrangler pages deploy");
+    const resume = deploy.indexOf('wrangler queues resume-delivery "$QUEUE_NAME"');
+
+    expect(rotation).toBeGreaterThan(attestation);
+    expect(deployPages).toBeGreaterThan(rotation);
+    expect(resume).toBeGreaterThan(rotation);
+    expect(deploy.slice(attestation, rotation)).toContain(
+      `CLOUDFLARE_D1_API_TOKEN: \${{ secrets.CLOUDFLARE_D1_API_TOKEN }}`,
+    );
+    expect(deploy.slice(rotation, deployPages)).toContain(
+      '--release-report-sha256 "$SOURCE_SHA256"',
+    );
+  });
+
   it("treats only Cloudflare's missing Worker code as an empty first-deploy snapshot", () => {
     const deploy = jobBody("deploy");
 
