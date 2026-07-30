@@ -29,6 +29,11 @@ import {
   isUnprovenInAppBrowser,
   readProcessingClientConfig,
 } from "../lib/processing-config";
+import {
+  buildImageArchive,
+  type ImageArchiveEntry,
+  remoteArchiveByteBudget,
+} from "../lib/remote-image-archive";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-compress-workbench.module.css";
 
@@ -116,7 +121,11 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [message, setMessage] = useState("처리 방식을 확인하고 있어요.");
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [remoteDeliveryBusy, setRemoteDeliveryBusy] = useState(false);
+  const [archiveByteBudget, setArchiveByteBudget] = useState(() =>
+    remoteArchiveByteBudget({ deviceMemoryGiB: null, coarsePointer: true }),
+  );
   const batchRef = useRef<ReturnType<typeof runRemoteImageOptimizeBatch> | null>(null);
   const processingControllerRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<readonly WorkItem[]>([]);
@@ -127,6 +136,14 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   useEffect(() => {
     setRuntimeSupported(supportsBrowserImageRuntime());
+    const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    setArchiveByteBudget(
+      remoteArchiveByteBudget({
+        deviceMemoryGiB:
+          typeof memory === "number" && Number.isFinite(memory) && memory > 0 ? memory : null,
+        coarsePointer: window.matchMedia("(pointer: coarse)").matches,
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -258,7 +275,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const executionReady =
     policy.state === "server" || (policy.state === "local" && runtimeSupported);
-  const busy = processing || remoteDeliveryBusy;
+  const busy = processing || archiving || remoteDeliveryBusy;
 
   usePendingToolFiles({
     toolId,
@@ -584,10 +601,99 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     resultSummary === null
       ? null
       : `${resultSummary.reductionPercent.toFixed(1).replace(/\\.0$/, "")}% 줄였어요`;
-  const resultItem = resultItems[0] ?? null;
+  const archiveEntries = resultItems.flatMap<ImageArchiveEntry>((item) => {
+    const filename = suggestSameFormatOptimizedName(item.file.name, item.mime);
+    if (item.result?.kind === "remote") {
+      return [{ kind: "remote", filename, handle: item.result.handle }];
+    }
+    if (item.result?.kind === "local") {
+      return [
+        {
+          kind: "local",
+          filename,
+          blob: new Blob([item.result.result.bytes], { type: item.result.result.mime }),
+        },
+      ];
+    }
+    if (item.result?.kind === "original") {
+      return [{ kind: "local", filename, blob: item.file }];
+    }
+    return [];
+  });
+  const archiveBytes = archiveEntries.reduce(
+    (sum, entry) =>
+      sum + (entry.kind === "remote" ? entry.handle.descriptor.byteLength : entry.blob.size),
+    0,
+  );
+  const remoteArchiveIds = new Set(
+    archiveEntries.flatMap((entry) =>
+      entry.kind === "remote"
+        ? [
+            resultItems.find(
+              (item) => item.result?.kind === "remote" && item.result.handle === entry.handle,
+            )?.id,
+          ].filter((id): id is string => id !== undefined)
+        : [],
+    ),
+  );
+  const markRemoteArchiveEntriesConsumed = (itemMessage: string) => {
+    setItems((current) =>
+      current.map((item) =>
+        remoteArchiveIds.has(item.id)
+          ? { ...item, result: { kind: "remote-consumed" }, message: itemMessage }
+          : item,
+      ),
+    );
+  };
+  const downloadArchive = async () => {
+    if (
+      remoteDeliveryLockRef.current ||
+      archiveEntries.length < 2 ||
+      archiveBytes > archiveByteBudget
+    ) {
+      return;
+    }
+    remoteDeliveryLockRef.current = true;
+    downloadHandoffRef.current = false;
+    setArchiving(true);
+    setMessage("ZIP 파일을 만들고 있어요.");
+    let archive: Awaited<ReturnType<typeof buildImageArchive>> | null = null;
+    let url: string | null = null;
+    try {
+      archive = await buildImageArchive({
+        entries: archiveEntries,
+        byteBudget: archiveByteBudget,
+      });
+      url = URL.createObjectURL(archive.blob);
+      downloadUrl(url, "hereisit-images.zip");
+      downloadHandoffRef.current = true;
+      await archive.acknowledgeAfterHandoff();
+      markRemoteArchiveEntriesConsumed("다운로드 완료");
+      setMessage(
+        remoteArchiveIds.size > 0
+          ? "ZIP 다운로드와 서버 결과 삭제 요청을 완료했어요."
+          : "ZIP 다운로드를 시작했어요.",
+      );
+    } catch {
+      if (downloadHandoffRef.current) {
+        markRemoteArchiveEntriesConsumed("다운로드 전달됨");
+        setMessage("파일이 다운로드되었을 수 있어요. 브라우저 다운로드 목록을 확인해 주세요.");
+      } else {
+        setMessage("다운로드를 시작하지 못했어요. 다시 시도해 주세요.");
+      }
+    } finally {
+      if (url !== null) {
+        const createdUrl = url;
+        setTimeout(() => URL.revokeObjectURL(createdUrl), 0);
+      }
+      archive?.dispose();
+      remoteDeliveryLockRef.current = false;
+      setArchiving(false);
+    }
+  };
   const screen = deriveImageCompressScreen({
     processing,
-    archiving: false,
+    archiving,
     completedCount: completed.length,
   });
   const totalInputBytes = items.reduce((sum, item) => sum + item.file.size, 0);
@@ -714,53 +820,80 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
       {screen === "processing" ? (
         <section className={styles.stage} aria-labelledby="compress-progress-title">
-          <h2 id="compress-progress-title">이미지 압축 중</h2>
-          <p className={styles.progressCount}>
-            {Math.min(items.length, settledCount + 1)}/{items.length}
-          </p>
+          <h2 id="compress-progress-title">
+            {archiving ? "ZIP 파일 만드는 중" : "이미지 압축 중"}
+          </h2>
+          {archiving ? null : (
+            <p className={styles.progressCount}>
+              {Math.min(items.length, settledCount + 1)}/{items.length}
+            </p>
+          )}
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
-            {phaseLabel(activeItem?.phase ?? null)}
+            {archiving ? message : phaseLabel(activeItem?.phase ?? null)}
           </p>
-          <progress value={activeItem?.fraction ?? undefined} max={1} />
-          <button type="button" className={styles.secondaryAction} onClick={cancelProcessing}>
-            중단
-          </button>
+          <progress value={archiving ? undefined : (activeItem?.fraction ?? undefined)} max={1} />
+          {archiving ? null : (
+            <button type="button" className={styles.secondaryAction} onClick={cancelProcessing}>
+              중단
+            </button>
+          )}
         </section>
       ) : null}
 
-      {screen === "result" && resultItem !== null ? (
+      {screen === "result" && resultSummary !== null ? (
         <section className={styles.resultStage} aria-labelledby="compress-result-title">
-          <h2 id="compress-result-title">
-            {resultItem.result?.kind === "original" ? "원본 유지" : "압축 완료"}
-          </h2>
+          <h2 id="compress-result-title">{resultSummary.count}개 이미지 압축 완료</h2>
           <p className={styles.sizeComparison}>
-            <span>{formatBytes(resultItem.file.size)}</span>
+            <span>{formatBytes(resultSummary.inputBytes)}</span>
             <span aria-hidden="true">→</span>
-            <span>{formatBytes(resultItem.outputByteLength)}</span>
+            <span>{formatBytes(resultSummary.outputBytes)}</span>
           </p>
-          <p className={styles.reduction}>
-            {resultItem.result?.kind === "original"
-              ? "이미 충분히 작아 원본을 유지했어요"
-              : reductionText}
-          </p>
+          <p className={styles.reduction}>{reductionText}</p>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
           </p>
-          <button
-            className={styles.primaryAction}
-            type="button"
-            disabled={
-              resultItem.result?.kind === "remote-consumed" ||
-              (resultItem.result?.kind === "remote" && remoteDeliveryBusy)
-            }
-            onClick={() => void downloadItem(resultItem)}
-          >
-            {resultItem.result?.kind === "remote-consumed"
-              ? "다운로드 완료"
-              : resultItem.result?.kind === "original"
-                ? "원본 다운로드 ↓"
-                : "결과 다운로드 ↓"}
-          </button>
+          {archiveEntries.length >= 2 && archiveBytes <= archiveByteBudget ? (
+            <button
+              className={styles.primaryAction}
+              type="button"
+              onClick={() => void downloadArchive()}
+            >
+              결과 {archiveEntries.length}개 ZIP 다운로드 ↓
+            </button>
+          ) : archiveEntries.length >= 2 ? (
+            <p>용량이 커서 개별 다운로드만 지원해요.</p>
+          ) : null}
+          <details className={styles.individualResults} open={archiveBytes > archiveByteBudget}>
+            <summary>파일별 결과 보기</summary>
+            <ul>
+              {items.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.file.name}</strong>
+                    {item.outputByteLength === undefined ? (
+                      <span>{item.message}</span>
+                    ) : (
+                      <span>
+                        {formatBytes(item.file.size)} → {formatBytes(item.outputByteLength)}
+                      </span>
+                    )}
+                    {item.result?.kind === "original" ? <span>{item.message}</span> : null}
+                  </div>
+                  {item.status === "completed" &&
+                  item.result !== undefined &&
+                  item.result.kind !== "remote-consumed" ? (
+                    <button
+                      type="button"
+                      disabled={item.result.kind === "remote" && remoteDeliveryBusy}
+                      onClick={() => void downloadItem(item)}
+                    >
+                      {item.result.kind === "original" ? "원본 다운로드 ↓" : "결과 다운로드 ↓"}
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </details>
           <button className={styles.textAction} type="button" onClick={() => void resetWorkbench()}>
             다른 이미지 압축
           </button>

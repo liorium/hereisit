@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { crc32, deflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
+import { unzipSync } from "fflate";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -129,6 +130,7 @@ test("discloses local processing before selection and preserves PNG", async ({ p
   });
   await expect(page.getByText("sample.png")).toBeVisible();
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await page.getByText("파일별 결과 보기").click();
   const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   await expect(downloadButton).toBeVisible({ timeout: 20_000 });
   const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
@@ -318,12 +320,14 @@ test.describe("configured processing server", () => {
     ).toBeGreaterThan(0);
     await expect(page.getByText("처리 순서를 기다리는 중")).toBeVisible();
     await expect(page.getByText("용량 최적화 중")).toBeVisible();
+    await page.getByText("파일별 결과 보기").click();
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await expect(downloadButton).toBeVisible();
     await expect(
       page
-        .getByRole("region", { name: "압축 완료" })
-        .getByText(`${onePixelPng.byteLength}B`, { exact: true }),
+        .getByText("파일별 결과 보기")
+        .locator("..")
+        .getByText(new RegExp(`→ ${onePixelPng.byteLength}B$`)),
     ).toBeVisible();
     await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "중단" })).toHaveCount(0);
@@ -409,9 +413,10 @@ test.describe("configured processing server", () => {
       buffer: onePixelPng,
     });
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "원본 유지" })).toBeVisible();
-    await expect(page.getByText("이미 충분히 작아 원본을 유지했어요")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible();
+    await page.getByText("파일별 결과 보기").click();
     await expect(page.getByText("68B → 68B")).toBeVisible();
+    await expect(page.getByText(/원본 파일을 그대로 내려받습니다/)).toBeVisible();
     const downloadButton = page.getByRole("button", { name: "원본 다운로드 ↓" });
     const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
     expect(download.suggestedFilename()).toBe("retained-hereisit.png");
@@ -500,15 +505,14 @@ test.describe("configured processing server", () => {
     await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeVisible();
   });
 
-  test("keeps an earlier batch result downloadable while a later item is running", async ({
-    page,
-  }) => {
+  test("downloads two remote compression results as one acknowledged ZIP", async ({ page }) => {
     const ids = [jobId, secondJobId];
+    const calls: string[] = [];
     let created = 0;
-    let releaseSecond = false;
     await page.route("**/v1/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
+      calls.push(`${request.method()} ${path}`);
       if (path === "/v1/policy") {
         await route.fulfill({ status: 200, json: serverPolicy() });
         return;
@@ -541,42 +545,30 @@ test.describe("configured processing server", () => {
       }
       const statusJobId = ids.find((candidate) => path === `/v1/jobs/${candidate}`);
       if (statusJobId !== undefined && request.method() === "GET") {
-        const done = statusJobId === jobId || releaseSecond;
         await route.fulfill({
           status: 200,
-          json: done
-            ? {
-                contract: "tool-job@1",
-                jobId: statusJobId,
-                state: "succeeded",
-                phase: "completed",
-                phaseFraction: 1,
-                sequence: 3,
-                attempt: 1,
-                result: {
-                  kind: "download",
-                  mime: "image/png",
-                  byteLength: onePixelPng.byteLength,
-                  width: 1,
-                  height: 1,
-                  engineBuildId: "engine-test",
-                  codecBuildId: "codec-test",
-                  warnings: [],
-                  timing: { queueMs: 1, processingMs: 1, totalMs: 2 },
-                  expiresAt: "2099-01-01T00:00:00.000Z",
-                },
-                updatedAt: "2026-07-16T00:00:01.000Z",
-              }
-            : {
-                contract: "tool-job@1",
-                jobId: statusJobId,
-                state: "running",
-                phase: "optimizing",
-                phaseFraction: 0.5,
-                sequence: 2,
-                attempt: 1,
-                updatedAt: "2026-07-16T00:00:00.000Z",
-              },
+          json: {
+            contract: "tool-job@1",
+            jobId: statusJobId,
+            state: "succeeded",
+            phase: "completed",
+            phaseFraction: 1,
+            sequence: 3,
+            attempt: 1,
+            result: {
+              kind: "download",
+              mime: "image/png",
+              byteLength: onePixelPng.byteLength,
+              width: 1,
+              height: 1,
+              engineBuildId: "engine-test",
+              codecBuildId: "codec-test",
+              warnings: [],
+              timing: { queueMs: 1, processingMs: 1, totalMs: 2 },
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+            updatedAt: "2026-07-16T00:00:01.000Z",
+          },
         });
         return;
       }
@@ -596,25 +588,126 @@ test.describe("configured processing server", () => {
       { name: "first.png", mimeType: "image/png", buffer: onePixelPng },
       { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
     ]);
-    await page.getByRole("button", { name: "2개 이미지 용량 줄이기 →" }).click();
-    const downloadButtons = page.getByRole("button", { name: "결과 다운로드 ↓" });
-    await expect(downloadButtons).toHaveCount(1);
-    await expect(page.getByText("용량 최적화 중")).toBeVisible();
-    const resultResponsePromise = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === `/v1/jobs/${jobId}/result`,
-    );
-    const downloadPromise = page.waitForEvent("download");
-    await downloadButtons.first().click();
-    const resultResponse = await resultResponsePromise;
-    expect(resultResponse.status()).toBe(200);
-    expect(resultResponse.headers()["content-type"]).toBe("image/png");
-    expect(resultResponse.headers()["content-length"]).toBe(String(onePixelPng.byteLength));
-    expect(resultResponse.headers()["x-download-lease"]).toBe("a".repeat(43));
-    const firstDownload = await downloadPromise;
-    expect(firstDownload.suggestedFilename()).toBe("first-hereisit.png");
-    await expect(page.getByRole("button", { name: "다운로드 완료" })).toBeDisabled();
-    releaseSecond = true;
-    await expect(downloadButtons).toHaveCount(1);
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "2개 이미지 압축 완료" })
+        .locator("p")
+        .filter({ hasText: /136B.*→.*136B/ })
+        .first(),
+    ).toBeVisible();
+    const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+    await expect(archiveButton).toBeVisible();
+    await expect(page.getByRole("button", { name: /개별 다운로드/ })).toHaveCount(0);
+    await page.getByText("파일별 결과 보기").click();
+    await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(2);
+
+    const [download] = await Promise.all([page.waitForEvent("download"), archiveButton.click()]);
+    expect(download.suggestedFilename()).toBe("hereisit-images.zip");
+    const zipPath = await download.path();
+    expect(zipPath).not.toBeNull();
+    const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+    expect(Object.keys(archive).sort()).toEqual(["first-hereisit.png", "second-hereisit.png"]);
+    await expect.poll(() => calls.filter((call) => call.endsWith("/downloaded")).length).toBe(2);
+    await page.getByText("파일별 결과 보기").click();
+    await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
+  });
+
+  test("downloads mixed remote and local fallback results in one ZIP", async ({ page }) => {
+    const calls: string[] = [];
+    let createCalls = 0;
+    await page.route("**/v1/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      calls.push(`${request.method()} ${path}`);
+      if (path === "/v1/policy") {
+        await route.fulfill({ status: 200, json: serverPolicy() });
+      } else if (path === "/v1/jobs" && request.method() === "POST") {
+        createCalls += 1;
+        if (createCalls === 2) {
+          await route.fulfill({
+            status: 429,
+            json: {
+              contract: "tool-job@1",
+              error: {
+                code: "QUOTA_EXCEEDED",
+                message: "현재 네트워크의 처리 한도에 도달했어요.",
+                retryable: true,
+              },
+            },
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 201,
+          json: {
+            contract: "tool-job@1",
+            mode: "upload-required",
+            jobId,
+            upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
+              path: `/v1/jobs/${jobId}/input`,
+              contentType: "image/png",
+              byteLength: onePixelPng.byteLength,
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+            reservedWeightedUnits: 1,
+          },
+        });
+      } else if (path.endsWith("/input")) {
+        await route.fulfill({ status: 204 });
+      } else if (path === `/v1/jobs/${jobId}` && request.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          json: {
+            contract: "tool-job@1",
+            jobId,
+            state: "succeeded",
+            phase: "completed",
+            phaseFraction: 1,
+            sequence: 3,
+            attempt: 1,
+            result: {
+              kind: "download",
+              mime: "image/png",
+              byteLength: onePixelPng.byteLength,
+              width: 1,
+              height: 1,
+              engineBuildId: "engine-test",
+              codecBuildId: "codec-test",
+              warnings: [],
+              timing: { queueMs: 1, processingMs: 1, totalMs: 2 },
+              expiresAt: "2099-01-01T00:00:00.000Z",
+            },
+            updatedAt: "2026-07-16T00:00:01.000Z",
+          },
+        });
+      } else if (path.endsWith("/result")) {
+        await route.fulfill({ status: 200, body: onePixelPng, headers: resultHeaders });
+      } else {
+        await route.fulfill({ status: 204 });
+      }
+    });
+
+    await page.goto("/image/compress");
+    await page.locator('input[type="file"]').setInputFiles([
+      { name: "remote.png", mimeType: "image/png", buffer: onePixelPng },
+      { name: "local.png", mimeType: "image/png", buffer: onePixelPng },
+    ]);
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible();
+    const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+    const [download] = await Promise.all([page.waitForEvent("download"), archiveButton.click()]);
+    const zipPath = await download.path();
+    expect(zipPath).not.toBeNull();
+    const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+    expect(Object.keys(archive).sort()).toEqual(["local-hereisit.png", "remote-hereisit.png"]);
+    await expect.poll(() => calls.filter((call) => call.endsWith("/downloaded")).length).toBe(1);
+    await page.getByText("파일별 결과 보기").click();
+    await expect(page.getByRole("button", { name: "원본 다운로드 ↓" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
   });
 
   test("shows retry guidance without presenting it as a local usage fallback", async ({ page }) => {
@@ -787,6 +880,7 @@ test.describe("configured processing server", () => {
     });
     await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
     await expect(page.getByText("사용량 보호 · 업로드 없이 내 기기에서 처리")).toBeVisible();
+    await page.getByText("파일별 결과 보기").click();
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
     expect(uploadCalls).toBe(0);
   });

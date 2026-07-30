@@ -1,7 +1,8 @@
 import type { RemoteDownloadHandle } from "@hereisit/server-runtime";
+import { unzipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildRemoteImageArchive,
+  buildImageArchive,
   REMOTE_ARCHIVE_CONSTRAINED_MAX_BYTES,
   REMOTE_ARCHIVE_DESKTOP_MAX_BYTES,
   remoteArchiveByteBudget,
@@ -67,8 +68,8 @@ describe("remote image archive", () => {
   it("refuses an over-budget archive before fetching", async () => {
     const remote = handle("one", []);
     await expect(
-      buildRemoteImageArchive({
-        entries: [{ filename: "one.jpg", handle: remote }],
+      buildImageArchive({
+        entries: [{ kind: "remote", filename: "one.jpg", handle: remote }],
         byteBudget: 1,
       }),
     ).rejects.toThrow("budget");
@@ -79,10 +80,10 @@ describe("remote image archive", () => {
     const order: string[] = [];
     const first = handle("first", order);
     const second = handle("second", order);
-    const archive = await buildRemoteImageArchive({
+    const archive = await buildImageArchive({
       entries: [
-        { filename: "same.jpg", handle: first },
-        { filename: "same.jpg", handle: second },
+        { kind: "remote", filename: "same.jpg", handle: first },
+        { kind: "remote", filename: "same.jpg", handle: second },
       ],
       byteBudget: 1_024,
     });
@@ -90,6 +91,24 @@ describe("remote image archive", () => {
     expect(order).toEqual(["fetch:first", "chunk:first", "fetch:second", "chunk:second"]);
     await archive.acknowledgeAfterHandoff();
     expect(order.slice(-2)).toEqual(["ack:first", "ack:second"]);
+    archive.dispose();
+  });
+
+  it("archives local and remote entries together and acknowledges only the remote result", async () => {
+    const order: string[] = [];
+    const remote = handle("remote", order);
+    const archive = await buildImageArchive({
+      entries: [
+        { kind: "local", filename: "local.txt", blob: new Blob(["local"]) },
+        { kind: "remote", filename: "remote.txt", handle: remote },
+      ],
+      byteBudget: 1_024,
+    });
+    const files = unzipSync(new Uint8Array(await archive.blob.arrayBuffer()));
+    expect(new TextDecoder().decode(files["local.txt"])).toBe("local");
+    expect(new TextDecoder().decode(files["remote.txt"])).toBe("remote");
+    await archive.acknowledgeAfterHandoff();
+    expect(order).toContain("ack:remote");
     archive.dispose();
   });
 });

@@ -14,8 +14,20 @@ export function remoteArchiveByteBudget(input: {
     : REMOTE_ARCHIVE_DESKTOP_MAX_BYTES;
 }
 
-export async function buildRemoteImageArchive(input: {
-  readonly entries: readonly { readonly filename: string; readonly handle: RemoteDownloadHandle }[];
+export type ImageArchiveEntry =
+  | {
+      readonly kind: "remote";
+      readonly filename: string;
+      readonly handle: RemoteDownloadHandle;
+    }
+  | {
+      readonly kind: "local";
+      readonly filename: string;
+      readonly blob: Blob;
+    };
+
+export async function buildImageArchive(input: {
+  readonly entries: readonly ImageArchiveEntry[];
   readonly byteBudget: number;
   readonly signal?: AbortSignal;
 }): Promise<{
@@ -26,7 +38,11 @@ export async function buildRemoteImageArchive(input: {
   if (!Number.isSafeInteger(input.byteBudget) || input.byteBudget < 0) {
     throw new RangeError("archive byte budget is invalid");
   }
-  const total = input.entries.reduce((sum, entry) => sum + entry.handle.descriptor.byteLength, 0);
+  const total = input.entries.reduce(
+    (sum, entry) =>
+      sum + (entry.kind === "remote" ? entry.handle.descriptor.byteLength : entry.blob.size),
+    0,
+  );
   if (!Number.isSafeInteger(total) || total > input.byteBudget) {
     throw new RangeError("archive byte budget is too small");
   }
@@ -57,14 +73,24 @@ export async function buildRemoteImageArchive(input: {
   try {
     for (const [index, source] of input.entries.entries()) {
       if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const part = await source.handle.fetchForArchive({
-        remainingByteBudget: input.byteBudget - consumedBytes,
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      });
-      currentPart = part;
+      let part: RemoteArchivePart | null = null;
+      let byteLength: number;
+      let stream: ReadableStream<Uint8Array>;
+      if (source.kind === "remote") {
+        part = await source.handle.fetchForArchive({
+          remainingByteBudget: input.byteBudget - consumedBytes,
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+        currentPart = part;
+        byteLength = part.byteLength;
+        stream = part.stream;
+      } else {
+        byteLength = source.blob.size;
+        stream = source.blob.stream();
+      }
       const entry = new ZipPassThrough(names[index] ?? `image-${index + 1}`);
       zip.add(entry);
-      const reader = part.stream.getReader();
+      const reader = stream.getReader();
       try {
         while (true) {
           const next = await reader.read();
@@ -76,8 +102,8 @@ export async function buildRemoteImageArchive(input: {
       } finally {
         reader.releaseLock();
       }
-      acknowledgements.push(() => part.acknowledge());
-      consumedBytes += part.byteLength;
+      if (part !== null) acknowledgements.push(() => part.acknowledge());
+      consumedBytes += byteLength;
       currentPart = null;
     }
     zip.end();

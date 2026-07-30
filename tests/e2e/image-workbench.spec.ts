@@ -346,12 +346,13 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   });
 
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible({
     timeout: 20_000,
   });
-  const result = page.getByRole("region", { name: "압축 완료" });
+  const result = page.getByRole("region", { name: "1개 이미지 압축 완료" });
   await expect(result.getByText(formatByteSize(input.byteLength), { exact: true })).toBeVisible();
   await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
+  await page.getByText("파일별 결과 보기").click();
   await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toBeVisible();
   await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
 
@@ -368,6 +369,59 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   expect(Array.from(output.subarray(0, 3))).toEqual([0xff, 0xd8, 0xff]);
 });
 
+test("downloads two local compression results together and individually", async ({ page }) => {
+  await installAvailableWebShare(page);
+  await installDownloadActivationController(page);
+  let downloadCount = 0;
+  page.on("download", () => {
+    downloadCount += 1;
+  });
+  await page.goto("/image/compress");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.jpg", mimeType: "image/jpeg", buffer: input },
+    { name: "second.jpg", mimeType: "image/jpeg", buffer: input },
+  ]);
+
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(
+    page
+      .getByRole("region", { name: "2개 이미지 압축 완료" })
+      .locator("p")
+      .filter({ hasText: /KB.*→.*KB/ })
+      .first(),
+  ).toBeVisible();
+  const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
+  await expect(archiveButton).toBeVisible();
+  await expect(page.getByRole("button", { name: /개별 다운로드/ })).toHaveCount(0);
+
+  await page.getByText("파일별 결과 보기").click();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(2);
+
+  await setDownloadActivationBlocked(page, true);
+  await archiveButton.click();
+  await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  expect(downloadCount).toBe(0);
+  await expect(archiveButton).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([page.waitForEvent("download"), archiveButton.click()]);
+  expect(download.suggestedFilename()).toBe("hereisit-images.zip");
+  const zipPath = await download.path();
+  expect(zipPath).not.toBeNull();
+  const archive = unzipSync(new Uint8Array(await readFile(zipPath as string)));
+  expect(Object.keys(archive).sort()).toEqual(["first-hereisit.jpg", "second-hereisit.jpg"]);
+  expect(downloadCount).toBe(1);
+  await page.getByText("파일별 결과 보기").click();
+  await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(2);
+  await expectWebShareUnused(page);
+});
+
 test("retains and downloads the original when compression cannot make it smaller", async ({
   page,
 }) => {
@@ -380,9 +434,10 @@ test("retains and downloads the original when compression cannot make it smaller
   });
 
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "원본 유지" })).toBeVisible();
-  await expect(page.getByText("이미 충분히 작아 원본을 유지했어요")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "1개 이미지 압축 완료" })).toBeVisible();
+  await page.getByText("파일별 결과 보기").click();
   await expect(page.getByText("68B → 68B")).toBeVisible();
+  await expect(page.getByText(/원본 파일을 그대로 내려받습니다/)).toBeVisible();
   await expect(page.getByRole("button", { name: "원본 다운로드 ↓" })).toBeVisible();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
