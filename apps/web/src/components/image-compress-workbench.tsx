@@ -720,6 +720,11 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     items.every((item) => item.status === "failed") &&
     message !== "작업을 중단했어요.";
   const statusMessage = terminalFailure ? (items[0]?.message ?? message) : message;
+  const idleStatus =
+    items.length === 0 &&
+    (statusMessage === "처리 방식을 확인하고 있어요." ||
+      statusMessage === "서버 처리 정책을 확인했어요." ||
+      (policy.state !== "checking" && statusMessage === policy.text));
   const runDisabled = actionableCount === 0 || policy.state === "checking" || remoteDeliveryBusy;
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -758,7 +763,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       {screen === "setup" ? (
         <section className={styles.stage} aria-labelledby="compress-setup-title">
           <h2 id="compress-setup-title" className={styles.visuallyHidden}>
-            이미지 용량 줄이기
+            압축 설정
           </h2>
           <button
             type="button"
@@ -816,13 +821,15 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
               <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
             ) : null}
           </details>
-          <p
-            role={terminalFailure ? "alert" : "status"}
-            aria-live={terminalFailure ? "assertive" : "polite"}
-            data-testid="image-workbench-status"
-          >
-            {statusMessage}
-          </p>
+          {!idleStatus ? (
+            <p
+              role={terminalFailure ? "alert" : "status"}
+              aria-live={terminalFailure ? "assertive" : "polite"}
+              data-testid="image-workbench-status"
+            >
+              {statusMessage}
+            </p>
+          ) : null}
           <button
             type="button"
             className={styles.primaryAction}
