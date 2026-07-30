@@ -216,7 +216,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     const next: WorkItem[] = [];
     let heicCount = 0;
     let unsupportedCount = Math.max(0, supplied.length - selected.length);
-    for (const file of selected) {
+    for (const [index, file] of selected.entries()) {
+      setMessage(`${index + 1}/${selected.length} 이미지 확인 중`);
       if (file.size < 1 || file.size > MAX_FILE_BYTES) {
         unsupportedCount += 1;
         continue;
@@ -352,7 +353,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             phase: "completed",
             result: { kind: "original" },
             outputByteLength: item.file.size,
-            message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
+            message: "이미 충분히 작아 원본을 유지했어요",
           }),
         );
       } else {
@@ -446,7 +447,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                   phase: "completed",
                   result: { kind: "original" },
                   outputByteLength: source.file.size,
-                  message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
+                  message: "이미 충분히 작아 원본을 유지했어요",
                 }),
               );
             }
@@ -493,7 +494,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
                 phase: "completed",
                 result: { kind: "original" },
                 outputByteLength: source.file.size,
-                message: "원본 파일을 그대로 내려받습니다 · 메타데이터도 그대로일 수 있어요",
+                message: "이미 충분히 작아 원본을 유지했어요",
               }),
             );
           } else if (result.status === "rejected" && result.error.retryable) {
@@ -604,47 +605,23 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     (item): item is WorkItem & { readonly outputByteLength: number } =>
       item.outputByteLength !== undefined,
   );
+  const singleResultItem = items.length === 1 ? resultItems[0] : undefined;
   const resultSummary = summarizeImageCompression(
     resultItems.map((item) => ({ inputBytes: item.file.size, outputBytes: item.outputByteLength })),
   );
   const reductionText =
     resultSummary === null
       ? null
-      : `${resultSummary.reductionPercent.toFixed(1).replace(/\\.0$/, "")}% 줄였어요`;
-  const archiveEntries = resultItems.flatMap<ImageArchiveEntry>((item) => {
-    const filename = suggestSameFormatOptimizedName(item.file.name, item.mime);
-    if (item.result?.kind === "remote") {
-      return [{ kind: "remote", filename, handle: item.result.handle }];
-    }
-    if (item.result?.kind === "local") {
-      return [
-        {
-          kind: "local",
-          filename,
-          blob: new Blob([item.result.result.bytes], { type: item.result.result.mime }),
-        },
-      ];
-    }
-    if (item.result?.kind === "original") {
-      return [{ kind: "local", filename, blob: item.file }];
-    }
-    return [];
-  });
-  const archiveBytes = archiveEntries.reduce(
-    (sum, entry) =>
-      sum + (entry.kind === "remote" ? entry.handle.descriptor.byteLength : entry.blob.size),
-    0,
+      : `${resultSummary.reductionPercent.toFixed(1).replace(/\.0$/, "")}% 줄였어요`;
+  const archiveItems = resultItems.filter(
+    (item) =>
+      item.result?.kind === "remote" ||
+      item.result?.kind === "local" ||
+      item.result?.kind === "original",
   );
+  const archiveBytes = archiveItems.reduce((sum, item) => sum + item.outputByteLength, 0);
   const remoteArchiveIds = new Set(
-    archiveEntries.flatMap((entry) =>
-      entry.kind === "remote"
-        ? [
-            resultItems.find(
-              (item) => item.result?.kind === "remote" && item.result.handle === entry.handle,
-            )?.id,
-          ].filter((id): id is string => id !== undefined)
-        : [],
-    ),
+    archiveItems.flatMap((item) => (item.result?.kind === "remote" ? [item.id] : [])),
   );
   const markRemoteArchiveEntriesConsumed = (itemMessage: string) => {
     setItems((current) =>
@@ -658,7 +635,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const downloadArchive = async () => {
     if (
       remoteDeliveryLockRef.current ||
-      archiveEntries.length < 2 ||
+      archiveItems.length < 2 ||
       archiveBytes > archiveByteBudget
     ) {
       return;
@@ -670,6 +647,24 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     let archive: Awaited<ReturnType<typeof buildImageArchive>> | null = null;
     let url: string | null = null;
     try {
+      const archiveEntries = archiveItems.flatMap<ImageArchiveEntry>((item) => {
+        const filename = suggestSameFormatOptimizedName(item.file.name, item.mime);
+        if (item.result?.kind === "remote") {
+          return [{ kind: "remote", filename, handle: item.result.handle }];
+        }
+        if (item.result?.kind === "local") {
+          return [
+            {
+              kind: "local",
+              filename,
+              blob: new Blob([item.result.result.bytes], { type: item.result.result.mime }),
+            },
+          ];
+        }
+        return item.result?.kind === "original"
+          ? [{ kind: "local", filename, blob: item.file }]
+          : [];
+      });
       archive = await buildImageArchive({
         entries: archiveEntries,
         byteBudget: archiveByteBudget,
@@ -738,6 +733,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const resetWorkbench = async () => {
+    if (remoteDeliveryLockRef.current) return;
     processingControllerRef.current?.abort();
     batchRef.current?.cancel();
     const previous = itemsRef.current;
@@ -860,27 +856,80 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         </section>
       ) : null}
 
-      {screen === "result" && resultSummary !== null ? (
+      {screen === "result" && resultSummary !== null && singleResultItem !== undefined ? (
+        <section className={styles.resultStage} aria-labelledby="compress-result-title">
+          <h2 id="compress-result-title">
+            {singleResultItem.result?.kind === "original" ? "원본 유지" : "압축 완료"}
+          </h2>
+          <p className={styles.sizeComparison}>
+            <span>
+              <span className={styles.visuallyHidden}>압축 전 </span>
+              <span>{formatBytes(singleResultItem.file.size)}</span>
+            </span>
+            <span aria-hidden="true">→</span>
+            <span>
+              <span className={styles.visuallyHidden}>압축 후 </span>
+              <span>{formatBytes(singleResultItem.outputByteLength)}</span>
+            </span>
+          </p>
+          <p className={styles.reduction}>
+            {singleResultItem.result?.kind === "original"
+              ? "이미 충분히 작아 원본을 유지했어요"
+              : reductionText}
+          </p>
+          <p role="status" aria-live="polite" data-testid="image-workbench-status">
+            {message}
+          </p>
+          {singleResultItem.result !== undefined &&
+          singleResultItem.result.kind !== "remote-consumed" ? (
+            <button
+              className={styles.primaryAction}
+              type="button"
+              disabled={singleResultItem.result.kind === "remote" && remoteDeliveryBusy}
+              onClick={() => void downloadItem(singleResultItem)}
+            >
+              {singleResultItem.result.kind === "original" ? "원본 다운로드 ↓" : "결과 다운로드 ↓"}
+            </button>
+          ) : null}
+          <button
+            className={styles.textAction}
+            type="button"
+            disabled={remoteDeliveryBusy}
+            onClick={() => void resetWorkbench()}
+          >
+            다른 이미지 압축
+          </button>
+        </section>
+      ) : null}
+
+      {screen === "result" && resultSummary !== null && items.length > 1 ? (
         <section className={styles.resultStage} aria-labelledby="compress-result-title">
           <h2 id="compress-result-title">{resultSummary.count}개 이미지 압축 완료</h2>
           <p className={styles.sizeComparison}>
-            <span>{formatBytes(resultSummary.inputBytes)}</span>
+            <span>
+              <span className={styles.visuallyHidden}>압축 전 </span>
+              <span>{formatBytes(resultSummary.inputBytes)}</span>
+            </span>
             <span aria-hidden="true">→</span>
-            <span>{formatBytes(resultSummary.outputBytes)}</span>
+            <span>
+              <span className={styles.visuallyHidden}>압축 후 </span>
+              <span>{formatBytes(resultSummary.outputBytes)}</span>
+            </span>
           </p>
           <p className={styles.reduction}>{reductionText}</p>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
           </p>
-          {archiveEntries.length >= 2 && archiveBytes <= archiveByteBudget ? (
+          {archiveItems.length >= 2 && archiveBytes <= archiveByteBudget ? (
             <button
               className={styles.primaryAction}
               type="button"
+              disabled={remoteDeliveryBusy}
               onClick={() => void downloadArchive()}
             >
-              결과 {archiveEntries.length}개 ZIP 다운로드 ↓
+              결과 {archiveItems.length}개 ZIP 다운로드 ↓
             </button>
-          ) : archiveEntries.length >= 2 ? (
+          ) : archiveItems.length >= 2 ? (
             <p>용량이 커서 개별 다운로드만 지원해요.</p>
           ) : null}
           <details className={styles.individualResults} open={archiveBytes > archiveByteBudget}>
@@ -914,7 +963,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
               ))}
             </ul>
           </details>
-          <button className={styles.textAction} type="button" onClick={() => void resetWorkbench()}>
+          <button
+            className={styles.textAction}
+            type="button"
+            disabled={remoteDeliveryBusy}
+            onClick={() => void resetWorkbench()}
+          >
             다른 이미지 압축
           </button>
         </section>

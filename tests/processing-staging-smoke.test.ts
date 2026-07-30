@@ -71,8 +71,9 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
     expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
-      source.indexOf("await page.locator('[data-policy=\"server\"] strong')"),
+      source.indexOf("await page.locator('[data-policy=\"server\"]')"),
     );
+    expect(source).toContain('getByText("압축 설정 · 추천", { exact: true }).click()');
     expect(source).toContain('getByRole("radio", { name: /최소 용량/ }).check()');
   });
 
@@ -82,14 +83,14 @@ describe("authenticated processing staging smoke", () => {
     expect(source).not.toContain("const result = await smoke({");
   });
 
-  it("uses the real one-item compression action name in both browser paths", async () => {
+  it("uses the exact focused compression action in both browser paths", async () => {
     const [smokeSource, componentSource] = await Promise.all([
       readFile("scripts/smoke-image-compress-server.mjs", "utf8"),
       readFile("apps/web/src/components/image-compress-workbench.tsx", "utf8"),
     ]);
-    expect(smokeSource.match(/1개 이미지 용량 줄이기 →/gu)).toHaveLength(2);
+    expect(smokeSource.match(/name: "용량 줄이기", exact: true/gu)).toHaveLength(2);
     expect(smokeSource).not.toContain("이미지 1개 압축하기");
-    expect(componentSource).toContain("{items.length}개 이미지 용량 줄이기 →");
+    expect(componentSource).toContain("용량 줄이기");
   });
 
   it("accepts only the fixed staging origin, output path, and canonical environment session", async () => {

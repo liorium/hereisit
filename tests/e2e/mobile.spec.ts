@@ -196,7 +196,7 @@ test("shows representative image and PDF selectors in the initial 390 by 844 vie
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   for (const [path, label] of [
-    ["/image/compress", "압축할 이미지 선택"],
+    ["/image/compress", "이미지 선택"],
     ["/pdf/organize", "정리할 PDF 선택"],
   ] as const) {
     await page.goto(path);
@@ -237,8 +237,9 @@ test("keeps image compression preset text readable after selection", async ({ pa
     mimeType: "image/png",
     buffer: onePixelPng,
   });
-  await expect(page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeEnabled();
 
+  await page.getByText("압축 설정 · 추천", { exact: true }).click();
   const preset = page.getByRole("radio", { name: /추천/ }).locator("..");
   await expectFunctionalTextFloor([
     { label: "compression preset name", locator: preset.locator("strong") },
@@ -681,7 +682,7 @@ test("keeps representative image and PDF error feedback reachable", async ({ pag
   await page.setViewportSize({ width: 320, height: 568 });
 
   await page.goto("/image/compress");
-  await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await page.locator("input[type=file]").setInputFiles({
     name: "not-an-image.txt",
     mimeType: "text/plain",

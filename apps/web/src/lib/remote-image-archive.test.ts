@@ -88,6 +88,8 @@ describe("remote image archive", () => {
       byteBudget: 1_024,
     });
     expect(archive.blob.type).toBe("application/zip");
+    const files = unzipSync(new Uint8Array(await archive.blob.arrayBuffer()));
+    expect(Object.keys(files).sort()).toEqual(["same-2.jpg", "same.jpg"]);
     expect(order).toEqual(["fetch:first", "chunk:first", "fetch:second", "chunk:second"]);
     await archive.acknowledgeAfterHandoff();
     expect(order.slice(-2)).toEqual(["ack:first", "ack:second"]);

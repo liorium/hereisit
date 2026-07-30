@@ -5,11 +5,11 @@ const tools = [
   {
     path: "/image/compress",
     title: "이미지 용량 줄이기",
-    selectLabel: "압축할 이미지 선택",
+    selectLabel: "이미지 선택",
     preset: /추천/,
     visiblePresets: [/추천/, /최소 용량/, /무손실/],
     presetControl: "radio",
-    runLabel: "1개 이미지 용량 줄이기 →",
+    runLabel: "용량 줄이기",
   },
   {
     path: "/image/resize",
@@ -106,6 +106,7 @@ test("links to dedicated image tools and initializes each intent", async ({ page
       buffer: onePixelPng,
     });
     if (tool.presetControl === "radio") {
+      await page.getByText("압축 설정 · 추천", { exact: true }).click();
       const presetGroup = page.getByRole("radiogroup", { name: "압축 프리셋" });
       await expect(presetGroup.getByRole("radio", { name: tool.preset })).toBeChecked();
       await expect(presetGroup.getByRole("radio")).toHaveCount(tool.visiblePresets.length);
@@ -123,7 +124,7 @@ test("links to dedicated image tools and initializes each intent", async ({ page
         await expect(presetGroup.getByRole("button", { name: visiblePreset })).toBeVisible();
       }
     }
-    await expect(page.getByRole("button", { name: tool.runLabel })).toBeVisible();
+    await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",
       new RegExp(`${tool.path.replaceAll("/", "\\/")}\\/?$`),
