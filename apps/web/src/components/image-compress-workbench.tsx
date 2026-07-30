@@ -16,6 +16,7 @@ import type {
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes } from "../lib/files";
+import { deriveImageCompressScreen } from "../lib/image-compress-presentation";
 import {
   type LocalImageOptimizeResult,
   runLocalImageOptimizeFallback,
@@ -129,7 +130,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   useEffect(() => {
     let active = true;
     if (config.apiOrigin === null) {
-      setPolicy({ state: "local", text: "업로드 없음 · 내 기기에서 처리" });
+      setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
       if (!hasFileSelectionRef.current) {
         setMessage("파일은 업로드하지 않고 이 기기에서 처리해요.");
       }
@@ -143,16 +144,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         if (value.execution === "server") {
           setPolicy({
             state: "server",
-            text: "선택한 이미지는 HereIsIt 처리 서버로 전송되며 입력과 결과는 자동 삭제를 시도해요.",
+            text: "파일은 HereIsIt 처리 서버로 전송되며 작업 후 자동 삭제를 시도해요.",
           });
           if (!hasFileSelectionRef.current) setMessage("서버 처리 정책을 확인했어요.");
         } else {
           setPolicy({
             state: "local",
-            text:
-              value.reason === "LOCAL_FALLBACK_REQUIRED"
-                ? "사용량 보호 · 업로드 없이 내 기기에서 처리"
-                : "서버 처리 중지 · 업로드 없이 내 기기에서 처리",
+            text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
           });
           if (!hasFileSelectionRef.current) {
             setMessage(
@@ -165,7 +163,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       })
       .catch(() => {
         if (!active) return;
-        setPolicy({ state: "local", text: "서버 연결 실패 · 업로드 없이 내 기기에서 처리" });
+        setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
         if (!hasFileSelectionRef.current) {
           setMessage("서버에 연결하지 못해 로컬 처리로 전환했어요.");
         }
@@ -381,16 +379,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             execution = "server";
             setPolicy({
               state: "server",
-              text: "선택한 이미지는 HereIsIt 처리 서버로 전송되며 입력과 결과는 자동 삭제를 시도해요.",
+              text: "파일은 HereIsIt 처리 서버로 전송되며 작업 후 자동 삭제를 시도해요.",
             });
           } else {
             execution = "local";
             setPolicy({
               state: "local",
-              text:
-                refreshed.reason === "LOCAL_FALLBACK_REQUIRED"
-                  ? "사용량 보호 · 업로드 없이 내 기기에서 처리"
-                  : "서버 처리 중지 · 업로드 없이 내 기기에서 처리",
+              text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
             });
           }
         } catch {
@@ -399,7 +394,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             return;
           }
           execution = "local";
-          setPolicy({ state: "local", text: "서버 연결 실패 · 업로드 없이 내 기기에서 처리" });
+          setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
         }
       }
 
@@ -484,7 +479,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             if (result.error.code === "RATE_LIMITED" || result.error.code === "QUOTA_EXCEEDED") {
               setPolicy({
                 state: "local",
-                text: "사용량 보호 · 업로드 없이 내 기기에서 처리",
+                text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
               });
             }
             fallback.push(source);
@@ -574,9 +569,32 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const completed = items.filter((item) => item.status === "completed");
+  const screen = deriveImageCompressScreen({
+    processing,
+    archiving,
+    completedCount: completed.length,
+  });
+  const totalInputBytes = items.reduce((sum, item) => sum + item.file.size, 0);
+  const activeItem = items.find((item) => item.status === "processing");
+  const settledCount = items.filter(
+    (item) => item.status === "completed" || item.status === "failed",
+  ).length;
+  const presetLabels: Record<Preset, string> = {
+    recommended: "추천",
+    smallest: "최소 용량",
+    lossless: "무손실",
+  };
   const actionableCount = items.filter(
     (item) => item.status === "ready" || item.status === "failed",
   ).length;
+  const runDisabled =
+    actionableCount === 0 || policy.state === "checking" || archiving || remoteDeliveryBusy;
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    void chooseFiles(input.files).finally(() => {
+      input.value = "";
+    });
+  };
   const remoteEntries = completed.flatMap((item) =>
     item.result?.kind === "remote"
       ? [
@@ -653,35 +671,29 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     }
   };
 
+  const cancelProcessing = () => {
+    processingControllerRef.current?.abort();
+    batchRef.current?.cancel();
+  };
+
   return (
     <section
       className={styles.workbench}
       data-runtime="hereisit-server-runtime"
       aria-label="이미지 압축 작업대"
     >
-      <div className={styles.disclosure} data-policy={policy.state}>
-        <strong>
-          {policy.state === "checking" ? "처리 방식을 확인하고 있어요." : policy.text}
-        </strong>
-        {policy.state === "server" ? (
-          <p>
-            입력은 작업 종료 시, 결과는 다운로드 확인 시 삭제를 시도합니다. 확인되지 않은 결과는
-            일반적으로 35분 안에 정리하며 장애 시 늦어질 수 있고 1일 만료 규칙이 안전망으로
-            적용됩니다. <a href="/privacy">개인정보처리방침</a>
-          </p>
-        ) : null}
-      </div>
-
-      <div className={styles.grid}>
-        <section className={styles.panel} aria-labelledby="compress-files-title">
-          <h2 id="compress-files-title">1. 이미지 선택</h2>
+      {screen === "setup" ? (
+        <section className={styles.stage} aria-labelledby="compress-setup-title">
+          <h2 id="compress-setup-title" className={styles.visuallyHidden}>
+            이미지 용량 줄이기
+          </h2>
           <button
             type="button"
             className={styles.picker}
             disabled={!executionReady || busy}
             onClick={() => fileInputRef.current?.click()}
           >
-            압축할 이미지 선택
+            이미지 선택
           </button>
           <input
             ref={fileInputRef}
@@ -690,67 +702,83 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             accept="image/jpeg,image/png,image/webp"
             multiple
             disabled={!executionReady || busy}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => {
-              const input = event.currentTarget;
-              void chooseFiles(input.files).finally(() => {
-                input.value = "";
-              });
-            }}
+            onChange={handleFileInputChange}
           />
-          <p>JPG, PNG, WebP · 파일당 30MB · 최대 20개 · 움직이는 이미지 제외</p>
-          <ul className={styles.fileList}>
-            {items.map((item) => (
-              <li key={item.id}>
-                <div>
-                  <strong>{item.file.name}</strong>
-                  <span>
-                    {formatBytes(item.file.size)} · {item.width}×{item.height}
-                  </span>
-                </div>
-                <span>{item.status === "processing" ? phaseLabel(item.phase) : item.message}</span>
-                {item.status === "processing" ? (
-                  <progress value={item.fraction ?? undefined} max={1} />
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className={styles.panel} aria-labelledby="compress-settings-title">
-          <h2 id="compress-settings-title">2. 압축 설정</h2>
-          <div className={styles.presets} role="radiogroup" aria-label="압축 프리셋">
-            {(
-              [
-                ["recommended", "추천", "품질과 용량의 균형"],
-                ["smallest", "최소 용량", "더 강한 시각적 압축"],
-                ["lossless", "무손실", "픽셀을 바꾸지 않고 정리"],
-              ] as const
-            ).map(([value, label, detail]) => (
-              <label key={value} data-selected={preset === value}>
-                <input
-                  type="radio"
-                  name="compress-preset"
-                  value={value}
-                  checked={preset === value}
-                  disabled={processing || archiving || remoteDeliveryBusy}
-                  onChange={() => changePreset(value)}
-                />
-                <strong>{label}</strong>
-                <span>{detail}</span>
-              </label>
-            ))}
-          </div>
-          {items.some((item) => item.mime === "image/png") && preset !== "lossless" ? (
-            <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
+          <p className={styles.limits}>JPG, PNG, WebP · 파일당 30MB · 최대 20개</p>
+          {items.length > 0 ? (
+            <p className={styles.selectionSummary}>
+              {items.length === 1
+                ? `${items[0]?.file.name} · ${formatBytes(totalInputBytes)}`
+                : `${items.length}개 이미지 · ${formatBytes(totalInputBytes)}`}
+            </p>
           ) : null}
-        </section>
-
-        <section className={styles.panel} aria-labelledby="compress-results-title">
-          <h2 id="compress-results-title">3. 결과</h2>
+          <p className={styles.disclosure} data-policy={policy.state}>
+            {policy.state === "checking" ? "처리 방식을 확인하고 있어요." : policy.text}
+            {policy.state === "server" ? <a href="/privacy">자세히</a> : null}
+          </p>
+          <details className={styles.settings}>
+            <summary>압축 설정 · {presetLabels[preset]}</summary>
+            <div className={styles.presets} role="radiogroup" aria-label="압축 프리셋">
+              {(
+                [
+                  ["recommended", "추천", "품질과 용량의 균형"],
+                  ["smallest", "최소 용량", "더 강한 시각적 압축"],
+                  ["lossless", "무손실", "픽셀을 바꾸지 않고 정리"],
+                ] as const
+              ).map(([value, label, detail]) => (
+                <label key={value} data-selected={preset === value}>
+                  <input
+                    type="radio"
+                    name="compress-preset"
+                    value={value}
+                    checked={preset === value}
+                    onChange={() => changePreset(value)}
+                  />
+                  <strong>{label}</strong>
+                  <span>{detail}</span>
+                </label>
+              ))}
+            </div>
+            {items.some((item) => item.mime === "image/png") && preset !== "lossless" ? (
+              <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
+            ) : null}
+          </details>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
           </p>
-          <ul className={styles.results}>
+          <button
+            type="button"
+            className={styles.primaryAction}
+            disabled={runDisabled}
+            onClick={() => void processItems()}
+          >
+            용량 줄이기
+          </button>
+        </section>
+      ) : null}
+
+      {screen === "processing" ? (
+        <section className={styles.stage} aria-labelledby="compress-progress-title">
+          <h2 id="compress-progress-title">이미지 압축 중</h2>
+          <p className={styles.progressCount}>
+            {Math.min(items.length, settledCount + 1)}/{items.length}
+          </p>
+          <p role="status" aria-live="polite" data-testid="image-workbench-status">
+            {archiving ? "ZIP을 준비하고 있어요." : phaseLabel(activeItem?.phase ?? null)}
+          </p>
+          <progress value={activeItem?.fraction ?? undefined} max={1} />
+          <button type="button" className={styles.secondaryAction} onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
+      ) : null}
+
+      {screen === "result" ? (
+        <section className={styles.stage} aria-label="결과">
+          <p role="status" aria-live="polite" data-testid="image-workbench-status">
+            {message}
+          </p>
+          <ul className={styles.resultList}>
             {completed.map((item) => (
               <li key={item.id}>
                 <div>
@@ -784,34 +812,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             )
           ) : null}
         </section>
-      </div>
-
-      <div className={styles.stickyAction}>
-        {processing ? (
-          <button
-            type="button"
-            onClick={() => {
-              processingControllerRef.current?.abort();
-              batchRef.current?.cancel();
-            }}
-          >
-            처리 중단
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={
-              actionableCount === 0 ||
-              policy.state === "checking" ||
-              archiving ||
-              remoteDeliveryBusy
-            }
-            onClick={() => void processItems()}
-          >
-            {items.length}개 이미지 용량 줄이기 →
-          </button>
-        )}
-      </div>
+      ) : null}
     </section>
   );
 }

@@ -393,8 +393,10 @@ test("uses compression progress copy during local source-preserving work", async
     buffer: onePixelPng,
   });
 
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { name: "이미지 압축 중" })).toBeVisible();
   await expect(page.getByText("용량 최적화 중", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
   await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
   await page.evaluate(() =>
     (

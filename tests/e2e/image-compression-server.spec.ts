@@ -109,17 +109,22 @@ test("discloses local processing before selection and preserves PNG", async ({ p
     if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobRequests.push(request.url());
   });
   await page.goto("/image/compress");
-  await expect(page.getByText("업로드 없음 · 내 기기에서 처리")).toBeVisible();
+  await expect(page.getByText("파일은 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
   await expect(page.getByText("내 기기에서만 처리")).toHaveCount(0);
-  const picker = page.getByRole("button", { name: "압축할 이미지 선택" });
+  const picker = page.getByRole("button", { name: "이미지 선택" });
   await expect(picker).toBeEnabled();
+  await expect(page.getByText("압축 설정 · 추천")).toBeVisible();
+  await expect(page.getByRole("radio", { name: /최소 용량/ })).not.toBeVisible();
+  await page.getByText("압축 설정 · 추천").click();
+  await expect(page.getByRole("radio", { name: /최소 용량/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기" })).toBeDisabled();
   await page.locator('input[type="file"]').setInputFiles({
     name: "sample.png",
     mimeType: "image/png",
     buffer: onePixelPng,
   });
   await expect(page.getByText("sample.png")).toBeVisible();
-  await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "용량 줄이기" }).click();
   const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   await expect(downloadButton).toBeVisible({ timeout: 20_000 });
   const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
@@ -131,17 +136,17 @@ test("keeps the mobile workbench in one column without horizontal overflow", asy
   test.skip(serverModeEnabled, "requires the default local-only build");
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/image/compress");
-  await expect(page.getByText("업로드 없음 · 내 기기에서 처리")).toBeVisible();
+  await expect(page.getByText("파일은 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true);
-  const action = page.getByRole("button", { name: "0개 이미지 용량 줄이기 →" });
+  const action = page.getByRole("button", { name: "용량 줄이기" });
   await expect(action).toBeVisible();
   expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   expect(
-    (await page.getByRole("button", { name: "압축할 이미지 선택" }).boundingBox())?.height,
+    (await page.getByRole("button", { name: "이미지 선택" }).boundingBox())?.height,
   ).toBeGreaterThanOrEqual(44);
 });
 
@@ -286,20 +291,21 @@ test.describe("configured processing server", () => {
     });
 
     await page.goto("/image/compress");
-    await expect(page.locator('[data-policy="checking"] strong')).toHaveText(
-      "처리 방식을 확인하고 있어요.",
-    );
-    await expect(page.getByRole("button", { name: "압축할 이미지 선택" })).toBeDisabled();
-    await expect(page.getByText(/선택한 이미지는 HereIsIt 처리 서버로 전송/)).toBeVisible();
-    const picker = page.getByRole("button", { name: "압축할 이미지 선택" });
+    await expect(page.getByText("처리 방식을 확인하고 있어요.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    const picker = page.getByRole("button", { name: "이미지 선택" });
     await expect(picker).toBeEnabled();
     await page.locator('input[type="file"]').setInputFiles({
       name: "server.png",
       mimeType: "image/png",
       buffer: progressPng,
     });
-    await page.getByRole("button", { name: "1개 이미지 용량 줄이기 →" }).click();
+    await page.getByRole("button", { name: "용량 줄이기" }).click();
+    await expect(page.getByRole("heading", { name: "이미지 압축 중" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "이미지 선택" })).toHaveCount(0);
     await expect(page.getByText("안전하게 업로드 중")).toBeVisible();
+    await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
     await expect(page.locator("progress")).toBeVisible();
     expect(
       await page.locator("progress").evaluate((element) => (element as HTMLProgressElement).value),
