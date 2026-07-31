@@ -9,7 +9,10 @@ const secret = "A".repeat(43);
 const maintainerSessionId = "123e4567-e89b-42d3-a456-426614174000";
 const maintainerSessionHash = createHash("sha256").update(maintainerSessionId).digest("hex");
 
-function validEnvironment(): Record<string, string> {
+function validEnvironment(
+  deployment: "staging" | "production" = "staging",
+): Record<string, string> {
+  const prefix = deployment.toUpperCase();
   return {
     CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
     CLOUDFLARE_API_TOKEN: "worker-token-value-1234567890",
@@ -17,12 +20,12 @@ function validEnvironment(): Record<string, string> {
     CLOUDFLARE_LOGPUSH_API_TOKEN: "logs-token-value-12345678901",
     LOGPUSH_R2_ACCESS_KEY_ID: "R2ACCESSKEY1234567890",
     LOGPUSH_R2_SECRET_ACCESS_KEY: "r2-secret-access-key-value-1234567890",
-    STAGING_ANALYTICS_READ_TOKEN: "analytics-read-token-1234567890",
-    STAGING_LOGPUSH_STATUS_TOKEN: "logpush-status-token-1234567890",
-    STAGING_ABUSE_HMAC_SECRET_CURRENT: secret,
-    STAGING_ABUSE_HMAC_SECRET_PREVIOUS: secret,
-    STAGING_MAINTAINER_SESSION_ID: maintainerSessionId,
-    STAGING_MAINTAINER_HASHES_JSON: JSON.stringify([maintainerSessionHash]),
+    [`${prefix}_ANALYTICS_READ_TOKEN`]: "analytics-read-token-1234567890",
+    [`${prefix}_LOGPUSH_STATUS_TOKEN`]: "logpush-status-token-1234567890",
+    [`${prefix}_ABUSE_HMAC_SECRET_CURRENT`]: secret,
+    [`${prefix}_ABUSE_HMAC_SECRET_PREVIOUS`]: secret,
+    [`${prefix}_MAINTAINER_SESSION_ID`]: maintainerSessionId,
+    [`${prefix}_MAINTAINER_HASHES_JSON`]: JSON.stringify([maintainerSessionHash]),
     ALERT_DESTINATION_ADDRESS: "alerts@example.com",
   };
 }
@@ -41,6 +44,15 @@ describe("processing deployment environment verifier", () => {
     });
     expect(JSON.parse(output)).toEqual(result);
     for (const value of Object.values(environment)) expect(output).not.toContain(value);
+  });
+
+  it("validates the production-specific credentials without accepting staging substitutes", () => {
+    expect(
+      validateProcessingDeploymentEnvironment(validEnvironment("production"), "production"),
+    ).toEqual({ ready: true, checked: 13, maintainerHashCount: 1 });
+    expect(() => validateProcessingDeploymentEnvironment(validEnvironment(), "production")).toThrow(
+      "PRODUCTION_ANALYTICS_READ_TOKEN",
+    );
   });
 
   it("rejects every missing required deployment value", () => {
