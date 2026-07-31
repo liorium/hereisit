@@ -33,7 +33,7 @@ jobs:
     if: github.event_name == 'pull_request'
     needs: verify
     runs-on: ubuntu-24.04
-    # The complete 554-case matrix spans six browser/device projects and may use two Playwright workers.
+    # Keep WebKit on one worker: its short-lived progress and download events become flaky under contention.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -48,7 +48,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hereisit/web build
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm test:e2e
+      - run: >-
+          pnpm exec playwright test
+          --project=chromium
+          --project=firefox
+          --project=mobile-chromium
+          --project=mobile-firefox
+      - run: >-
+          pnpm exec playwright test
+          --project=webkit
+          --project=mobile-webkit
+          --workers=1
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
