@@ -76,4 +76,8 @@ A successful deployment retains only these sanitized artifacts for seven days:
 - `smoke-result.json`
 
 Production will follow the same successful-push pattern after its separate Cloudflare resources and
-GitHub environment exist. Keep GitHub environment approval as the only manual production gate.
+GitHub environment exist. Before provisioning anything, configure `processing-production` with the same
+common variables and secrets listed above, replace the six `STAGING_` secrets with matching
+`PRODUCTION_` names, and run `Processing production preflight` from `main`. This check is read-only and
+does not deploy or create billable resources. Keep GitHub environment approval as the only manual
+production gate.

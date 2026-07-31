@@ -1,0 +1,53 @@
+name: Processing production preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: processing-production-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate production deployment access
+    if: github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
+    environment: processing-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.11.0
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate sealed environment inputs
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ALERT_DESTINATION_ADDRESS: ${{ vars.ALERT_DESTINATION_ADDRESS }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          PRODUCTION_ANALYTICS_READ_TOKEN: ${{ secrets.PRODUCTION_ANALYTICS_READ_TOKEN }}
+          PRODUCTION_LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          PRODUCTION_ABUSE_HMAC_SECRET_CURRENT: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_CURRENT }}
+          PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS }}
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
+          PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
+        run: node scripts/verify-processing-deployment-environment.mjs --environment production
+      - name: Verify Cloudflare token identity
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler whoami
