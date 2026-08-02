@@ -10,6 +10,7 @@ const accountId = "0123456789abcdef0123456789abcdef";
 const imageRef = `registry.cloudflare.com/${accountId}/hereisit-image-engine:${"a".repeat(40)}`;
 const manifestDigest = `sha256:${"b".repeat(64)}`;
 const configDigest = `sha256:${"c".repeat(64)}`;
+const buildSpecificImageRef = `${imageRef}-${configDigest.slice("sha256:".length)}`;
 const distributionLayerDigests = [`sha256:${"d".repeat(64)}`, `sha256:${"e".repeat(64)}`];
 const diffIds = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
 const candidateIdentity = { configDigest, distributionLayerDigests };
@@ -163,6 +164,26 @@ describe("Cloudflare image digest resolver", () => {
         expectedConfigDigest: `sha256:${"9".repeat(64)}`,
       }),
     ).toThrow(/config/i);
+  });
+
+  it("binds a build-specific tag suffix to the same local config digest", () => {
+    expect(
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor({ ref: buildSpecificImageRef }),
+        imageRef: buildSpecificImageRef,
+        accountId,
+        expectedConfigDigest: configDigest,
+      }),
+    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-image-engine@${manifestDigest}`);
+
+    expect(() =>
+      resolveCloudflareImageDigestFromConfig({
+        manifest: descriptor({ ref: buildSpecificImageRef }),
+        imageRef: buildSpecificImageRef,
+        accountId,
+        expectedConfigDigest: `sha256:${"9".repeat(64)}`,
+      }),
+    ).toThrow(/tag config/i);
   });
 
   it("accepts the tag-only Ref Docker returns for a single manifest", () => {
