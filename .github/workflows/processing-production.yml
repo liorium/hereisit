@@ -364,28 +364,34 @@ jobs:
         run: |
           node --input-type=module - <<'NODE'
           import { writeFile } from "node:fs/promises";
-          const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              origin: process.env.PRODUCTION_PAGES_ORIGIN,
-            },
-            body: JSON.stringify({
-              contract: "tool-job@1",
-              toolContract: "image.optimize@1",
-              anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27",
-            }),
-          });
-          const body = await response.json();
-          if (
-            response.status !== 200 ||
-            response.headers.get("access-control-allow-origin") !==
-              process.env.PRODUCTION_PAGES_ORIGIN ||
-            body.execution !== "local" ||
-            body.reason !== "LOCAL_FALLBACK_REQUIRED" ||
-            body.maintainer !== false ||
-            body.disclosure?.upload !== false
-          ) {
+          import { setTimeout as delay } from "node:timers/promises";
+          let passed = false;
+          for (let attempt = 1; attempt <= 15; attempt += 1) {
+            const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                origin: process.env.PRODUCTION_PAGES_ORIGIN,
+              },
+              body: JSON.stringify({
+                contract: "tool-job@1",
+                toolContract: "image.optimize@1",
+                anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27",
+              }),
+            });
+            const body = await response.json();
+            passed =
+              response.status === 200 &&
+              response.headers.get("access-control-allow-origin") ===
+                process.env.PRODUCTION_PAGES_ORIGIN &&
+              body.execution === "local" &&
+              body.reason === "LOCAL_FALLBACK_REQUIRED" &&
+              body.maintainer === false &&
+              body.disclosure?.upload === false;
+            if (passed) break;
+            if (attempt < 15) await delay(2_000);
+          }
+          if (!passed) {
             throw new Error("production public policy is not maintainer-only");
           }
           await writeFile(
