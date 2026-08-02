@@ -88,4 +88,5 @@ into isolated production resources. Public rollout remains zero, while the regis
 one tightly bounded canary allowance. The DLQ remains paused; primary delivery resumes only after the
 release attestation, accounting epoch, public local-only policy, and deployment gates pass. An
 authenticated browser smoke must complete or the primary Queue is paused again. The production Pages
-tree is not changed, and only sanitized canary evidence is retained for seven days.
+tree is built from the exact approved commit with the production API origin, and only sanitized canary
+evidence is retained for seven days.
