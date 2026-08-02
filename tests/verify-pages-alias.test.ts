@@ -9,7 +9,7 @@ const deploymentId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const uniqueUrl = "https://aaaaaaaa.hereisit.pages.dev";
 const stableUrl = "https://processing-staging.hereisit.pages.dev";
 
-function deployment(aliases = [stableUrl]) {
+function deployment(aliases: string[] | null = [stableUrl]) {
   return {
     id: deploymentId,
     aliases,
@@ -109,6 +109,38 @@ describe("Pages stable alias verifier", () => {
     ).toEqual({ deploymentId, stableUrl, verified: true });
   });
 
+  it("accepts only the canonical domain for a successful production deployment", () => {
+    const production = {
+      ...deployment(null),
+      deployment_trigger: { metadata: { branch: "main" }, type: "ad_hoc" },
+      environment: "production",
+    };
+    expect(
+      verifyPagesAlias({
+        document: envelope(production),
+        project,
+        branch: "main",
+        deploymentId,
+        uniqueUrl,
+        stableUrl: "https://hereisit.pages.dev",
+      }),
+    ).toEqual({
+      deploymentId,
+      stableUrl: "https://hereisit.pages.dev",
+      verified: true,
+    });
+    expect(() =>
+      verifyPagesAlias({
+        document: envelope(production),
+        project,
+        branch: "main",
+        deploymentId,
+        uniqueUrl,
+        stableUrl: "https://other.pages.dev",
+      }),
+    ).toThrow("production domain");
+  });
+
   it.each([
     ["deployment", { id: "wrong" }],
     ["project", { project_name: "other" }],
@@ -116,6 +148,7 @@ describe("Pages stable alias verifier", () => {
     ["unique URL", { url: "https://other.pages.dev" }],
     ["failed stage", { latest_stage: { status: "failure" } }],
     ["duplicate alias", { aliases: [stableUrl, stableUrl] }],
+    ["null preview alias", { aliases: null }],
   ])("rejects a mismatched %s", (_label, override) => {
     expect(() =>
       verifyPagesAlias({

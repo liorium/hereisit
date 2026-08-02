@@ -92,10 +92,17 @@ export function verifyPagesAlias({
   if (metadata.branch !== branch) throw new TypeError("Pages branch does not match");
   const stage = assertObject(deployment.latest_stage, "Pages deployment latest stage");
   if (stage.status !== "success") throw new Error("Pages deployment stage is not successful");
-  if (!Array.isArray(deployment.aliases)) throw new TypeError("Pages aliases must be an array");
-  const aliases = deployment.aliases.map((alias) => assertHttpsOrigin(alias, "Pages alias"));
-  if (new Set(aliases).size !== aliases.length) throw new TypeError("Pages aliases must be unique");
-  if (!aliases.includes(stableUrl)) throw new PagesAliasPendingError();
+  if (deployment.aliases === null) {
+    if (deployment.environment !== "production" || stableUrl !== `https://${project}.pages.dev`) {
+      throw new TypeError("Pages production domain does not match");
+    }
+  } else {
+    if (!Array.isArray(deployment.aliases)) throw new TypeError("Pages aliases must be an array");
+    const aliases = deployment.aliases.map((alias) => assertHttpsOrigin(alias, "Pages alias"));
+    if (new Set(aliases).size !== aliases.length)
+      throw new TypeError("Pages aliases must be unique");
+    if (!aliases.includes(stableUrl)) throw new PagesAliasPendingError();
+  }
   return { deploymentId, stableUrl, verified: true };
 }
 
