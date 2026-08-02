@@ -56,7 +56,10 @@ describe("processing production workflow", () => {
     expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
     expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
     expect(workflow).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
-    expect(workflow).not.toContain("wrangler pages deploy");
+    expect(workflow).toContain('NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN"');
+    expect(workflow).toContain("wrangler pages deploy apps/web/out");
+    expect(workflow).toContain("--branch main");
+    expect(workflow).toContain('--stable-url "$PRODUCTION_PAGES_ORIGIN"');
   });
 
   it("provisions, attests, and smoke-checks before publishing sanitized evidence", () => {
@@ -67,6 +70,7 @@ describe("processing production workflow", () => {
     const accountingEpoch = workflow.indexOf("node scripts/rotate-staging-accounting-epoch.mjs");
     const queueCheck = workflow.indexOf("node scripts/verify-queue-delivery-state.mjs");
     const policySmoke = workflow.indexOf("LOCAL_FALLBACK_REQUIRED");
+    const pages = workflow.indexOf("wrangler pages deploy apps/web/out");
     const gate = workflow.indexOf("node scripts/verify-deployment-gate-artifacts.mjs");
     const resume = workflow.indexOf('queues resume-delivery "$QUEUE_NAME"');
     const canarySmoke = workflow.indexOf("--output .artifacts/deployment/canary-smoke.json");
@@ -79,7 +83,8 @@ describe("processing production workflow", () => {
     expect(accountingEpoch).toBeGreaterThan(attestation);
     expect(queueCheck).toBeGreaterThan(accountingEpoch);
     expect(policySmoke).toBeGreaterThan(queueCheck);
-    expect(gate).toBeGreaterThan(policySmoke);
+    expect(pages).toBeGreaterThan(policySmoke);
+    expect(gate).toBeGreaterThan(pages);
     expect(resume).toBeGreaterThan(gate);
     expect(canarySmoke).toBeGreaterThan(resume);
     expect(upload).toBeGreaterThan(canarySmoke);

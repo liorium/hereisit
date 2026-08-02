@@ -134,6 +134,8 @@ jobs:
             --input docs/deployment/processing-staging-cost-input.json \
             --schema docs/deployment/live-cost-model.schema.json \
             --output .artifacts/runtime/live-cost-model.json)"
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN" \
+            pnpm --filter @hereisit/web build
           [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
           PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
             'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
@@ -399,6 +401,31 @@ jobs:
             { flag: "wx", mode: 0o600 },
           );
           NODE
+      - name: Deploy and verify the production Pages tree
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : > .artifacts/runtime/pages-deploy.ndjson
+          WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/pages-deploy.ndjson \
+            pnpm exec wrangler pages deploy apps/web/out \
+              --project-name hereisit \
+              --branch main \
+              --commit-hash "$EXPECTED_HEAD_SHA" \
+              --commit-dirty=false \
+              --no-bundle
+          node scripts/read-wrangler-output.mjs \
+            --file .artifacts/runtime/pages-deploy.ndjson \
+            --event pages-deploy \
+            --field deployment_id \
+            --expected-pages-project hereisit \
+            --expected-branch main
+          node scripts/verify-pages-alias.mjs \
+            --pages-output .artifacts/runtime/pages-deploy.ndjson \
+            --project hereisit \
+            --branch main \
+            --stable-url "$PRODUCTION_PAGES_ORIGIN"
       - name: Verify deployment gate artifacts
         run: |
           set -euo pipefail
