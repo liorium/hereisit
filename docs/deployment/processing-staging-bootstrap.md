@@ -84,7 +84,8 @@ production gate.
 
 After a successful staging deployment, `.github/workflows/processing-production.yml` waits at that
 protected production gate. Approval bootstraps the exact staging commit and immutable engine digest
-into isolated production resources. All three processing allowances and public rollout remain zero,
-the maintainer allowlist is empty, both Queues remain paused, and the production Pages tree is not
-changed. A policy smoke must confirm local-only processing before sanitized bootstrap evidence is
-retained for seven days.
+into isolated production resources. Public rollout remains zero, while the registered maintainer gets
+one tightly bounded canary allowance. The DLQ remains paused; primary delivery resumes only after the
+release attestation, accounting epoch, public local-only policy, and deployment gates pass. An
+authenticated browser smoke must complete or the primary Queue is paused again. The production Pages
+tree is not changed, and only sanitized canary evidence is retained for seven days.

@@ -19,7 +19,7 @@ env:
 
 jobs:
   deploy:
-    name: Bootstrap successful staging commit in production, disabled
+    name: Deploy successful staging commit as production maintainer canary
     if: >-
       github.repository == 'liorium/hereisit' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -45,6 +45,7 @@ jobs:
       WORKER_MODULE: .artifacts/build/api-worker.mjs
       PRODUCTION_API_ORIGIN: https://hereisit-processing-production.liorium.workers.dev
       PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+      CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -117,7 +118,7 @@ jobs:
           PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
           PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: node scripts/verify-processing-deployment-environment.mjs --environment production
-      - name: Build the Worker and disabled bootstrap cost model
+      - name: Build the Worker and canary cost model
         run: |
           set -euo pipefail
           umask 077
@@ -148,6 +149,7 @@ jobs:
           CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
           LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
           LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: |
           set -euo pipefail
           umask 077
@@ -170,6 +172,12 @@ jobs:
             --file .artifacts/runtime/resources-production.json --field logpush.jobId)"
 
           generate_config() {
+            local daily_limit=0
+            local maintainer_hashes='[]'
+            if [[ "$1" == active ]]; then
+              daily_limit="$CANARY_DAILY_WEIGHTED_UNIT_LIMIT"
+              maintainer_hashes="$PRODUCTION_MAINTAINER_HASHES_JSON"
+            fi
             node scripts/generate-processing-wrangler.mjs \
               --environment production \
               --account-id "$CLOUDFLARE_ACCOUNT_ID" \
@@ -184,9 +192,9 @@ jobs:
               --queue-name "$QUEUE_NAME" \
               --dlq-name "$DLQ_NAME" \
               --engine-image "$ENGINE_IMAGE" \
-              --account-daily-weighted-unit-limit 0 \
-              --anonymous-daily-weighted-unit-limit 0 \
-              --network-daily-weighted-unit-limit 0 \
+              --account-daily-weighted-unit-limit "$daily_limit" \
+              --anonymous-daily-weighted-unit-limit "$daily_limit" \
+              --network-daily-weighted-unit-limit "$daily_limit" \
               --account-pending-job-limit 10 \
               --network-pending-job-limit 3 \
               --maximum-queued-age-seconds 600 \
@@ -206,7 +214,7 @@ jobs:
               --policy-rate-limit-namespace-id 22005 \
               --job-api-network-rate-limit-namespace-id 22006 \
               --alert-destination-address "$ALERT_DESTINATION_ADDRESS" \
-              --maintainer-session-hashes-json '[]' \
+              --maintainer-session-hashes-json "$maintainer_hashes" \
               --rollout-percent 0
           }
 
@@ -332,6 +340,15 @@ jobs:
             --attestation .artifacts/runtime/worker-version-attestations.json \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID"
+      - name: Begin the release-bound production cost-accounting epoch
+        env:
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/rotate-staging-accounting-epoch.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --release-report-sha256 "$SOURCE_SHA256"
       - name: Verify both production queues remain paused
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -363,19 +380,19 @@ jobs:
             response.headers.get("access-control-allow-origin") !==
               process.env.PRODUCTION_PAGES_ORIGIN ||
             body.execution !== "local" ||
-            body.reason !== "SERVER_PROCESSING_DISABLED" ||
+            body.reason !== "LOCAL_FALLBACK_REQUIRED" ||
             body.maintainer !== false ||
             body.disclosure?.upload !== false
           ) {
-            throw new Error("production policy is not fail-closed");
+            throw new Error("production public policy is not maintainer-only");
           }
           await writeFile(
             ".artifacts/deployment/policy-smoke.json",
             `${JSON.stringify({
-              schema: "hereisit-processing-production-bootstrap-smoke@1",
+              schema: "hereisit-processing-production-canary-policy-smoke@1",
               passed: true,
               execution: "local",
-              reason: "SERVER_PROCESSING_DISABLED",
+              reason: "LOCAL_FALLBACK_REQUIRED",
               upload: false,
               queuesPaused: true,
             })}\n`,
@@ -398,9 +415,34 @@ jobs:
             --config "$WRANGLER_CONFIG" \
             --config-sha256 "$CONFIG_SHA256" \
             > .artifacts/deployment/gate-results.json
+      - name: Install browser smoke runtime while queues remain paused
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Arm primary queue failure cleanup
+        id: resume-attempt
+        run: echo "attempted=true" >> "$GITHUB_OUTPUT"
+      - name: Resume only primary delivery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+      - name: Verify primary resumed and DLQ remained paused
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run authenticated production canary smoke
+        env:
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
+        run: |
+          node scripts/smoke-image-compress-server.mjs \
+            --page-origin "$PRODUCTION_PAGES_ORIGIN" \
+            --output .artifacts/deployment/canary-smoke.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: processing-production-bootstrap-${{ github.event.workflow_run.head_sha }}
+          name: processing-production-canary-${{ github.event.workflow_run.head_sha }}
           path: |
             .artifacts/deployment/source-sha.txt
             .artifacts/deployment/staging-run-id.txt
@@ -408,7 +450,19 @@ jobs:
             .artifacts/deployment/worker-version.json
             .artifacts/deployment/gate-results.json
             .artifacts/deployment/policy-smoke.json
+            .artifacts/deployment/canary-smoke.json
           compression-level: 0
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+      - name: Re-pause and verify both queues after any failed delivery attempt
+        if: failure() && steps.resume-attempt.outputs.attempted == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"

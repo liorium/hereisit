@@ -17,6 +17,7 @@ vi.mock("../scripts/support/processing-staging-smoke-runtime.mjs", () => ({
 }));
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
+const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
 const publicBucketZeroSessionId = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const temporaryRoots: string[] = [];
@@ -51,6 +52,13 @@ function stagingSmokeResult() {
     directDownload: true,
     downloadAcknowledged: true,
     sourceFilenameLeak: false,
+  };
+}
+
+function productionSmokeResult() {
+  return {
+    ...stagingSmokeResult(),
+    schema: "hereisit-processing-production-canary-smoke@1",
   };
 }
 
@@ -141,6 +149,24 @@ describe("authenticated processing staging smoke", () => {
         }),
       ).rejects.toThrow("processing staging smoke configuration is invalid");
     }
+  });
+
+  it("uses the isolated production session for the fixed production origin", async () => {
+    const output = await outputPath();
+    browserSmoke.mockResolvedValue(productionSmokeResult());
+
+    const result = await runProcessingStagingSmokeCli({
+      argv: ["--page-origin", PROCESSING_PRODUCTION_ORIGIN, "--output", output],
+      environment: { PRODUCTION_MAINTAINER_SESSION_ID: sessionId },
+    });
+
+    expect(browserSmoke).toHaveBeenCalledWith(
+      { pageOrigin: PROCESSING_PRODUCTION_ORIGIN, maintainerSessionId: sessionId },
+      expect.any(Function),
+    );
+    expect(result).toEqual(productionSmokeResult());
+    expect(await readFile(output, "utf8")).toBe(canonicalJson(productionSmokeResult()));
+    expect((await stat(output)).mode & 0o777).toBe(0o600);
   });
 
   it("keeps the module surface narrow and rejects non-HTTP origins before browser launch", async () => {

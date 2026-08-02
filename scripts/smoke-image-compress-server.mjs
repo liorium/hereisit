@@ -6,6 +6,7 @@ import { canonicalJson, parseCliArguments, writeCanonicalJsonAtomic } from "./im
 import { runProcessingStagingBrowserSmoke } from "./support/processing-staging-smoke-runtime.mjs";
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
+const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
 const PUBLIC_BUCKET_ZERO_SESSION_ID = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const JOB_UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -336,9 +337,12 @@ async function assertMaintainerServer(
   }
 }
 
-function stagingSmokeResult() {
+function authenticatedSmokeResult(pageOrigin) {
   return {
-    schema: "hereisit-processing-staging-smoke@1",
+    schema:
+      pageOrigin === PROCESSING_PRODUCTION_ORIGIN
+        ? "hereisit-processing-production-canary-smoke@1"
+        : "hereisit-processing-staging-smoke@1",
     version: 1,
     passed: true,
     rolloutPercent: 0,
@@ -362,12 +366,15 @@ async function performImageCompressServerSmoke({
   const browser = await runSmokeStage("browser-launch", () => chromium.launch({ headless: true }));
   try {
     if (maintainerSessionId !== undefined) {
-      if (origin !== PROCESSING_STAGING_ORIGIN || !SESSION_UUID_PATTERN.test(maintainerSessionId)) {
+      if (
+        (origin !== PROCESSING_STAGING_ORIGIN && origin !== PROCESSING_PRODUCTION_ORIGIN) ||
+        !SESSION_UUID_PATTERN.test(maintainerSessionId)
+      ) {
         throw new TypeError(stableFailure);
       }
       await assertNonMaintainerLocal(browser, origin, timeoutMs);
       await assertMaintainerServer(browser, origin, maintainerSessionId, sourcePath, timeoutMs);
-      return stagingSmokeResult();
+      return authenticatedSmokeResult(origin);
     }
 
     const context = await browser.newContext({ acceptDownloads: true });
@@ -428,20 +435,26 @@ export async function smokeImageCompressServer(input) {
 function parseStagingSmokeCli(argv, environment) {
   try {
     const args = parseCliArguments(argv);
+    const pageOrigin = args["page-origin"];
+    const sessionId =
+      pageOrigin === PROCESSING_STAGING_ORIGIN
+        ? environment.STAGING_MAINTAINER_SESSION_ID
+        : pageOrigin === PROCESSING_PRODUCTION_ORIGIN
+          ? environment.PRODUCTION_MAINTAINER_SESSION_ID
+          : undefined;
     if (
-      argv.join("\0") !==
-        `--page-origin\0${PROCESSING_STAGING_ORIGIN}\0--output\0${args.output ?? ""}` ||
+      argv.join("\0") !== `--page-origin\0${pageOrigin ?? ""}\0--output\0${args.output ?? ""}` ||
       Object.keys(args).sort().join() !== "output,page-origin" ||
       typeof args.output !== "string" ||
       args.output.length === 0 ||
-      !SESSION_UUID_PATTERN.test(environment.STAGING_MAINTAINER_SESSION_ID ?? "")
+      !SESSION_UUID_PATTERN.test(sessionId ?? "")
     ) {
       throw new TypeError(stableFailure);
     }
     return {
-      pageOrigin: PROCESSING_STAGING_ORIGIN,
+      pageOrigin,
       outputPath: args.output,
-      sessionId: environment.STAGING_MAINTAINER_SESSION_ID,
+      sessionId,
     };
   } catch {
     throw new TypeError("processing staging smoke configuration is invalid");
@@ -461,7 +474,7 @@ export async function runProcessingStagingSmokeCli({ argv, environment }) {
       pageOrigin: input.pageOrigin,
       maintainerSessionId: input.sessionId,
     });
-    if (canonicalJson(result) !== canonicalJson(stagingSmokeResult())) {
+    if (canonicalJson(result) !== canonicalJson(authenticatedSmokeResult(input.pageOrigin))) {
       throw new Error(stableFailure);
     }
     await writeCanonicalJsonAtomic(input.outputPath, result, {
