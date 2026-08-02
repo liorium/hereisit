@@ -265,11 +265,9 @@ export function createCloudflareProcessingResourceApi({
       return {
         id: entry.id,
         accountId,
-        enabled:
-          entry.enabled === true &&
-          destinationValid &&
-          output.output_type === "ndjson" &&
-          output.record_template === undefined,
+        enabled: entry.enabled,
+        destinationValid,
+        outputValid: output.output_type === "ndjson" && output.record_template === undefined,
         dataset: entry.dataset,
         workerScriptName,
         fields: output.field_names,
@@ -280,6 +278,15 @@ export function createCloudflareProcessingResourceApi({
   };
 
   const applyAction = async (action) => {
+    const logpushDestination = () => {
+      const destination = new URL(
+        `r2://${config.usageLogBucketName}/workers-trace-events/${config.environment}/{DATE}`,
+      );
+      destination.searchParams.set("account-id", accountId);
+      destination.searchParams.set("access-key-id", accessKeyId);
+      destination.searchParams.set("secret-access-key", secretAccessKey);
+      return destination.href.replace("%7BDATE%7D", "{DATE}");
+    };
     if (action.type === "create-d1") {
       await request(`${accountPath}/d1/database`, d1Token, {
         method: "POST",
@@ -338,18 +345,11 @@ export function createCloudflareProcessingResourceApi({
       return;
     }
     if (action.type === "create-logpush") {
-      const destination = new URL(
-        `r2://${config.usageLogBucketName}/workers-trace-events/${config.environment}/{DATE}`,
-      );
-      destination.searchParams.set("account-id", accountId);
-      destination.searchParams.set("access-key-id", accessKeyId);
-      destination.searchParams.set("secret-access-key", secretAccessKey);
-      const destinationConfiguration = destination.href.replace("%7BDATE%7D", "{DATE}");
       await request(`${accountPath}/logpush/jobs`, logsToken, {
         method: "POST",
         body: {
           name: `${config.workerScriptName}-usage-ledger`,
-          destination_conf: destinationConfiguration,
+          destination_conf: logpushDestination(),
           dataset: "workers_trace_events",
           enabled: true,
           filter: JSON.stringify({
@@ -362,6 +362,13 @@ export function createCloudflareProcessingResourceApi({
             sample_rate: 1,
           },
         },
+      });
+      return;
+    }
+    if (action.type === "update-logpush-destination") {
+      await request(`${accountPath}/logpush/jobs/${action.id}`, logsToken, {
+        method: "PUT",
+        body: { destination_conf: logpushDestination() },
       });
       return;
     }

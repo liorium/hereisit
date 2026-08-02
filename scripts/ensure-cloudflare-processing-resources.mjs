@@ -120,6 +120,9 @@ function validateLogpush(resource, config) {
   if (resource.workerScriptName !== config.workerScriptName) {
     throw new TypeError("Logpush Worker filter does not match");
   }
+  if (resource.outputValid !== true) {
+    throw new TypeError("Logpush output format does not match");
+  }
   if (
     !Array.isArray(resource.fields) ||
     resource.fields.length !== expectedLogpushFields.length ||
@@ -172,7 +175,13 @@ export function planProcessingResources({ config: configValue, inventory: invent
       dataset: "workers_trace_events",
       workerScriptName: config.workerScriptName,
     });
-  } else validateLogpush(logpushMatches[0], config);
+  } else {
+    const logpush = logpushMatches[0];
+    validateLogpush(logpush, config);
+    if (logpush.destinationValid !== true) {
+      actions.push({ type: "update-logpush-destination", id: logpush.id });
+    }
+  }
 
   return {
     version: 1,
