@@ -365,4 +365,39 @@ describe("Cloudflare processing resource API", () => {
       "r2://hereisit-processing-usage-staging/workers-trace-events/staging/{DATE}",
     );
   });
+
+  it("updates only a rotated Logpush destination credential", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body === undefined ? null : JSON.parse(String(init.body)),
+      });
+      return response({});
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushR2AccessKeyId: "rotated-access-key",
+      logpushR2SecretAccessKey: "rotated-secret-key",
+    });
+
+    await api.applyAction({ type: "update-logpush-destination", id: 41 });
+
+    expect(calls).toEqual([
+      {
+        url: `https://api.cloudflare.com/client/v4/accounts/${accountId}/logpush/jobs/41`,
+        method: "PUT",
+        body: {
+          destination_conf:
+            `r2://hereisit-processing-usage-staging/workers-trace-events/staging/{DATE}` +
+            `?account-id=${accountId}&access-key-id=rotated-access-key&secret-access-key=rotated-secret-key`,
+        },
+      },
+    ]);
+  });
 });

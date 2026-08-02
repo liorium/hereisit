@@ -73,6 +73,8 @@ function resources() {
         id: 41,
         accountId,
         enabled: true,
+        destinationValid: true,
+        outputValid: true,
         dataset: "workers_trace_events",
         workerScriptName: config.workerScriptName,
         fields: [
@@ -147,6 +149,15 @@ describe("Cloudflare processing resource planner", () => {
     expect(planProcessingResources({ config, inventory: resources() }).actions).toEqual([]);
   });
 
+  it("rotates only a stale Logpush destination credential", () => {
+    const inventory = resources();
+    inventory.logpush[0] = { ...inventory.logpush[0], destinationValid: false };
+
+    expect(planProcessingResources({ config, inventory }).actions).toEqual([
+      { type: "update-logpush-destination", id: 41 },
+    ]);
+  });
+
   it("resumes provisioning with only the exact processing Worker consumer", () => {
     const inventory = resources();
     inventory.queues = inventory.queues.map((queue) => ({
@@ -206,6 +217,7 @@ describe("Cloudflare processing resource planner", () => {
     ["incomplete consumer inventory", "queues", { consumerCount: 1 }],
     ["Logpush logs", "logpush", { fields: ["Logs"] }],
     ["Logpush sampling", "logpush", { samplingRate: 0.1 }],
+    ["Logpush output", "logpush", { outputValid: false }],
   ])("rejects %s instead of rebinding it", (_label, collection, override) => {
     const inventory = resources();
     const entries = inventory[collection as keyof typeof inventory] as Array<
