@@ -73,6 +73,7 @@ describe("authenticated processing staging smoke", () => {
     expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
       source.indexOf("await page.locator('[data-policy=\"server\"]')"),
     );
+    expect(source.match(/await assertPolicies\(state, \{ maintainer: true/gu)).toHaveLength(2);
     expect(source).toContain('getByText("압축 설정 · 추천", { exact: true }).click()');
     expect(source).toContain('getByRole("radio", { name: /최소 용량/ }).check()');
   });
