@@ -1,4 +1,8 @@
-const transientPolicyFailure = "processing staging smoke failed [maintainer-policy-execution]";
+const transientPolicyFailures = new Set([
+  "processing staging smoke failed [public-policy]",
+  "processing staging smoke failed [maintainer-policy-missing]",
+  "processing staging smoke failed [maintainer-policy-execution]",
+]);
 
 function waitForPropagation() {
   return new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -13,7 +17,11 @@ export async function runProcessingStagingBrowserSmoke(
     try {
       return await implementation(input);
     } catch (error) {
-      if (attempt === 3 || !(error instanceof Error) || error.message !== transientPolicyFailure) {
+      if (
+        attempt === 3 ||
+        !(error instanceof Error) ||
+        !transientPolicyFailures.has(error.message)
+      ) {
         throw error;
       }
       await waitForRetry();

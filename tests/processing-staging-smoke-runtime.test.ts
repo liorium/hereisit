@@ -45,4 +45,23 @@ describe("processing staging smoke readiness", () => {
     expect(attempts).toBe(3);
     expect(waits).toBe(2);
   });
+
+  it.each([
+    "public-policy",
+    "maintainer-policy-missing",
+  ])("retries transient %s propagation", async (stage) => {
+    let attempts = 0;
+    const result = await runProcessingStagingBrowserSmoke(
+      {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error(`processing staging smoke failed [${stage}]`);
+        return "ready";
+      },
+      async () => undefined,
+    );
+
+    expect(result).toBe("ready");
+    expect(attempts).toBe(2);
+  });
 });
