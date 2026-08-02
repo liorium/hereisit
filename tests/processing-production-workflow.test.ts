@@ -25,7 +25,7 @@ describe("processing production workflow", () => {
     );
   });
 
-  it("keeps production processing disabled and isolated", () => {
+  it("keeps production isolated and admits only the maintainer canary", () => {
     for (const value of [
       "hereisit-processing-production",
       "hereisit-processing-usage-production",
@@ -36,17 +36,26 @@ describe("processing production workflow", () => {
       expect(workflow).toContain(value);
     }
     for (const flag of [
-      "--account-daily-weighted-unit-limit 0",
-      "--anonymous-daily-weighted-unit-limit 0",
-      "--network-daily-weighted-unit-limit 0",
+      '--account-daily-weighted-unit-limit "$daily_limit"',
+      '--anonymous-daily-weighted-unit-limit "$daily_limit"',
+      '--network-daily-weighted-unit-limit "$daily_limit"',
       "--rollout-percent 0",
     ]) {
       expect(workflow).toContain(flag);
     }
-    expect(workflow).toContain("--maintainer-session-hashes-json '[]'");
+    expect(workflow).toContain('CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"');
+    expect(workflow).toContain("local daily_limit=0");
+    expect(workflow).toContain("local maintainer_hashes='[]'");
+    expect(workflow).toContain('if [[ "$1" == active ]]');
+    expect(workflow).toContain('daily_limit="$CANARY_DAILY_WEIGHTED_UNIT_LIMIT"');
+    expect(workflow).toContain('maintainer_hashes="$PRODUCTION_MAINTAINER_HASHES_JSON"');
+    expect(workflow).toContain('--maintainer-session-hashes-json "$maintainer_hashes"');
     expect(workflow).toContain('--queue "$QUEUE_NAME" --expected paused');
     expect(workflow).toContain('--queue "$DLQ_NAME" --expected paused');
-    expect(workflow).not.toContain("queues resume-delivery");
+    expect(workflow).toContain('queues resume-delivery "$QUEUE_NAME"');
+    expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
+    expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
+    expect(workflow).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
     expect(workflow).not.toContain("wrangler pages deploy");
   });
 
@@ -55,19 +64,27 @@ describe("processing production workflow", () => {
     const migrations = workflow.indexOf("wrangler d1 migrations apply");
     const putSecrets = workflow.indexOf("wrangler secret put");
     const attestation = workflow.indexOf("node scripts/apply-worker-version-attestations.mjs");
+    const accountingEpoch = workflow.indexOf("node scripts/rotate-staging-accounting-epoch.mjs");
     const queueCheck = workflow.indexOf("node scripts/verify-queue-delivery-state.mjs");
-    const smoke = workflow.indexOf("SERVER_PROCESSING_DISABLED");
+    const policySmoke = workflow.indexOf("LOCAL_FALLBACK_REQUIRED");
+    const gate = workflow.indexOf("node scripts/verify-deployment-gate-artifacts.mjs");
+    const resume = workflow.indexOf('queues resume-delivery "$QUEUE_NAME"');
+    const canarySmoke = workflow.indexOf("--output .artifacts/deployment/canary-smoke.json");
     const upload = workflow.indexOf("actions/upload-artifact@");
 
     expect(provision).toBeGreaterThanOrEqual(0);
     expect(migrations).toBeGreaterThan(provision);
     expect(putSecrets).toBeGreaterThan(migrations);
     expect(attestation).toBeGreaterThan(putSecrets);
-    expect(queueCheck).toBeGreaterThan(attestation);
-    expect(smoke).toBeGreaterThan(queueCheck);
-    expect(upload).toBeGreaterThan(smoke);
+    expect(accountingEpoch).toBeGreaterThan(attestation);
+    expect(queueCheck).toBeGreaterThan(accountingEpoch);
+    expect(policySmoke).toBeGreaterThan(queueCheck);
+    expect(gate).toBeGreaterThan(policySmoke);
+    expect(resume).toBeGreaterThan(gate);
+    expect(canarySmoke).toBeGreaterThan(resume);
+    expect(upload).toBeGreaterThan(canarySmoke);
     expect(workflow).toContain(
-      `processing-production-bootstrap-\${{ github.event.workflow_run.head_sha }}`,
+      `processing-production-canary-\${{ github.event.workflow_run.head_sha }}`,
     );
     const uploadedPaths = [...workflow.slice(upload).matchAll(/^\s+(.artifacts\/[^\s]+)$/gm)].map(
       ([, path]) => path,
@@ -79,6 +96,7 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
+      ".artifacts/deployment/canary-smoke.json",
     ]);
   });
 
