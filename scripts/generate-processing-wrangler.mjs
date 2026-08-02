@@ -370,7 +370,7 @@ export function generateProcessingWrangler(input) {
     main: "../../apps/api-worker/src/index.ts",
     compatibility_date: "2026-07-16",
     compatibility_flags: ["nodejs_compat"],
-    workers_dev: environment === "staging",
+    workers_dev: true,
     logpush: true,
     triggers: { crons: ["*/5 * * * *"] },
     d1_databases: [
