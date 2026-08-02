@@ -73,6 +73,8 @@ const inventory = {
       enabled: true,
       dataset: "workers_trace_events",
       workerScriptName: config.workerScriptName,
+      destinationValid: true,
+      outputValid: true,
       fields: [
         "CPUTimeMs",
         "Entrypoint",
