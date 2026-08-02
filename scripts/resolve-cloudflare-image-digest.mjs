@@ -27,13 +27,15 @@ function validateRequestedReference(imageRef, accountId) {
   }
   if (typeof imageRef !== "string") throw new TypeError("image reference is invalid");
   const pattern = new RegExp(
-    `^registry\\.cloudflare\\.com/${accountId}/hereisit-image-engine:([0-9a-f]{40})$`,
+    `^registry\\.cloudflare\\.com/${accountId}/hereisit-image-engine:([0-9a-f]{40})(?:-([0-9a-f]{64}))?$`,
   );
-  if (!pattern.test(imageRef)) {
+  const match = pattern.exec(imageRef);
+  if (match === null) {
     throw new TypeError(
       "image reference must be the same-account Cloudflare repository with an immutable git tag",
     );
   }
+  return match[2] === undefined ? null : `sha256:${match[2]}`;
 }
 
 function descriptorPlatform(entry) {
@@ -79,8 +81,11 @@ function validateCandidateIdentity(value) {
 }
 
 export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, candidateIdentity }) {
-  validateRequestedReference(imageRef, accountId);
+  const taggedConfigDigest = validateRequestedReference(imageRef, accountId);
   const expected = validateCandidateIdentity(candidateIdentity);
+  if (taggedConfigDigest !== null && taggedConfigDigest !== expected.configDigest) {
+    throw new TypeError("image tag config does not match the finalized candidate");
+  }
   const selected = selectRunnableDescriptor(manifest);
   const descriptor = assertObject(selected.Descriptor, "selected registry descriptor");
   const digest = assertDigest(descriptor.digest, "selected registry manifest digest");
@@ -119,8 +124,11 @@ export function resolveCloudflareImageDigestFromConfig({
   accountId,
   expectedConfigDigest,
 }) {
-  validateRequestedReference(imageRef, accountId);
+  const taggedConfigDigest = validateRequestedReference(imageRef, accountId);
   const expected = assertDigest(expectedConfigDigest, "local image config digest");
+  if (taggedConfigDigest !== null && taggedConfigDigest !== expected) {
+    throw new TypeError("image tag config does not match the local Docker image");
+  }
   const selected = selectRunnableDescriptor(manifest);
   const descriptor = assertObject(selected.Descriptor, "selected registry descriptor");
   const digest = assertDigest(descriptor.digest, "selected registry manifest digest");
