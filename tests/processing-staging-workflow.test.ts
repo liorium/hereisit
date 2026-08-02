@@ -186,6 +186,21 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
   });
 
+  it("waits for a republished Container tag to expose the pushed manifest", () => {
+    const deploy = jobBody("deploy");
+    const push = deploy.indexOf("wrangler containers push");
+    const retry = deploy.indexOf("for attempt in {1..30}; do", push);
+    const inspect = deploy.indexOf("docker manifest inspect", retry);
+    const resolve = deploy.indexOf("node scripts/resolve-cloudflare-image-digest.mjs", inspect);
+    const retryBody = deploy.slice(retry, deploy.indexOf('echo "ENGINE_IMAGE=', resolve));
+
+    expect(retry).toBeGreaterThan(push);
+    expect(inspect).toBeGreaterThan(retry);
+    expect(resolve).toBeGreaterThan(inspect);
+    expect(retryBody).toContain("if (( attempt == 30 )); then");
+    expect(retryBody).toContain("sleep 5");
+  });
+
   it("uploads only sanitized deployment evidence", () => {
     const upload = actionStep(jobBody("deploy"), "actions/upload-artifact@");
     const paths = [...upload.matchAll(/^\s+(.artifacts\/deployment\/[^\s]+)$/gm)].map(

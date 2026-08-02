@@ -147,14 +147,26 @@ jobs:
           REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"
           docker tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" "$REGISTRY_IMAGE_TAG"
           pnpm exec wrangler containers push "$REGISTRY_IMAGE_TAG"
-          docker manifest inspect -v "$REGISTRY_IMAGE_TAG" \
-            > .artifacts/runtime/cloudflare-container-manifest.json
-          node scripts/resolve-cloudflare-image-digest.mjs \
-            --manifest .artifacts/runtime/cloudflare-container-manifest.json \
-            --expected-config-digest "$LOCAL_IMAGE_CONFIG_DIGEST" \
-            --image-ref "$REGISTRY_IMAGE_TAG" \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --output .artifacts/deployment/cloudflare-image-digest.txt
+          for attempt in {1..30}; do
+            if docker manifest inspect -v "$REGISTRY_IMAGE_TAG" \
+                > .artifacts/runtime/cloudflare-container-manifest.json \
+                2> .artifacts/runtime/cloudflare-container-manifest.stderr &&
+              node scripts/resolve-cloudflare-image-digest.mjs \
+                --manifest .artifacts/runtime/cloudflare-container-manifest.json \
+                --expected-config-digest "$LOCAL_IMAGE_CONFIG_DIGEST" \
+                --image-ref "$REGISTRY_IMAGE_TAG" \
+                --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+                --output .artifacts/deployment/cloudflare-image-digest.txt \
+                2>> .artifacts/runtime/cloudflare-container-manifest.stderr; then
+              break
+            fi
+            if (( attempt == 30 )); then
+              cat .artifacts/runtime/cloudflare-container-manifest.stderr >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          rm -f .artifacts/runtime/cloudflare-container-manifest.stderr
           echo "ENGINE_IMAGE=$(cat .artifacts/deployment/cloudflare-image-digest.txt)" >> "$GITHUB_ENV"
       - name: Provision resources and deploy the bootstrap Worker
         env:
