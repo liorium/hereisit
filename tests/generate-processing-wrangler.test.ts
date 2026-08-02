@@ -324,7 +324,9 @@ describe("processing Wrangler generator", () => {
       maintainerSessionHashes: [],
     };
 
-    expect(generateProcessingWrangler(input).vars).toMatchObject({
+    const config = generateProcessingWrangler(input);
+    expect(config.workers_dev).toBe(true);
+    expect(config.vars).toMatchObject({
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: "0",
       ANONYMOUS_DAILY_WEIGHTED_UNIT_LIMIT: "0",
       NETWORK_DAILY_WEIGHTED_UNIT_LIMIT: "0",
