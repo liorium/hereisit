@@ -81,3 +81,10 @@ common variables and secrets listed above, replace the six `STAGING_` secrets wi
 `PRODUCTION_` names, and run `Processing production preflight` from `main`. This check is read-only and
 does not deploy or create billable resources. Keep GitHub environment approval as the only manual
 production gate.
+
+After a successful staging deployment, `.github/workflows/processing-production.yml` waits at that
+protected production gate. Approval bootstraps the exact staging commit and immutable engine digest
+into isolated production resources. All three processing allowances and public rollout remain zero,
+the maintainer allowlist is empty, both Queues remain paused, and the production Pages tree is not
+changed. A policy smoke must confirm local-only processing before sanitized bootstrap evidence is
+retained for seven days.

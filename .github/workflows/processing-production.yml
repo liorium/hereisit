@@ -1,0 +1,414 @@
+name: Processing production
+
+on:
+  workflow_run:
+    workflows: ["Processing staging"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: processing-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.11.0"
+
+jobs:
+  deploy:
+    name: Bootstrap successful staging commit in production, disabled
+    if: >-
+      github.repository == 'liorium/hereisit' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    environment: processing-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      STAGING_RUN_ID: ${{ github.event.workflow_run.id }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      ALERT_DESTINATION_ADDRESS: ${{ vars.ALERT_DESTINATION_ADDRESS }}
+      WORKER_SCRIPT_NAME: hereisit-processing-production
+      D1_NAME: hereisit-processing-production
+      BUCKET_NAME: hereisit-processing-production
+      USAGE_LOG_BUCKET_NAME: hereisit-processing-usage-production
+      USAGE_ANALYTICS_DATASET_NAME: hereisit_processing_usage_production
+      QUEUE_NAME: hereisit-image-jobs-production
+      DLQ_NAME: hereisit-image-jobs-dlq-production
+      WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
+      WORKER_MODULE: .artifacts/build/api-worker.mjs
+      PRODUCTION_API_ORIGIN: https://hereisit-processing-production.liorium.workers.dev
+      PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: processing-staging-deployment-${{ github.event.workflow_run.head_sha }}
+          path: .artifacts/staging
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Bind the exact successful staging deployment
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$STAGING_RUN_ID" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(cat .artifacts/staging/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
+          ENGINE_IMAGE="$(cat .artifacts/staging/cloudflare-image-digest.txt)"
+          [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
+          node --input-type=module - <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const root = ".artifacts/staging";
+          for (const path of ["worker-version.json", "gate-results.json", "smoke-result.json"]) {
+            const value = JSON.parse(await readFile(`${root}/${path}`, "utf8"));
+            if (value === null || typeof value !== "object" || Array.isArray(value)) process.exit(1);
+          }
+          const smoke = JSON.parse(await readFile(`${root}/smoke-result.json`, "utf8"));
+          if (smoke.passed !== true || smoke.rolloutPercent !== 0 || smoke.maintainerServer !== true) {
+            process.exit(1);
+          }
+          NODE
+          mkdir -p .artifacts/build .artifacts/deployment .artifacts/runtime .wrangler/generated
+          cp .artifacts/staging/source-sha.txt .artifacts/deployment/source-sha.txt
+          cp .artifacts/staging/cloudflare-image-digest.txt \
+            .artifacts/deployment/cloudflare-image-digest.txt
+          printf '%s\n' "$STAGING_RUN_ID" > .artifacts/deployment/staging-run-id.txt
+          SOURCE_SHA256="$(sha256sum .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
+          {
+            echo "ENGINE_IMAGE=$ENGINE_IMAGE"
+            echo "SOURCE_SHA256=$SOURCE_SHA256"
+          } >> "$GITHUB_ENV"
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          git diff --exit-code
+      - name: Validate sealed deployment environment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          PRODUCTION_ANALYTICS_READ_TOKEN: ${{ secrets.PRODUCTION_ANALYTICS_READ_TOKEN }}
+          PRODUCTION_LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          PRODUCTION_ABUSE_HMAC_SECRET_CURRENT: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_CURRENT }}
+          PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS }}
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
+          PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
+        run: node scripts/verify-processing-deployment-environment.mjs --environment production
+      - name: Build the Worker and disabled bootstrap cost model
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .artifacts/build/api-worker-bundle
+          pnpm --filter @hereisit/api-worker exec wrangler deploy \
+            --config wrangler.local.jsonc \
+            --containers-rollout none \
+            --dry-run \
+            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
+          test -f .artifacts/build/api-worker-bundle/index.js
+          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
+          LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
+            --input docs/deployment/processing-staging-cost-input.json \
+            --schema docs/deployment/live-cost-model.schema.json \
+            --output .artifacts/runtime/live-cost-model.json)"
+          [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
+            'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
+          [[ "$PROVIDER_USAGE_SCHEMA_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
+            echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
+          } >> "$GITHUB_ENV"
+      - name: Provision isolated resources and deploy the bootstrap Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node scripts/ensure-cloudflare-processing-resources.mjs \
+            --phase provision \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --environment production \
+            --location apac \
+            --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --database-name "$D1_NAME" \
+            --queue-name "$QUEUE_NAME" \
+            --dlq-name "$DLQ_NAME" \
+            --output .artifacts/runtime/resources-production.json
+          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
+            --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs \
+            --file .artifacts/runtime/resources-production.json --field logpush.jobId)"
+
+          generate_config() {
+            node scripts/generate-processing-wrangler.mjs \
+              --environment production \
+              --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+              --database-id "$PRODUCTION_D1_DATABASE_ID" \
+              --app-origin "$PRODUCTION_PAGES_ORIGIN" \
+              --bucket-name "$BUCKET_NAME" \
+              --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+              --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
+              --cost-accounting-mode "$1" \
+              --logpush-job-id "$PRODUCTION_LOGPUSH_JOB_ID" \
+              --container-application-id "$2" \
+              --queue-name "$QUEUE_NAME" \
+              --dlq-name "$DLQ_NAME" \
+              --engine-image "$ENGINE_IMAGE" \
+              --account-daily-weighted-unit-limit 0 \
+              --anonymous-daily-weighted-unit-limit 0 \
+              --network-daily-weighted-unit-limit 0 \
+              --account-pending-job-limit 10 \
+              --network-pending-job-limit 3 \
+              --maximum-queued-age-seconds 600 \
+              --max-live-median-output-ratio-bps 8500 \
+              --max-live-p95-weighted-units 150000000 \
+              --max-live-original-retained-rate-bps 7000 \
+              --max-live-cost-per-1000-microusd 500000 \
+              --max-projected-monthly-cost-microusd 5000000 \
+              --live-cost-model .artifacts/runtime/live-cost-model.json \
+              --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
+              --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
+              --release-report-sha256 "$SOURCE_SHA256" \
+              --session-rate-limit-namespace-id 22001 \
+              --network-rate-limit-namespace-id 22002 \
+              --job-read-rate-limit-namespace-id 22003 \
+              --result-download-rate-limit-namespace-id 22004 \
+              --policy-rate-limit-namespace-id 22005 \
+              --job-api-network-rate-limit-namespace-id 22006 \
+              --alert-destination-address "$ALERT_DESTINATION_ADDRESS" \
+              --maintainer-session-hashes-json '[]' \
+              --rollout-percent 0
+          }
+
+          generate_config bootstrap 00000000-0000-4000-8000-000000000000
+          pnpm exec wrangler deploy "$WORKER_MODULE" \
+            --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none --dry-run
+          pnpm exec wrangler d1 migrations apply "$D1_NAME" \
+            --config "$WRANGLER_CONFIG" --remote
+          if ! pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/versions-before.json \
+            2> .artifacts/runtime/versions-before.stderr; then
+            if grep -Fq '[code: 10007]' .artifacts/runtime/versions-before.stderr; then
+              printf '[]\n' > .artifacts/runtime/versions-before.json
+            else
+              cat .artifacts/runtime/versions-before.stderr >&2
+              exit 1
+            fi
+          fi
+          rm -f .artifacts/runtime/versions-before.stderr
+          PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --before .artifacts/runtime/versions-before.json)"
+          : > .artifacts/runtime/bootstrap-deploy.ndjson
+          WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/bootstrap-deploy.ndjson \
+            pnpm exec wrangler deploy "$WORKER_MODULE" \
+              --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout immediate
+          pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/versions-after-bootstrap.json
+          pnpm exec wrangler containers list --json \
+            > .artifacts/runtime/container-inventory.json
+          PRODUCTION_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
+            --mode discover \
+            --input .artifacts/runtime/container-inventory.json \
+            --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --worker-script-name "$WORKER_SCRIPT_NAME")"
+          for attempt in {1..30}; do
+            if pnpm exec wrangler containers info "$PRODUCTION_CONTAINER_APPLICATION_ID" \
+                > .artifacts/runtime/container-application.json \
+                2> .artifacts/runtime/container-application-verify.stderr &&
+              node scripts/resolve-cloudflare-container-application.mjs \
+                --mode verify \
+                --input .artifacts/runtime/container-application.json \
+                --output .artifacts/runtime/container-provider-scope.json \
+                --environment production \
+                --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+                --worker-script-name "$WORKER_SCRIPT_NAME" \
+                --application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" \
+                --engine-image "$ENGINE_IMAGE" \
+                --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                2>> .artifacts/runtime/container-application-verify.stderr; then
+              break
+            fi
+            if (( attempt == 30 )); then
+              cat .artifacts/runtime/container-application-verify.stderr >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          rm -f .artifacts/runtime/container-application-verify.stderr
+          generate_config active "$PRODUCTION_CONTAINER_APPLICATION_ID"
+          node scripts/verify-worker-version-chain.mjs \
+            --mode capture-bootstrap \
+            --worker-module "$WORKER_MODULE" \
+            --config "$WRANGLER_CONFIG" \
+            --release-report .artifacts/deployment/source-sha.txt \
+            --output .artifacts/runtime/bootstrap-witness.json
+          {
+            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
+            echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
+          } >> "$GITHUB_ENV"
+      - name: Install secrets and finalize the active Worker version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          PRODUCTION_ANALYTICS_READ_TOKEN: ${{ secrets.PRODUCTION_ANALYTICS_READ_TOKEN }}
+          PRODUCTION_LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          PRODUCTION_ABUSE_HMAC_SECRET_CURRENT: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_CURRENT }}
+          PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS" | \
+            pnpm exec wrangler secret put ABUSE_HMAC_SECRET_PREVIOUS --config "$WRANGLER_CONFIG"
+          printf '%s' "$PRODUCTION_ABUSE_HMAC_SECRET_CURRENT" | \
+            pnpm exec wrangler secret put ABUSE_HMAC_SECRET_CURRENT --config "$WRANGLER_CONFIG"
+          printf '%s' "$PRODUCTION_ANALYTICS_READ_TOKEN" | \
+            pnpm exec wrangler secret put ANALYTICS_READ_TOKEN --config "$WRANGLER_CONFIG"
+          printf '%s' "$PRODUCTION_LOGPUSH_STATUS_TOKEN" | \
+            pnpm exec wrangler secret put LOGPUSH_STATUS_TOKEN --config "$WRANGLER_CONFIG"
+          pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/versions-after-secrets.json
+          pnpm exec wrangler secret list --config "$WRANGLER_CONFIG" --format json \
+            > .artifacts/runtime/worker-secrets.json
+          node scripts/verify-worker-secret-list.mjs --file .artifacts/runtime/worker-secrets.json
+          : > .artifacts/runtime/final-deploy.ndjson
+          WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/final-deploy.ndjson \
+            pnpm exec wrangler deploy "$WORKER_MODULE" \
+              --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none
+          pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/versions-after-final.json
+          DEPLOYED_API_ORIGIN="$(node scripts/read-wrangler-output.mjs \
+            --file .artifacts/runtime/final-deploy.ndjson --event deploy --field targets.0)"
+          test "$DEPLOYED_API_ORIGIN" = "$PRODUCTION_API_ORIGIN"
+          node scripts/verify-worker-version-chain.mjs \
+            --mode finalize \
+            --before .artifacts/runtime/versions-before.json \
+            --after-bootstrap .artifacts/runtime/versions-after-bootstrap.json \
+            --after-secrets .artifacts/runtime/versions-after-secrets.json \
+            --after-final .artifacts/runtime/versions-after-final.json \
+            --bootstrap-output .artifacts/runtime/bootstrap-deploy.ndjson \
+            --final-output .artifacts/runtime/final-deploy.ndjson \
+            --bootstrap-witness .artifacts/runtime/bootstrap-witness.json \
+            --worker-module "$WORKER_MODULE" \
+            --config "$WRANGLER_CONFIG" \
+            --release-report .artifacts/deployment/source-sha.txt \
+            --output .artifacts/runtime/worker-version-attestations.json \
+            --previous-active-version-id "$PREVIOUS_ACTIVE_VERSION_ID"
+          cp .artifacts/runtime/worker-version-attestations.json \
+            .artifacts/deployment/worker-version.json
+          node scripts/apply-worker-version-attestations.mjs \
+            --attestation .artifacts/runtime/worker-version-attestations.json \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID"
+      - name: Verify both production queues remain paused
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Verify public production policy remains local
+        run: |
+          node --input-type=module - <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              origin: process.env.PRODUCTION_PAGES_ORIGIN,
+            },
+            body: JSON.stringify({
+              contract: "tool-job@1",
+              toolContract: "image.optimize@1",
+              anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27",
+            }),
+          });
+          const body = await response.json();
+          if (
+            response.status !== 200 ||
+            response.headers.get("access-control-allow-origin") !==
+              process.env.PRODUCTION_PAGES_ORIGIN ||
+            body.execution !== "local" ||
+            body.reason !== "SERVER_PROCESSING_DISABLED" ||
+            body.maintainer !== false ||
+            body.disclosure?.upload !== false
+          ) {
+            throw new Error("production policy is not fail-closed");
+          }
+          await writeFile(
+            ".artifacts/deployment/policy-smoke.json",
+            `${JSON.stringify({
+              schema: "hereisit-processing-production-bootstrap-smoke@1",
+              passed: true,
+              execution: "local",
+              reason: "SERVER_PROCESSING_DISABLED",
+              upload: false,
+              queuesPaused: true,
+            })}\n`,
+            { flag: "wx", mode: 0o600 },
+          );
+          NODE
+      - name: Verify deployment gate artifacts
+        run: |
+          set -euo pipefail
+          ATTESTATION_SHA256="$(sha256sum .artifacts/runtime/worker-version-attestations.json | cut -d' ' -f1)"
+          CONFIG_SHA256="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const value = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            if (!/^[0-9a-f]{64}$/.test(value.generatedConfigSha256 ?? "")) process.exit(1);
+            process.stdout.write(value.generatedConfigSha256);' \
+            .artifacts/runtime/worker-version-attestations.json)"
+          node scripts/verify-deployment-gate-artifacts.mjs \
+            --attestation .artifacts/runtime/worker-version-attestations.json \
+            --attestation-sha256 "$ATTESTATION_SHA256" \
+            --config "$WRANGLER_CONFIG" \
+            --config-sha256 "$CONFIG_SHA256" \
+            > .artifacts/deployment/gate-results.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: processing-production-bootstrap-${{ github.event.workflow_run.head_sha }}
+          path: |
+            .artifacts/deployment/source-sha.txt
+            .artifacts/deployment/staging-run-id.txt
+            .artifacts/deployment/cloudflare-image-digest.txt
+            .artifacts/deployment/worker-version.json
+            .artifacts/deployment/gate-results.json
+            .artifacts/deployment/policy-smoke.json
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
