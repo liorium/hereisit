@@ -300,6 +300,7 @@ async function assertMaintainerServer(
     );
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await runSmokeStage("job-completion", () => downloadButton.waitFor({ timeout: timeoutMs }));
+    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
     const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
     const acknowledgementPromise = page.waitForResponse(
       (response) =>
