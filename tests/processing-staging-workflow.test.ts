@@ -98,8 +98,9 @@ describe("processing staging workflow", () => {
     expect(verifyPages).toBeGreaterThan(deployPages);
     expect(deploy).toContain("--rollout-percent 0");
     expect(deploy).not.toMatch(/--rollout-percent (?!0\b)\d+/);
+    expect(deploy).toContain(`IMAGE_CONFIG_HEX="\${LOCAL_IMAGE_CONFIG_DIGEST#sha256:}"`);
     expect(deploy).toContain(
-      'REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"',
+      'REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA-$IMAGE_CONFIG_HEX"',
     );
     expect(deploy).toContain(
       'SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"',
@@ -186,7 +187,7 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
   });
 
-  it("waits for a republished Container tag to expose the pushed manifest", () => {
+  it("waits for the build-specific Container tag to expose the pushed manifest", () => {
     const deploy = jobBody("deploy");
     const push = deploy.indexOf("wrangler containers push");
     const retry = deploy.indexOf("for attempt in {1..30}; do", push);

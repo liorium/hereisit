@@ -144,7 +144,9 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA"
+          IMAGE_CONFIG_HEX="${LOCAL_IMAGE_CONFIG_DIGEST#sha256:}"
+          [[ "$IMAGE_CONFIG_HEX" =~ ^[0-9a-f]{64}$ ]]
+          REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA-$IMAGE_CONFIG_HEX"
           docker tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" "$REGISTRY_IMAGE_TAG"
           pnpm exec wrangler containers push "$REGISTRY_IMAGE_TAG"
           for attempt in {1..30}; do
