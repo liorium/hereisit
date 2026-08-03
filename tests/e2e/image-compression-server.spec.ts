@@ -118,22 +118,29 @@ test("discloses local processing before selection and preserves PNG", async ({ p
   await expect(picker).toBeEnabled();
   await expect(picker).toHaveCSS("border-top-style", "dashed");
   await expect(picker).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(page.getByText("압축 설정 · 추천")).toBeVisible();
+  await expect(page.getByText("압축 설정 · 추천")).toHaveCount(0);
   await expect(page.getByRole("radio", { name: /최소 용량/ })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toHaveCount(0);
+  await picker.evaluate((element, pngBase64) => {
+    const bytes = Uint8Array.from(atob(pngBase64), (character) => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], "sample.png", { type: "image/png" }));
+    element.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  }, onePixelPng.toString("base64"));
+  await expect(page.getByText("sample.png")).toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 다시 선택" })).toBeVisible();
   await page.getByText("압축 설정 · 추천").click();
   await expect(page.getByRole("radio", { name: /최소 용량/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeDisabled();
-  await page.locator('input[type="file"]').setInputFiles({
-    name: "sample.png",
-    mimeType: "image/png",
-    buffer: onePixelPng,
-  });
-  await expect(page.getByText("sample.png")).toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
   const downloadButton = page.getByRole("button", {
     name: /원본 다운로드 ↓|결과 다운로드 ↓/,
   });
   await expect(downloadButton).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("원본", { exact: true })).toBeVisible();
+  await expect(page.getByText("결과", { exact: true })).toBeVisible();
   const [download] = await Promise.all([page.waitForEvent("download"), downloadButton.click()]);
   expect(download.suggestedFilename()).toBe("sample-hereisit.png");
   expect(jobRequests).toEqual([]);
@@ -175,6 +182,12 @@ test("supports keyboard setup with named compression presets", async ({ page }) 
     await page.keyboard.press("Tab");
   }
   await expect(picker).toBeFocused();
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "keyboard.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
 
   const settings = page.getByText("압축 설정 · 추천");
   for (
