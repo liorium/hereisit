@@ -17,12 +17,12 @@ export function ToolCard({
   }
 
   return (
-    <article className={styles.card} data-context={context} data-domain={catalogTool.domains[0]}>
+    <article className={styles.card} data-context={context}>
       <Link className={styles.link} href={catalogTool.route} prefetch={false}>
         <span className={styles.name}>{catalogTool.name}</span>
         <span className={styles.description}>{catalogTool.shortDescription}</span>
         <span className={styles.execution}>
-          {catalogTool.execution === "browser" ? "내 기기에서 처리" : "처리 전 방식 안내"}
+          {catalogTool.execution === "browser" ? "내 기기에서 처리" : "서버에서 처리"}
         </span>
       </Link>
       <FavoriteToolButton toolId={catalogTool.id} toolName={catalogTool.name} />

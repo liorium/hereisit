@@ -1,28 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #fffef8;
+  --paper: #f7f7f2;
+  --ink: #17191f;
+  --muted: #6b6f7a;
+  --line: #dadde3;
+  --blue: #3d5afe;
+  --blue-dark: #263dcc;
+  --yellow: #ffd84d;
+  --green: #16845b;
+  --red: #c83b3b;
   --panel: #ffffff;
-  --surface: #ffffff;
-  --ink: #080808;
-  --frame: #000000;
-  --muted: #55554f;
-  --line: #080808;
-  --accent: #e91d2a;
-  --accent-dark: #a90f19;
-  --link: #0000ee;
-  --focus: #0000ee;
-  --image-ribbon: #b3bd95;
-  --document-ribbon: #9ab6c8;
-  --conversion-ribbon: #e6915d;
-  --planned-ribbon: #d8d8d0;
-  --green: #126b3a;
-  --warning: #8a5200;
-  --red: #b00020;
-  /* Legacy aliases while feature workbenches move to the shared palette. */
-  --blue: var(--accent);
-  --blue-dark: var(--accent-dark);
-  --yellow: var(--image-ribbon);
 }
 
 * {
@@ -34,9 +22,7 @@ html {
 }
 
 body {
-  min-height: 100dvh;
   margin: 0;
-  border: 8px solid var(--frame);
   background: var(--paper);
   color: var(--ink);
   font-family: Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", Inter, system-ui, sans-serif;
@@ -59,30 +45,13 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
-button {
-  transition:
-    background-color 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease;
-}
-
-button:not(:disabled):active {
-  transform: translateY(2px);
-}
-
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 3px solid color-mix(in srgb, var(--blue) 50%, transparent);
   outline-offset: 3px;
-}
-
-::selection {
-  background: var(--image-ribbon);
-  color: var(--ink);
 }
 
 .site-header {
@@ -575,12 +544,6 @@ select:focus-visible,
   .site-footer {
     align-items: start;
     flex-direction: column;
-  }
-}
-
-@media (max-width: 600px) {
-  body {
-    border-width: 4px;
   }
 }
 

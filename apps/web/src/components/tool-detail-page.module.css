@@ -1,68 +1,58 @@
 .page {
-  --tool-ribbon: var(--planned-ribbon);
+  box-sizing: border-box;
   width: 100%;
-  min-width: 0;
-  padding: 18px 0 80px;
-}
-
-.page[data-domain="image"] {
-  --tool-ribbon: var(--image-ribbon);
-}
-
-.page[data-domain="document"] {
-  --tool-ribbon: var(--document-ribbon);
-}
-
-.page[data-domain="data"] {
-  --tool-ribbon: var(--conversion-ribbon);
+  max-width: 100%;
+  padding-block: 24px 80px;
 }
 
 .breadcrumbs {
-  width: min(calc(100% - 48px), 1280px);
-  min-width: 0;
-  margin: 0 auto;
+  box-sizing: border-box;
   display: flex;
+  width: min(calc(100% - 32px), 1180px);
+  min-width: 0;
+  margin-inline: auto;
   align-items: center;
-  gap: 4px 10px;
+  gap: 4px 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.875rem;
+  line-height: 1.5;
   flex-wrap: wrap;
 }
 
 .breadcrumbs a,
 .breadcrumbs span {
-  min-height: 44px;
   display: inline-flex;
+  min-height: 44px;
   align-items: center;
 }
 
 .breadcrumbs a {
-  color: var(--link);
-  text-underline-offset: 3px;
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
 }
 
 .breadcrumbs > * + *::before {
-  margin-right: 10px;
-  color: var(--ink);
+  margin-right: 12px;
+  color: var(--line);
   content: "/";
 }
 
 .hero {
-  width: min(calc(100% - 48px), 880px);
-  margin: 12px auto 28px;
-  padding: 24px 28px 26px;
-  border: 2px solid var(--ink);
-  border-left: 14px solid var(--tool-ribbon);
-  background: white;
+  box-sizing: border-box;
+  width: min(calc(100% - 32px), 760px);
+  margin-inline: auto;
+  padding-block: 40px 32px;
 }
 
 .eyebrow {
-  margin: 0 0 9px;
-  color: var(--ink);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  margin: 0 0 12px;
+  color: var(--blue-dark);
+  font-size: 0.8125rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  text-transform: uppercase;
 }
 
 .titleRow {
@@ -76,65 +66,83 @@
 .titleRow h1 {
   min-width: 0;
   margin: 0;
-  font-family: "Arial Black", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-  font-size: clamp(2.25rem, 6vw, 3.75rem);
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: -0.06em;
-  word-break: keep-all;
+  color: var(--ink);
+  font-size: clamp(2rem, 7vw, 3.5rem);
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
 }
 
 .titleRow button {
   min-width: 44px;
   min-height: 44px;
+  margin: 0;
   flex: 0 0 auto;
-  border-radius: 0;
+}
+
+.description,
+.summary {
+  max-width: 68ch;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .summary {
-  max-width: 62ch;
-  margin: 14px 0 0;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1.6;
-  text-wrap: pretty;
-  word-break: keep-all;
+  margin-top: 8px;
 }
 
 .execution {
   display: grid;
   max-width: 640px;
-  margin-top: 16px;
-  padding: 11px 13px;
-  border: 1px solid var(--ink);
-  background: var(--tool-ribbon);
-  gap: 2px;
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  gap: 4px;
+}
+
+.execution strong {
+  color: var(--ink);
 }
 
 .execution span {
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.5;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .warning,
 .support {
   max-width: 68ch;
-  margin: 14px 0 0;
-  padding: 10px 12px;
-  border-left: 5px solid currentColor;
-  background: var(--paper);
+  margin: 16px 0 0;
+  padding-left: 28px;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.65;
+  position: relative;
 }
 
-.warning {
-  border-color: var(--red);
+.warning::before,
+.support::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-weight: 900;
 }
 
-.support {
-  border-color: var(--link);
+.warning::before {
+  color: var(--red);
+  content: "주의";
+  font-size: 0.7rem;
+  letter-spacing: -0.04em;
+}
+
+.support::before {
+  color: var(--blue-dark);
+  content: "안내";
+  font-size: 0.7rem;
+  letter-spacing: -0.04em;
 }
 
 .file,
@@ -145,24 +153,33 @@
 }
 
 .related {
-  width: min(calc(100% - 48px), 1180px);
+  box-sizing: border-box;
+  width: min(calc(100% - 32px), 1180px);
   min-width: 0;
   margin: 72px auto 0;
-  padding-top: 24px;
-  border-top: 2px solid var(--ink);
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
 }
 
 .related h2 {
-  margin: 0 0 18px;
+  margin: 0 0 20px;
+  color: var(--ink);
   font-size: clamp(1.5rem, 4vw, 2rem);
-  letter-spacing: -0.04em;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
 }
 
 .relatedGrid {
   display: grid;
   min-width: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+}
+
+.breadcrumbs a:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--blue-dark);
+  outline-offset: 3px;
 }
 
 @media (max-width: 840px) {
@@ -173,7 +190,7 @@
 
 @media (max-width: 600px) {
   .page {
-    padding: 4px 0 48px;
+    padding-block: 8px 48px;
   }
 
   .breadcrumbs,
@@ -183,34 +200,57 @@
   }
 
   .hero {
-    margin: 4px auto 18px;
-    padding: 16px 14px 18px;
-    border-left-width: 8px;
+    padding-block: 16px 14px;
+  }
+
+  .eyebrow {
+    margin-bottom: 8px;
   }
 
   .titleRow {
+    align-items: flex-start;
     gap: 8px;
   }
 
   .titleRow h1 {
-    font-size: clamp(1.8rem, 9vw, 2.4rem);
+    font-size: clamp(1.75rem, 9vw, 2.3rem);
+    line-height: 1.08;
   }
 
+  .description,
   .summary {
-    margin-top: 9px;
-    font-size: 13px;
+    margin-top: 10px;
+    font-size: 0.875rem;
     line-height: 1.5;
   }
 
-  .execution,
+  .summary {
+    margin-top: 6px;
+  }
+
+  .execution {
+    margin-top: 14px;
+    padding: 10px 12px;
+    gap: 2px;
+    border-radius: 12px;
+    font-size: 0.8125rem;
+  }
+
   .warning,
   .support {
     margin-top: 10px;
-    font-size: 12px;
+    padding-left: 24px;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+
+  .warning::before,
+  .support::before {
+    font-size: 0.75rem;
   }
 
   .related {
-    margin-top: 44px;
+    margin-top: 40px;
   }
 
   .relatedGrid {
@@ -219,7 +259,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page * {
-    transition: none !important;
+  .page *,
+  .page *::before,
+  .page *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

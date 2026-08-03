@@ -1,22 +1,19 @@
 .workbench {
-  width: min(100% - 48px, 880px);
-  margin: 0 auto 72px;
+  width: min(100% - 40px, 760px);
+  margin: 0 auto 80px;
 }
 
-.stage,
-.resultStage {
+.stage {
   display: grid;
-  gap: 16px;
-  padding: clamp(22px, 4vw, 34px);
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: white;
+  gap: 18px;
+  padding: clamp(20px, 4vw, 40px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface, #fff);
 }
 
 .stage h2,
-.stage p,
-.resultStage h2,
-.resultStage p {
+.stage p {
   margin: 0;
 }
 
@@ -30,20 +27,22 @@
 }
 
 .picker {
+  display: flex;
   width: 100%;
-  min-height: 150px;
-  border: 2px dashed var(--ink);
-  border-radius: 0;
-  background: var(--image-ribbon);
-  color: var(--ink);
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed currentColor;
+  border-radius: 18px;
+  background: transparent;
+  color: inherit;
+  font-weight: 800;
   cursor: pointer;
-  font-size: 20px;
-  font-weight: 900;
 }
 
 .workbench button:disabled {
   cursor: not-allowed;
-  opacity: 0.48;
+  opacity: 0.45;
 }
 
 .fileInput {
@@ -57,180 +56,140 @@
 .limits,
 .selectionSummary,
 .individualResults span {
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.selectionSummary {
-  padding: 10px 12px;
-  border-left: 6px solid var(--image-ribbon);
-  background: var(--paper);
-  font-variant-numeric: tabular-nums;
-  font-weight: 750;
+  color: var(--muted, #667085);
+  font-size: 0.88rem;
 }
 
 .disclosure {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.disclosure::before {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  background: var(--green);
-  content: "";
-}
-
-.disclosure[data-policy="server"]::before {
-  background: var(--warning, #8a5200);
+  gap: 6px;
+  color: var(--muted, #667085);
+  font-size: 0.88rem;
 }
 
 .disclosure a {
+  display: inline-flex;
   min-width: 44px;
   min-height: 44px;
-  display: inline-flex;
   align-items: center;
-  color: var(--link);
-}
-
-.settings {
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
+  justify-content: center;
 }
 
 .settings summary,
 .individualResults summary {
-  min-height: 48px;
   display: flex;
+  min-height: 44px;
   align-items: center;
   cursor: pointer;
   font-weight: 800;
 }
 
-.settings[open] {
-  padding-bottom: 14px;
+.settings[open] summary {
+  margin-bottom: 12px;
 }
 
 .presets {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .presets label {
-  min-width: 0;
-  min-height: 88px;
-  padding: 12px;
   display: grid;
-  grid-template-columns: 22px 1fr;
-  align-content: start;
-  border: 1px solid var(--ink);
+  grid-template-columns: 24px 1fr;
+  min-height: 60px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   cursor: pointer;
 }
 
 .presets label[data-selected="true"] {
-  border-width: 3px;
-  background: var(--image-ribbon);
+  border-color: #4057f4;
+  box-shadow: inset 0 0 0 1px #4057f4;
 }
 
 .presets input {
   grid-row: 1 / 3;
   width: 18px;
   height: 18px;
-  accent-color: var(--accent);
 }
 
 .presets span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.settings > p {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--muted, #667085);
+  font-size: 0.88rem;
 }
 
 .stage progress {
   width: 100%;
-  height: 16px;
-  accent-color: var(--accent);
 }
 
 .progressCount {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 800;
-  font-variant-numeric: tabular-nums;
 }
 
 .primaryAction,
 .secondaryAction,
 .individualResults button {
   min-height: 48px;
-  padding: 0 18px;
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: var(--accent);
-  color: white;
-  font-weight: 850;
+  border: 0;
+  border-radius: 12px;
+  background: #4057f4;
+  color: #fff;
+  font-weight: 800;
   cursor: pointer;
 }
 
-.secondaryAction,
-.individualResults button {
-  background: white;
-  color: var(--ink);
+.primaryAction {
+  background: #4057f4;
+  color: #fff;
 }
 
 .resultStage {
-  padding: 0 clamp(22px, 5vw, 42px) clamp(24px, 5vw, 40px);
+  display: grid;
+  gap: 18px;
+  padding: clamp(24px, 5vw, 48px);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface, #fff);
   text-align: center;
 }
 
-.resultStage h2 {
-  margin: 0 calc(clamp(22px, 5vw, 42px) * -1);
-  padding: 18px 20px;
-  background: var(--ink);
-  color: white;
-  font-size: clamp(1.4rem, 4vw, 2rem);
-}
-
-.resultStage h2 + * {
-  margin-top: 12px;
+.resultStage h2,
+.resultStage p {
+  margin: 0;
 }
 
 .sizeComparison {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.35em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: clamp(1.6rem, 6vw, 3rem);
-  font-weight: 900;
-  letter-spacing: -0.06em;
+  gap: 0.4em;
+  font-size: clamp(1.75rem, 6vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
 
 .reduction {
-  color: var(--green);
-  font-weight: 800;
+  color: #2f6b55;
+  font-weight: 700;
 }
 
 .textAction {
   min-height: 44px;
   border: 0;
   background: transparent;
-  color: var(--link);
-  cursor: pointer;
+  color: var(--muted, #667085);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.secondaryAction {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
 }
 
 .individualResults {
@@ -238,22 +197,23 @@
 }
 
 .individualResults[open] summary {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .individualResults ul {
   display: grid;
+  gap: 10px;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--ink);
   list-style: none;
 }
 
 .individualResults li {
   display: grid;
   gap: 7px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--ink);
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
 }
 
 .individualResults div {
@@ -273,48 +233,30 @@
 .textAction:focus-visible,
 .picker:focus-visible,
 .settings summary:focus-visible,
-.individualResults summary:focus-visible,
-.presets input:focus-visible,
-.individualResults button:focus-visible {
-  outline: 3px solid var(--focus);
+.individualResults summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
   outline-offset: 3px;
 }
 
-@media (max-width: 600px) {
+.presets input:focus-visible,
+.individualResults button:focus-visible {
+  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
   .workbench {
     width: calc(100% - 24px);
-    margin-bottom: 52px;
+    margin-bottom: 56px;
   }
 
   .stage {
-    gap: 13px;
-    padding: 16px 14px 18px;
+    gap: 16px;
+    padding: 20px 16px 24px;
+    border-radius: 18px;
   }
 
   .picker {
-    min-height: 104px;
-    font-size: 17px;
-  }
-
-  .presets {
-    grid-template-columns: 1fr;
-  }
-
-  .presets label {
-    min-height: 64px;
-  }
-
-  .stage > .primaryAction {
-    position: sticky;
-    z-index: 2;
-    bottom: 4px;
-  }
-
-  .resultStage {
-    padding-inline: 14px;
-  }
-
-  .resultStage h2 {
-    margin-inline: -14px;
+    min-height: 132px;
   }
 }

@@ -1,54 +1,52 @@
 .section {
   width: min(1280px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 34px 0 68px;
+  padding: 34px 0 66px;
 }
 
 .heading {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 10px 28px;
-  margin-bottom: 18px;
+  max-width: 760px;
+  margin-bottom: 24px;
 }
 
 .heading h2 {
   margin: 0;
-  font-size: clamp(30px, 4vw, 48px);
-  line-height: 1.05;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.06;
   letter-spacing: -0.055em;
+  overflow-wrap: break-word;
   text-wrap: balance;
   word-break: keep-all;
 }
 
-.heading > p:first-child {
-  grid-row: 1 / 3;
-  padding-top: 8px;
-}
-
 .heading > p:last-child {
-  margin: 0;
+  margin: 16px 0 0;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  word-break: keep-all;
 }
 
 .dropzone {
   min-width: 0;
-  min-height: 210px;
-  padding: 32px 24px;
+  min-height: 220px;
+  padding: 34px 24px;
   margin: 0;
   display: grid;
   place-items: center;
   align-content: center;
   gap: 10px;
-  border: 2px dashed var(--ink);
-  border-radius: 0;
-  background: var(--image-ribbon);
+  border: 2px dashed color-mix(in srgb, var(--blue) 50%, var(--line));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 80%, var(--paper));
   text-align: center;
 }
 
 .dropzone[data-dragging="true"] {
   border-style: solid;
-  background: color-mix(in srgb, var(--image-ribbon) 68%, white);
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, var(--panel));
 }
 
 .dropzone > strong {
@@ -57,7 +55,7 @@
 }
 
 .dropzone > span {
-  color: var(--ink);
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -73,28 +71,24 @@
   border: 0;
 }
 
-.selectButton,
-.recommendation button {
+.selectButton {
+  min-width: 124px;
   min-height: 48px;
-  padding: 0 20px;
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: var(--accent);
-  color: white;
+  padding: 0 18px;
+  margin-top: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
   cursor: pointer;
   font-weight: 850;
 }
 
-.selectButton {
-  min-width: 150px;
-  margin-top: 8px;
-}
-
 .status,
 .correction {
-  margin: 12px 0 0;
-  font-size: 13px;
-  line-height: 1.55;
+  margin: 14px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .status {
@@ -104,33 +98,30 @@
 
 .correction {
   padding: 12px 14px;
-  border-left: 6px solid var(--red);
-  background: white;
+  border-left: 3px solid var(--red);
+  background: color-mix(in srgb, var(--red) 5%, var(--panel));
   color: var(--red);
 }
 
 .results {
-  margin-top: 22px;
+  margin-top: 24px;
   display: grid;
-  gap: 16px;
-}
-
-.group {
-  padding: 20px;
-  border: 2px solid var(--ink);
-  background: white;
-}
-
-.groupHeading,
-.recommendation {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 18px;
 }
 
+.group {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
 .groupHeading {
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
 }
 
 .groupHeading h3 {
@@ -139,20 +130,25 @@
 }
 
 .groupHeading span {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
   font-size: 12px;
   font-weight: 800;
 }
 
 .recommendations {
   display: grid;
-  border-top: 1px solid var(--ink);
+  gap: 10px;
 }
 
 .recommendation {
   min-width: 0;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--ink);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
 }
 
 .recommendation > div {
@@ -160,8 +156,7 @@
 }
 
 .recommendation p {
-  max-width: 68ch;
-  margin: 4px 0 6px;
+  margin: 5px 0 8px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
@@ -176,15 +171,31 @@
   color: var(--red);
 }
 
+.recommendation button,
+.secondaryActions button,
+.secondaryActions a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .recommendation button {
   flex: none;
-  min-height: 44px;
-  padding-inline: 14px;
 }
 
 .recommendation button:disabled {
-  border-color: var(--muted);
-  background: var(--planned-ribbon);
+  border-color: var(--line);
+  background: var(--line);
   color: var(--muted);
   cursor: not-allowed;
 }
@@ -192,29 +203,22 @@
 .secondaryActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 10px;
 }
 
 .secondaryActions button,
 .secondaryActions a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--link);
-  cursor: pointer;
-  font-weight: 750;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
 }
 
 .errorSummary {
   margin-top: 16px;
   padding: 14px;
   border: 2px solid var(--red);
-  background: white;
+  border-radius: 10px;
+  background: var(--panel);
   color: var(--red);
   font-weight: 800;
 }
@@ -222,15 +226,12 @@
 @media (max-width: 800px) {
   .section {
     width: min(100% - 32px, 640px);
+    padding: 24px 0 52px;
   }
 
-  .heading {
-    grid-template-columns: 1fr;
-  }
-
-  .heading > p:first-child {
-    grid-row: auto;
-    padding-top: 0;
+  .dropzone {
+    min-height: 190px;
+    padding: 26px 16px;
   }
 
   .recommendation {
@@ -246,39 +247,62 @@
 @media (max-width: 600px) {
   .section {
     width: calc(100% - 24px);
-    padding: 18px 0 42px;
+    padding: 0 0 40px;
   }
 
   .heading {
-    gap: 4px;
     margin-bottom: 12px;
   }
 
   .heading h2 {
-    font-size: 27px;
+    font-size: 26px;
+    line-height: 1.1;
+  }
+
+  .heading > p:first-child {
+    margin-bottom: 4px;
   }
 
   .heading > p:last-child {
+    margin-top: 8px;
     font-size: 13px;
+    line-height: 1.45;
   }
 
   .dropzone {
-    min-height: 116px;
+    min-height: 104px;
     padding: 14px;
     gap: 8px;
+    border-radius: 14px;
   }
 
   .dropzone > strong {
     display: none;
   }
 
+  .dropzone > span {
+    font-size: 12px;
+  }
+
   .selectButton {
     width: 100%;
+    min-height: 48px;
     order: -1;
     margin-top: 0;
   }
 
+  .status,
+  .correction {
+    margin-top: 10px;
+    font-size: 12px;
+  }
+
+  .results {
+    margin-top: 16px;
+    gap: 12px;
+  }
+
   .group {
-    padding: 14px;
+    padding: 16px;
   }
 }

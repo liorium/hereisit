@@ -69,8 +69,8 @@ export function DomainToolTabs({
     <section className={styles.section} aria-labelledby="home-tools-title">
       <div className={styles.heading}>
         <div>
-          <p className="eyebrow">02 / 도구 선택</p>
-          <h2 id="home-tools-title">도구 찾기</h2>
+          <p className="eyebrow">DISCOVER TOOLS</p>
+          <h2 id="home-tools-title">필요한 도구를 바로 찾아보세요.</h2>
         </div>
       </div>
 

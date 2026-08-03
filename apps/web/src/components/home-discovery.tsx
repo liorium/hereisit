@@ -16,11 +16,11 @@ export function HomeDiscovery(): ReactNode {
     <>
       <section className={styles.hero} aria-labelledby="home-title">
         <div className={styles.heroCopy}>
-          <p className="eyebrow">HEREISIT / 01</p>
+          <p className="eyebrow">FAST · PRIVATE · LOCAL</p>
           <h1 id="home-title">
             파일 작업, <span className={styles.closingPhrase}>여기서 끝.</span>
           </h1>
-          <p>파일을 고르면 맞는 도구를 바로 찾아드려요. 처리 방식은 실행 전에 알려드립니다.</p>
+          <p>파일은 기기 밖으로 나가지 않아요. 파일로 시작하거나 필요한 도구를 검색하세요.</p>
         </div>
         <div className={styles.search}>
           <CatalogSearch idPrefix="home-hero" variant="hero" />

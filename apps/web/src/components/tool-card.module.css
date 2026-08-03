@@ -1,95 +1,89 @@
 .card {
-  --ribbon: var(--planned-ribbon);
   position: relative;
-  min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+  gap: 12px;
   overflow: hidden;
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: var(--ribbon);
-  transition: transform 140ms ease;
-}
-
-.card[data-domain="image"] {
-  --ribbon: var(--image-ribbon);
-}
-
-.card[data-domain="document"] {
-  --ribbon: var(--document-ribbon);
-}
-
-.card[data-domain="data"] {
-  --ribbon: var(--conversion-ribbon);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .card[data-context="related"] {
-  background: color-mix(in srgb, var(--ribbon) 72%, white);
+  background: color-mix(in srgb, var(--panel) 90%, var(--paper));
 }
 
 .link {
   min-width: 0;
-  min-height: 188px;
-  display: flex;
-  flex-direction: column;
-  padding: 0 0 18px;
+  display: grid;
+  gap: 10px;
+  padding: 24px 8px 24px 24px;
   color: var(--ink);
   text-decoration: none;
 }
 
-.name {
-  min-width: 0;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  padding: 11px 16px;
-  border-bottom: 2px solid var(--ink);
-  background: white;
-  font-size: clamp(18px, 2vw, 22px);
-  font-weight: 900;
-  line-height: 1.2;
-  letter-spacing: -0.04em;
-  text-wrap: balance;
-  word-break: keep-all;
-}
-
+.name,
 .description {
   min-width: 0;
-  padding: 16px 16px 0;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.55;
   overflow-wrap: break-word;
-  text-wrap: pretty;
   word-break: keep-all;
 }
 
 .execution {
   min-width: 0;
-  margin-top: auto;
-  padding: 16px 16px 0;
-  color: var(--ink);
-  font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.name {
+  padding-right: 4px;
+  font-size: clamp(18px, 2vw, 23px);
   font-weight: 850;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.description {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.execution {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
 }
 
 .favoriteButton {
-  width: 44px;
-  height: 44px;
-  margin: 7px 6px 0 0;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 14px 14px 0 0;
   display: inline-grid;
   place-items: center;
-  border: 2px solid var(--ink);
-  border-radius: 0;
-  background: white;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
   color: var(--ink);
   cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .favoriteButton[aria-pressed="true"] {
-  background: var(--accent);
-  color: white;
+  border-color: color-mix(in srgb, var(--yellow) 70%, var(--ink));
+  background: var(--yellow);
 }
 
 .favoriteIcon {
@@ -109,73 +103,92 @@
   border: 0;
 }
 
+.link:focus-visible {
+  position: relative;
+}
+
 .link:focus-visible,
 .favoriteButton:focus-visible {
-  position: relative;
   z-index: 1;
-  outline: 3px solid var(--focus);
-  outline-offset: -4px;
+  outline: 3px solid color-mix(in srgb, var(--blue) 58%, transparent);
+  outline-offset: -3px;
 }
 
 @media (hover: hover) {
   .card:hover {
+    border-color: var(--ink);
+    box-shadow: 5px 5px 0 var(--yellow);
     transform: translate(-2px, -2px);
   }
 
-  .card:hover::after {
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 100%;
-    height: 100%;
-    border-right: 4px solid var(--ink);
-    border-bottom: 4px solid var(--ink);
-    content: "";
-    pointer-events: none;
+  .favoriteButton:hover {
+    border-color: var(--ink);
+    transform: scale(1.04);
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 800px) {
   .card {
     display: block;
   }
 
   .link {
-    min-height: 0;
-    padding-bottom: 14px;
-  }
-
-  .name {
-    min-height: 54px;
-    padding: 10px 64px 10px 14px;
-    font-size: 18px;
-  }
-
-  .description {
-    padding: 13px 14px 0;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .execution {
-    padding: 12px 14px 0;
+    padding-right: 68px;
   }
 
   .card > .favoriteButton {
     position: absolute;
     z-index: 2;
-    top: 5px;
-    right: 5px;
+    top: 12px;
+    right: 12px;
     margin: 0;
   }
 }
 
+@media (max-width: 420px) {
+  .link {
+    padding: 20px 4px 20px 20px;
+  }
+
+  .favoriteButton {
+    margin: 10px 10px 0 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .link {
+    min-height: 44px;
+    gap: 6px;
+    padding: 18px 68px 18px 18px;
+  }
+
+  .name,
+  .description {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .name {
+    font-size: 18px;
+    line-height: 1.3;
+  }
+
+  .description {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .favoriteButton {
     transition: none;
   }
 
-  .card:hover {
+  .card:hover,
+  .favoriteButton:hover {
     transform: none;
   }
 }
