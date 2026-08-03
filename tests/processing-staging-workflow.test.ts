@@ -110,6 +110,7 @@ describe("processing staging workflow", () => {
       "--output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true",
     );
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
+    expect(deploy).toContain(`LOGPUSH_STATUS_TOKEN: \${{ secrets.STAGING_LOGPUSH_STATUS_TOKEN }}`);
   });
 
   it("resumes only the primary queue after deployment checks and fails closed", () => {

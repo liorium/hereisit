@@ -97,6 +97,32 @@ describe("Cloudflare processing resource API", () => {
     expect(JSON.stringify(await api.readInventory())).not.toMatch(/token|access-key|secret-key/);
   });
 
+  it("verifies the exact runtime token can read the converged Logpush job", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer status-token");
+      return response({
+        id: 41,
+        dataset: "workers_trace_events",
+        enabled: true,
+        last_complete: null,
+        last_error: null,
+        error_message: null,
+      });
+    });
+    const api = createCloudflareProcessingResourceApi({
+      config,
+      fetcher,
+      apiToken: "resource-token",
+      d1ApiToken: "d1-token",
+      logpushApiToken: "logs-token",
+      logpushStatusToken: "status-token",
+      logpushR2AccessKeyId: "access-key",
+      logpushR2SecretAccessKey: "secret-key",
+    });
+
+    await expect(api.verifyLogpushStatus(41)).resolves.toBeUndefined();
+  });
+
   it("accepts successful Cloudflare responses with nullable error metadata", async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;

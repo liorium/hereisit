@@ -152,6 +152,7 @@ export function createCloudflareProcessingResourceApi({
   apiToken,
   d1ApiToken,
   logpushApiToken,
+  logpushStatusToken = logpushApiToken,
   logpushR2AccessKeyId,
   logpushR2SecretAccessKey,
 }) {
@@ -159,6 +160,7 @@ export function createCloudflareProcessingResourceApi({
   const resourceToken = assertCredential(apiToken, "Cloudflare resource token");
   const d1Token = assertCredential(d1ApiToken, "Cloudflare D1 token");
   const logsToken = assertCredential(logpushApiToken, "Cloudflare Logs token");
+  const statusToken = assertCredential(logpushStatusToken, "Cloudflare Logpush status token");
   const accessKeyId = assertCredential(logpushR2AccessKeyId, "Logpush R2 access key ID");
   const secretAccessKey = assertCredential(
     logpushR2SecretAccessKey,
@@ -277,6 +279,23 @@ export function createCloudflareProcessingResourceApi({
     return { d1: databases, r2, queues, logpush };
   };
 
+  const verifyLogpushStatus = async (jobId) => {
+    if (!Number.isSafeInteger(jobId) || jobId < 1) throw new TypeError("Logpush job ID is invalid");
+    const result = asObject(
+      await request(`${accountPath}/logpush/jobs/${jobId}`, statusToken),
+      "Logpush status",
+    );
+    if (
+      result.id !== jobId ||
+      result.dataset !== "workers_trace_events" ||
+      result.enabled !== true ||
+      result.last_error !== null ||
+      result.error_message !== null
+    ) {
+      throw new TypeError("Logpush runtime status is invalid");
+    }
+  };
+
   const applyAction = async (action) => {
     const logpushDestination = () => {
       const destination = new URL(
@@ -375,5 +394,5 @@ export function createCloudflareProcessingResourceApi({
     throw new TypeError("unknown processing resource action");
   };
 
-  return { readInventory, applyAction };
+  return { readInventory, verifyLogpushStatus, applyAction };
 }

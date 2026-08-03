@@ -192,8 +192,17 @@ export function planProcessingResources({ config: configValue, inventory: invent
   };
 }
 
-export async function convergeProcessingResources({ config, readInventory, applyAction }) {
-  if (typeof readInventory !== "function" || typeof applyAction !== "function") {
+export async function convergeProcessingResources({
+  config,
+  readInventory,
+  verifyLogpushStatus,
+  applyAction,
+}) {
+  if (
+    typeof readInventory !== "function" ||
+    typeof verifyLogpushStatus !== "function" ||
+    typeof applyAction !== "function"
+  ) {
     throw new TypeError("resource convergence dependencies are invalid");
   }
   const maximumActions = 16;
@@ -201,6 +210,13 @@ export async function convergeProcessingResources({ config, readInventory, apply
     const inventory = await readInventory();
     const plan = planProcessingResources({ config, inventory });
     if (plan.actions.length === 0) {
+      const logpush = inventory.logpush.find(
+        (entry) =>
+          entry.dataset === "workers_trace_events" &&
+          entry.workerScriptName === config.workerScriptName,
+      );
+      if (logpush === undefined) throw new Error("converged Logpush job is missing");
+      await verifyLogpushStatus(logpush.id);
       return {
         version: 1,
         phase: "provision",
@@ -332,12 +348,14 @@ export async function runProcessingResourceProvisioner(
     apiToken: environment.CLOUDFLARE_API_TOKEN,
     d1ApiToken: environment.CLOUDFLARE_D1_API_TOKEN,
     logpushApiToken: environment.CLOUDFLARE_LOGPUSH_API_TOKEN,
+    logpushStatusToken: environment.LOGPUSH_STATUS_TOKEN,
     logpushR2AccessKeyId: environment.LOGPUSH_R2_ACCESS_KEY_ID,
     logpushR2SecretAccessKey: environment.LOGPUSH_R2_SECRET_ACCESS_KEY,
   });
   const result = await convergeProcessingResources({
     config,
     readInventory: api.readInventory,
+    verifyLogpushStatus: api.verifyLogpushStatus,
     applyAction: api.applyAction,
   });
   const manifest = buildProcessingProvisionManifest({
