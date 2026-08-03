@@ -472,7 +472,7 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
 
 test("publishes every PDF route with unique metadata", async ({ page, request }) => {
   const tools = [
-    ["/pdf/merge", "PDF 합치기", "PDF 파일 선택"],
+    ["/pdf/merge", "PDF 합치기", "합칠 PDF 선택"],
     ["/pdf/split", "PDF 페이지 분할", "PDF 선택"],
     ["/pdf/to-image", "PDF를 JPG·PNG로 변환", "PDF 선택"],
     ["/pdf/image-to-pdf", "이미지를 PDF로 변환", "JPG·PNG 이미지 선택"],
