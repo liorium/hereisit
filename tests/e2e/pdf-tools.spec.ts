@@ -50,11 +50,19 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.locator("input[type=file]").setInputFiles([
     { name: "first.pdf", mimeType: "application/pdf", buffer: await createPdf([100]) },
-    { name: "second.pdf", mimeType: "application/pdf", buffer: await createPdf([200]) },
+    { name: "second.pdf", mimeType: "application/pdf", buffer: await createPdf([200, 200]) },
   ]);
+  const selected = page.getByRole("region", { name: "합칠 PDF 순서" });
+  await expect(selected.getByText("first.pdf", { exact: true })).toBeVisible();
+  await expect(selected.getByText("1페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(selected.getByText("second.pdf", { exact: true })).toBeVisible();
+  await expect(selected.getByText("2페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeEnabled();
+  await expect(page.getByText("설정", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "second.pdf 위로 이동" }).click();
-  await page.getByRole("button", { name: "2개 PDF 합치기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(selected.locator("article").first()).toContainText("second.pdf");
+  await page.getByRole("button", { name: "PDF 합치기", exact: true }).click();
+  await expect(page.getByText("3페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
   expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
@@ -64,7 +72,7 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
   const merged = await PDFDocument.load(output);
-  expect(merged.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([200, 100]);
+  expect(merged.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([200, 200, 100]);
   expect(downloadCount).toBe(1);
   await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
   await expectWebShareUnused(page);

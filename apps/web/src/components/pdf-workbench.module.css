@@ -1059,6 +1059,180 @@
   font-size: 10px;
 }
 
+.mergeDropIcon span {
+  background: var(--ink);
+  color: var(--yellow);
+}
+
+.mergeSetup {
+  width: min(820px, 100%);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 10px 10px 0 var(--yellow);
+}
+
+.mergeSetupHeader {
+  min-height: 104px;
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mergeSetupHeader h2,
+.mergeSetupHeader p {
+  margin: 0;
+}
+
+.mergeSetupHeader h2 {
+  font-size: clamp(25px, 4vw, 36px);
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+}
+
+.mergeSetupHeader p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mergeHeaderActions,
+.mergeFileActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mergeHeaderActions button,
+.mergeFileActions button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mergeHeaderActions button {
+  padding: 0 15px;
+}
+
+.mergeFileActions button {
+  width: 44px;
+  padding: 0;
+}
+
+.mergeHeaderActions button:disabled,
+.mergeFileActions button:disabled,
+.mergePrimaryAction:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mergeFileList {
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.mergeFileRow {
+  min-height: 84px;
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.mergePosition {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--yellow);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.mergeFileCopy {
+  min-width: 0;
+}
+
+.mergeFileCopy strong {
+  display: block;
+}
+
+.mergeFileCopy strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mergeFileMeta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+}
+
+.mergeFileMeta span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.mergeSetupFooter {
+  padding: 22px 28px 28px;
+}
+
+.mergeLocalNotice,
+.mergeStatus {
+  margin: 0;
+  text-align: center;
+}
+
+.mergeLocalNotice {
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.mergeStatus {
+  min-height: 18px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mergePrimaryAction {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 18px;
+  padding: 0 24px;
+  border: 1px solid var(--ink);
+  border-radius: 10px;
+  background: var(--ink);
+  color: white;
+  font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--ink) 72%, black);
+}
+
 @media (max-width: 1050px) {
   .workspace {
     grid-template-columns: minmax(240px, 0.8fr) minmax(330px, 1.2fr);
@@ -1268,6 +1442,43 @@
 
   .actionButtons > button {
     min-height: 48px;
+  }
+}
+
+@media (max-width: 640px) {
+  .mergeSetup {
+    box-shadow: 6px 6px 0 var(--yellow);
+  }
+
+  .mergeSetupHeader {
+    padding: 20px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .mergeHeaderActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mergeFileRow {
+    padding: 14px;
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .mergeFileActions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(44px, 1fr));
+  }
+
+  .mergeFileActions button {
+    width: 100%;
+  }
+
+  .mergeSetupFooter {
+    padding: 20px;
   }
 }
 

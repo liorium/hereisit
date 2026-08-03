@@ -47,7 +47,13 @@ function isSafeWatermarkText(value: string): boolean {
 interface PdfWorkItem {
   id: string;
   file: File;
+  inspection?: PdfInputInspection;
 }
+
+type PdfInputInspection =
+  | { status: "pending" }
+  | { status: "ready"; pageCount: number }
+  | { status: "failed"; message: string };
 
 const INTENT_CONFIG: Record<
   PdfEditingIntent,
@@ -62,7 +68,7 @@ const INTENT_CONFIG: Record<
 > = {
   merge: {
     emptyTitle: "합칠 PDF를 놓거나 선택하세요",
-    selectLabel: "PDF 파일 선택",
+    selectLabel: "합칠 PDF 선택",
     workbenchTitle: "PDF 합치기 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF · 파일당 50MB · 최대 20개",
@@ -204,6 +210,43 @@ export function PdfWorkbench({
     itemsRef.current = items;
   }, [items]);
 
+  useEffect(() => {
+    if (intent !== "merge" || processing) return;
+    const pending = items.find((item) => item.inspection?.status === "pending");
+    if (pending === undefined) return;
+
+    let active = true;
+    const handle = inspectPdfFile(pending.file);
+    void handle.result.then((outcome) => {
+      if (!active) return;
+      setItems((current) => {
+        const next = current.map((item): PdfWorkItem => {
+          if (item.id !== pending.id || item.inspection?.status !== "pending") return item;
+          if (outcome.status === "fulfilled") {
+            return {
+              ...item,
+              inspection: { status: "ready", pageCount: outcome.value.pageCount },
+            };
+          }
+          if (outcome.status === "rejected") {
+            return {
+              ...item,
+              inspection: { status: "failed", message: outcome.error.message },
+            };
+          }
+          return item;
+        });
+        itemsRef.current = next;
+        return next;
+      });
+    });
+
+    return () => {
+      active = false;
+      handle.cancel();
+    };
+  }, [intent, items, processing]);
+
   const revokeResultUrl = useCallback(() => {
     if (resultUrlRef.current === undefined) return;
     URL.revokeObjectURL(resultUrlRef.current);
@@ -306,7 +349,8 @@ export function PdfWorkbench({
         ) {
           continue;
         }
-        accepted.push({ id: makeId(), file });
+        const item = { id: makeId(), file };
+        accepted.push(intent === "merge" ? { ...item, inspection: { status: "pending" } } : item);
         remainingBytes -= file.size;
       }
 
@@ -614,6 +658,7 @@ export function PdfWorkbench({
     runtimeSupported &&
     !busy &&
     items.length >= minFiles &&
+    (intent !== "merge" || items.every((item) => item.inspection?.status === "ready")) &&
     (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok) &&
     (intent !== "organize" || pagePlan.length > 0) &&
     (intent !== "watermark" ||
@@ -641,7 +686,87 @@ export function PdfWorkbench({
         }}
       />
 
-      {items.length === 0 ? (
+      {intent === "merge" && items.length > 0 && !processing && result === undefined ? (
+        <section className={styles.mergeSetup} aria-labelledby="pdf-workbench-title">
+          <header className={styles.mergeSetupHeader}>
+            <div>
+              <h2 id="pdf-workbench-title">합칠 PDF 순서</h2>
+              <p>
+                {items.length}개 PDF · {formatBytes(totalBytes)}
+              </p>
+            </div>
+            <div className={styles.mergeHeaderActions}>
+              <button type="button" onClick={() => inputRef.current?.click()}>
+                PDF 추가
+              </button>
+              <button type="button" onClick={reset}>
+                전체 삭제
+              </button>
+            </div>
+          </header>
+
+          <section className={styles.mergeFileList} aria-label="합칠 PDF 순서">
+            {items.map((item, index) => (
+              <article className={styles.mergeFileRow} key={item.id}>
+                <span className={styles.mergePosition}>{index + 1}</span>
+                <div className={styles.mergeFileCopy}>
+                  <strong title={item.file.name}>{item.file.name}</strong>
+                  <div className={styles.mergeFileMeta}>
+                    <span>{formatBytes(item.file.size)}</span>
+                    <span>
+                      {item.inspection?.status === "ready"
+                        ? `${item.inspection.pageCount}페이지`
+                        : item.inspection?.status === "failed"
+                          ? item.inspection.message
+                          : "페이지 확인 중"}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.mergeFileActions}>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 위로 이동`}
+                    disabled={index === 0}
+                    onClick={() => moveItem(index, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 아래로 이동`}
+                    disabled={index === items.length - 1}
+                    onClick={() => moveItem(index, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 제거`}
+                    onClick={() => removeItem(item.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              </article>
+            ))}
+          </section>
+
+          <footer className={styles.mergeSetupFooter}>
+            <p className={styles.mergeLocalNotice}>파일은 업로드하지 않고 이 기기에서 처리해요.</p>
+            <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
+              {message}
+            </p>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              disabled={!canRun}
+              onClick={() => void startProcessing()}
+            >
+              PDF 합치기
+            </button>
+          </footer>
+        </section>
+      ) : items.length === 0 ? (
         <section
           className={`${styles.emptyDropzone} ${dragging ? styles.dragging : ""}`}
           aria-labelledby="pdf-workbench-title"
@@ -655,7 +780,10 @@ export function PdfWorkbench({
           }}
           onDrop={onDrop}
         >
-          <div className={styles.dropIcon} aria-hidden="true">
+          <div
+            className={`${styles.dropIcon} ${intent === "merge" ? styles.mergeDropIcon : ""}`}
+            aria-hidden="true"
+          >
             <span>＋</span>
           </div>
           <div className={styles.dropCopy}>
@@ -667,7 +795,7 @@ export function PdfWorkbench({
           </div>
           <div className={styles.dropActions}>
             <button
-              className={styles.primaryButton}
+              className={intent === "merge" ? styles.mergePrimaryAction : styles.primaryButton}
               type="button"
               disabled={!hydrated || !runtimeSupported}
               onClick={() => inputRef.current?.click()}
