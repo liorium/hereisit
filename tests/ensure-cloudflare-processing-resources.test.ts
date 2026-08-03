@@ -242,6 +242,7 @@ describe("Cloudflare processing resource planner", () => {
     const result = await convergeProcessingResources({
       config,
       readInventory: async () => inventory,
+      verifyLogpushStatus: async () => undefined,
       applyAction: async (action) => {
         applied.push(action.type);
         inventory = {
@@ -275,12 +276,26 @@ describe("Cloudflare processing resource planner", () => {
     });
   });
 
+  it("refuses a converged deployment when the runtime token cannot read Logpush status", async () => {
+    await expect(
+      convergeProcessingResources({
+        config,
+        readInventory: async () => resources(),
+        applyAction: async () => undefined,
+        verifyLogpushStatus: async () => {
+          throw new Error("runtime token denied");
+        },
+      }),
+    ).rejects.toThrow("runtime token denied");
+  });
+
   it("stops a non-converging or unexpectedly changed resource set", async () => {
     const empty = { d1: [], r2: [], queues: [], logpush: [] };
     await expect(
       convergeProcessingResources({
         config,
         readInventory: async () => empty,
+        verifyLogpushStatus: async () => undefined,
         applyAction: async () => undefined,
       }),
     ).rejects.toThrow(/converge/i);

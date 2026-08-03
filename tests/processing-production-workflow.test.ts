@@ -62,6 +62,9 @@ describe("processing production workflow", () => {
     expect(workflow).toContain('--stable-url "$PRODUCTION_PAGES_ORIGIN"');
     expect(workflow).toContain("for (let attempt = 1; attempt <= 15; attempt += 1)");
     expect(workflow).toContain("if (attempt < 15) await delay(2_000)");
+    expect(workflow).toContain(
+      `LOGPUSH_STATUS_TOKEN: \${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}`,
+    );
   });
 
   it("provisions, attests, and smoke-checks before publishing sanitized evidence", () => {
