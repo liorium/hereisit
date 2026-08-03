@@ -671,7 +671,10 @@ export function PdfWorkbench({
   };
 
   return (
-    <section className={styles.shell} aria-labelledby="pdf-workbench-title">
+    <section
+      className={styles.shell}
+      aria-labelledby={intent === "merge" ? undefined : "pdf-workbench-title"}
+    >
       <input
         ref={inputRef}
         className={styles.hiddenInput}
@@ -686,8 +689,58 @@ export function PdfWorkbench({
         }}
       />
 
-      {intent === "merge" && items.length > 0 && !processing && result === undefined ? (
-        <section className={styles.mergeSetup} aria-labelledby="pdf-workbench-title">
+      {intent === "merge" && result !== undefined ? (
+        <section className={`${styles.mergeStage} ${styles.mergeResult}`}>
+          <div className={styles.mergeResultMark} aria-hidden="true">
+            ✓
+          </div>
+          <h2 id="pdf-workbench-title">PDF 합치기 완료</h2>
+          <p className={styles.mergeResultSummary}>
+            {items.length}개 PDF · {result.outputPageCount}페이지
+          </p>
+          <strong className={styles.mergeSizeComparison}>
+            {formatBytes(totalBytes)} → {formatBytes(result.byteLength)}
+          </strong>
+          {result.warnings.includes("SIGNATURES_INVALIDATED") ? (
+            <p className={styles.mergeWarning}>
+              새 PDF에서는 기존 전자서명이 유효하지 않아요. 북마크·양식은 유지되지 않을 수 있어요.
+            </p>
+          ) : null}
+          <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
+            결과 PDF 다운로드 ↓
+          </button>
+          <p
+            className={styles.mergeResultStatus}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {message}
+          </p>
+          <button className={styles.mergeTextAction} type="button" onClick={reset}>
+            다른 PDF 합치기
+          </button>
+        </section>
+      ) : intent === "merge" && processing ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-workbench-title">PDF 합치는 중</h2>
+          <p>{phaseLabel(phase)}</p>
+          <div
+            className={styles.mergeProgressTrack}
+            role="progressbar"
+            aria-label="PDF 합치기 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
+      ) : intent === "merge" && items.length > 0 ? (
+        <section className={styles.mergeSetup}>
           <header className={styles.mergeSetupHeader}>
             <div>
               <h2 id="pdf-workbench-title">합칠 PDF 순서</h2>

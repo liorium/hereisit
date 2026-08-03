@@ -62,12 +62,16 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   await page.getByRole("button", { name: "second.pdf 위로 이동" }).click();
   await expect(selected.locator("article").first()).toContainText("second.pdf");
   await page.getByRole("button", { name: "PDF 합치기", exact: true }).click();
-  await expect(page.getByText("3페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "PDF 합치기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("2개 PDF · 3페이지", { exact: true })).toBeVisible();
+  await expect(page.getByText(/\d+(?:\.\d+)?(?:KB|B) → \d+(?:\.\d+)?(?:KB|B)/)).toBeVisible();
   expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "결과 PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
   const output = await downloadedBytes(await download.path());
@@ -75,6 +79,8 @@ test("merges PDFs in the chosen order without external uploads", async ({ page }
   expect(merged.getPages().map((pdfPage) => pdfPage.getWidth())).toEqual([200, 200, 100]);
   expect(downloadCount).toBe(1);
   await expect(page.getByRole("status")).toContainText("다운로드를 시작했어요.");
+  await page.getByRole("button", { name: "다른 PDF 합치기" }).click();
+  await expect(page.getByRole("button", { name: "합칠 PDF 선택" })).toBeVisible();
   await expectWebShareUnused(page);
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
@@ -88,22 +94,38 @@ test("keeps a prepared PDF result retryable when download activation fails", asy
     { name: "first.pdf", mimeType: "application/pdf", buffer: await createPdf([100]) },
     { name: "second.pdf", mimeType: "application/pdf", buffer: await createPdf([200]) },
   ]);
-  await page.getByRole("button", { name: "2개 PDF 합치기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  const merge = page.getByRole("button", { name: "PDF 합치기", exact: true });
+  await expect(merge).toBeEnabled({ timeout: 20_000 });
+  await merge.click();
+  await expect(page.getByRole("heading", { name: "PDF 합치기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
 
   await setDownloadActivationBlocked(page, true);
-  await page.getByRole("button", { name: "PDF 다운로드 ↓" }).click();
+  await page.getByRole("button", { name: "결과 PDF 다운로드 ↓" }).click();
   await expect(page.getByRole("status")).toContainText(
     "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
   );
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PDF 합치기 완료" })).toBeVisible();
 
   await setDownloadActivationBlocked(page, false);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "결과 PDF 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
+});
+
+test("keeps a failed inspection removable and blocks merge", async ({ page }) => {
+  await page.goto("/pdf/merge");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "valid.pdf", mimeType: "application/pdf", buffer: await createPdf([100]) },
+    { name: "broken.pdf", mimeType: "application/pdf", buffer: Buffer.from("not a pdf") },
+  ]);
+  const selected = page.getByRole("region", { name: "합칠 PDF 순서" });
+  await expect(selected).toContainText("broken.pdf");
+  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "broken.pdf 제거" })).toBeEnabled();
 });
 
 test("splits every PDF page into a ZIP", async ({ page }) => {
