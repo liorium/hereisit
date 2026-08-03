@@ -1,19 +1,22 @@
 .hero {
   width: min(1280px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 78px 0 44px;
+  padding: 64px 0 38px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 480px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 470px);
   align-items: end;
   gap: 64px;
+  border-bottom: 2px solid var(--ink);
 }
 
 .heroCopy h1 {
-  max-width: 760px;
+  max-width: 780px;
   margin: 0;
-  font-size: clamp(54px, 7vw, 92px);
-  line-height: 0.95;
-  letter-spacing: -0.07em;
+  font-family: "Arial Black", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: clamp(58px, 7vw, 96px);
+  font-weight: 900;
+  line-height: 0.94;
+  letter-spacing: -0.075em;
   overflow-wrap: break-word;
   text-wrap: balance;
   word-break: keep-all;
@@ -24,66 +27,57 @@
 }
 
 .heroCopy > p:last-child {
-  max-width: 650px;
-  margin: 26px 0 0;
+  max-width: 54ch;
+  margin: 24px 0 0;
   color: var(--muted);
-  font-size: 18px;
-  line-height: 1.7;
-  overflow-wrap: break-word;
+  font-size: 17px;
+  line-height: 1.65;
   text-wrap: pretty;
   word-break: keep-all;
 }
 
 .search {
   min-width: 0;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 
 @media (max-width: 900px) {
   .hero {
     grid-template-columns: 1fr;
-    gap: 30px;
+    gap: 28px;
   }
 }
 
 @media (max-width: 800px) {
   .hero {
     width: min(100% - 32px, 640px);
-    padding: 54px 0 34px;
+    padding: 46px 0 28px;
   }
 
   .heroCopy h1 {
-    font-size: clamp(50px, 15vw, 70px);
-  }
-
-  .heroCopy > p:last-child {
-    font-size: 16px;
+    font-size: clamp(50px, 15vw, 72px);
   }
 }
 
 @media (max-width: 600px) {
   .hero {
     width: calc(100% - 24px);
-    padding: 24px 0 12px;
-    gap: 14px;
+    padding: 24px 0 18px;
+    gap: 16px;
   }
 
   .heroCopy h1 {
-    font-size: clamp(40px, 13vw, 52px);
+    font-size: clamp(42px, 13vw, 56px);
     line-height: 0.98;
   }
 
   .heroCopy > p:first-child {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .heroCopy > p:last-child {
     margin-top: 12px;
     font-size: 14px;
-    line-height: 1.45;
-  }
-
-  .search {
-    padding-bottom: 0;
+    line-height: 1.5;
   }
 }

@@ -34,8 +34,8 @@
   min-height: 46px;
   flex: 1;
   padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
   background: var(--panel);
   color: var(--ink);
   font-size: 16px;
@@ -46,8 +46,8 @@
 }
 
 .input:focus-visible {
-  border-color: var(--blue);
-  outline: 3px solid color-mix(in srgb, var(--blue) 24%, transparent);
+  border-color: var(--ink);
+  outline: 3px solid var(--focus);
   outline-offset: 1px;
 }
 
@@ -55,18 +55,18 @@
   min-width: 76px;
   min-height: 46px;
   padding: 0 14px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  background: var(--ink);
-  color: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: var(--accent);
+  color: white;
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
 }
 
 .submit:hover {
-  background: var(--blue-dark);
-  border-color: var(--blue-dark);
+  background: var(--accent-dark);
+  border-color: var(--ink);
 }
 
 .listbox {
@@ -76,13 +76,12 @@
   right: 0;
   left: 0;
   max-height: min(360px, 55vh);
-  padding: 6px;
+  padding: 0;
   margin: 0;
   overflow-y: auto;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
   background: var(--panel);
-  box-shadow: 0 18px 48px rgba(23, 25, 31, 0.16);
   list-style: none;
 }
 
@@ -97,7 +96,7 @@
   gap: 4px;
   padding: 10px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: var(--ink);
   cursor: pointer;
@@ -106,11 +105,11 @@
 
 .option:hover,
 .option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--blue) 9%, var(--panel));
+  background: var(--image-ribbon);
 }
 
 .option:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--blue) 45%, transparent);
+  outline: 3px solid var(--focus);
   outline-offset: -2px;
 }
 

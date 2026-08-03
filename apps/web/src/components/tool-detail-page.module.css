@@ -1,58 +1,68 @@
 .page {
-  box-sizing: border-box;
+  --tool-ribbon: var(--planned-ribbon);
   width: 100%;
-  max-width: 100%;
-  padding-block: 24px 80px;
+  min-width: 0;
+  padding: 18px 0 80px;
+}
+
+.page[data-domain="image"] {
+  --tool-ribbon: var(--image-ribbon);
+}
+
+.page[data-domain="document"] {
+  --tool-ribbon: var(--document-ribbon);
+}
+
+.page[data-domain="data"] {
+  --tool-ribbon: var(--conversion-ribbon);
 }
 
 .breadcrumbs {
-  box-sizing: border-box;
-  display: flex;
-  width: min(calc(100% - 32px), 1180px);
+  width: min(calc(100% - 48px), 1280px);
   min-width: 0;
-  margin-inline: auto;
+  margin: 0 auto;
+  display: flex;
   align-items: center;
-  gap: 4px 12px;
+  gap: 4px 10px;
   color: var(--muted);
-  font-size: 0.875rem;
-  line-height: 1.5;
+  font-size: 13px;
   flex-wrap: wrap;
 }
 
 .breadcrumbs a,
 .breadcrumbs span {
-  display: inline-flex;
   min-height: 44px;
+  display: inline-flex;
   align-items: center;
 }
 
 .breadcrumbs a {
-  color: inherit;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
+  color: var(--link);
+  text-underline-offset: 3px;
 }
 
 .breadcrumbs > * + *::before {
-  margin-right: 12px;
-  color: var(--line);
+  margin-right: 10px;
+  color: var(--ink);
   content: "/";
 }
 
 .hero {
-  box-sizing: border-box;
-  width: min(calc(100% - 32px), 760px);
-  margin-inline: auto;
-  padding-block: 40px 32px;
+  width: min(calc(100% - 48px), 880px);
+  margin: 12px auto 28px;
+  padding: 24px 28px 26px;
+  border: 2px solid var(--ink);
+  border-left: 14px solid var(--tool-ribbon);
+  background: white;
 }
 
 .eyebrow {
-  margin: 0 0 12px;
-  color: var(--blue-dark);
-  font-size: 0.8125rem;
+  margin: 0 0 9px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.08em;
-  line-height: 1.4;
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .titleRow {
@@ -66,83 +76,65 @@
 .titleRow h1 {
   min-width: 0;
   margin: 0;
-  color: var(--ink);
-  font-size: clamp(2rem, 7vw, 3.5rem);
-  letter-spacing: -0.045em;
-  line-height: 1.08;
-  overflow-wrap: anywhere;
+  font-family: "Arial Black", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: clamp(2.25rem, 6vw, 3.75rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  word-break: keep-all;
 }
 
 .titleRow button {
   min-width: 44px;
   min-height: 44px;
-  margin: 0;
   flex: 0 0 auto;
+  border-radius: 0;
 }
 
-.description,
 .summary {
-  max-width: 68ch;
-  margin: 16px 0 0;
+  max-width: 62ch;
+  margin: 14px 0 0;
   color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.7;
-}
-
-.summary {
-  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  text-wrap: pretty;
+  word-break: keep-all;
 }
 
 .execution {
   display: grid;
   max-width: 640px;
-  margin-top: 24px;
-  padding: 16px 18px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--panel);
-  gap: 4px;
-}
-
-.execution strong {
-  color: var(--ink);
+  margin-top: 16px;
+  padding: 11px 13px;
+  border: 1px solid var(--ink);
+  background: var(--tool-ribbon);
+  gap: 2px;
 }
 
 .execution span {
-  color: var(--muted);
-  line-height: 1.55;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .warning,
 .support {
   max-width: 68ch;
-  margin: 16px 0 0;
-  padding-left: 28px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-left: 5px solid currentColor;
+  background: var(--paper);
   color: var(--muted);
-  line-height: 1.65;
-  position: relative;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
-.warning::before,
-.support::before {
-  position: absolute;
-  top: 0;
-  left: 0;
-  font-weight: 900;
+.warning {
+  border-color: var(--red);
 }
 
-.warning::before {
-  color: var(--red);
-  content: "주의";
-  font-size: 0.7rem;
-  letter-spacing: -0.04em;
-}
-
-.support::before {
-  color: var(--blue-dark);
-  content: "안내";
-  font-size: 0.7rem;
-  letter-spacing: -0.04em;
+.support {
+  border-color: var(--link);
 }
 
 .file,
@@ -153,33 +145,24 @@
 }
 
 .related {
-  box-sizing: border-box;
-  width: min(calc(100% - 32px), 1180px);
+  width: min(calc(100% - 48px), 1180px);
   min-width: 0;
   margin: 72px auto 0;
-  padding-top: 32px;
-  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  border-top: 2px solid var(--ink);
 }
 
 .related h2 {
-  margin: 0 0 20px;
-  color: var(--ink);
+  margin: 0 0 18px;
   font-size: clamp(1.5rem, 4vw, 2rem);
-  letter-spacing: -0.035em;
-  line-height: 1.2;
+  letter-spacing: -0.04em;
 }
 
 .relatedGrid {
   display: grid;
   min-width: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.breadcrumbs a:focus-visible {
-  border-radius: 4px;
-  outline: 3px solid var(--blue-dark);
-  outline-offset: 3px;
+  gap: 12px;
 }
 
 @media (max-width: 840px) {
@@ -190,7 +173,7 @@
 
 @media (max-width: 600px) {
   .page {
-    padding-block: 8px 48px;
+    padding: 4px 0 48px;
   }
 
   .breadcrumbs,
@@ -200,57 +183,34 @@
   }
 
   .hero {
-    padding-block: 16px 14px;
-  }
-
-  .eyebrow {
-    margin-bottom: 8px;
+    margin: 4px auto 18px;
+    padding: 16px 14px 18px;
+    border-left-width: 8px;
   }
 
   .titleRow {
-    align-items: flex-start;
     gap: 8px;
   }
 
   .titleRow h1 {
-    font-size: clamp(1.75rem, 9vw, 2.3rem);
-    line-height: 1.08;
+    font-size: clamp(1.8rem, 9vw, 2.4rem);
   }
 
-  .description,
   .summary {
-    margin-top: 10px;
-    font-size: 0.875rem;
+    margin-top: 9px;
+    font-size: 13px;
     line-height: 1.5;
   }
 
-  .summary {
-    margin-top: 6px;
-  }
-
-  .execution {
-    margin-top: 14px;
-    padding: 10px 12px;
-    gap: 2px;
-    border-radius: 12px;
-    font-size: 0.8125rem;
-  }
-
+  .execution,
   .warning,
   .support {
     margin-top: 10px;
-    padding-left: 24px;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-  }
-
-  .warning::before,
-  .support::before {
-    font-size: 0.75rem;
+    font-size: 12px;
   }
 
   .related {
-    margin-top: 40px;
+    margin-top: 44px;
   }
 
   .relatedGrid {
@@ -259,12 +219,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page *,
-  .page *::before,
-  .page *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+  .page * {
+    transition: none !important;
   }
 }

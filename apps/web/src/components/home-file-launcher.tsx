@@ -172,9 +172,9 @@ export function HomeFileLauncher(): ReactNode {
   return (
     <section className={styles.section} aria-labelledby="file-launcher-title">
       <div className={styles.heading}>
-        <p className="eyebrow">START WITH A FILE</p>
-        <h2 id="file-launcher-title">파일을 고르면 맞는 도구를 찾아드려요.</h2>
-        <p>업로드하지 않고 파일 앞부분만 기기 안에서 확인합니다.</p>
+        <p className="eyebrow">01 / 파일로 시작</p>
+        <h2 id="file-launcher-title">파일을 놓고 시작하세요.</h2>
+        <p>파일 형식만 기기에서 확인합니다.</p>
       </div>
 
       <fieldset

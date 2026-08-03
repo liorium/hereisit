@@ -1,34 +1,37 @@
 .header {
   position: relative;
   z-index: 20;
-  width: min(1440px, calc(100% - 48px));
-  height: 84px;
+  width: min(1440px, calc(100% - 32px));
+  height: 68px;
+  padding: 0 16px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--line);
+  background: var(--ink);
+  color: white;
 }
 
 .brand {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
-  gap: 11px;
-  color: var(--ink);
+  gap: 10px;
+  color: white;
   text-decoration: none;
+  font-family: "Arial Black", Pretendard, "Apple SD Gothic Neo", sans-serif;
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: -0.04em;
 }
 
 .brandMark {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 8px 8px 8px 2px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: white;
   font-size: 16px;
 }
 
@@ -39,22 +42,22 @@
 }
 
 .desktopNav {
-  gap: 4px;
+  gap: 2px;
 }
 
 .navButton,
 .navLink,
 .searchTrigger {
-  min-height: 42px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   padding: 0 12px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 0;
   background: transparent;
-  color: var(--muted);
+  color: #e8e8e2;
   cursor: pointer;
   text-decoration: none;
   font-size: 13px;
@@ -68,15 +71,13 @@
 .searchTrigger[aria-expanded="true"],
 .navButton[data-active="true"],
 .navLink[aria-current="page"] {
-  background: var(--panel);
-  color: var(--ink);
+  background: var(--accent);
+  color: white;
 }
 
 .comingSoon {
-  padding: 3px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
+  padding: 2px 5px;
+  border: 1px solid currentColor;
   font-size: 9px;
   font-weight: 800;
 }
@@ -89,49 +90,46 @@
 .mega,
 .searchPanel {
   position: absolute;
-  top: calc(100% + 10px);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--panel) 97%, var(--paper));
-  box-shadow: 0 24px 64px rgba(23, 25, 31, 0.16);
+  top: calc(100% + 8px);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  background: white;
+  color: var(--ink);
 }
 
 .mega {
   right: 0;
   left: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 1.45fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr) minmax(
+  grid-template-columns: minmax(320px, 1.4fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr) minmax(
       180px,
       0.7fr
     );
   gap: 24px;
-  padding: 24px;
+  padding: 22px;
 }
 
 .mega h2,
 .drawer h2,
 .drawer h3 {
   margin: 0;
-  color: var(--ink);
+  color: inherit;
   font-size: 14px;
-  letter-spacing: -0.02em;
 }
 
 .sectionHeading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .allToolsLink {
+  min-height: 44px;
   display: inline-flex;
-  margin-top: 12px;
-  color: var(--blue-dark);
-  font-size: 11px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--link);
+  font-size: 12px;
   font-weight: 800;
-  text-decoration: none;
+  text-underline-offset: 3px;
 }
 
 .domainGrid,
@@ -142,21 +140,20 @@
   list-style: none;
 }
 
-.domainGrid {
+.domainGrid,
+.drawerDomainGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
 }
 
 .domainGrid a,
 .drawerDomainGrid a {
-  min-height: 42px;
+  min-height: 44px;
   display: flex;
   align-items: center;
-  padding: 9px 11px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel);
+  padding: 8px 10px;
+  border: 1px solid var(--ink);
+  background: white;
   color: var(--ink);
   text-decoration: none;
   font-size: 12px;
@@ -165,31 +162,25 @@
 
 .domainGrid a:hover,
 .drawerDomainGrid a:hover {
-  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
-  color: var(--blue-dark);
+  background: var(--image-ribbon);
 }
 
 .toolSection h2 {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .toolList {
   display: grid;
-  gap: 4px;
 }
 
 .toolLink {
-  min-height: 42px;
+  min-height: 46px;
   display: grid;
   gap: 2px;
-  padding: 7px 8px;
-  border-radius: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--ink);
   color: var(--ink);
   text-decoration: none;
-}
-
-.toolLink:hover {
-  background: color-mix(in srgb, var(--blue) 8%, var(--panel));
 }
 
 .toolLink strong {
@@ -212,39 +203,36 @@
 }
 
 .workflowTeaser {
-  align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--ink);
-  color: var(--paper);
+  padding: 14px;
+  border: 2px solid var(--ink);
+  background: var(--document-ribbon);
+  color: var(--ink);
 }
 
 .workflowTeaser > span {
-  padding: 3px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
+  padding: 2px 5px;
+  border: 1px solid var(--ink);
   font-size: 9px;
   font-weight: 800;
 }
 
 .workflowTeaser strong {
-  margin-top: 18px;
+  margin-top: 16px;
   font-size: 14px;
 }
 
 .workflowTeaser p {
-  margin: 7px 0 18px;
-  color: rgba(255, 255, 255, 0.68);
+  margin: 7px 0 16px;
   font-size: 11px;
   line-height: 1.55;
 }
 
 .workflowTeaser a {
   margin-top: auto;
-  color: var(--paper);
+  color: var(--link);
   font-size: 11px;
   font-weight: 800;
 }
@@ -252,7 +240,7 @@
 .searchPanel {
   right: 0;
   width: min(520px, calc(100vw - 48px));
-  padding: 16px;
+  padding: 14px;
 }
 
 .mobileTrigger {
@@ -263,17 +251,16 @@
   justify-items: center;
   gap: 5px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
+  border: 2px solid white;
+  border-radius: 0;
+  background: var(--ink);
   cursor: pointer;
 }
 
 .mobileTrigger > span {
-  width: 19px;
+  width: 20px;
   height: 2px;
-  border-radius: 999px;
-  background: var(--ink);
+  background: white;
 }
 
 .drawer {
@@ -286,17 +273,18 @@
   margin: 0 0 0 auto;
   overflow: hidden;
   border: 0;
+  border-left: 4px solid var(--ink);
   background: var(--paper);
   color: var(--ink);
 }
 
 .drawer::backdrop {
-  background: rgba(23, 25, 31, 0.5);
+  background: rgb(0 0 0 / 58%);
 }
 
 .drawerContent {
   height: 100%;
-  padding: 0 20px calc(24px + env(safe-area-inset-bottom));
+  padding: 0 18px calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 
@@ -304,15 +292,14 @@
   position: sticky;
   z-index: 2;
   top: 0;
-  min-height: 72px;
+  min-height: 68px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 0 -20px 18px;
-  padding: env(safe-area-inset-top) 20px 0;
-  border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 96%, transparent);
-  backdrop-filter: blur(14px);
+  margin: 0 -18px 16px;
+  padding: env(safe-area-inset-top) 18px 0;
+  background: var(--ink);
+  color: white;
 }
 
 .drawerHeader h2 {
@@ -325,10 +312,10 @@
   display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-  color: var(--ink);
+  border: 2px solid white;
+  border-radius: 0;
+  background: var(--ink);
+  color: white;
   cursor: pointer;
   font-size: 25px;
 }
@@ -336,8 +323,7 @@
 .drawerDestinations {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 .drawerDestinations > a {
@@ -346,10 +332,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
+  padding: 9px 10px;
+  border: 1px solid var(--ink);
+  background: white;
   color: var(--ink);
   text-decoration: none;
   font-size: 13px;
@@ -362,40 +347,25 @@
 }
 
 .drawerSection {
-  padding-top: 28px;
+  padding-top: 24px;
 }
 
 .drawerSection h3 {
-  margin-bottom: 12px;
-}
-
-.drawerDomainGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .drawerFooter {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: 28px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
+  margin-top: 24px;
+  padding: 12px;
+  border-left: 6px solid var(--green);
+  background: white;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
 }
 
 .drawerFooter > span {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 13%, transparent);
+  display: none;
 }
 
 @media (max-width: 980px) {
@@ -410,8 +380,9 @@
 
 @media (max-width: 800px) {
   .header {
-    width: min(100% - 32px, 640px);
-    height: 70px;
+    width: min(100% - 16px, 640px);
+    height: 62px;
+    padding: 0 10px;
   }
 
   .brand {
@@ -434,12 +405,10 @@
 }
 
 @media (max-width: 600px) {
-  .brand,
-  .drawerDomainGrid a {
-    min-height: 44px;
+  .header {
+    width: calc(100% - 8px);
   }
 
-  .drawerDestinations span,
   .drawerFooter {
     font-size: 12px;
   }

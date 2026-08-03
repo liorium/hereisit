@@ -31,7 +31,7 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
     <>
       <ToolVisitTracker toolId={toolId} />
       <SiteHeader activePath={tool.route} />
-      <main className={styles.page}>
+      <main className={styles.page} data-domain={primaryDomain}>
         <nav aria-label="현재 위치" className={styles.breadcrumbs}>
           <Link href="/" prefetch={false}>
             홈
@@ -48,7 +48,6 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
             <h1>{tool.name}</h1>
             <FavoriteToolButton toolId={toolId} toolName={tool.name} />
           </div>
-          <p className={styles.description}>{tool.shortDescription}</p>
           <p className={styles.summary}>{implementation.defaultSummary}</p>
           {tool.execution === "browser" ? (
             <section aria-label="처리 방식" className={styles.execution}>
