@@ -1146,3 +1146,37 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
   );
   await privacy.assertClean(0, false);
 });
+
+test("keeps PDF merge controls usable in a narrow viewport", async ({ page }) => {
+  const first = await PDFDocument.create();
+  first.addPage([200, 300]);
+  const second = await PDFDocument.create();
+  second.addPage([200, 300]);
+  second.addPage([200, 300]);
+
+  await page.goto("/pdf/merge");
+  const input = page.locator("input[type=file]");
+  await expect(input).toBeEnabled({ timeout: 60_000 });
+  await input.setInputFiles([
+    { name: "first.pdf", mimeType: "application/pdf", buffer: Buffer.from(await first.save()) },
+    { name: "second.pdf", mimeType: "application/pdf", buffer: Buffer.from(await second.save()) },
+  ]);
+  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeEnabled({
+    timeout: 20_000,
+  });
+
+  for (const name of [
+    "second.pdf 위로 이동",
+    "second.pdf 아래로 이동",
+    "second.pdf 제거",
+    "PDF 합치기",
+  ]) {
+    const box = await page.getByRole("button", { name, exact: true }).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});

@@ -1,19 +1,22 @@
 .workbench {
-  width: min(100% - 40px, 760px);
+  width: min(100% - 40px, 800px);
   margin: 0 auto 80px;
 }
 
-.stage {
+.stage,
+.resultStage {
   display: grid;
   gap: 18px;
-  padding: clamp(20px, 4vw, 40px);
+  padding: clamp(22px, 4vw, 40px);
   border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--surface, #fff);
+  border-radius: 22px;
+  background: var(--panel);
 }
 
 .stage h2,
-.stage p {
+.stage p,
+.resultStage h2,
+.resultStage p {
   margin: 0;
 }
 
@@ -21,23 +24,79 @@
   position: absolute;
   width: 1px;
   height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+  border: 0;
 }
 
 .picker {
-  display: flex;
   width: 100%;
-  min-height: 160px;
-  align-items: center;
-  justify-content: center;
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 28px 20px;
   border: 1px dashed currentColor;
-  border-radius: 18px;
+  border-radius: 16px;
   background: transparent;
-  color: inherit;
-  font-weight: 800;
+  color: var(--ink);
   cursor: pointer;
+  text-align: center;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.picker:hover:not(:disabled),
+.picker[data-dragging="true"] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--yellow) 18%, var(--panel));
+}
+
+.picker[data-dragging="true"] {
+  transform: scale(0.995);
+}
+
+.picker[data-selected="true"] {
+  min-height: 118px;
+  border-style: solid;
+  background: var(--paper);
+}
+
+.pickerKicker {
+  padding: 3px 7px;
+  background: var(--yellow);
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.pickerTitle {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: clamp(1.1rem, 3vw, 1.35rem);
+  font-weight: 850;
+  letter-spacing: -0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerHint,
+.pickerMeta,
+.individualResults span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.pickerMeta {
+  margin-top: 3px;
 }
 
 .workbench button:disabled {
@@ -49,23 +108,41 @@
   position: absolute;
   width: 1px;
   height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
-}
-
-.limits,
-.selectionSummary,
-.individualResults span {
-  color: var(--muted, #667085);
-  font-size: 0.88rem;
+  white-space: nowrap;
+  border: 0;
 }
 
 .disclosure {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 6px;
-  color: var(--muted, #667085);
-  font-size: 0.88rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.disclosure::before {
+  width: 8px;
+  height: 8px;
+  margin: 0.38rem 3px 0 0;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--green);
+  content: "";
+}
+
+.disclosure[data-policy="checking"]::before {
+  background: var(--muted);
+}
+
+.disclosure[data-policy="server"]::before {
+  background: var(--yellow);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent);
 }
 
 .disclosure a {
@@ -73,153 +150,247 @@
   min-width: 44px;
   min-height: 44px;
   align-items: center;
+  margin-top: -0.75rem;
+  color: var(--ink);
+  font-weight: 700;
   justify-content: center;
+  text-underline-offset: 3px;
+}
+
+.settings {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .settings summary,
 .individualResults summary {
+  min-height: 50px;
   display: flex;
-  min-height: 44px;
   align-items: center;
+  justify-content: space-between;
+  list-style: none;
   cursor: pointer;
   font-weight: 800;
 }
 
-.settings[open] summary {
+.settings summary::-webkit-details-marker,
+.individualResults summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings summary::after,
+.individualResults summary::after {
+  content: "+";
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.settings[open] summary::after,
+.individualResults[open] summary::after {
+  content: "−";
+}
+
+.settings[open] summary,
+.individualResults[open] summary {
   margin-bottom: 12px;
 }
 
 .presets {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-bottom: 14px;
 }
 
 .presets label {
+  min-width: 0;
+  min-height: 86px;
   display: grid;
-  grid-template-columns: 24px 1fr;
-  min-height: 60px;
+  grid-template-columns: 22px 1fr;
+  align-content: center;
+  gap: 3px 7px;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: pointer;
 }
 
 .presets label[data-selected="true"] {
-  border-color: #4057f4;
-  box-shadow: inset 0 0 0 1px #4057f4;
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--yellow) 20%, var(--panel));
+  box-shadow: inset 0 0 0 1px var(--ink);
 }
 
 .presets input {
   grid-row: 1 / 3;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--ink);
+}
+
+.presets strong {
+  overflow-wrap: anywhere;
 }
 
 .presets span {
-  color: var(--muted, #667085);
-  font-size: 0.88rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.settings > p {
+  padding: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 .stage progress {
   width: 100%;
+  height: 10px;
+  accent-color: var(--ink);
 }
 
 .progressCount {
-  font-size: 1.25rem;
-  font-weight: 800;
+  font-size: clamp(2rem, 6vw, 3rem);
+  font-weight: 850;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
 }
 
 .primaryAction,
 .secondaryAction,
 .individualResults button {
-  min-height: 48px;
-  border: 0;
-  border-radius: 12px;
-  background: #4057f4;
-  color: #fff;
-  font-weight: 800;
+  min-height: 50px;
+  padding: 0 18px;
+  border: 1px solid var(--ink);
+  border-radius: 11px;
+  background: var(--ink);
+  color: var(--paper);
   cursor: pointer;
+  font-weight: 800;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
-.primaryAction {
-  background: #4057f4;
-  color: #fff;
+.primaryAction:hover:not(:disabled),
+.individualResults button:hover:not(:disabled) {
+  background: #000;
+}
+
+.primaryAction:active:not(:disabled),
+.secondaryAction:active:not(:disabled),
+.individualResults button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.secondaryAction {
+  background: transparent;
+  color: var(--ink);
 }
 
 .resultStage {
-  display: grid;
-  gap: 18px;
-  padding: clamp(24px, 5vw, 48px);
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--surface, #fff);
+  padding: clamp(28px, 6vw, 52px);
   text-align: center;
 }
 
-.resultStage h2,
-.resultStage p {
-  margin: 0;
+.resultStage h2 {
+  font-size: clamp(1.8rem, 5vw, 2.7rem);
+  letter-spacing: -0.05em;
 }
 
 .sizeComparison {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.4em;
-  font-size: clamp(1.75rem, 6vw, 3rem);
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0;
   font-variant-numeric: tabular-nums;
 }
 
+.sizeComparison > div {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+}
+
+.sizeComparison > div[data-result="true"] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--yellow) 16%, var(--panel));
+}
+
+.sizeComparison strong {
+  overflow: hidden;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  letter-spacing: -0.04em;
+  text-overflow: ellipsis;
+}
+
+.sizeLabel {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.sizeArrow {
+  color: var(--muted);
+  font-size: 1.2rem;
+}
+
 .reduction {
-  color: #2f6b55;
-  font-weight: 700;
+  color: var(--green);
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.resultStage > p[role="status"] {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 .textAction {
   min-height: 44px;
   border: 0;
   background: transparent;
-  color: var(--muted, #667085);
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.secondaryAction {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: inherit;
 }
 
 .individualResults {
   text-align: left;
 }
 
-.individualResults[open] summary {
-  margin-bottom: 12px;
-}
-
 .individualResults ul {
   display: grid;
-  gap: 10px;
-  margin: 0;
+  gap: 8px;
   padding: 0;
+  margin: 0;
   list-style: none;
 }
 
 .individualResults li {
   display: grid;
-  gap: 7px;
+  gap: 10px;
   padding: 13px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
 }
 
 .individualResults div {
   display: flex;
   min-width: 0;
   flex-direction: column;
+  gap: 3px;
 }
 
 .individualResults strong {
@@ -228,35 +399,84 @@
   white-space: nowrap;
 }
 
+.individualResults button {
+  min-height: 44px;
+}
+
 .primaryAction:focus-visible,
 .secondaryAction:focus-visible,
 .textAction:focus-visible,
 .picker:focus-visible,
 .settings summary:focus-visible,
-.individualResults summary:focus-visible {
-  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
-  outline-offset: 3px;
-}
-
+.individualResults summary:focus-visible,
 .presets input:focus-visible,
 .individualResults button:focus-visible {
-  outline: 3px solid color-mix(in srgb, #4057f4 45%, transparent);
+  outline: 3px solid color-mix(in srgb, var(--ink) 36%, transparent);
   outline-offset: 3px;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .workbench {
     width: calc(100% - 24px);
     margin-bottom: 56px;
   }
 
-  .stage {
-    gap: 16px;
-    padding: 20px 16px 24px;
+  .stage,
+  .resultStage {
+    gap: 15px;
+    padding: 18px 16px 22px;
     border-radius: 18px;
   }
 
   .picker {
-    min-height: 132px;
+    min-height: 154px;
+    padding: 24px 12px;
+  }
+
+  .picker[data-selected="true"] {
+    min-height: 112px;
+  }
+
+  .pickerTitle {
+    font-size: 1.05rem;
+  }
+
+  .presets {
+    grid-template-columns: 1fr;
+  }
+
+  .presets label {
+    min-height: 64px;
+  }
+
+  .stage > .primaryAction {
+    position: sticky;
+    z-index: 2;
+    bottom: 8px;
+  }
+
+  .sizeComparison {
+    gap: 7px;
+  }
+
+  .sizeComparison > div {
+    padding: 14px 7px;
+  }
+
+  .sizeComparison strong {
+    font-size: clamp(1.1rem, 6vw, 1.45rem);
+  }
+
+  .sizeArrow {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker,
+  .primaryAction,
+  .secondaryAction,
+  .individualResults button {
+    transition: none;
   }
 }

@@ -122,6 +122,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [runtimeSupported, setRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [remoteDeliveryBusy, setRemoteDeliveryBusy] = useState(false);
   const [archiveByteBudget, setArchiveByteBudget] = useState(() =>
     remoteArchiveByteBudget({ deviceMemoryGiB: null, coarsePointer: true }),
@@ -210,6 +211,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const chooseFiles = useCallback(async (files: FileList | readonly File[] | null) => {
     if (files === null) return;
+    setDragging(false);
     hasFileSelectionRef.current = true;
     const supplied = Array.from(files);
     const selected = supplied.slice(0, MAX_FILES);
@@ -744,6 +746,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     const previous = itemsRef.current;
     itemsRef.current = [];
     setItems([]);
+    setDragging(false);
     await disposeRemoteItems(previous);
     setMessage(
       policy.state === "checking"
@@ -768,10 +771,45 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           <button
             type="button"
             className={styles.picker}
+            aria-label={items.length > 0 ? "이미지 다시 선택" : "이미지 선택"}
+            data-dragging={dragging}
+            data-selected={items.length > 0}
             disabled={!executionReady || busy}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              if (executionReady && !busy) setDragging(true);
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                setDragging(false);
+              }
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (!executionReady || busy) return;
+              void chooseFiles(event.dataTransfer.files);
+            }}
             onClick={() => fileInputRef.current?.click()}
           >
-            이미지 선택
+            {items.length > 0 ? (
+              <>
+                <span className={styles.pickerKicker}>선택됨</span>
+                <strong className={styles.pickerTitle}>
+                  {items.length === 1
+                    ? `${items[0]?.file.name} · ${formatBytes(totalInputBytes)}`
+                    : `${items.length}개 이미지 · ${formatBytes(totalInputBytes)}`}
+                </strong>
+                <span className={styles.pickerHint}>눌러서 이미지 다시 선택</span>
+              </>
+            ) : (
+              <>
+                <strong className={styles.pickerTitle}>이미지 선택</strong>
+                <span className={styles.pickerHint}>클릭하거나 여기로 끌어오세요</span>
+                <span className={styles.pickerMeta}>JPG, PNG, WebP · 최대 20개 · 각 30MB</span>
+              </>
+            )}
           </button>
           <input
             ref={fileInputRef}
@@ -782,45 +820,39 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             disabled={!executionReady || busy}
             onChange={handleFileInputChange}
           />
-          <p className={styles.limits}>JPG, PNG, WebP · 파일당 30MB · 최대 20개</p>
-          {items.length > 0 ? (
-            <p className={styles.selectionSummary}>
-              {items.length === 1
-                ? `${items[0]?.file.name} · ${formatBytes(totalInputBytes)}`
-                : `${items.length}개 이미지 · ${formatBytes(totalInputBytes)}`}
-            </p>
-          ) : null}
           <p className={styles.disclosure} data-policy={policy.state}>
             {policy.state === "checking" ? "처리 방식을 확인하고 있어요." : policy.text}
             {policy.state === "server" ? <a href="/privacy">자세히</a> : null}
           </p>
-          <details className={styles.settings}>
-            <summary>압축 설정 · {presetLabels[preset]}</summary>
-            <div className={styles.presets} role="radiogroup" aria-label="압축 프리셋">
-              {(
-                [
-                  ["recommended", "추천", "품질과 용량의 균형"],
-                  ["smallest", "최소 용량", "더 강한 시각적 압축"],
-                  ["lossless", "무손실", "픽셀을 바꾸지 않고 정리"],
-                ] as const
-              ).map(([value, label, detail]) => (
-                <label key={value} data-selected={preset === value}>
-                  <input
-                    type="radio"
-                    name="compress-preset"
-                    value={value}
-                    checked={preset === value}
-                    onChange={() => changePreset(value)}
-                  />
-                  <strong>{label}</strong>
-                  <span>{detail}</span>
-                </label>
-              ))}
-            </div>
-            {items.some((item) => item.mime === "image/png") && preset !== "lossless" ? (
-              <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
-            ) : null}
-          </details>
+          {items.length > 0 ? (
+            <details className={styles.settings}>
+              <summary>압축 설정 · {presetLabels[preset]}</summary>
+              <div className={styles.presets} role="radiogroup" aria-label="압축 프리셋">
+                {(
+                  [
+                    ["recommended", "추천", "품질과 용량의 균형"],
+                    ["smallest", "최소 용량", "더 강한 시각적 압축"],
+                    ["lossless", "무손실", "픽셀을 바꾸지 않고 정리"],
+                  ] as const
+                ).map(([value, label, detail]) => (
+                  <label key={value} data-selected={preset === value}>
+                    <input
+                      type="radio"
+                      name="compress-preset"
+                      value={value}
+                      checked={preset === value}
+                      onChange={() => changePreset(value)}
+                    />
+                    <strong>{label}</strong>
+                    <span>{detail}</span>
+                  </label>
+                ))}
+              </div>
+              {items.some((item) => item.mime === "image/png") && preset !== "lossless" ? (
+                <p>PNG 스마트 모드는 색상 수를 줄일 수 있는 시각적 압축입니다.</p>
+              ) : null}
+            </details>
+          ) : null}
           {!idleStatus ? (
             <p
               role={terminalFailure ? "alert" : "status"}
@@ -830,14 +862,16 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
               {statusMessage}
             </p>
           ) : null}
-          <button
-            type="button"
-            className={styles.primaryAction}
-            disabled={runDisabled}
-            onClick={() => void processItems()}
-          >
-            용량 줄이기
-          </button>
+          {items.length > 0 ? (
+            <button
+              type="button"
+              className={styles.primaryAction}
+              disabled={runDisabled}
+              onClick={() => void processItems()}
+            >
+              용량 줄이기
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -868,17 +902,19 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           <h2 id="compress-result-title">
             {singleResultItem.result?.kind === "original" ? "원본 유지" : "압축 완료"}
           </h2>
-          <p className={styles.sizeComparison}>
-            <span>
-              <span className={styles.visuallyHidden}>압축 전 </span>
-              <span>{formatBytes(singleResultItem.file.size)}</span>
+          <div className={styles.sizeComparison}>
+            <div>
+              <span className={styles.sizeLabel}>원본</span>
+              <strong>{formatBytes(singleResultItem.file.size)}</strong>
+            </div>
+            <span aria-hidden="true" className={styles.sizeArrow}>
+              →
             </span>
-            <span aria-hidden="true">→</span>
-            <span>
-              <span className={styles.visuallyHidden}>압축 후 </span>
-              <span>{formatBytes(singleResultItem.outputByteLength)}</span>
-            </span>
-          </p>
+            <div data-result="true">
+              <span className={styles.sizeLabel}>결과</span>
+              <strong>{formatBytes(singleResultItem.outputByteLength)}</strong>
+            </div>
+          </div>
           <p className={styles.reduction}>
             {singleResultItem.result?.kind === "original"
               ? "이미 충분히 작아 원본을 유지했어요"
@@ -912,17 +948,19 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       {screen === "result" && resultSummary !== null && items.length > 1 ? (
         <section className={styles.resultStage} aria-labelledby="compress-result-title">
           <h2 id="compress-result-title">{resultSummary.count}개 이미지 압축 완료</h2>
-          <p className={styles.sizeComparison}>
-            <span>
-              <span className={styles.visuallyHidden}>압축 전 </span>
-              <span>{formatBytes(resultSummary.inputBytes)}</span>
+          <div className={styles.sizeComparison}>
+            <div>
+              <span className={styles.sizeLabel}>원본</span>
+              <strong>{formatBytes(resultSummary.inputBytes)}</strong>
+            </div>
+            <span aria-hidden="true" className={styles.sizeArrow}>
+              →
             </span>
-            <span aria-hidden="true">→</span>
-            <span>
-              <span className={styles.visuallyHidden}>압축 후 </span>
-              <span>{formatBytes(resultSummary.outputBytes)}</span>
-            </span>
-          </p>
+            <div data-result="true">
+              <span className={styles.sizeLabel}>결과</span>
+              <strong>{formatBytes(resultSummary.outputBytes)}</strong>
+            </div>
+          </div>
           <p className={styles.reduction}>{reductionText}</p>
           <p role="status" aria-live="polite" data-testid="image-workbench-status">
             {message}
