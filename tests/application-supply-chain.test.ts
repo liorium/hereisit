@@ -217,7 +217,7 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "c6c540383752b4cec867f62feb27775ea3a8bd89560b571aa059a334a2e9bf60",
+      noticeSha256: "7a2285db70a4ea11b88e3f120d240f83fb0fe3f0321b7717a113214d191bc3de",
       packageCount: 46,
     });
   });

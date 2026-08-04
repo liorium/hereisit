@@ -2079,7 +2079,7 @@ THE SOFTWARE.
 
 ========================================================================
 Package: nanoid
-Version: 3.3.15
+Version: 3.3.16
 License: MIT
 
 --- LICENSE ---
@@ -2814,7 +2814,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 ========================================================================
 Package: postcss
-Version: 8.5.18
+Version: 8.5.25
 License: MIT
 
 --- LICENSE ---
