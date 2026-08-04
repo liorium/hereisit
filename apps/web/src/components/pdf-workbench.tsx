@@ -865,6 +865,65 @@ export function PdfWorkbench({
             중단
           </button>
         </section>
+      ) : intent === "split" && result !== undefined ? (
+        <section
+          className={`${styles.mergeStage} ${styles.mergeResult}`}
+          aria-label="PDF 나누기 결과"
+        >
+          <div className={styles.mergeResultMark} aria-hidden="true">
+            ✓
+          </div>
+          <h2 id="pdf-workbench-title">
+            {result.mime === "application/zip" ? "나누기 완료" : "추출 완료"}
+          </h2>
+          <p className={styles.mergeResultSummary}>
+            {result.mime === "application/zip"
+              ? `${result.sourcePageCount}페이지 → PDF ${result.outputDocumentCount}개`
+              : `${result.sourcePageCount}페이지 → ${result.outputPageCount}페이지`}
+          </p>
+          <strong className={styles.mergeSizeComparison}>
+            {formatBytes(totalBytes)} → {formatBytes(result.byteLength)}
+          </strong>
+          {result.warnings.includes("SIGNATURES_INVALIDATED") ? (
+            <p className={styles.mergeWarning}>
+              새 PDF에서는 기존 전자서명이 유효하지 않아요. 북마크·양식은 유지되지 않을 수 있어요.
+            </p>
+          ) : null}
+          <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
+            {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
+          </button>
+          <p
+            className={styles.mergeResultStatus}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {message}
+          </p>
+          <button className={styles.mergeTextAction} type="button" onClick={reset}>
+            다른 PDF 나누기
+          </button>
+        </section>
+      ) : intent === "split" && processing ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-workbench-title">
+            {splitMode === "every-page" ? "PDF 나누는 중" : "페이지 추출 중"}
+          </h2>
+          <p>{phaseLabel(phase)}</p>
+          <div
+            className={styles.mergeProgressTrack}
+            role="progressbar"
+            aria-label="PDF 나누기 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
       ) : intent === "split" && result === undefined && !processing && splitItem !== undefined ? (
         <section className={styles.mergeSetup} aria-label="PDF 나누기 설정">
           <header className={styles.mergeSetupHeader}>

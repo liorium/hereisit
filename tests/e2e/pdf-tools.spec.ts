@@ -163,7 +163,13 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
     buffer: await createPdf([100, 200, 300]),
   });
   await page.getByRole("button", { name: "PDF 페이지별로 나누기" }).click();
-  await expect(page.getByText("3개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  const result = page.getByRole("region", { name: "PDF 나누기 결과" });
+  await expect(result.getByText("3페이지 → PDF 3개", { exact: true })).toBeVisible();
+  await expect(result.getByText(/\d+(?:\.\d+)?(?:KB|B) → \d+(?:\.\d+)?(?:KB|B)/)).toBeVisible();
+  await expect(page.getByLabel("PDF 설정")).toHaveCount(0);
   expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
@@ -184,6 +190,8 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
   expect(downloadCount).toBe(1);
   await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
   await expectWebShareUnused(page);
+  await page.getByRole("button", { name: "다른 PDF 나누기" }).click();
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
 });
 
 test("downloads a one-page split result as a ZIP", async ({ page }) => {
@@ -199,7 +207,9 @@ test("downloads a one-page split result as a ZIP", async ({ page }) => {
     buffer: await createPdf([100]),
   });
   await page.getByRole("button", { name: "PDF 페이지별로 나누기" }).click();
-  await expect(page.getByText("1개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("1페이지 → PDF 1개", { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
   expect(downloadCount).toBe(0);
   await expect(page.getByRole("button", { name: "ZIP 다운로드 ↓" })).toBeVisible();
 
@@ -234,7 +244,10 @@ test("extracts a validated page range into one PDF", async ({ page }) => {
   await page.getByLabel("페이지 범위").fill("2-3");
   await expect(page.getByText("2페이지를 선택했어요.")).toBeVisible();
   await page.getByRole("button", { name: "선택 페이지 추출하기" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "추출 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("3페이지 → 2페이지", { exact: true })).toBeVisible();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
