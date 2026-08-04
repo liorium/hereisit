@@ -199,6 +199,19 @@ export function PdfWorkbench({
   const splitItem = intent === "split" ? items[0] : undefined;
   const splitPageCount =
     splitItem?.inspection?.status === "ready" ? splitItem.inspection.pageCount : undefined;
+  const splitScreen =
+    intent !== "split"
+      ? undefined
+      : result !== undefined
+        ? "result"
+        : processing
+          ? "processing"
+          : inspecting || splitItem?.inspection?.status === "pending"
+            ? "inspecting"
+            : splitItem !== undefined
+              ? "setup"
+              : "select";
+  const splitStageHeadingRef = useRef<HTMLHeadingElement>(null);
   const parsedPageRange = useMemo(
     () => parsePageSelection(pageRange, splitPageCount),
     [pageRange, splitPageCount],
@@ -215,6 +228,11 @@ export function PdfWorkbench({
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  useEffect(() => {
+    if (splitScreen === undefined || splitScreen === "select") return;
+    splitStageHeadingRef.current?.focus();
+  }, [splitScreen]);
 
   useEffect(() => {
     if ((intent !== "merge" && intent !== "split") || processing) return;
@@ -859,7 +877,9 @@ export function PdfWorkbench({
         </section>
       ) : intent === "split" && (inspecting || splitItem?.inspection?.status === "pending") ? (
         <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
-          <h2 id="pdf-workbench-title">페이지 확인 중</h2>
+          <h2 id="pdf-workbench-title" ref={splitStageHeadingRef} tabIndex={-1}>
+            페이지 확인 중
+          </h2>
           <p>{message}</p>
           <button className={styles.mergeSecondaryAction} type="button" onClick={cancelInspection}>
             중단
@@ -873,7 +893,7 @@ export function PdfWorkbench({
           <div className={styles.mergeResultMark} aria-hidden="true">
             ✓
           </div>
-          <h2 id="pdf-workbench-title">
+          <h2 id="pdf-workbench-title" ref={splitStageHeadingRef} tabIndex={-1}>
             {result.mime === "application/zip" ? "나누기 완료" : "추출 완료"}
           </h2>
           <p className={styles.mergeResultSummary}>
@@ -906,7 +926,7 @@ export function PdfWorkbench({
         </section>
       ) : intent === "split" && processing ? (
         <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
-          <h2 id="pdf-workbench-title">
+          <h2 id="pdf-workbench-title" ref={splitStageHeadingRef} tabIndex={-1}>
             {splitMode === "every-page" ? "PDF 나누는 중" : "페이지 추출 중"}
           </h2>
           <p>{phaseLabel(phase)}</p>
@@ -925,10 +945,15 @@ export function PdfWorkbench({
           </button>
         </section>
       ) : intent === "split" && result === undefined && !processing && splitItem !== undefined ? (
-        <section className={styles.mergeSetup} aria-label="PDF 나누기 설정">
+        <section
+          className={`${styles.mergeSetup} ${styles.splitSetup}`}
+          aria-label="PDF 나누기 설정"
+        >
           <header className={styles.mergeSetupHeader}>
             <div>
-              <h2 id="pdf-workbench-title">나눌 방식</h2>
+              <h2 id="pdf-workbench-title" ref={splitStageHeadingRef} tabIndex={-1}>
+                나눌 방식
+              </h2>
             </div>
             <div className={styles.mergeHeaderActions}>
               <button type="button" onClick={() => inputRef.current?.click()}>

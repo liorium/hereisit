@@ -116,6 +116,36 @@ test("keeps a prepared PDF result retryable when download activation fails", asy
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
 });
 
+test("keeps a split result retryable when download activation fails", async ({ page }) => {
+  await installDownloadActivationController(page);
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "retry.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200]),
+  });
+  const run = page.getByRole("button", { name: "PDF 페이지별로 나누기" });
+  await expect(run).toBeEnabled({ timeout: 20_000 });
+  await run.click();
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("retry-pages-hereisit.zip");
+});
+
 test("keeps a failed inspection removable and blocks merge", async ({ page }) => {
   await page.goto("/pdf/merge");
   await page.locator("input[type=file]").setInputFiles([
@@ -148,6 +178,22 @@ test("inspects a split PDF and rejects a page above its real page count", async 
   await range.fill("4");
   await expect(setup.getByText("이 PDF는 3페이지까지 있어요.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "선택 페이지 추출하기" })).toBeDisabled();
+});
+
+test("keeps a failed split inspection replaceable", async ({ page }) => {
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "broken.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("not a pdf"),
+  });
+
+  const setup = page.getByRole("region", { name: "PDF 나누기 설정" });
+  await expect(setup.getByRole("status")).toContainText(/확인할 수 없|다시 시도/, {
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "PDF 교체" })).toBeEnabled();
 });
 
 test("splits every PDF page into a ZIP", async ({ page }) => {

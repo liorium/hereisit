@@ -706,61 +706,45 @@ test("keeps representative image and PDF error feedback reachable", async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
-test("keeps PDF settings and controls touch-safe", async ({ page }) => {
+test("keeps the staged PDF split flow touch-safe", async ({ page }) => {
   const document = await PDFDocument.create();
   document.addPage([200, 300]);
   document.addPage([300, 200]);
   const pdf = Buffer.from(await document.save());
 
+  await holdTerminalWorkerEvents(page);
   await page.goto("/pdf/split");
-  const splitInput = page.locator("input[type=file]");
-  await expect(splitInput).toBeEnabled({ timeout: 60_000 });
-  await splitInput.setInputFiles({
+  await page.locator("input[type=file]").setInputFiles({
     name: "sample.pdf",
     mimeType: "application/pdf",
     buffer: pdf,
   });
 
-  const files = page.getByLabel("선택한 파일");
-  const settings = page.getByLabel("PDF 설정");
-  const result = page.getByLabel("PDF 결과 미리보기");
-  const [filesBox, settingsBox, resultBox] = await Promise.all([
-    files.boundingBox(),
-    settings.boundingBox(),
-    result.boundingBox(),
-  ]);
-  expect(filesBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
-  expect(settingsBox?.y ?? 0).toBeLessThan(resultBox?.y ?? 0);
+  const setup = page.getByRole("region", { name: "PDF 나누기 설정" });
+  await expect(setup.getByText("sample.pdf", { exact: true })).toBeVisible();
+  await expect(setup.getByText("2페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(setup.getByRole("heading", { name: "나눌 방식" })).toBeFocused();
+  await setup.getByRole("radio", { name: /페이지 추출/ }).check();
 
-  await page.getByText("페이지 추출", { exact: true }).click();
-  const range = page.getByLabel("페이지 범위");
-  const fontSize = await range.evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).fontSize),
-  );
-  expect(fontSize).toBeGreaterThanOrEqual(16);
+  const range = setup.getByLabel("페이지 범위");
+  await range.fill("1");
+  expect(
+    await range.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(16);
 
-  const remove = page.getByRole("button", { name: "sample.pdf 제거" });
-  const removeBox = await remove.boundingBox();
-  expect(removeBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(removeBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  const replace = page.getByRole("button", { name: "PDF 교체" });
+  const run = page.getByRole("button", { name: "선택 페이지 추출하기" });
+  for (const control of [replace, run]) {
+    const box = await control.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
 
-  const splitSettings = page.getByLabel("PDF 설정");
-  const extractOption = splitSettings.getByRole("radio", { name: /페이지 추출/ }).locator("..");
   await expectFunctionalTextFloor([
-    {
-      label: "PDF option legend",
-      locator: splitSettings.getByText("나눌 방식", { exact: true }),
-    },
-    { label: "PDF option label", locator: extractOption.locator("strong") },
-    { label: "PDF option help", locator: extractOption.locator("small") },
-    {
-      label: "PDF range control label",
-      locator: splitSettings.getByText("페이지 범위", { exact: true }),
-    },
-    {
-      label: "PDF range control help",
-      locator: range.locator("..").locator("small"),
-    },
+    { label: "PDF option legend", locator: setup.getByText("나눌 방식", { exact: true }).first() },
+    { label: "PDF option label", locator: setup.getByText("페이지 추출", { exact: true }) },
+    { label: "PDF range control label", locator: setup.getByText("페이지 범위", { exact: true }) },
+    { label: "PDF range control help", locator: range.locator("..").locator("small") },
   ]);
 
   const layout = await page.evaluate(() => ({
@@ -768,6 +752,17 @@ test("keeps PDF settings and controls touch-safe", async ({ page }) => {
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+
+  await run.click();
+  const processingHeading = page.getByRole("heading", { name: "페이지 추출 중" });
+  await expect(processingHeading).toBeFocused();
+  const cancel = page.getByRole("button", { name: "중단" });
+  const cancelBox = await cancel.boundingBox();
+  expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(cancelBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await cancel.click();
+  await expect(setup).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("PDF 작업을 중단했어요.");
 });
 
 test("keeps PDF organizer controls touch-safe without horizontal overflow", async ({ page }) => {
