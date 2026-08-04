@@ -169,7 +169,7 @@ export function PdfWorkbench({
   const [result, setResult] = useState<PdfPipelineResult>();
   const [resultUrl, setResultUrl] = useState<string>();
   const [splitMode, setSplitMode] = useState<"every-page" | "extract">("every-page");
-  const [pageRange, setPageRange] = useState("1-3, 5");
+  const [pageRange, setPageRange] = useState("");
   const [imagePageSize, setImagePageSize] = useState<"a4" | "image">("a4");
   const [pagePlan, setPagePlan] = useState<PdfPagePlan>([]);
   const [organizerPageCount, setOrganizerPageCount] = useState(0);
@@ -196,7 +196,13 @@ export function PdfWorkbench({
     () => items.reduce((total, item) => total + item.file.size, 0),
     [items],
   );
-  const parsedPageRange = useMemo(() => parsePageSelection(pageRange), [pageRange]);
+  const splitItem = intent === "split" ? items[0] : undefined;
+  const splitPageCount =
+    splitItem?.inspection?.status === "ready" ? splitItem.inspection.pageCount : undefined;
+  const parsedPageRange = useMemo(
+    () => parsePageSelection(pageRange, splitPageCount),
+    [pageRange, splitPageCount],
+  );
   const parsedWatermarkPageRange = useMemo(
     () => parsePageSelection(watermarkPageRange),
     [watermarkPageRange],
@@ -211,35 +217,59 @@ export function PdfWorkbench({
   }, [items]);
 
   useEffect(() => {
-    if (intent !== "merge" || processing) return;
+    if ((intent !== "merge" && intent !== "split") || processing) return;
     const pending = items.find((item) => item.inspection?.status === "pending");
     if (pending === undefined) return;
 
     let active = true;
     const handle = inspectPdfFile(pending.file);
-    void handle.result.then((outcome) => {
-      if (!active) return;
-      setItems((current) => {
-        const next = current.map((item): PdfWorkItem => {
-          if (item.id !== pending.id || item.inspection?.status !== "pending") return item;
-          if (outcome.status === "fulfilled") {
+    if (intent === "split") {
+      inspectionHandleRef.current = handle;
+      setInspecting(true);
+      setMessage("PDF 페이지를 기기 안에서 확인하고 있어요.");
+    }
+
+    void handle.result
+      .then((outcome) => {
+        if (!active) return;
+        setItems((current) => {
+          const next = current.map((item): PdfWorkItem => {
+            if (item.id !== pending.id || item.inspection?.status !== "pending") return item;
+            if (outcome.status === "fulfilled") {
+              return {
+                ...item,
+                inspection: { status: "ready", pageCount: outcome.value.pageCount },
+              };
+            }
             return {
               ...item,
-              inspection: { status: "ready", pageCount: outcome.value.pageCount },
+              inspection: {
+                status: "failed",
+                message:
+                  outcome.status === "rejected"
+                    ? outcome.error.message
+                    : "페이지 확인을 중단했어요.",
+              },
             };
-          }
-          if (outcome.status === "rejected") {
-            return {
-              ...item,
-              inspection: { status: "failed", message: outcome.error.message },
-            };
-          }
-          return item;
+          });
+          itemsRef.current = next;
+          return next;
         });
-        itemsRef.current = next;
-        return next;
+
+        if (intent !== "split") return;
+        if (outcome.status === "fulfilled") {
+          setMessage(`${outcome.value.pageCount}페이지 PDF를 준비했어요.`);
+        } else if (outcome.status === "rejected") {
+          setMessage(outcome.error.message);
+        } else {
+          setMessage("페이지 확인을 중단했어요.");
+        }
+      })
+      .finally(() => {
+        if (!active || intent !== "split") return;
+        if (inspectionHandleRef.current === handle) inspectionHandleRef.current = undefined;
+        setInspecting(false);
       });
-    });
 
     return () => {
       active = false;
@@ -350,7 +380,11 @@ export function PdfWorkbench({
           continue;
         }
         const item = { id: makeId(), file };
-        accepted.push(intent === "merge" ? { ...item, inspection: { status: "pending" } } : item);
+        accepted.push(
+          intent === "merge" || intent === "split"
+            ? { ...item, inspection: { status: "pending" } }
+            : item,
+        );
         remainingBytes -= file.size;
       }
 
@@ -460,6 +494,8 @@ export function PdfWorkbench({
     setItems([]);
     setProcessing(false);
     setInspecting(false);
+    setSplitMode("every-page");
+    setPageRange("");
     setPagePlan([]);
     setOrganizerPageCount(0);
     clearResult();
@@ -659,7 +695,9 @@ export function PdfWorkbench({
     !busy &&
     items.length >= minFiles &&
     (intent !== "merge" || items.every((item) => item.inspection?.status === "ready")) &&
-    (intent !== "split" || splitMode !== "extract" || parsedPageRange.ok) &&
+    (intent !== "split" ||
+      (splitItem?.inspection?.status === "ready" &&
+        (splitMode === "every-page" || parsedPageRange.ok))) &&
     (intent !== "organize" || pagePlan.length > 0) &&
     (intent !== "watermark" ||
       (validWatermarkText && (watermarkScope === "every-page" || parsedWatermarkPageRange.ok)));
@@ -816,6 +854,104 @@ export function PdfWorkbench({
               onClick={() => void startProcessing()}
             >
               PDF 합치기
+            </button>
+          </footer>
+        </section>
+      ) : intent === "split" && (inspecting || splitItem?.inspection?.status === "pending") ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-workbench-title">페이지 확인 중</h2>
+          <p>{message}</p>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelInspection}>
+            중단
+          </button>
+        </section>
+      ) : intent === "split" && result === undefined && !processing && splitItem !== undefined ? (
+        <section className={styles.mergeSetup} aria-label="PDF 나누기 설정">
+          <header className={styles.mergeSetupHeader}>
+            <div>
+              <h2 id="pdf-workbench-title">나눌 방식</h2>
+            </div>
+            <div className={styles.mergeHeaderActions}>
+              <button type="button" onClick={() => inputRef.current?.click()}>
+                PDF 교체
+              </button>
+            </div>
+          </header>
+
+          <div className={styles.splitFileSummary}>
+            <strong>{splitItem.file.name}</strong>
+            <span>{formatBytes(splitItem.file.size)}</span>
+            <span>
+              {splitItem.inspection?.status === "ready"
+                ? `${splitItem.inspection.pageCount}페이지`
+                : splitItem.inspection?.status === "failed"
+                  ? splitItem.inspection.message
+                  : "페이지 확인 중"}
+            </span>
+          </div>
+
+          <fieldset className={styles.splitOptions}>
+            <legend>나눌 방식</legend>
+            <label>
+              <input
+                type="radio"
+                name="split-mode"
+                checked={splitMode === "every-page"}
+                onChange={() => changeSplitMode("every-page")}
+              />
+              <span>
+                <strong>페이지별 분리</strong>
+                <small>각 페이지를 PDF로 만들고 ZIP으로 저장</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="split-mode"
+                checked={splitMode === "extract"}
+                onChange={() => changeSplitMode("extract")}
+              />
+              <span>
+                <strong>페이지 추출</strong>
+                <small>필요한 페이지만 한 PDF로 저장</small>
+              </span>
+            </label>
+            {splitMode === "extract" ? (
+              <div className={styles.splitRangeField}>
+                <label htmlFor="pdf-page-range">페이지 범위</label>
+                <input
+                  id="pdf-page-range"
+                  type="text"
+                  value={pageRange}
+                  placeholder="예: 1-3, 5"
+                  aria-invalid={!parsedPageRange.ok}
+                  aria-describedby="pdf-page-range-help"
+                  onChange={(event) => {
+                    setPageRange(event.target.value);
+                    clearResult();
+                  }}
+                />
+                <small id="pdf-page-range-help">
+                  {parsedPageRange.ok
+                    ? `${parsedPageRange.pages.length}페이지를 선택했어요.`
+                    : parsedPageRange.message}
+                </small>
+              </div>
+            ) : null}
+          </fieldset>
+
+          <footer className={styles.mergeSetupFooter}>
+            <p className={styles.mergeLocalNotice}>파일은 업로드하지 않고 이 기기에서 처리해요.</p>
+            <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
+              {message}
+            </p>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              disabled={!canRun}
+              onClick={() => void startProcessing()}
+            >
+              {splitMode === "every-page" ? "PDF 페이지별로 나누기" : "선택 페이지 추출하기"}
             </button>
           </footer>
         </section>
