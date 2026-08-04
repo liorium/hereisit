@@ -1072,7 +1072,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
     page.getByText("파일을 다시 선택해 주세요", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
   await expect(page.getByText(/target-mismatch\.png/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "PDF 파일 선택" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "합칠 PDF 선택" })).toBeEnabled();
 });
 
 test("hands a needs-more recommendation through destination validation", async ({ page }) => {
@@ -1086,7 +1086,7 @@ test("hands a needs-more recommendation through destination validation", async (
   await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
   await expect(page.getByText("needs-another.pdf", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "1개 PDF 합치기 →" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeDisabled();
 });
 
 test("exposes the desktop destinations and a bounded navigation disclosure", async ({ page }) => {

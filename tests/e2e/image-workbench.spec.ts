@@ -356,13 +356,9 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   const result = page.getByRole("region", { name: "압축 완료" });
   await expect(result.getByRole("status")).toHaveAttribute("aria-live", "polite");
   await expect(result.getByText(formatByteSize(input.byteLength), { exact: true })).toBeVisible();
-  const sizeComparison = result.locator("p").filter({ hasText: "→" }).first();
-  await expect(sizeComparison.getByText("압축 전", { exact: true })).toBeAttached();
-  await expect(sizeComparison.getByText("압축 후", { exact: true })).toBeAttached();
-  await expect(sizeComparison.getByText("→", { exact: true })).toHaveAttribute(
-    "aria-hidden",
-    "true",
-  );
+  await expect(result.getByText("원본", { exact: true })).toBeVisible();
+  await expect(result.getByText("결과", { exact: true })).toBeVisible();
+  await expect(result.getByText("→", { exact: true })).toHaveAttribute("aria-hidden", "true");
   await expect(page.getByText(/% 줄였어요$/)).toBeVisible();
   const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
   await expect(downloadButton).toBeVisible();
@@ -370,13 +366,14 @@ test("makes a photo-like JPEG smaller while preserving its format", async ({ pag
   expect(
     await result.evaluate((section) => {
       const heading = section.querySelector("h2");
-      const sizeComparison = section.querySelector("p");
+      const sizeComparison = section.querySelector('[data-result="true"]')?.parentElement;
       const download = [...section.querySelectorAll("button")].find((button) =>
         button.textContent?.includes("결과 다운로드"),
       );
       return (
         heading !== null &&
         sizeComparison !== null &&
+        sizeComparison !== undefined &&
         download !== undefined &&
         Boolean(
           heading.compareDocumentPosition(sizeComparison) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -438,13 +435,10 @@ test("downloads two local compression results together and individually", async 
   await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(
-    page
-      .getByRole("region", { name: "2개 이미지 압축 완료" })
-      .locator("p")
-      .filter({ hasText: /KB.*→.*KB/ })
-      .first(),
-  ).toBeVisible();
+  const result = page.getByRole("region", { name: "2개 이미지 압축 완료" });
+  await expect(result.getByText("원본", { exact: true })).toBeVisible();
+  await expect(result.getByText("결과", { exact: true })).toBeVisible();
+  await expect(result.getByText("→", { exact: true })).toHaveAttribute("aria-hidden", "true");
   const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
   await expect(archiveButton).toBeVisible();
   await expect(page.getByRole("button", { name: /개별 다운로드/ })).toHaveCount(0);
