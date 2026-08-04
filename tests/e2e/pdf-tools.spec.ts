@@ -116,6 +116,36 @@ test("keeps a prepared PDF result retryable when download activation fails", asy
   expect(download.suggestedFilename()).toBe("merged-hereisit.pdf");
 });
 
+test("keeps a split result retryable when download activation fails", async ({ page }) => {
+  await installDownloadActivationController(page);
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "retry.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200]),
+  });
+  const run = page.getByRole("button", { name: "PDF 페이지별로 나누기" });
+  await expect(run).toBeEnabled({ timeout: 20_000 });
+  await run.click();
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await setDownloadActivationBlocked(page, true);
+  await page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
+  );
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible();
+
+  await setDownloadActivationBlocked(page, false);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "ZIP 다운로드 ↓" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("retry-pages-hereisit.zip");
+});
+
 test("keeps a failed inspection removable and blocks merge", async ({ page }) => {
   await page.goto("/pdf/merge");
   await page.locator("input[type=file]").setInputFiles([
@@ -126,6 +156,55 @@ test("keeps a failed inspection removable and blocks merge", async ({ page }) =>
   await expect(selected).toContainText("broken.pdf");
   await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "broken.pdf 제거" })).toBeEnabled();
+});
+
+test("inspects a split PDF and rejects a page above its real page count", async ({ page }) => {
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200, 300]),
+  });
+
+  const setup = page.getByRole("region", { name: "PDF 나누기 설정" });
+  await expect(setup.getByText("report.pdf", { exact: true })).toBeVisible();
+  await expect(setup.getByText("3페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeEnabled();
+
+  await setup.getByRole("radio", { name: /페이지 추출/ }).check();
+  const range = setup.getByLabel("페이지 범위");
+  await expect(range).toHaveValue("");
+  await expect(range).toHaveAttribute("placeholder", "예: 1-3, 5");
+  await range.fill("4");
+  await expect(setup.getByText("이 PDF는 3페이지까지 있어요.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "선택 페이지 추출하기" })).toBeDisabled();
+});
+
+test("keeps a failed split inspection replaceable", async ({ page }) => {
+  await page.goto("/pdf/split");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "broken.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("not a pdf"),
+  });
+
+  const setup = page.getByRole("region", { name: "PDF 나누기 설정" });
+  await expect(setup.getByRole("status")).toContainText(/확인할 수 없|다시 시도/, {
+    timeout: 20_000,
+  });
+  await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeDisabled();
+  const replace = page.getByRole("button", { name: "PDF 교체" });
+  await expect(replace).toBeEnabled();
+  const fileChooser = page.waitForEvent("filechooser");
+  await replace.click();
+  await (await fileChooser).setFiles({
+    name: "replacement.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200, 300]),
+  });
+  await expect(setup.getByText("replacement.pdf", { exact: true })).toBeVisible();
+  await expect(setup.getByText("3페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeEnabled();
 });
 
 test("splits every PDF page into a ZIP", async ({ page }) => {
@@ -140,8 +219,14 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
     mimeType: "application/pdf",
     buffer: await createPdf([100, 200, 300]),
   });
-  await page.getByRole("button", { name: "PDF 페이지별로 나누기 →" }).click();
-  await expect(page.getByText("3개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "PDF 페이지별로 나누기" }).click();
+  await expect(page.getByRole("heading", { name: "나누기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  const result = page.getByRole("region", { name: "PDF 나누기 결과" });
+  await expect(result.getByText("3페이지 → PDF 3개", { exact: true })).toBeVisible();
+  await expect(result.getByText(/\d+(?:\.\d+)?(?:KB|B) → \d+(?:\.\d+)?(?:KB|B)/)).toBeVisible();
+  await expect(page.getByLabel("PDF 설정")).toHaveCount(0);
   expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
@@ -162,6 +247,8 @@ test("splits every PDF page into a ZIP", async ({ page }) => {
   expect(downloadCount).toBe(1);
   await expect(page.getByRole("status")).toContainText("ZIP 다운로드를 시작했어요.");
   await expectWebShareUnused(page);
+  await page.getByRole("button", { name: "다른 PDF 나누기" }).click();
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
 });
 
 test("downloads a one-page split result as a ZIP", async ({ page }) => {
@@ -176,8 +263,10 @@ test("downloads a one-page split result as a ZIP", async ({ page }) => {
     mimeType: "application/pdf",
     buffer: await createPdf([100]),
   });
-  await page.getByRole("button", { name: "PDF 페이지별로 나누기 →" }).click();
-  await expect(page.getByText("1개 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "PDF 페이지별로 나누기" }).click();
+  await expect(page.getByText("1페이지 → PDF 1개", { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
   expect(downloadCount).toBe(0);
   await expect(page.getByRole("button", { name: "ZIP 다운로드 ↓" })).toBeVisible();
 
@@ -211,8 +300,11 @@ test("extracts a validated page range into one PDF", async ({ page }) => {
   await page.getByText("페이지 추출", { exact: true }).click();
   await page.getByLabel("페이지 범위").fill("2-3");
   await expect(page.getByText("2페이지를 선택했어요.")).toBeVisible();
-  await page.getByRole("button", { name: "선택 페이지 추출하기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "선택 페이지 추출하기" }).click();
+  await expect(page.getByRole("heading", { name: "추출 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("3페이지 → 2페이지", { exact: true })).toBeVisible();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
