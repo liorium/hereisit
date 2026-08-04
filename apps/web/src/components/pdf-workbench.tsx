@@ -698,15 +698,11 @@ export function PdfWorkbench({
   const runLabel =
     intent === "merge"
       ? `${items.length}개 PDF 합치기 →`
-      : intent === "split"
-        ? splitMode === "every-page"
-          ? "PDF 페이지별로 나누기 →"
-          : "선택 페이지 추출하기 →"
-        : intent === "organize"
-          ? `${pagePlan.length}페이지 정리하기 →`
-          : intent === "watermark"
-            ? "PDF에 워터마크 넣기 →"
-            : `${items.length}개 이미지로 PDF 만들기 →`;
+      : intent === "organize"
+        ? `${pagePlan.length}페이지 정리하기 →`
+        : intent === "watermark"
+          ? "PDF에 워터마크 넣기 →"
+          : `${items.length}개 이미지로 PDF 만들기 →`;
 
   const canRun =
     runtimeSupported &&
@@ -1245,60 +1241,6 @@ export function PdfWorkbench({
                     페이지 순서 초기화
                   </button>
                 </div>
-              ) : null}
-
-              {intent === "split" ? (
-                <fieldset className={styles.optionGroup}>
-                  <legend>나눌 방식</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="split-mode"
-                      checked={splitMode === "every-page"}
-                      disabled={busy}
-                      onChange={() => changeSplitMode("every-page")}
-                    />
-                    <span>
-                      <strong>페이지별 분리</strong>
-                      <small>각 페이지를 PDF로 만들고 ZIP으로 저장</small>
-                    </span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="split-mode"
-                      checked={splitMode === "extract"}
-                      disabled={busy}
-                      onChange={() => changeSplitMode("extract")}
-                    />
-                    <span>
-                      <strong>페이지 추출</strong>
-                      <small>필요한 페이지만 한 PDF로 저장</small>
-                    </span>
-                  </label>
-                  {splitMode === "extract" ? (
-                    <div className={styles.rangeField}>
-                      <label htmlFor="pdf-page-range">페이지 범위</label>
-                      <input
-                        id="pdf-page-range"
-                        type="text"
-                        value={pageRange}
-                        disabled={busy}
-                        aria-invalid={!parsedPageRange.ok}
-                        aria-describedby="pdf-page-range-help"
-                        onChange={(event) => {
-                          setPageRange(event.target.value);
-                          clearResult();
-                        }}
-                      />
-                      <small id="pdf-page-range-help">
-                        {parsedPageRange.ok
-                          ? `${parsedPageRange.pages.length}페이지를 선택했어요.`
-                          : parsedPageRange.message}
-                      </small>
-                    </div>
-                  ) : null}
-                </fieldset>
               ) : null}
 
               {intent === "image-to-pdf" ? (

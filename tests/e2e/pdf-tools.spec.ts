@@ -193,7 +193,18 @@ test("keeps a failed split inspection replaceable", async ({ page }) => {
     timeout: 20_000,
   });
   await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "PDF 교체" })).toBeEnabled();
+  const replace = page.getByRole("button", { name: "PDF 교체" });
+  await expect(replace).toBeEnabled();
+  const fileChooser = page.waitForEvent("filechooser");
+  await replace.click();
+  await (await fileChooser).setFiles({
+    name: "replacement.pdf",
+    mimeType: "application/pdf",
+    buffer: await createPdf([100, 200, 300]),
+  });
+  await expect(setup.getByText("replacement.pdf", { exact: true })).toBeVisible();
+  await expect(setup.getByText("3페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "PDF 페이지별로 나누기" })).toBeEnabled();
 });
 
 test("splits every PDF page into a ZIP", async ({ page }) => {
