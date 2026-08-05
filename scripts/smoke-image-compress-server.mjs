@@ -282,12 +282,6 @@ async function assertMaintainerServer(
     await runSmokeStage("maintainer-ui", () =>
       page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs }),
     );
-    await runSmokeStage("preset-selection", () =>
-      page.getByText("압축 설정 · 추천", { exact: true }).click(),
-    );
-    await runSmokeStage("preset-selection", () =>
-      page.getByRole("radio", { name: /최소 용량/ }).check(),
-    );
     const source = await readFile(sourcePath);
     await runSmokeStage("file-selection", () =>
       page.locator('input[type="file"]').setInputFiles({
@@ -295,6 +289,12 @@ async function assertMaintainerServer(
         mimeType: "image/jpeg",
         buffer: source,
       }),
+    );
+    await runSmokeStage("preset-selection", () =>
+      page.getByText("압축 설정 · 추천", { exact: true }).click(),
+    );
+    await runSmokeStage("preset-selection", () =>
+      page.getByRole("radio", { name: /최소 용량/ }).check(),
     );
     await runSmokeStage("job-submit", () =>
       page.getByRole("button", { name: "용량 줄이기", exact: true }).click(),
