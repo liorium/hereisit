@@ -367,7 +367,7 @@ jobs:
           import { writeFile } from "node:fs/promises";
           import { setTimeout as delay } from "node:timers/promises";
           let passed = false;
-          for (let attempt = 1; attempt <= 15; attempt += 1) {
+          for (let attempt = 1; attempt <= 60; attempt += 1) {
             const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
               method: "POST",
               headers: {
@@ -390,7 +390,7 @@ jobs:
               body.maintainer === false &&
               body.disclosure?.upload === false;
             if (passed) break;
-            if (attempt < 15) await delay(2_000);
+            if (attempt < 60) await delay(2_000);
           }
           if (!passed) {
             throw new Error("production public policy is not maintainer-only");

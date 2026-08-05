@@ -60,8 +60,8 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("wrangler pages deploy apps/web/out");
     expect(workflow).toContain("--branch main");
     expect(workflow).toContain('--stable-url "$PRODUCTION_PAGES_ORIGIN"');
-    expect(workflow).toContain("for (let attempt = 1; attempt <= 15; attempt += 1)");
-    expect(workflow).toContain("if (attempt < 15) await delay(2_000)");
+    expect(workflow).toContain("for (let attempt = 1; attempt <= 60; attempt += 1)");
+    expect(workflow).toContain("if (attempt < 60) await delay(2_000)");
     expect(workflow).toContain(
       `LOGPUSH_STATUS_TOKEN: \${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}`,
     );
