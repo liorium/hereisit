@@ -12,9 +12,11 @@ import {
 } from "../scripts/smoke-image-compress-server.mjs";
 
 const browserSmoke = vi.hoisted(() => vi.fn());
+const browserLaunch = vi.hoisted(() => vi.fn());
 vi.mock("../scripts/support/processing-staging-smoke-runtime.mjs", () => ({
   runProcessingStagingBrowserSmoke: browserSmoke,
 }));
+vi.mock("@playwright/test", () => ({ chromium: { launch: browserLaunch } }));
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
 const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
@@ -25,6 +27,7 @@ const temporaryRoots: string[] = [];
 beforeEach(() => {
   browserSmoke.mockReset();
   browserSmoke.mockResolvedValue(stagingSmokeResult());
+  browserLaunch.mockReset();
 });
 
 afterEach(async () => {
@@ -62,7 +65,79 @@ function productionSmokeResult() {
   };
 }
 
+function browserThatStopsAtJobSubmit() {
+  let contextCount = 0;
+  return {
+    newContext: async () => {
+      const maintainer = contextCount++ === 1;
+      const listeners = new Map<string, Array<(value: unknown) => void>>();
+      let fileSelected = false;
+      const page = {
+        on: (event: string, listener: (value: unknown) => void) => {
+          listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+        },
+        goto: async () => {
+          const response = {
+            url: () => `${PROCESSING_STAGING_ORIGIN}/v1/policy`,
+            status: () => 200,
+            request: () => ({ method: () => "GET" }),
+            json: async () =>
+              maintainer
+                ? { maintainer: true, execution: "server", reason: null }
+                : {
+                    maintainer: false,
+                    execution: "local",
+                    reason: "LOCAL_FALLBACK_REQUIRED",
+                  },
+          };
+          for (const listener of listeners.get("response") ?? []) listener(response);
+        },
+        locator: (selector: string) => ({
+          waitFor: async () => undefined,
+          setInputFiles: async () => {
+            if (selector === 'input[type="file"]') fileSelected = true;
+          },
+        }),
+        getByText: () => ({
+          click: async () => {
+            if (!fileSelected) throw new Error("settings are not rendered before file selection");
+          },
+        }),
+        getByRole: (role: string) => ({
+          check: async () => undefined,
+          click: async () => {
+            if (role === "button") throw new Error("stop after setup");
+          },
+        }),
+        waitForTimeout: async () => undefined,
+      };
+      return {
+        addInitScript: async () => undefined,
+        newPage: async () => page,
+        newCDPSession: async () => ({
+          send: async () => undefined,
+          on: () => undefined,
+        }),
+        close: async () => undefined,
+      };
+    },
+    close: async () => undefined,
+  };
+}
+
 describe("authenticated processing staging smoke", () => {
+  it("selects a file before opening its conditional compression settings", async () => {
+    browserLaunch.mockResolvedValue(browserThatStopsAtJobSubmit());
+    browserSmoke.mockImplementation((input, implementation) => implementation(input));
+
+    await expect(
+      smokeImageCompressServer({
+        pageOrigin: PROCESSING_STAGING_ORIGIN,
+        maintainerSessionId: sessionId,
+      }),
+    ).rejects.toThrow("processing staging smoke failed [job-submit]");
+  });
+
   it("uses CDP for preflight and a public deterministic rollout-zero session", async () => {
     const digest = createHash("sha256").update(publicBucketZeroSessionId).digest();
     expect(digest.readUInt32BE(0) % 100).toBe(0);
