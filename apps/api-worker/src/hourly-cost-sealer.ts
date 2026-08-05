@@ -532,7 +532,8 @@ export async function sealNextHourlyCost(
     session
       .prepare(
         `UPDATE rollout_control
-         SET last_sealed_hour_key = ?
+         SET last_sealed_hour_key = ?,
+             last_cost_window_complete = CASE WHEN ? >= ? + 23 THEN 1 ELSE 0 END
          WHERE id = 1
            AND cost_accounting_epoch = ?
            AND cost_accounting_started_at = ?
@@ -564,6 +565,8 @@ export async function sealNextHourlyCost(
       )
       .bind(
         hourKey,
+        hourKey,
+        firstHourKey,
         control.cost_accounting_epoch,
         control.cost_accounting_started_at,
         firstHourKey,

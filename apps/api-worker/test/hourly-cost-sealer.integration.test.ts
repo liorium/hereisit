@@ -124,7 +124,8 @@ beforeEach(async () => {
   await env.DB.prepare(
     `UPDATE rollout_control
      SET cost_accounting_epoch = ?, cost_accounting_started_at = ?,
-         last_sealed_hour_key = NULL, circuit_open = 0, reason = NULL, opened_at = NULL
+         last_sealed_hour_key = NULL, last_cost_window_complete = 0,
+         circuit_open = 0, reason = NULL, opened_at = NULL
      WHERE id = 1`,
   )
     .bind(accountingEpoch, firstHourStart)
@@ -214,6 +215,37 @@ describe("hourly cost sealing", () => {
     await expect(sealNextHourlyCost(env.DB, input(now))).resolves.toMatchObject({
       kind: "sealed",
       hourKey: firstHourKey + 1,
+    });
+  });
+
+  it("marks the cost window complete only after 24 sequential sealed hours", async () => {
+    for (let offset = 0; offset < 24; offset += 1) {
+      await seedCompleteProviderRow(firstHourKey + offset);
+    }
+    const now = firstHourStart + 25 * 3_600_000;
+
+    for (let offset = 0; offset < 23; offset += 1) {
+      await expect(sealNextHourlyCost(env.DB, input(now))).resolves.toMatchObject({
+        kind: "sealed",
+        hourKey: firstHourKey + offset,
+      });
+    }
+    await expect(
+      env.DB.prepare("SELECT last_cost_window_complete FROM rollout_control WHERE id = 1").first(),
+    ).resolves.toEqual({ last_cost_window_complete: 0 });
+
+    await expect(sealNextHourlyCost(env.DB, input(now))).resolves.toMatchObject({
+      kind: "sealed",
+      hourKey: firstHourKey + 23,
+    });
+    await expect(
+      env.DB.prepare(
+        `SELECT last_sealed_hour_key, last_cost_window_complete
+         FROM rollout_control WHERE id = 1`,
+      ).first(),
+    ).resolves.toEqual({
+      last_sealed_hour_key: firstHourKey + 23,
+      last_cost_window_complete: 1,
     });
   });
 
