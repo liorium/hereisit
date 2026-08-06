@@ -59,6 +59,7 @@ const inputKeys = new Set([
   "bucketName",
   "usageLogBucketName",
   "usageAnalyticsDatasetName",
+  "productAnalyticsDatasetName",
   "costAccountingMode",
   "logpushJobId",
   "containerApplicationId",
@@ -88,6 +89,7 @@ const inputKeys = new Set([
   "resultDownloadRateLimitNamespaceId",
   "policyRateLimitNamespaceId",
   "jobApiNetworkRateLimitNamespaceId",
+  "productAnalyticsRateLimitNamespaceId",
   "alertDestinationAddress",
 ]);
 
@@ -252,6 +254,7 @@ function validateInput(input) {
     bucketName: `hereisit-processing-${environment}`,
     usageLogBucketName: `hereisit-processing-usage-${environment}`,
     usageAnalyticsDatasetName: `hereisit_processing_usage_${environment}`,
+    productAnalyticsDatasetName: `hereisit_product_usage_${environment}`,
     queueName: `hereisit-image-jobs-${environment}`,
     dlqName: `hereisit-image-jobs-dlq-${environment}`,
   };
@@ -309,6 +312,7 @@ function validateInput(input) {
     "resultDownloadRateLimitNamespaceId",
     "policyRateLimitNamespaceId",
     "jobApiNetworkRateLimitNamespaceId",
+    "productAnalyticsRateLimitNamespaceId",
   ];
   const namespaceIds = namespaceKeys.map((key) => {
     if (typeof value[key] !== "string" || !NAMESPACE_PATTERN.test(value[key])) {
@@ -363,6 +367,7 @@ export function generateProcessingWrangler(input) {
     ["RESULT_DOWNLOAD_RATE_LIMITER", value.resultDownloadRateLimitNamespaceId, 3],
     ["POLICY_RATE_LIMITER", value.policyRateLimitNamespaceId, 60],
     ["JOB_API_NETWORK_RATE_LIMITER", value.jobApiNetworkRateLimitNamespaceId, 180],
+    ["PRODUCT_ANALYTICS_RATE_LIMITER", value.productAnalyticsRateLimitNamespaceId, 120],
   ];
   return {
     $schema: "../../node_modules/wrangler/config-schema.json",
@@ -387,6 +392,7 @@ export function generateProcessingWrangler(input) {
     ],
     analytics_engine_datasets: [
       { binding: "USAGE_ANALYTICS", dataset: value.usageAnalyticsDatasetName },
+      { binding: "PRODUCT_ANALYTICS", dataset: value.productAnalyticsDatasetName },
     ],
     version_metadata: { binding: "WORKER_VERSION" },
     queues: {
@@ -473,6 +479,7 @@ const cliScalarFields = {
   "bucket-name": "bucketName",
   "usage-log-bucket-name": "usageLogBucketName",
   "usage-analytics-dataset-name": "usageAnalyticsDatasetName",
+  "product-analytics-dataset-name": "productAnalyticsDatasetName",
   "cost-accounting-mode": "costAccountingMode",
   "container-application-id": "containerApplicationId",
   "queue-name": "queueName",
@@ -487,6 +494,7 @@ const cliScalarFields = {
   "result-download-rate-limit-namespace-id": "resultDownloadRateLimitNamespaceId",
   "policy-rate-limit-namespace-id": "policyRateLimitNamespaceId",
   "job-api-network-rate-limit-namespace-id": "jobApiNetworkRateLimitNamespaceId",
+  "product-analytics-rate-limit-namespace-id": "productAnalyticsRateLimitNamespaceId",
   "alert-destination-address": "alertDestinationAddress",
 };
 

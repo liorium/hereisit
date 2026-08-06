@@ -67,6 +67,15 @@ describe("processing production workflow", () => {
     );
   });
 
+  it("binds an isolated production product dataset", () => {
+    expect(workflow).toContain("PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_production");
+    expect(workflow).toContain(
+      '--product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME"',
+    );
+    expect(workflow).toContain("--product-analytics-rate-limit-namespace-id 22007");
+    expect(workflow.match(/--product-analytics-dataset-name/g)).toHaveLength(1);
+  });
+
   it("provisions, attests, and smoke-checks before publishing sanitized evidence", () => {
     const provision = workflow.indexOf("node scripts/ensure-cloudflare-processing-resources.mjs");
     const migrations = workflow.indexOf("wrangler d1 migrations apply");

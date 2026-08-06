@@ -172,6 +172,23 @@ test("publishes dedicated routes in the sitemap", async ({ request }) => {
   }
 });
 
+test("publishes and links the privacy disclosure", async ({ page, request }) => {
+  const paths = ["/", "/tools", ...availableToolEntries.map((tool) => tool.route), "/privacy"];
+
+  for (const path of paths) {
+    const response = await page.goto(path);
+    expect(response?.ok()).toBe(true);
+    await expect(
+      page.locator("footer").getByRole("link", { name: "개인정보 보호" }),
+    ).toHaveAttribute("href", "/privacy");
+  }
+
+  await expect(page.getByRole("heading", { level: 1, name: "개인정보 보호" })).toBeVisible();
+  expect(await (await request.get("/sitemap.xml")).text()).toContain(
+    "https://hereisit.pages.dev/privacy",
+  );
+});
+
 test("publishes the scanned PDF compression tool", async ({ page }) => {
   await page.goto("/tools");
   await revealCatalogTool(page, pdfCompressionTool.path);

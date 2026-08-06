@@ -698,6 +698,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
     expect(config.r2_buckets.map(({ binding }) => binding)).toEqual(["JOB_OBJECTS", "USAGE_LOGS"]);
     expect(config.analytics_engine_datasets).toEqual([
       { binding: "USAGE_ANALYTICS", dataset: "hereisit-processing-usage-local" },
+      { binding: "PRODUCT_ANALYTICS", dataset: "hereisit_product_usage_local" },
     ]);
     expect(config.version_metadata).toEqual({ binding: "WORKER_VERSION" });
     expect(config.queues?.producers).toEqual([
@@ -770,6 +771,11 @@ describe("Wrangler source-of-truth and generated environment", () => {
         name: "JOB_API_NETWORK_RATE_LIMITER",
         namespace_id: "1006",
         simple: { limit: 180, period: 60 },
+      },
+      {
+        name: "PRODUCT_ANALYTICS_RATE_LIMITER",
+        namespace_id: "11007",
+        simple: { limit: 120, period: 60 },
       },
     ]);
     expect(JSON.parse(config.vars.APP_ORIGINS ?? "null")).toEqual([
@@ -1030,6 +1036,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "JOB_OBJECTS",
       "USAGE_LOGS",
       "USAGE_ANALYTICS",
+      "PRODUCT_ANALYTICS",
       "WORKER_VERSION",
       "SESSION_JOB_RATE_LIMITER",
       "NETWORK_JOB_RATE_LIMITER",
@@ -1037,6 +1044,7 @@ describe("Wrangler source-of-truth and generated environment", () => {
       "RESULT_DOWNLOAD_RATE_LIMITER",
       "POLICY_RATE_LIMITER",
       "JOB_API_NETWORK_RATE_LIMITER",
+      "PRODUCT_ANALYTICS_RATE_LIMITER",
       "IMAGE_JOBS",
       "IMAGE_ENGINE",
     ]) {

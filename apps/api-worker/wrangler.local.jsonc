@@ -29,6 +29,10 @@
     {
       "binding": "USAGE_ANALYTICS",
       "dataset": "hereisit-processing-usage-local"
+    },
+    {
+      "binding": "PRODUCT_ANALYTICS",
+      "dataset": "hereisit_product_usage_local"
     }
   ],
   "version_metadata": {
@@ -114,6 +118,11 @@
       "name": "JOB_API_NETWORK_RATE_LIMITER",
       "namespace_id": "1006",
       "simple": { "limit": 180, "period": 60 }
+    },
+    {
+      "name": "PRODUCT_ANALYTICS_RATE_LIMITER",
+      "namespace_id": "11007",
+      "simple": { "limit": 120, "period": 60 }
     }
   ],
   "vars": {

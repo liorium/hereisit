@@ -4,6 +4,7 @@ import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-rep
 import type { Env } from "./env";
 import { type OperationalConfig, parseOperationalConfig } from "./env";
 import { dispatchJobOutbox } from "./outbox";
+import { writeProductUsagePoint } from "./product-analytics";
 import { deleteAuthorizedArtifact, storeExactInputArtifact } from "./r2-artifacts";
 import {
   type CreateJobRouteRuntime,
@@ -16,6 +17,10 @@ import {
   readPolicyStateFromD1,
   routePolicyRequest,
 } from "./routes/policy";
+import {
+  type ProductAnalyticsRouteRuntime,
+  routeProductAnalyticsRequest,
+} from "./routes/product-analytics";
 import {
   type LifecycleRouteRuntime,
   routeJobDeleteRequest,
@@ -35,6 +40,7 @@ const JOB_ACTION_PATH_PATTERN =
   /^\/v1\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(cancel|result|downloaded)$/;
 
 export interface RouterRouteRuntimes {
+  readonly analytics?: ProductAnalyticsRouteRuntime;
   readonly create?: CreateJobRouteRuntime;
   readonly upload?: UploadRouteRuntime;
   readonly lifecycle?: LifecycleRouteRuntime;
@@ -87,6 +93,7 @@ export async function routeRequestWithDependencies(
 
   let route:
     | { readonly kind: "policy"; readonly methods: "POST, OPTIONS" }
+    | { readonly kind: "analytics"; readonly methods: "POST, OPTIONS" }
     | { readonly kind: "create"; readonly methods: "POST, OPTIONS" }
     | { readonly kind: "health"; readonly methods: "GET, OPTIONS" }
     | {
@@ -111,6 +118,8 @@ export async function routeRequestWithDependencies(
       };
   if (url.pathname === "/v1/policy") {
     route = { kind: "policy", methods: "POST, OPTIONS" };
+  } else if (url.pathname === "/v1/analytics/events") {
+    route = { kind: "analytics", methods: "POST, OPTIONS" };
   } else if (url.pathname === "/v1/jobs") {
     route = { kind: "create", methods: "POST, OPTIONS" };
   } else if (url.pathname === "/health") {
@@ -143,12 +152,16 @@ export async function routeRequestWithDependencies(
     }
   }
 
+  if (route.kind === "analytics" && origin === null) {
+    return withCors(jsonError(403, "ORIGIN_NOT_ALLOWED"), null);
+  }
   if (request.method === "OPTIONS") {
     return withCors(new Response(null, { status: 204 }), origin);
   }
   const methodAllowed =
     (route.kind === "upload" && request.method === "PUT") ||
     ((route.kind === "policy" ||
+      route.kind === "analytics" ||
       route.kind === "create" ||
       route.kind === "cancel" ||
       route.kind === "downloaded") &&
@@ -163,6 +176,13 @@ export async function routeRequestWithDependencies(
 
   if (route.kind === "policy") {
     return withCors(await routePolicyRequest(request, runtime), origin);
+  }
+  if (route.kind === "analytics") {
+    const analyticsRuntime = routes.analytics;
+    if (analyticsRuntime === undefined) {
+      return withCors(jsonError(503, "ANALYTICS_UNAVAILABLE"), origin);
+    }
+    return withCors(await routeProductAnalyticsRequest(request, analyticsRuntime), origin);
   }
   if (route.kind === "create") {
     const createRuntime = routes.create;
@@ -337,6 +357,18 @@ export async function routeRequest(
     },
   };
   return routeRequestWithDependencies(request, policyRuntime, {
+    analytics: {
+      environment: config.environment,
+      currentSecret: env.ABUSE_HMAC_SECRET_CURRENT,
+      previousSecret: env.ABUSE_HMAC_SECRET_PREVIOUS,
+      versionId: env.WORKER_VERSION.id,
+      releaseSha256: env.RELEASE_REPORT_SHA256,
+      rateLimiter: env.PRODUCT_ANALYTICS_RATE_LIMITER,
+      readJson: readBoundedJson,
+      hashNetwork: hashNetworkBuckets,
+      writePoint: (point) => writeProductUsagePoint(env.PRODUCT_ANALYTICS, point),
+      now: () => new Date(),
+    },
     create: createRuntime,
     upload: uploadRuntime,
     lifecycle: lifecycleRuntime,

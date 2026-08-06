@@ -23,6 +23,7 @@ import type {
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import {
   getToolImplementation,
   isPdfEditingIntent,
@@ -190,6 +191,7 @@ export function PdfWorkbench({
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const busy = processing || inspecting;
 
   const totalBytes = useMemo(
@@ -333,6 +335,7 @@ export function PdfWorkbench({
     () => () => {
       runRef.current += 1;
       handleRef.current?.cancel();
+      productRunRef.current?.cancelled();
       inspectionHandleRef.current?.cancel();
       if (resultUrlRef.current !== undefined) URL.revokeObjectURL(resultUrlRef.current);
     },
@@ -505,6 +508,7 @@ export function PdfWorkbench({
   const reset = () => {
     runRef.current += 1;
     handleRef.current?.cancel();
+    productRunRef.current?.cancelled();
     handleRef.current = undefined;
     inspectionHandleRef.current?.cancel();
     inspectionHandleRef.current = undefined;
@@ -591,6 +595,8 @@ export function PdfWorkbench({
     }
     const spec = buildSpec();
     if (spec === undefined) return;
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
 
     const runId = runRef.current + 1;
     runRef.current = runId;
@@ -617,6 +623,7 @@ export function PdfWorkbench({
       const outcome = await handle.result;
       if (runRef.current !== runId) return;
       if (outcome.status === "fulfilled") {
+        productRun.succeeded();
         const blob = resultBlob(outcome.value);
         const url = URL.createObjectURL(blob);
         resultUrlRef.current = url;
@@ -630,23 +637,28 @@ export function PdfWorkbench({
             : `${outcome.value.outputPageCount}페이지 PDF를 완성했어요.`,
         );
       } else if (outcome.status === "cancelled") {
+        productRun.cancelled();
         setMessage("PDF 작업을 중단했어요.");
       } else {
+        productRun.failed(outcome.error.code);
         setMessage(outcome.error.message);
       }
     } catch {
       if (runRef.current === runId) {
+        productRun.failed("WORKER_CRASH");
         setMessage("PDF 작업기를 시작하지 못했어요. 최신 브라우저에서 다시 시도해 주세요.");
       }
     } finally {
       if (runRef.current === runId) {
         if (handleRef.current === handle) handleRef.current = undefined;
+        if (productRunRef.current === productRun) productRunRef.current = null;
         setProcessing(false);
       }
     }
   };
 
   const cancelProcessing = () => {
+    productRunRef.current?.cancelled();
     runRef.current += 1;
     handleRef.current?.cancel();
     handleRef.current = undefined;
@@ -666,6 +678,7 @@ export function PdfWorkbench({
     const currentUrl = resultUrlRef.current;
     if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(resultUrl, result.suggestedName);
       setMessage(
         result.mime === "application/zip" ? "ZIP 다운로드를 시작했어요." : "다운로드를 시작했어요.",

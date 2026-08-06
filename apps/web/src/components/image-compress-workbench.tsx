@@ -29,6 +29,7 @@ import {
   isUnprovenInAppBrowser,
   readProcessingClientConfig,
 } from "../lib/processing-config";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import {
   buildImageArchive,
   type ImageArchiveEntry,
@@ -134,6 +135,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const hasFileSelectionRef = useRef(false);
   const downloadHandoffRef = useRef(false);
   const remoteDeliveryLockRef = useRef(false);
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
 
   useEffect(() => {
     setRuntimeSupported(supportsBrowserImageRuntime());
@@ -201,6 +203,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     () => () => {
       batchRef.current?.cancel();
       processingControllerRef.current?.abort();
+      productRunRef.current?.cancelled();
       for (const item of itemsRef.current) {
         if (item.result?.kind === "remote")
           void item.result.handle.dispose().catch(() => undefined);
@@ -311,6 +314,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     spec: ImageOptimizeSpecV1,
     signal: AbortSignal,
   ) => {
+    const results: LocalImageOptimizeResult[] = [];
     for (const item of sourceItems) {
       if (signal.aborted) break;
       setItems((current) =>
@@ -336,6 +340,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             ),
         },
       );
+      results.push(result);
       if (result.status === "fulfilled") {
         setItems((current) =>
           updateItem(current, item.id, {
@@ -372,16 +377,34 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         );
       }
     }
+    return results;
   };
 
   const processItems = async () => {
     if (processing || remoteDeliveryBusy || items.length === 0 || policy.state === "checking")
       return;
+    const sourceItems = items.filter((item) => item.status === "ready" || item.status === "failed");
+    if (sourceItems.length === 0) return;
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
     setProcessing(true);
     const processingController = new AbortController();
     processingControllerRef.current = processingController;
-    const sourceItems = items.filter((item) => item.status === "ready" || item.status === "failed");
     const spec = optimizeSpec(preset);
+    let completedCount = 0;
+    let cancelledCount = 0;
+    let firstFailureCode: string | undefined;
+    const recordLocalResults = (results: readonly LocalImageOptimizeResult[]) => {
+      for (const result of results) {
+        if (result.status === "fulfilled" || result.status === "original-retained") {
+          completedCount += 1;
+        } else if (result.status === "cancelled") {
+          cancelledCount += 1;
+        } else if (firstFailureCode === undefined) {
+          firstFailureCode = result.status === "unsupported" ? "UNSUPPORTED_INPUT" : "WORKER_CRASH";
+        }
+      }
+    };
     try {
       let execution: "server" | "local" = policy.state === "server" ? "server" : "local";
       if (config.apiOrigin !== null) {
@@ -409,6 +432,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         } catch {
           if (processingController.signal.aborted) {
             setMessage("작업을 중단했어요.");
+            productRun.cancelled();
             return;
           }
           execution = "local";
@@ -480,6 +504,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           const source = sourceItems.find((item) => item.id === result.itemId);
           if (source === undefined) continue;
           if (result.status === "fulfilled") {
+            completedCount += 1;
             setItems((current) =>
               updateItem(current, result.itemId, {
                 status: "completed",
@@ -490,6 +515,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
               }),
             );
           } else if (result.status === "original-retained") {
+            completedCount += 1;
             setItems((current) =>
               updateItem(current, result.itemId, {
                 status: "completed",
@@ -508,6 +534,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             }
             fallback.push(source);
           } else {
+            if (result.status === "cancelled") cancelledCount += 1;
+            else firstFailureCode ??= result.error.code;
             setItems((current) =>
               updateItem(current, result.itemId, {
                 status: "failed",
@@ -518,17 +546,23 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         }
         if (fallback.length > 0) {
           setMessage("서버 처리를 시작하지 못한 이미지를 업로드 없이 다시 처리해요.");
-          await runLocal(fallback, spec, processingController.signal);
+          recordLocalResults(await runLocal(fallback, spec, processingController.signal));
         }
       } else {
-        await runLocal(sourceItems, spec, processingController.signal);
+        recordLocalResults(await runLocal(sourceItems, spec, processingController.signal));
       }
+      if (completedCount > 0) productRun.succeeded();
+      else if (cancelledCount > 0 || processingController.signal.aborted) productRun.cancelled();
+      else productRun.failed(firstFailureCode);
       setMessage(
         processingController.signal.aborted
           ? "작업을 중단했어요."
           : "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
       );
     } catch {
+      if (completedCount > 0) productRun.succeeded();
+      else if (processingController.signal.aborted) productRun.cancelled();
+      else productRun.failed("WORKER_CRASH");
       const failureMessage = "처리를 완료하지 못했어요. 다시 시도해 주세요.";
       setItems((current) =>
         current.map((item) =>
@@ -543,6 +577,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       if (processingControllerRef.current === processingController) {
         processingControllerRef.current = null;
       }
+      if (productRunRef.current === productRun) productRunRef.current = null;
       setProcessing(false);
     }
   };
@@ -553,6 +588,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     const filename = suggestSameFormatOptimizedName(item.file.name, item.mime);
     if (result.kind === "remote") {
       if (remoteDeliveryLockRef.current) return;
+      reportDownloadRequested(toolId);
       remoteDeliveryLockRef.current = true;
       setRemoteDeliveryBusy(true);
       downloadHandoffRef.current = false;
@@ -589,6 +625,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         : new Blob([result.result.bytes], { type: result.result.mime });
     const url = URL.createObjectURL(blob);
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(url, filename);
       setMessage(
         isUnprovenInAppBrowser()
@@ -646,6 +683,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     downloadHandoffRef.current = false;
     setArchiving(true);
     setMessage("ZIP 파일을 만들고 있어요.");
+    reportDownloadRequested(toolId);
     let archive: Awaited<ReturnType<typeof buildImageArchive>> | null = null;
     let url: string | null = null;
     try {
@@ -735,6 +773,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     });
   };
   const cancelProcessing = () => {
+    productRunRef.current?.cancelled();
     processingControllerRef.current?.abort();
     batchRef.current?.cancel();
   };
@@ -743,6 +782,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     if (remoteDeliveryLockRef.current) return;
     processingControllerRef.current?.abort();
     batchRef.current?.cancel();
+    productRunRef.current?.cancelled();
     const previous = itemsRef.current;
     itemsRef.current = [];
     setItems([]);

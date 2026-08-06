@@ -726,6 +726,7 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
     consoleMessages: [],
     storageWrites: [],
     objectUrls: [],
+    productEvents: [],
   });
   await expect(launcher.locator("img, canvas, [data-thumbnail]")).toHaveCount(0);
 

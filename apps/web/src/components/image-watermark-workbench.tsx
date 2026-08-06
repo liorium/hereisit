@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import { createZipArchive, downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
@@ -207,6 +208,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
   const itemsRef = useRef(items);
   const ownedUrlsRef = useRef(new Set<string>());
   const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const busy = processing || archiving;
 
   const commitItems = useCallback((update: (current: WorkItem[]) => WorkItem[]) => {
@@ -255,6 +257,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
     () => () => {
       activeGenerationRef.current += 1;
       batchRef.current?.cancel();
+      productRunRef.current?.cancelled();
       for (const timeoutId of archiveLeasesRef.current.values()) clearTimeout(timeoutId);
       archiveLeasesRef.current.clear();
       for (const url of ownedUrlsRef.current) URL.revokeObjectURL(url);
@@ -417,6 +420,8 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
 
   const startProcessing = async () => {
     if (!canRun) return;
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
     releaseArchiveUrls();
     const sourceItems = itemsRef.current.map((item) => ({ id: item.id, file: item.file }));
     const generation = activeGenerationRef.current + 1;
@@ -459,6 +464,9 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
       batchRef.current = handle;
       const results = await handle.result;
       if (activeGenerationRef.current !== generation) return;
+      if (results.some((result) => result.status === "fulfilled")) productRun.succeeded();
+      else if (results.some((result) => result.status === "cancelled")) productRun.cancelled();
+      else productRun.failed(results.find((result) => result.status === "rejected")?.error.code);
       const completed = results.filter((result) => result.status === "fulfilled").length;
       const cancelled = results.filter((result) => result.status === "cancelled").length;
       const failed = results.length - completed - cancelled;
@@ -473,6 +481,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
       }
     } catch {
       if (activeGenerationRef.current !== generation) return;
+      productRun.failed("WORKER_CRASH");
       commitItems((current) =>
         current.map((item) => resetItem(item, "failed", "브라우저 작업기를 시작하지 못했어요.")),
       );
@@ -480,12 +489,14 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
     } finally {
       if (activeGenerationRef.current === generation) {
         if (batchRef.current === handle) batchRef.current = undefined;
+        if (productRunRef.current === productRun) productRunRef.current = null;
         setProcessing(false);
       }
     }
   };
 
   const cancelProcessing = () => {
+    productRunRef.current?.cancelled();
     activeGenerationRef.current += 1;
     batchRef.current?.cancel();
     batchRef.current = undefined;
@@ -515,6 +526,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
       return;
     }
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(item.resultUrl, item.result.suggestedName);
       if (activeGenerationRef.current === generation) setMessage("다운로드를 시작했어요.");
     } catch {
@@ -557,6 +569,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
       try {
         const createdUrl = createOwnedUrl(archive);
         url = createdUrl;
+        reportDownloadRequested(toolId);
         downloadUrl(createdUrl, "hereisit-watermarked-images.zip");
         const timeoutId = setTimeout(() => {
           if (!archiveLeasesRef.current.delete(createdUrl)) return;
@@ -613,6 +626,7 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
   const reset = () => {
     activeGenerationRef.current += 1;
     batchRef.current?.cancel();
+    productRunRef.current?.cancelled();
     batchRef.current = undefined;
     releaseArchiveUrls();
     for (const url of ownedUrlsRef.current) URL.revokeObjectURL(url);

@@ -59,6 +59,21 @@ jobs:
           --project=webkit
           --project=mobile-webkit
           --workers=1
+      - name: Build product analytics fixture
+        run: pnpm --filter @hereisit/web build
+        env:
+          ALLOW_LOCAL_PROCESSING_ORIGINS: "1"
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
+      - name: Test product analytics
+        run: >-
+          pnpm exec playwright test
+          tests/e2e/product-analytics.spec.ts
+          tests/e2e/image-workbench.spec.ts
+          tests/e2e/pdf-tools.spec.ts
+          --project=chromium
+          --grep analytics
+        env:
+          HEREISIT_E2E_PRODUCT_ANALYTICS: "1"
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

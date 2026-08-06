@@ -269,6 +269,19 @@ select:focus-visible,
   margin: 8px 0 0;
 }
 
+.site-footer-meta {
+  max-width: 620px;
+  text-align: right;
+}
+
+.site-footer-meta a {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--ink);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
 .site-header-actions {
   min-width: 0;
   display: flex;
@@ -544,6 +557,10 @@ select:focus-visible,
   .site-footer {
     align-items: start;
     flex-direction: column;
+  }
+
+  .site-footer-meta {
+    text-align: left;
   }
 }
 

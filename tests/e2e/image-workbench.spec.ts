@@ -8,6 +8,8 @@ import {
   setDownloadActivationBlocked,
 } from "./support/result-download";
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: analytics requires the explicit build fixture.
+const analyticsBuildEnabled = process.env.HEREISIT_E2E_PRODUCT_ANALYTICS === "1";
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -50,6 +52,20 @@ async function createPhotoLikeJpeg(page: Page): Promise<Buffer> {
     return Array.from(new Uint8Array(await blob.arrayBuffer()));
   });
   return Buffer.from(bytes);
+}
+
+async function captureProductEvents(page: Page): Promise<Record<string, unknown>[]> {
+  const events: Record<string, unknown>[] = [];
+  await page.route("**/v1/analytics/events", async (route) => {
+    events.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ status: 204 });
+  });
+  return events;
+}
+
+function expectOnlyProductFields(events: readonly Record<string, unknown>[]): void {
+  const allowed = new Set(["schema", "toolId", "event", "duration", "failure"]);
+  expect(events.every((event) => Object.keys(event).every((key) => allowed.has(key)))).toBe(true);
 }
 
 async function installHeldTransformingWorker(page: Page): Promise<void> {
@@ -318,6 +334,55 @@ test("processes and downloads an image without external uploads", async ({ page 
     ),
   ).toBe(true);
   expect(requestedPaths.some((path) => path.endsWith(".ts"))).toBe(false);
+});
+
+test("product analytics records one image run and download", async ({ page }) => {
+  test.skip(!analyticsBuildEnabled, "requires a build with product analytics enabled");
+  const events = await captureProductEvents(page);
+  await page.goto("/image/compress");
+  const input = await createPhotoLikeJpeg(page);
+  await page.locator("input[type=file]").setInputFiles({
+    name: "analytics.jpg",
+    mimeType: "image/jpeg",
+    buffer: input,
+  });
+
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible({ timeout: 20_000 });
+  await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 다운로드 ↓" }).click(),
+  ]);
+
+  await expect.poll(() => events.length).toBe(3);
+  expect(events.map(({ event }) => event)).toEqual([
+    "processing-started",
+    "processing-succeeded",
+    "download-requested",
+  ]);
+  expect(events.every(({ toolId }) => toolId === "image.compress")).toBe(true);
+  expectOnlyProductFields(events);
+});
+
+test("product analytics settles a cancelled image run once", async ({ page }) => {
+  test.skip(!analyticsBuildEnabled, "requires a build with product analytics enabled");
+  await installHeldTransformingWorker(page);
+  const events = await captureProductEvents(page);
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "cancel.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
+  await page.getByRole("button", { name: "중단" }).click();
+
+  await expect.poll(() => events.length).toBe(2);
+  expect(events.map(({ event }) => event)).toEqual(["processing-started", "processing-failed"]);
+  expect(events[1]).toMatchObject({ failure: "cancelled", toolId: "image.compress" });
+  expectOnlyProductFields(events);
 });
 
 test("reaches the upload action through the real tab order", async ({ page }) => {
