@@ -5,6 +5,16 @@ import { describe, expect, it } from "vitest";
 import { generateHeaders, writeGeneratedHeaders } from "../scripts/generate-web-headers.mjs";
 
 describe("Cloudflare Pages header generation", () => {
+  it("allows only the exact Cloudflare Web Analytics beacon", () => {
+    const headers = generateHeaders({ processingApiOrigin: null });
+    expect(headers).toContain(
+      "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com/beacon.min.js",
+    );
+    expect(headers).toContain("connect-src 'self'");
+    expect(headers).not.toContain("script-src *");
+    expect(headers).not.toContain("connect-src *");
+  });
+
   it("adds only one validated HTTPS processing origin", () => {
     expect(generateHeaders({ processingApiOrigin: "https://processing.example.com" })).toContain(
       "connect-src 'self' https://processing.example.com",
