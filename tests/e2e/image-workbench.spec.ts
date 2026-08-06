@@ -8,6 +8,8 @@ import {
   setDownloadActivationBlocked,
 } from "./support/result-download";
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: analytics requires the explicit build fixture.
+const analyticsBuildEnabled = process.env.HEREISIT_E2E_PRODUCT_ANALYTICS === "1";
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -335,6 +337,7 @@ test("processes and downloads an image without external uploads", async ({ page 
 });
 
 test("product analytics records one image run and download", async ({ page }) => {
+  test.skip(!analyticsBuildEnabled, "requires a build with product analytics enabled");
   const events = await captureProductEvents(page);
   await page.goto("/image/compress");
   const input = await createPhotoLikeJpeg(page);
@@ -362,6 +365,7 @@ test("product analytics records one image run and download", async ({ page }) =>
 });
 
 test("product analytics settles a cancelled image run once", async ({ page }) => {
+  test.skip(!analyticsBuildEnabled, "requires a build with product analytics enabled");
   await installHeldTransformingWorker(page);
   const events = await captureProductEvents(page);
   await page.goto("/image/compress");

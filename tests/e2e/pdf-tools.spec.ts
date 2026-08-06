@@ -9,6 +9,8 @@ import {
   setDownloadActivationBlocked,
 } from "./support/result-download";
 
+// biome-ignore lint/suspicious/noUndeclaredEnvVars: analytics requires the explicit build fixture.
+const analyticsBuildEnabled = process.env.HEREISIT_E2E_PRODUCT_ANALYTICS === "1";
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -26,6 +28,7 @@ async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array>
 }
 
 test("product analytics records one PDF merge and download", async ({ page }) => {
+  test.skip(!analyticsBuildEnabled, "requires a build with product analytics enabled");
   const events: Record<string, unknown>[] = [];
   await page.route("**/v1/analytics/events", async (route) => {
     events.push(route.request().postDataJSON() as Record<string, unknown>);
