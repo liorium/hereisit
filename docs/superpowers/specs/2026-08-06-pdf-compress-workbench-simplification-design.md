@@ -1,7 +1,7 @@
 # PDF compression workbench simplification design
 
 **Date:** 2026-08-06
-**Status:** Approved direction, pending written-spec review
+**Status:** Approved for implementation
 
 ## 목적
 
