@@ -1,7 +1,7 @@
 # Privacy-safe product analytics design
 
 **Date:** 2026-08-06
-**Status:** Design approved; written specification pending review
+**Status:** Approved for implementation
 
 ## Purpose
 
