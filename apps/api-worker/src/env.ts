@@ -5,6 +5,8 @@ export type Env = Cloudflare.Env & {
   readonly ABUSE_HMAC_SECRET_PREVIOUS: string;
   readonly ANALYTICS_READ_TOKEN: string;
   readonly LOGPUSH_STATUS_TOKEN: string;
+  readonly PRODUCT_ANALYTICS: AnalyticsEngineDataset;
+  readonly PRODUCT_ANALYTICS_RATE_LIMITER: RateLimit;
 };
 
 export interface LiveCostModelV1 {
