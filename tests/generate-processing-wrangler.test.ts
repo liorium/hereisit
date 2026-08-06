@@ -81,6 +81,7 @@ function validInput(environment: "staging" | "production" = "staging") {
     bucketName: `hereisit-processing-${suffix}`,
     usageLogBucketName: `hereisit-processing-usage-${suffix}`,
     usageAnalyticsDatasetName: `hereisit_processing_usage_${suffix}`,
+    productAnalyticsDatasetName: `hereisit_product_usage_${suffix}`,
     costAccountingMode: "active" as const,
     logpushJobId: 123,
     containerApplicationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
@@ -112,6 +113,7 @@ function validInput(environment: "staging" | "production" = "staging") {
     resultDownloadRateLimitNamespaceId: "21004",
     policyRateLimitNamespaceId: "21005",
     jobApiNetworkRateLimitNamespaceId: "21006",
+    productAnalyticsRateLimitNamespaceId: "21007",
     alertDestinationAddress: "operator@example.com",
   };
 }
@@ -131,6 +133,8 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
     input.usageLogBucketName,
     "--usage-analytics-dataset-name",
     input.usageAnalyticsDatasetName,
+    "--product-analytics-dataset-name",
+    input.productAnalyticsDatasetName,
     "--cost-accounting-mode",
     input.costAccountingMode,
     "--logpush-job-id",
@@ -185,6 +189,8 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
     input.policyRateLimitNamespaceId,
     "--job-api-network-rate-limit-namespace-id",
     input.jobApiNetworkRateLimitNamespaceId,
+    "--product-analytics-rate-limit-namespace-id",
+    input.productAnalyticsRateLimitNamespaceId,
     "--alert-destination-address",
     input.alertDestinationAddress,
     "--maintainer-session-hashes-json",
@@ -270,6 +276,7 @@ describe("processing Wrangler generator", () => {
       ],
       analytics_engine_datasets: [
         { binding: "USAGE_ANALYTICS", dataset: input.usageAnalyticsDatasetName },
+        { binding: "PRODUCT_ANALYTICS", dataset: input.productAnalyticsDatasetName },
       ],
       version_metadata: { binding: "WORKER_VERSION" },
       durable_objects: {
@@ -295,7 +302,13 @@ describe("processing Wrangler generator", () => {
       "21004",
       "21005",
       "21006",
+      "21007",
     ]);
+    expect(config.ratelimits).toContainEqual({
+      name: "PRODUCT_ANALYTICS_RATE_LIMITER",
+      namespace_id: "21007",
+      simple: { limit: 120, period: 60 },
+    });
     expect(config.vars).toMatchObject({
       ENVIRONMENT: "staging",
       CLOUDFLARE_ACCOUNT_ID: input.accountId,
@@ -367,6 +380,8 @@ describe("processing Wrangler generator", () => {
     ],
     ["wrong bucket", { bucketName: "hereisit-processing-production" }],
     ["wrong dataset", { usageAnalyticsDatasetName: "hereisit_processing_usage_production" }],
+    ["wrong product dataset", { productAnalyticsDatasetName: "hereisit_product_usage_production" }],
+    ["duplicate product namespace", { productAnalyticsRateLimitNamespaceId: "21005" }],
   ])("rejects %s", (_label, override) => {
     expect(() => generateProcessingWrangler({ ...validInput(), ...override })).toThrow();
   });

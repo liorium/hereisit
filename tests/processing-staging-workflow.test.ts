@@ -113,6 +113,15 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain(`LOGPUSH_STATUS_TOKEN: \${{ secrets.STAGING_LOGPUSH_STATUS_TOKEN }}`);
   });
 
+  it("binds the staging product dataset without provisioning a separate resource", () => {
+    expect(workflow).toContain("PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_staging");
+    expect(workflow).toContain(
+      '--product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME"',
+    );
+    expect(workflow).toContain("--product-analytics-rate-limit-namespace-id 21007");
+    expect(workflow.match(/--product-analytics-dataset-name/g)).toHaveLength(1);
+  });
+
   it("resumes only the primary queue after deployment checks and fails closed", () => {
     const deploy = jobBody("deploy");
     const verifyPages = deploy.indexOf("node scripts/verify-pages-alias.mjs");

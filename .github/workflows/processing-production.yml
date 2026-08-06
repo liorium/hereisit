@@ -39,6 +39,7 @@ jobs:
       BUCKET_NAME: hereisit-processing-production
       USAGE_LOG_BUCKET_NAME: hereisit-processing-usage-production
       USAGE_ANALYTICS_DATASET_NAME: hereisit_processing_usage_production
+      PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_production
       QUEUE_NAME: hereisit-image-jobs-production
       DLQ_NAME: hereisit-image-jobs-dlq-production
       WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
@@ -189,6 +190,7 @@ jobs:
               --bucket-name "$BUCKET_NAME" \
               --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
               --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
+              --product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME" \
               --cost-accounting-mode "$1" \
               --logpush-job-id "$PRODUCTION_LOGPUSH_JOB_ID" \
               --container-application-id "$2" \
@@ -216,6 +218,7 @@ jobs:
               --result-download-rate-limit-namespace-id 22004 \
               --policy-rate-limit-namespace-id 22005 \
               --job-api-network-rate-limit-namespace-id 22006 \
+              --product-analytics-rate-limit-namespace-id 22007 \
               --alert-destination-address "$ALERT_DESTINATION_ADDRESS" \
               --maintainer-session-hashes-json "$maintainer_hashes" \
               --rollout-percent 0
