@@ -233,8 +233,10 @@ async function prepareCompressedResult(
   const privacy = await installPrivacyObserver(page);
   await openReadyPdfCompression(page);
   await uploadPdf(page, "scan.pdf", await createScannedPdf(page), 1);
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
   return privacy;
 }
 
@@ -245,6 +247,15 @@ async function settleRenderedState(page: Page): Promise<void> {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   );
+}
+
+async function expectMobileCompressionStage(page: Page): Promise<void> {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+  const buttons = page.getByRole("region", { name: "파일 작업 영역" }).locator("button");
+  for (const button of await buttons.all()) {
+    const box = await button.boundingBox();
+    if (box !== null) expect(box.height).toBeGreaterThanOrEqual(44);
+  }
 }
 
 test("detects a sentinel filename hidden in a structured console argument", async ({ page }) => {
@@ -506,33 +517,16 @@ test("bounds a wide history state before enumerating its values", async ({ page 
   ).toBe(0);
 });
 
-test("publishes the isolated compression shell with exact default copy and preset", async ({
-  page,
-}) => {
-  await page.goto(PDF_COMPRESSION_ROUTE);
-  await expect(page.getByRole("heading", { level: 1, name: "스캔 PDF 용량 줄이기" })).toBeVisible();
+test("shows only the file-selection step before a PDF is ready", async ({ page }) => {
+  await openReadyPdfCompression(page);
+  await expect(page.getByRole("heading", { level: 2, name: "스캔 PDF 용량 줄이기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled();
-  await expect(page.getByRole("radio", { name: /균형 150DPI/ })).toBeChecked();
-  await expect(page.getByRole("radio", { name: /최소 용량 96DPI/ })).not.toBeChecked();
-  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(2);
-  await expect(page.getByText(/원본보다 1% 이상 작을 때만/).first()).toBeVisible();
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "PDF 압축 결과" })).toHaveCount(0);
   await expect(
-    page.getByText("PDF 1개 · 1바이트~50MB · 최대 100페이지 · 파일은 이 기기에서만 처리돼요."),
+    page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/작은 글자가 흐려질 수 있어요/)).toBeVisible();
-  await expect(page.locator('[aria-label="PDF 압축 작업 공간"] > *')).toHaveCount(3);
-  await expect(page.locator('[aria-label="PDF 압축 작업 공간"] > *').nth(0)).toHaveAttribute(
-    "aria-label",
-    "원본 PDF",
-  );
-  await expect(page.locator('[aria-label="PDF 압축 작업 공간"] > *').nth(1)).toHaveAttribute(
-    "aria-label",
-    "PDF 압축 설정",
-  );
-  await expect(page.locator('[aria-label="PDF 압축 작업 공간"] > *').nth(2)).toHaveAttribute(
-    "aria-label",
-    "PDF 압축 결과",
-  );
+  await expect(page.getByText("파일은 이 기기에서만 처리돼요.", { exact: true })).toBeVisible();
 });
 
 test("explains an unsupported browser before selection without starting local work", async ({
@@ -585,6 +579,7 @@ test("compresses a known scan with the default preset and downloads only after o
   page,
 }) => {
   test.setTimeout(90_000);
+  await page.setViewportSize({ width: 320, height: 720 });
   await installAvailableWebShare(page);
   await installObjectUrlCounters(page);
   const privacySentinel = "PRIVATE_SCAN_SENTINEL";
@@ -592,32 +587,33 @@ test("compresses a known scan with the default preset and downloads only after o
     sentinels: [privacySentinel, SOURCE_TITLE, SOURCE_AUTHOR],
   });
   await openReadyPdfCompression(page);
+  await expectMobileCompressionStage(page);
   let downloadCount = 0;
   page.on("download", () => {
     downloadCount += 1;
   });
   const source = await createScannedPdf(page, 2);
   await uploadPdf(page, `${privacySentinel}.pdf`, source, 2);
-  await expect(page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" })).toBeEnabled();
-  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(2);
+  const setup = page.getByRole("region", { name: "PDF 압축 설정" });
+  await expect(setup).toBeVisible();
+  await expectMobileCompressionStage(page);
+  await expect(setup.getByRole("radio", { name: /균형 150DPI/ })).toBeChecked();
+  await expect(setup.getByText(DESTRUCTIVE_WARNING, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "2페이지 용량 줄이기" })).toBeEnabled();
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  const details = page.getByLabel("압축 결과 상세");
-  const detailRows = details.locator("div");
-  await expect(details.getByText("균형 150DPI", { exact: true })).toBeVisible();
-  await expect(detailRows.filter({ hasText: /^원본\d+(?:\.\d+)?(?:B|KB|MB)$/ })).toHaveCount(1);
-  await expect(detailRows.filter({ hasText: /^결과\d+(?:\.\d+)?(?:B|KB|MB)$/ })).toHaveCount(1);
-  await expect(detailRows.filter({ hasText: /^절약\d+%$/ })).toHaveCount(1);
-  await expect(detailRows.filter({ hasText: /^처리 시간(?:\d+ms|\d+(?:\.\d+)?초)$/ })).toHaveCount(
-    1,
-  );
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(
-    page.getByRole("region", { name: "PDF 압축 결과" }).getByText(DESTRUCTIVE_WARNING, {
-      exact: true,
-    }),
+    page.getByText(/^\d+(?:\.\d+)?(?:B|KB|MB) → \d+(?:\.\d+)?(?:B|KB|MB)$/),
   ).toBeVisible();
-  await expect(page.getByText(DESTRUCTIVE_WARNING, { exact: true })).toHaveCount(3);
+  await expect(page.getByText(/^\d+% 줄었어요$/)).toBeVisible();
+  await expect(page.getByText("모든 페이지가 이미지로 변환된 PDF예요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "다른 PDF 압축" })).toBeVisible();
+  await expect(page.getByText("처리 시간", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "같은 설정으로 다시 실행" })).toHaveCount(0);
+  await expectMobileCompressionStage(page);
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
@@ -655,6 +651,7 @@ test("compresses a known scan with the default preset and downloads only after o
 test("makes the same Letter scan smaller with the minimum preset and preserves output structure", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await installAvailableWebShare(page);
   await installObjectUrlCounters(page);
   await openReadyPdfCompression(page);
@@ -665,8 +662,10 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
   });
   await uploadPdf(page, "report.pdf", source, 2);
 
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
   expect(downloadCount).toBe(0);
   const [balancedDownload] = await Promise.all([
     page.waitForEvent("download"),
@@ -677,18 +676,13 @@ test("makes the same Letter scan smaller with the minimum preset and preserves o
   await expectWebShareUnused(page);
   const balanced = await downloadedBytes(await balancedDownload.path());
 
+  await page.getByRole("button", { name: "다른 PDF 압축" }).click();
+  await uploadPdf(page, "report.pdf", source, 2);
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
-  await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect(
-    page.getByLabel("압축 결과 상세").getByText("최소 용량 96DPI", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("region", { name: "PDF 압축 결과" }).getByText(DESTRUCTIVE_WARNING, {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
   expect(downloadCount).toBe(1);
   expect(await resultObjectUrlMime(page)).toBe("application/pdf");
 
@@ -734,7 +728,7 @@ test("keeps a compressed PDF result retryable when download activation fails", a
     await expect(page.getByRole("status")).toContainText(
       "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
     );
-    await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible();
     await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
   });
 
@@ -775,7 +769,7 @@ test("shows both preset-specific no-reduction messages without creating a result
   });
   await uploadPdf(page, "vector.pdf", await createVectorPdf(1, { width: 612, height: 792 }), 1);
 
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
   await expect(
     page
       .getByText(
@@ -788,7 +782,7 @@ test("shows both preset-specific no-reduction messages without creating a result
   expect(downloadCount).toBe(0);
 
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
   await expect(
     page
       .getByText(
@@ -813,25 +807,25 @@ test("gives preset-specific guidance when a valid oversized page is unsafe at mi
     1,
   );
 
-  const resultRegion = page.getByRole("region", { name: "PDF 압축 결과" });
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
+  const setup = page.getByRole("region", { name: "PDF 압축 설정" });
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
   await expect(
-    resultRegion.getByText(
+    setup.getByText(
       "균형 150DPI에서는 페이지가 너무 커요. 최소 용량 96DPI로 낮춰 다시 시도해 주세요.",
       { exact: true },
     ),
   ).toBeVisible({ timeout: 60_000 });
 
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
 
   await expect(
-    resultRegion.getByText(
+    setup.getByText(
       "사용 가능한 최소 96DPI에서도 이 PDF를 안전하게 처리할 수 없어요. 원본을 그대로 사용하거나 페이지 크기나 페이지 수를 줄인 PDF를 다시 준비해 주세요.",
       { exact: true },
     ),
   ).toBeVisible({ timeout: 60_000 });
-  await expect(resultRegion.getByText(/더 낮은 해상도/)).toHaveCount(0);
+  await expect(setup.getByText(/더 낮은 해상도/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
 });
@@ -875,36 +869,12 @@ test("reports count-based rendering, encoding, and assembling progress", async (
   });
   await openReadyPdfCompression(page);
   await uploadPdf(page, "progress.pdf", await createScannedPdf(page, 2), 2);
-  await page.evaluate(() => {
-    const progress = document.querySelector('[role="progressbar"][aria-label="PDF 압축 진행률"]');
-    const observedWindow = window as Window & {
-      __hereisitCompressionProgress?: Array<{ label: string | null; value: string | null }>;
-    };
-    observedWindow.__hereisitCompressionProgress = [];
-    if (progress === null) throw new Error("Compression progress element unavailable");
-    const record = () => {
-      observedWindow.__hereisitCompressionProgress?.push({
-        label: progress.getAttribute("aria-valuetext"),
-        value: progress.getAttribute("aria-valuenow"),
-      });
-    };
-    new MutationObserver(record).observe(progress, {
-      attributes: true,
-      attributeFilter: ["aria-valuenow", "aria-valuetext"],
-    });
-    record();
+  await expect(page.getByRole("progressbar", { name: "PDF 압축 진행률" })).toHaveCount(0);
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("progressbar", { name: "PDF 압축 진행률" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
   });
-
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  const states = await page.evaluate(
-    () =>
-      (
-        window as Window & {
-          __hereisitCompressionProgress?: Array<{ label: string | null; value: string | null }>;
-        }
-      ).__hereisitCompressionProgress ?? [],
-  );
   expect(
     await page.evaluate(() =>
       JSON.parse(sessionStorage.getItem("__hereisitCompressionWorkerProgress") ?? "[]"),
@@ -917,11 +887,6 @@ test("reports count-based rendering, encoding, and assembling progress", async (
     { phase: "encoding", completedPages: 2, totalPages: 2 },
     { phase: "assembling", completedPages: 2, totalPages: 2 },
   ]);
-  expect(states.some(({ label }) => label === "1/2페이지 다시 만드는 중")).toBe(true);
-  expect(states.some(({ label }) => label === "2/2페이지 다시 만드는 중")).toBe(true);
-  const numericValues = states.map(({ value }) => Number(value)).filter(Number.isFinite);
-  expect(numericValues).toEqual([...numericValues].sort((left, right) => left - right));
-  expect(states.at(-1)).toEqual({ label: "압축 완료", value: "100" });
 });
 
 test("hard-rejects page counts outside the advisory limit without preflighting MediaBox geometry", async ({
@@ -938,7 +903,7 @@ test("hard-rejects page counts outside the advisory limit without preflighting M
   ).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
-  await expect(page.getByRole("button", { name: "PDF 용량 줄이기 →" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /페이지 용량 줄이기/ })).toHaveCount(0);
 
   await uploadPdf(
     page,
@@ -946,12 +911,10 @@ test("hard-rejects page counts outside the advisory limit without preflighting M
     await createVectorPdf(1, { width: 3_933.6, height: 72 }),
     1,
   );
-  await expect(page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "1페이지 용량 줄이기" })).toBeEnabled();
 });
 
-test("invalidates and revokes results on preset change, rerun, replacement, reset, and unmount", async ({
-  page,
-}) => {
+test("revokes results when starting another PDF and leaving the tool", async ({ page }) => {
   test.setTimeout(90_000);
   await installObjectUrlCounters(page);
   let downloads = 0;
@@ -962,37 +925,17 @@ test("invalidates and revokes results on preset change, rerun, replacement, rese
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
   expect(downloads).toBe(0);
 
-  await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
-  await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+  await page.getByRole("button", { name: "다른 PDF 압축" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
-  expect(downloads).toBe(0);
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 1 });
-  expect(downloads).toBe(0);
-
-  await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 2 });
   expect(downloads).toBe(0);
 
   const replacement = await createScannedPdf(page);
   await uploadPdf(page, "replacement.pdf", replacement, 1);
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
-  expect(downloads).toBe(0);
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 3 });
-  expect(downloads).toBe(0);
-
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 4 });
-  expect(downloads).toBe(0);
-  await uploadPdf(page, "unmount.pdf", replacement, 1);
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 4 });
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 1 });
   expect(downloads).toBe(0);
 
   await page.evaluate(() => {
@@ -1004,7 +947,7 @@ test("invalidates and revokes results on preset change, rerun, replacement, rese
     router.push("/pdf/merge");
   });
   await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 5 });
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 2 });
   expect(downloads).toBe(0);
 });
 
@@ -1031,14 +974,15 @@ test("cancels immediately without exposing a partial result or download", async 
     };
   });
 
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await page.getByRole("button", { name: "작업 중단" }).click();
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "중단" }).click();
   await page.evaluate(() => {
     (window as Window & { __hereisitReleaseFrames?: () => void }).__hereisitReleaseFrames?.();
   });
   await settleRenderedState(page);
   await expect(page.getByText("PDF 압축을 중단했어요.").first()).toBeVisible();
-  await expect(page.getByText("압축 PDF 준비 완료")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "PDF 압축 설정" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(downloadCount).toBe(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });

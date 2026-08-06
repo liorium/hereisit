@@ -11,9 +11,9 @@ import {
 const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
 const ROUTE_PATH = "/pdf/compress";
 const REQUIRED_ASSET_PATHS = [
-  "/pdfjs/6.1.200/pdf.worker.min.mjs",
-  "/pdfjs/6.1.200/cmaps/Adobe-Japan1-UCS2.bcmap",
-  "/pdfjs/6.1.200/standard_fonts/LiberationSans-Regular.ttf",
+  "/pdfjs/6.2.108/pdf.worker.min.mjs",
+  "/pdfjs/6.2.108/cmaps/Adobe-Japan1-UCS2.bcmap",
+  "/pdfjs/6.2.108/standard_fonts/LiberationSans-Regular.ttf",
 ];
 const SOURCE_METADATA = {
   author: "PRIVATE_COMPRESSION_SMOKE_AUTHOR",
@@ -392,7 +392,7 @@ try {
     if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
     if (request.postData() !== null) violations.push("request-body");
     if (request.redirectedFrom() !== null) violations.push("redirect");
-    if (target.pathname.startsWith("/pdfjs/") && !target.pathname.startsWith("/pdfjs/6.1.200/")) {
+    if (target.pathname.startsWith("/pdfjs/") && !target.pathname.startsWith("/pdfjs/6.2.108/")) {
       violations.push("unpinned-pdfjs");
     }
     if (SENTINELS.some((sentinel) => decodeURIComponent(request.url()).includes(sentinel))) {

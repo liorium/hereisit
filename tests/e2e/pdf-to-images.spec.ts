@@ -170,10 +170,10 @@ async function observePrivateConversion(page: Page) {
     if (url.origin !== origin) violations.push("cross-origin");
     if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
     if (request.postData() !== null) violations.push("request-body");
-    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.1.200/")) {
+    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.2.108/")) {
       violations.push("unpinned-pdfjs");
     }
-    if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
+    if (url.pathname === "/pdfjs/6.2.108/pdf.worker.min.mjs") parserWorkerRequests += 1;
     await route.continue();
   });
   page.context().on("requestfailed", () => {
@@ -759,7 +759,7 @@ test("loads only each raster route's inspection and dedicated Worker markers", a
     for (const requestUrl of pdfjsRequests) {
       const url = new URL(requestUrl);
       expect(url.origin).toBe(LOCAL_PAGES_ORIGIN);
-      expect(url.pathname.startsWith("/pdfjs/6.1.200/")).toBe(true);
+      expect(url.pathname.startsWith("/pdfjs/6.2.108/")).toBe(true);
     }
 
     page.off("request", onRequest);

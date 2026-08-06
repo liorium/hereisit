@@ -493,7 +493,7 @@ describe("default PDF.js adapter and parser readiness", () => {
       RenderingCancelledException: FakePdfException,
       ResponseException: FakePdfException,
       VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
+      version: "6.2.108",
     }));
     vi.stubGlobal("Worker", FakeParserWorker);
     vi.stubGlobal("self", { location: { origin: "https://example.test" } });
@@ -504,7 +504,7 @@ describe("default PDF.js adapter and parser readiness", () => {
     expect(await settleBeforeNextTimer(result)).toEqual({ status: "pending" });
     const parserPort = FakeParserWorker.instances[0];
     expect(parserPort).toBeDefined();
-    expect(parserPort?.url.href).toBe("https://example.test/pdfjs/6.1.200/pdf.worker.min.mjs");
+    expect(parserPort?.url.href).toBe("https://example.test/pdfjs/6.2.108/pdf.worker.min.mjs");
     expect(parserPort?.options).toEqual({
       type: "module",
       name: "hereisit-pdfjs-parser-worker",
@@ -547,9 +547,9 @@ describe("default PDF.js adapter and parser readiness", () => {
       ].sort(),
     );
     expect(parameters).toMatchObject({
-      cMapUrl: "https://example.test/pdfjs/6.1.200/cmaps/",
+      cMapUrl: "https://example.test/pdfjs/6.2.108/cmaps/",
       cMapPacked: true,
-      standardFontDataUrl: "https://example.test/pdfjs/6.1.200/standard_fonts/",
+      standardFontDataUrl: "https://example.test/pdfjs/6.2.108/standard_fonts/",
       useWorkerFetch: true,
       useWasm: false,
       enableXfa: false,
@@ -598,7 +598,7 @@ describe("default PDF.js adapter and parser readiness", () => {
       RenderingCancelledException: FakePdfException,
       ResponseException: FakePdfException,
       VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
+      version: "6.2.108",
     }));
     vi.stubGlobal("Worker", FakeParserWorker);
     vi.stubGlobal("self", { location: { origin: "https://example.test" } });
@@ -643,7 +643,7 @@ describe("default PDF.js adapter and parser readiness", () => {
       RenderingCancelledException: FakePdfException,
       ResponseException: FakePdfException,
       VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
+      version: "6.2.108",
     }));
     vi.stubGlobal("Worker", FakeParserWorker);
     vi.stubGlobal("self", { location: { origin: "https://example.test" } });
@@ -717,7 +717,7 @@ describe("default PDF.js adapter and parser readiness", () => {
       RenderingCancelledException: FakePdfException,
       ResponseException: FakePdfException,
       VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
+      version: "6.2.108",
     }));
     vi.stubGlobal("Worker", FakeParserWorker);
     vi.stubGlobal("self", { location: { origin: "https://example.test" } });

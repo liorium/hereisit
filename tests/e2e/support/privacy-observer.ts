@@ -458,13 +458,13 @@ export async function installPrivacyObserver(
         `${request.method()} ${url.origin === origin ? "same-origin" : "cross-origin"}`,
       );
     }
-    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.1.200/")) {
+    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.2.108/")) {
       violations.push("unpinned-pdfjs");
     }
     if (sentinels.some((sentinel) => decodeURIComponent(request.url()).includes(sentinel))) {
       leaks.push("request-url");
     }
-    if (url.pathname === "/pdfjs/6.1.200/pdf.worker.min.mjs") parserWorkerRequests += 1;
+    if (url.pathname === "/pdfjs/6.2.108/pdf.worker.min.mjs") parserWorkerRequests += 1;
     if (
       options.fulfillProbePathPrefix !== undefined &&
       url.pathname.startsWith(options.fulfillProbePathPrefix)

@@ -5,7 +5,7 @@ import {
 } from "@hereisit/pdf-tool";
 
 const MAX_ACTIVE_CANVAS_BYTES = 128 * 1024 * 1024;
-const PDFJS_VERSION = "6.1.200";
+const PDFJS_VERSION = "6.2.108";
 const PDFJS_ASSET_PATH = `/pdfjs/${PDFJS_VERSION}/`;
 const CANVAS_MEMORY_MARKER = "[HEREISIT_PDF_CANVAS_MEMORY_LIMIT]";
 const MEMORY_LIMIT_MESSAGE =

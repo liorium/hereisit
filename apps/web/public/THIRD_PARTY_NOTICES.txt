@@ -2176,7 +2176,7 @@ THE SOFTWARE.
 
 ========================================================================
 Package: pdfjs-dist
-Version: 6.1.200
+Version: 6.2.108
 License: Apache-2.0
 
 --- LICENSE ---
