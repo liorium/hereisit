@@ -1,4 +1,10 @@
-import { type ConsoleMessage, expect, type Page, type Route } from "@playwright/test";
+import {
+  type ConsoleMessage,
+  expect,
+  type Page,
+  type Request as PlaywrightRequest,
+  type Route,
+} from "@playwright/test";
 
 const DEFAULT_ORIGIN = "http://127.0.0.1:4173";
 
@@ -21,11 +27,13 @@ export interface PrivacyObservation {
   consoleMessages: readonly string[];
   storageWrites: readonly string[];
   objectUrls: readonly string[];
+  productEvents: readonly string[];
 }
 
 export interface PrivacyObserverOptions {
   fulfillProbePathPrefix?: string;
   origin?: string;
+  productAnalyticsOrigin?: string;
   sentinels?: readonly string[];
 }
 
@@ -44,7 +52,9 @@ export async function installPrivacyObserver(
   const externalRequests: string[] = [];
   const writeRequests: string[] = [];
   const consoleMessages: string[] = [];
+  const productEvents: string[] = [];
   const context = page.context();
+  const productAnalyticsOrigin = options.productAnalyticsOrigin;
   let requestCount = 0;
   let parserWorkerRequests = 0;
   let downloads = 0;
@@ -394,14 +404,56 @@ export async function installPrivacyObserver(
     }
     const request = route.request();
     const url = new URL(request.url());
+    const requestBody = request.postData();
+    const isProductAnalytics =
+      productAnalyticsOrigin !== undefined &&
+      url.origin === productAnalyticsOrigin &&
+      url.pathname === "/v1/analytics/events" &&
+      url.search === "" &&
+      request.method() === "POST";
     requestCount += 1;
+    if (requestBody !== null && sentinels.some((sentinel) => requestBody.includes(sentinel))) {
+      leaks.push("request-body");
+    }
+    if (isProductAnalytics) {
+      const allowedKeys = new Set(["schema", "toolId", "event", "duration", "failure"]);
+      const allowedEvents = new Set([
+        "processing-started",
+        "processing-succeeded",
+        "processing-failed",
+        "download-requested",
+      ]);
+      try {
+        if (requestBody === null || new TextEncoder().encode(requestBody).byteLength > 512) {
+          throw new TypeError("invalid analytics body");
+        }
+        const payload: unknown = JSON.parse(requestBody);
+        if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+          throw new TypeError("invalid analytics body");
+        }
+        const record = payload as Record<string, unknown>;
+        if (
+          record.schema !== "product-usage@1" ||
+          Object.keys(record).some((key) => !allowedKeys.has(key)) ||
+          typeof record.event !== "string" ||
+          !allowedEvents.has(record.event)
+        ) {
+          throw new TypeError("invalid analytics body");
+        }
+        productEvents.push(record.event);
+      } catch {
+        violations.push("invalid-product-analytics");
+      }
+      await route.fulfill({ status: 204 });
+      return;
+    }
     if (url.origin !== origin) {
       violations.push("cross-origin");
       externalRequests.push(`${request.method()} cross-origin`);
     }
-    if (!["GET", "HEAD"].includes(request.method()) || request.postData() !== null) {
+    if (!["GET", "HEAD"].includes(request.method()) || requestBody !== null) {
       if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
-      if (request.postData() !== null) violations.push("request-body");
+      if (requestBody !== null) violations.push("request-body");
       writeRequests.push(
         `${request.method()} ${url.origin === origin ? "same-origin" : "cross-origin"}`,
       );
@@ -439,7 +491,17 @@ export async function installPrivacyObserver(
   const downloadHandler = () => {
     downloads += 1;
   };
-  const failedRequestHandler = () => {
+  const failedRequestHandler = (request: PlaywrightRequest) => {
+    const url = new URL(request.url());
+    if (
+      productAnalyticsOrigin !== undefined &&
+      url.origin === productAnalyticsOrigin &&
+      url.pathname === "/v1/analytics/events" &&
+      url.search === "" &&
+      request.method() === "POST"
+    ) {
+      return;
+    }
     failedRequests += 1;
   };
   const pageErrorHandler = () => {
@@ -478,6 +540,7 @@ export async function installPrivacyObserver(
       externalRequests.length = 0;
       writeRequests.length = 0;
       consoleMessages.length = 0;
+      productEvents.length = 0;
       requestCount = 0;
       parserWorkerRequests = 0;
       downloads = 0;
@@ -511,6 +574,7 @@ export async function installPrivacyObserver(
         consoleMessages: [...consoleMessages],
         storageWrites: [...browserState.storageWrites],
         objectUrls: [...browserState.objectUrls],
+        productEvents: [...productEvents],
       };
     },
     async assertClean(expectedDownloads = 0, requireParserWorker = true) {

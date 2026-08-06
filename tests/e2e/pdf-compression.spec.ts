@@ -413,6 +413,7 @@ test("observes deliberate privacy probes without exposing their raw values", asy
     consoleMessages: [],
     storageWrites: [],
     objectUrls: [],
+    productEvents: [],
   });
   await privacy.assertClean(0, false);
 });
