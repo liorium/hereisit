@@ -25,6 +25,40 @@ async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array>
   return new Uint8Array(await readFile(downloadPath as string));
 }
 
+test("product analytics records one PDF merge and download", async ({ page }) => {
+  const events: Record<string, unknown>[] = [];
+  await page.route("**/v1/analytics/events", async (route) => {
+    events.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ status: 204 });
+  });
+  await page.goto("/pdf/merge");
+  await page.locator("input[type=file]").setInputFiles([
+    { name: "first.pdf", mimeType: "application/pdf", buffer: await createPdf([100]) },
+    { name: "second.pdf", mimeType: "application/pdf", buffer: await createPdf([200]) },
+  ]);
+
+  const merge = page.getByRole("button", { name: "PDF 합치기", exact: true });
+  await expect(merge).toBeEnabled({ timeout: 20_000 });
+  await merge.click();
+  await expect(page.getByRole("heading", { name: "PDF 합치기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "결과 PDF 다운로드 ↓" }).click(),
+  ]);
+
+  await expect.poll(() => events.length).toBe(3);
+  expect(events.map(({ event }) => event)).toEqual([
+    "processing-started",
+    "processing-succeeded",
+    "download-requested",
+  ]);
+  expect(events.every(({ toolId }) => toolId === "pdf.merge")).toBe(true);
+  const allowed = new Set(["schema", "toolId", "event", "duration", "failure"]);
+  expect(events.every((event) => Object.keys(event).every((key) => allowed.has(key)))).toBe(true);
+});
+
 test("merges PDFs in the chosen order without external uploads", async ({ page }) => {
   await installAvailableWebShare(page);
   await page.goto("/pdf/merge");

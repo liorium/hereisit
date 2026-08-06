@@ -13,6 +13,7 @@ import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-co
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
@@ -82,6 +83,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const jobHandleRef = useRef<PdfCompressScannedJobHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const busy = inspecting || processing;
   const visibleMessage = hydrated && !runtimeSupported ? UNSUPPORTED_BROWSER_MESSAGE : message;
 
@@ -102,6 +104,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       inspectionHandleRef.current?.cancel();
       inspectionHandleRef.current = undefined;
       jobHandleRef.current?.cancel();
+      productRunRef.current?.cancelled();
       jobHandleRef.current = undefined;
       clearResult(updateState);
       if (updateState) {
@@ -235,6 +238,8 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     const selectedInspection = inspection;
     const selectedPreset = preset;
     const runId = invalidateActiveWork();
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
     setProcessing(true);
     setProgress({ phase: "validating", fraction: 0 });
     setMessage("압축 설정과 파일을 확인하고 있어요.");
@@ -259,6 +264,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       if (runRef.current !== runId) return;
 
       if (outcome.status === "fulfilled") {
+        productRun.succeeded();
         const { bytes, ...resultMetadata } = outcome.value;
         const blob = new Blob([bytes], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
@@ -267,9 +273,11 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         setProgress({ phase: "finalizing", fraction: 1 });
         setMessage("압축 PDF를 준비했어요.");
       } else if (outcome.status === "cancelled") {
+        productRun.cancelled();
         setProgress(undefined);
         setMessage("PDF 압축을 중단했어요.");
       } else {
+        productRun.failed(outcome.error.code);
         setProgress(undefined);
         const noReductionMessage =
           selectedPreset === "balanced"
@@ -289,10 +297,12 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       }
     } catch {
       if (runRef.current === runId) {
+        productRun.failed("WORKER_CRASH");
         setProgress(undefined);
         setMessage("스캔 PDF 압축 작업기를 시작하지 못했어요. 다시 시도해 주세요.");
       }
     } finally {
+      if (productRunRef.current === productRun) productRunRef.current = null;
       if (runRef.current === runId) {
         if (jobHandleRef.current === handle) jobHandleRef.current = undefined;
         setProcessing(false);
@@ -315,6 +325,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     const resultUrl = resultUrlRef.current;
     if (result === undefined || resultUrl === undefined) return;
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(resultUrl, result.suggestedName);
       setMessage("다운로드를 시작했어요.");
     } catch {

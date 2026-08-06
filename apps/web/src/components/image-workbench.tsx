@@ -28,6 +28,7 @@ import {
   formatSavings,
   resolveIfCurrent,
 } from "../lib/files";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type ToolImplementationConfig } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
@@ -258,6 +259,7 @@ export function ImageWorkbench({
   const itemsRef = useRef(items);
   const objectUrlsRef = useRef(new Set<string>());
   const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const detecting = detectionProgress !== null;
   const busy = processing || archiving || detecting;
 
@@ -305,6 +307,7 @@ export function ImageWorkbench({
       activeRunRef.current += 1;
       detectionGenerationRef.current += 1;
       batchRef.current?.cancel();
+      productRunRef.current?.cancelled();
       for (const timeoutId of archiveLeasesRef.current.values()) clearTimeout(timeoutId);
       archiveLeasesRef.current.clear();
       for (const url of objectUrlsRef.current) URL.revokeObjectURL(url);
@@ -592,6 +595,7 @@ export function ImageWorkbench({
     activeRunRef.current += 1;
     detectionGenerationRef.current += 1;
     batchRef.current?.cancel();
+    productRunRef.current?.cancelled();
     batchRef.current = undefined;
     for (const item of itemsRef.current) {
       revokeOwnedUrl(item.previewUrl);
@@ -658,6 +662,8 @@ export function ImageWorkbench({
 
   const startProcessing = async () => {
     if (itemsRef.current.length < minFiles || busy || !runtimeSupported) return;
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
     releaseArchiveLeases();
     const sourceItems = itemsRef.current;
     const runId = activeRunRef.current + 1;
@@ -693,6 +699,10 @@ export function ImageWorkbench({
       batchRef.current = handle;
       const results = await handle.result;
       if (activeRunRef.current !== runId) return;
+
+      if (results.some((result) => result.status === "fulfilled")) productRun.succeeded();
+      else if (results.some((result) => result.status === "cancelled")) productRun.cancelled();
+      else productRun.failed(results.find((result) => result.status === "rejected")?.error.code);
 
       const successes = results.filter((result) => result.status === "fulfilled").length;
       const unchanged = results.filter(
@@ -732,6 +742,7 @@ export function ImageWorkbench({
       }
     } catch {
       if (activeRunRef.current !== runId) return;
+      productRun.failed("WORKER_CRASH");
       commitItems((current) =>
         current.map((item) =>
           item.status === "completed"
@@ -743,12 +754,14 @@ export function ImageWorkbench({
     } finally {
       if (activeRunRef.current === runId) {
         if (batchRef.current === handle) batchRef.current = undefined;
+        if (productRunRef.current === productRun) productRunRef.current = null;
         setProcessing(false);
       }
     }
   };
 
   const cancelProcessing = () => {
+    productRunRef.current?.cancelled();
     activeRunRef.current += 1;
     batchRef.current?.cancel();
     batchRef.current = undefined;
@@ -777,6 +790,7 @@ export function ImageWorkbench({
       return;
     }
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(item.resultUrl, item.result.suggestedName);
       setMessage("다운로드를 시작했어요.");
     } catch {
@@ -814,6 +828,7 @@ export function ImageWorkbench({
       try {
         const createdUrl = createOwnedUrl(archive);
         url = createdUrl;
+        reportDownloadRequested(toolId);
         downloadUrl(createdUrl, "hereisit-images.zip");
         const timeoutId = setTimeout(() => {
           if (!archiveLeasesRef.current.delete(createdUrl)) return;

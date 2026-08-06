@@ -18,6 +18,7 @@ import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-co
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./pdf-workbench.module.css";
@@ -91,6 +92,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const jobHandleRef = useRef<PdfToImagesJobHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
+  const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const busy = inspecting || processing;
 
   const parsedPageRange = useMemo(
@@ -151,6 +153,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     inspectionHandleRef.current?.cancel();
     inspectionHandleRef.current = undefined;
     jobHandleRef.current?.cancel();
+    productRunRef.current?.cancelled();
     jobHandleRef.current = undefined;
     setInspecting(false);
     setProcessing(false);
@@ -168,6 +171,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
       runRef.current += 1;
       inspectionHandleRef.current?.cancel();
       jobHandleRef.current?.cancel();
+      productRunRef.current?.cancelled();
       if (resultUrlRef.current !== undefined) URL.revokeObjectURL(resultUrlRef.current);
     },
     [],
@@ -278,6 +282,8 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     const selectedFile = file;
     const spec = preflight.spec;
     const runId = invalidateActiveWork();
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
     setProcessing(true);
     setProgress({ phase: "validating", fraction: 0 });
     setMessage("변환 설정과 파일을 확인하고 있어요.");
@@ -302,6 +308,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
       if (runRef.current !== runId) return;
 
       if (outcome.status === "fulfilled") {
+        productRun.succeeded();
         const blob = new Blob([outcome.value.bytes], { type: outcome.value.mime });
         const url = URL.createObjectURL(blob);
         resultUrlRef.current = url;
@@ -314,18 +321,22 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
             : `${outcome.value.outputFileCount}개 이미지를 ZIP으로 준비했어요.`,
         );
       } else if (outcome.status === "cancelled") {
+        productRun.cancelled();
         setProgress(undefined);
         setMessage("이미지 변환을 중단했어요.");
       } else {
+        productRun.failed(outcome.error.code);
         setProgress(undefined);
         setMessage(outcome.error.message);
       }
     } catch {
       if (runRef.current === runId) {
+        productRun.failed("WORKER_CRASH");
         setProgress(undefined);
         setMessage("PDF 이미지 변환 작업기를 시작하지 못했어요. 다시 시도해 주세요.");
       }
     } finally {
+      if (productRunRef.current === productRun) productRunRef.current = null;
       if (runRef.current === runId) {
         if (jobHandleRef.current === handle) jobHandleRef.current = undefined;
         setProcessing(false);
@@ -348,6 +359,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     const currentUrl = resultUrlRef.current;
     if (result === undefined || resultUrl === undefined || currentUrl !== resultUrl) return;
     try {
+      reportDownloadRequested(toolId);
       downloadUrl(resultUrl, result.suggestedName);
       setMessage(
         result.outputFileCount === 1 ? "다운로드를 시작했어요." : "ZIP 다운로드를 시작했어요.",
