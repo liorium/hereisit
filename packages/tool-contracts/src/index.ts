@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./image-optimize";
+export * from "./product-usage";
 export * from "./tool-job";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
