@@ -102,13 +102,13 @@ embeds every page, then offers the final PDF only when it is at most
 download. It is not structure-preserving general PDF compression or internal-image-only optimization.
 
 After a bounded local inspection, the PDF-to-image and scanned-compression paths use separate dedicated
-Workers around shared raster internals. They import pinned PDF.js 6.1.200 and render exactly one page at a
+Workers around shared raster internals. They import pinned PDF.js 6.2.108 and render exactly one page at a
 time. The parser Worker, packed CMaps, and standard fonts are versioned, copied from the same pinned
 package, and served from the Pages origin. Each renderer receives PDF bytes as a transferred typed array;
 it never passes an input URL to PDF.js. Existing image and PDF-edit routes import neither renderer.
 
 These paths have no upload, CDN dependency, WebAssembly decoder, server renderer, or server fallback. PDF.js
-6.1.200 removed the `isEvalSupported` option, so the runtime intentionally does not pass it. The deployed
+6.2.108 does not expose the `isEvalSupported` option, so the runtime intentionally does not pass it. The deployed
 Content Security Policy, which does not grant `unsafe-eval` or `wasm-unsafe-eval`, remains the evaluation
 boundary. A browser that cannot provide the Worker and `OffscreenCanvas` chain receives an unsupported
 browser result instead of a main-thread fallback.

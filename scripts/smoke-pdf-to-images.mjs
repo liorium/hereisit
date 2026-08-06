@@ -12,9 +12,9 @@ import {
 const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
 const ROUTE_PATH = "/pdf/to-image";
 const REQUIRED_ASSET_PATHS = [
-  "/pdfjs/6.1.200/pdf.worker.min.mjs",
-  "/pdfjs/6.1.200/cmaps/Adobe-Japan1-UCS2.bcmap",
-  "/pdfjs/6.1.200/standard_fonts/LiberationSans-Regular.ttf",
+  "/pdfjs/6.2.108/pdf.worker.min.mjs",
+  "/pdfjs/6.2.108/cmaps/Adobe-Japan1-UCS2.bcmap",
+  "/pdfjs/6.2.108/standard_fonts/LiberationSans-Regular.ttf",
 ];
 
 function normalizeBaseUrl(value) {

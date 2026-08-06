@@ -3,7 +3,7 @@ import { access, cp, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PDFJS_VERSION = "6.1.200";
+const PDFJS_VERSION = "6.2.108";
 const scriptPath = fileURLToPath(import.meta.url);
 const repositoryRoot = path.resolve(path.dirname(scriptPath), "..");
 const packageRoot = path.join(repositoryRoot, "packages/browser-runtime/node_modules/pdfjs-dist");

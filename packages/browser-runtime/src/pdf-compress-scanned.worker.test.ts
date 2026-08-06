@@ -404,7 +404,7 @@ describe("scanned-PDF compression Worker readiness", () => {
       RenderingCancelledException: FakePdfException,
       ResponseException: FakePdfException,
       VerbosityLevel: { ERRORS: 0 },
-      version: "6.1.200",
+      version: "6.2.108",
     }));
     vi.stubGlobal("Worker", FakeParserWorker);
     vi.doMock("@cantoo/pdf-lib", () => ({

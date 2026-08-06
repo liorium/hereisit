@@ -8,7 +8,7 @@ import {
   plannedToolEntries,
 } from "../packages/tool-registry/src/tool-catalog.ts";
 
-const PDFJS_VERSION = "6.1.200";
+const PDFJS_VERSION = "6.2.108";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(repositoryRoot, "apps/web/out");
 const pdfjsPackageRoot = path.join(

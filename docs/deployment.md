@@ -5,7 +5,7 @@ processing, image text/logo watermarking, PDF page organization, rasterized PDF 
 PDF-page-to-image rendering remain in the browser; Pages serves only versioned static assets.
 Scan-oriented PDF compression also stays local: it rebuilds each page as JPEG and is intentionally
 destructive, while structure-preserving general PDF compression is not provided. The PDF raster paths use
-self-hosted PDF.js 6.1.200 parser Worker, CMap, and standard-font files, with no CDN, WASM, upload, or
+self-hosted PDF.js 6.2.108 parser Worker, CMap, and standard-font files, with no CDN, WASM, upload, or
 server fallback.
 
 The compressor's fixed presets are balanced 150DPI/JPEG quality 72/white and minimum 96DPI/JPEG quality
