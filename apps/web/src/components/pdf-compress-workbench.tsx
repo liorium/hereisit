@@ -12,7 +12,7 @@ import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { downloadUrl, formatBytes } from "../lib/files";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
@@ -30,6 +30,7 @@ if (PDF_COMPRESS_SCANNED_WARNING === undefined) {
 }
 
 type Preset = PdfCompressScannedSpecV1["preset"];
+type CompressionStage = "select" | "inspecting" | "setup" | "processing" | "result";
 type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResult, "bytes">;
 
 function isPdf(file: File): boolean {
@@ -79,6 +80,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const [result, setResult] = useState<PdfCompressScannedResultMetadata>();
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const stageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfCompressScannedJobHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
@@ -340,14 +342,27 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   };
 
   const pageCount = inspection?.pageCount;
-  const runLabel =
-    pageCount === undefined ? "PDF 용량 줄이기 →" : `${pageCount}페이지 PDF 용량 줄이기 →`;
-  const progressText = result === undefined ? progressLabel(progress) : "압축 완료";
-  const progressPercent = result === undefined ? Math.round((progress?.fraction ?? 0) * 100) : 100;
+  const runLabel = pageCount === undefined ? "PDF 용량 줄이기" : `${pageCount}페이지 용량 줄이기`;
+  const progressText = progressLabel(progress);
+  const progressPercent = Math.round((progress?.fraction ?? 0) * 100);
   const savings =
     result === undefined
       ? undefined
       : Math.round(((result.sourceByteLength - result.byteLength) / result.sourceByteLength) * 100);
+  const stage: CompressionStage =
+    result !== undefined
+      ? "result"
+      : processing
+        ? "processing"
+        : inspecting
+          ? "inspecting"
+          : inspection !== undefined
+            ? "setup"
+            : "select";
+
+  useEffect(() => {
+    if (stage !== "select") stageHeadingRef.current?.focus();
+  }, [stage]);
 
   return (
     <section className={styles.shell} aria-labelledby="pdf-compress-workbench-title">
@@ -364,246 +379,180 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         }}
       />
 
-      <div className={`${styles.workbench} ${styles.compressionWorkbench}`}>
-        <div className={styles.workbenchHeader}>
-          <div>
-            <p className={styles.eyebrow}>PDF COMPRESSOR</p>
-            <h2 id="pdf-compress-workbench-title">스캔 PDF 용량 줄이기</h2>
+      {stage === "select" ? (
+        <section
+          className={`${styles.emptyDropzone} ${dragging ? styles.dragging : ""}`}
+          aria-labelledby="pdf-compress-workbench-title"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            if (!busy) setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
+          }}
+          onDrop={onDrop}
+        >
+          <div className={styles.dropIcon} aria-hidden="true">
+            <span>＋</span>
           </div>
-          {file === undefined ? null : (
-            <div className={styles.headerActions}>
-              <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
+          <div className={styles.dropCopy}>
+            <h2 id="pdf-compress-workbench-title">스캔 PDF 용량 줄이기</h2>
+            <p>PDF 1개 · 최대 50MB · 최대 100페이지</p>
+          </div>
+          <div className={styles.dropActions}>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              disabled={!hydrated || !runtimeSupported}
+              onClick={() => inputRef.current?.click()}
+            >
+              PDF 선택
+            </button>
+            <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
+              {visibleMessage}
+            </p>
+          </div>
+          <div className={styles.localBadge}>
+            <span aria-hidden="true">✓</span>
+            <span>파일은 이 기기에서만 처리돼요.</span>
+          </div>
+        </section>
+      ) : stage === "inspecting" ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-compress-workbench-title" ref={stageHeadingRef} tabIndex={-1}>
+            PDF 확인하는 중
+          </h2>
+          <p role="status" aria-live="polite" aria-atomic="true">
+            {visibleMessage}
+          </p>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelInspection}>
+            중단
+          </button>
+        </section>
+      ) : stage === "setup" && file !== undefined && inspection !== undefined ? (
+        <section
+          className={`${styles.mergeSetup} ${styles.compressionSetup}`}
+          aria-label="PDF 압축 설정"
+        >
+          <header className={styles.mergeSetupHeader}>
+            <div>
+              <h2 id="pdf-compress-workbench-title" ref={stageHeadingRef} tabIndex={-1}>
+                압축 수준 선택
+              </h2>
+            </div>
+            <div className={styles.mergeHeaderActions}>
+              <button type="button" onClick={() => inputRef.current?.click()}>
                 PDF 교체
               </button>
-              <button type="button" onClick={reset} disabled={busy}>
-                처음부터
-              </button>
             </div>
-          )}
-        </div>
+          </header>
 
-        <section className={styles.workspace} aria-label="PDF 압축 작업 공간">
-          <section className={styles.filePanel} aria-label="원본 PDF">
-            <div className={styles.panelTitle}>
-              <strong>원본 PDF</strong>
-              <span>{file === undefined ? "1 FILE" : "1"}</span>
-            </div>
-            {file === undefined ? (
-              <section
-                className={`${styles.compressionPicker} ${dragging ? styles.dragging : ""}`}
-                aria-label="PDF 파일 선택"
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  if (!busy) setDragging(true);
-                }}
-                onDragOver={(event) => event.preventDefault()}
-                onDragLeave={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node))
-                    setDragging(false);
-                }}
-                onDrop={onDrop}
-              >
-                <div className={styles.compressionPickerIcon} aria-hidden="true">
-                  PDF
-                </div>
-                <p>PDF 1개 · 1바이트~50MB · 최대 100페이지 · 파일은 이 기기에서만 처리돼요.</p>
-                <button
-                  className={styles.primaryButton}
-                  type="button"
-                  disabled={!hydrated || !runtimeSupported}
-                  onClick={() => inputRef.current?.click()}
-                >
-                  PDF 선택
-                </button>
-              </section>
-            ) : (
-              <>
-                <div className={styles.fileList}>
-                  <article className={styles.fileRow}>
-                    <span className={styles.fileIndex}>01</span>
-                    <div className={styles.fileCopy}>
-                      <strong>{file.name}</strong>
-                      <span>{formatBytes(file.size)}</span>
-                    </div>
-                  </article>
-                </div>
-                <div className={styles.inspectionCard}>
-                  <strong>{inspecting ? "페이지 확인 중…" : "PDF 정보"}</strong>
-                  <p>
-                    {inspection === undefined
-                      ? "페이지 수를 이 기기에서만 확인해요."
-                      : `${inspection.pageCount}페이지 · 페이지 수만 압축 준비에 사용해요.`}
-                  </p>
-                </div>
-                <p className={styles.fileTotal}>선택 {formatBytes(file.size)} · 한도 50MB</p>
-              </>
-            )}
-          </section>
+          <div className={styles.splitFileSummary}>
+            <strong>{file.name}</strong>
+            <span>{formatBytes(file.size)}</span>
+            <span>{inspection.pageCount}페이지</span>
+          </div>
 
-          <aside className={styles.settingsPanel} aria-label="PDF 압축 설정">
-            <div className={styles.panelTitle}>
-              <strong>압축 수준</strong>
-              <span>LOCAL</span>
-            </div>
-            <div className={styles.compressionSettings}>
-              <fieldset className={styles.presetGroup}>
-                <legend>압축 수준 선택</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="pdf-compress-preset"
-                    checked={preset === "balanced"}
-                    disabled={busy}
-                    onChange={() => selectPreset("balanced")}
-                  />
-                  <span>
-                    <span className={styles.presetHeading}>
-                      <strong>균형 150DPI</strong>
-                      <em>추천</em>
-                    </span>
-                    <small>글자 가독성과 용량의 균형을 맞춰요.</small>
-                  </span>
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="pdf-compress-preset"
-                    checked={preset === "minimum"}
-                    disabled={busy}
-                    onChange={() => selectPreset("minimum")}
-                  />
-                  <span>
-                    <span className={styles.presetHeading}>
-                      <strong>최소 용량 96DPI</strong>
-                      <em>작게</em>
-                    </span>
-                    <small>용량을 더 줄이지만 작은 글자가 흐려질 수 있어요.</small>
-                  </span>
-                </label>
-              </fieldset>
+          <fieldset className={styles.splitOptions}>
+            <legend>압축 수준</legend>
+            <label>
+              <input
+                type="radio"
+                name="pdf-compress-preset"
+                checked={preset === "balanced"}
+                onChange={() => selectPreset("balanced")}
+              />
+              <span>
+                <strong>균형 150DPI · 추천</strong>
+                <small>글자 가독성과 용량의 균형을 맞춰요.</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="pdf-compress-preset"
+                checked={preset === "minimum"}
+                onChange={() => selectPreset("minimum")}
+              />
+              <span>
+                <strong>최소 용량 96DPI</strong>
+                <small>더 작게 만들지만 작은 글자가 흐려질 수 있어요.</small>
+              </span>
+            </label>
+          </fieldset>
 
-              <p className={styles.compressionWarning}>{PDF_COMPRESS_SCANNED_WARNING}</p>
-              <div className={styles.privacyNotice}>
-                <span aria-hidden="true">✓</span>
-                <p>
-                  <strong>파일은 이 기기에서만 처리돼요.</strong>
-                  파일은 서버로 전송되지 않습니다.
-                </p>
-              </div>
-            </div>
-          </aside>
+          <p className={styles.compressionSetupWarning}>{PDF_COMPRESS_SCANNED_WARNING}</p>
 
-          <section className={styles.resultPanel} aria-label="PDF 압축 결과">
-            <div className={styles.resultIcon} aria-hidden="true">
-              PDF
-            </div>
-            <div className={styles.resultCopy}>
-              <strong>
-                {result !== undefined
-                  ? "압축 PDF 준비 완료"
-                  : processing
-                    ? progressLabel(progress)
-                    : inspecting
-                      ? "PDF 페이지 확인 중"
-                      : visibleMessage}
-              </strong>
-              <p>원본보다 1% 이상 작을 때만 새 PDF를 제공해요.</p>
-            </div>
-            <div
-              className={styles.progressTrack}
-              role="progressbar"
-              aria-label="PDF 압축 진행률"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={progressPercent}
-              aria-valuetext={progressText}
+          <footer className={styles.mergeSetupFooter}>
+            <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
+              {visibleMessage}
+            </p>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              onClick={() => void startProcessing()}
             >
-              <span style={{ width: `${progressPercent}%` }} />
-            </div>
-            {result === undefined ? null : (
-              <>
-                <strong className={styles.savingsSummary}>{savings}% 절약</strong>
-                <dl className={styles.compressionResultDetails} aria-label="압축 결과 상세">
-                  <div>
-                    <dt>설정</dt>
-                    <dd>{presetLabel(result.preset)}</dd>
-                  </div>
-                  <div>
-                    <dt>원본</dt>
-                    <dd>{formatBytes(result.sourceByteLength)}</dd>
-                  </div>
-                  <div>
-                    <dt>결과</dt>
-                    <dd>{formatBytes(result.byteLength)}</dd>
-                  </div>
-                  <div>
-                    <dt>절약</dt>
-                    <dd>{savings}%</dd>
-                  </div>
-                  <div>
-                    <dt>처리 시간</dt>
-                    <dd>{formatDuration(result.timing.totalMs)}</dd>
-                  </div>
-                </dl>
-                <p className={styles.compressionResultWarning}>{PDF_COMPRESS_SCANNED_WARNING}</p>
-              </>
-            )}
-          </section>
+              {runLabel}
+            </button>
+          </footer>
         </section>
-
-        <div className={styles.actionBar}>
-          <div className={styles.statusCopy} role="status" aria-live="polite" aria-atomic="true">
-            <strong>{visibleMessage}</strong>
-            <span>
-              {processing
-                ? progressLabel(progress)
-                : inspecting
-                  ? "PDF 페이지 확인 중"
-                  : inspection === undefined
-                    ? file === undefined
-                      ? "PDF를 선택하세요."
-                      : "PDF 페이지 수를 확인할 수 없어요."
-                    : `${inspection.pageCount}페이지 PDF · ${presetLabel(preset)}`}
-            </span>
+      ) : stage === "processing" ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-compress-workbench-title" ref={stageHeadingRef} tabIndex={-1}>
+            PDF 용량 줄이는 중
+          </h2>
+          <p>{progressLabel(progress)}</p>
+          <div
+            className={styles.mergeProgressTrack}
+            role="progressbar"
+            aria-label="PDF 압축 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-valuetext={progressText}
+          >
+            <span style={{ width: `${progressPercent}%` }} />
           </div>
-          <div className={`${styles.actionButtons} ${styles.toImageActionButtons}`}>
-            {processing ? (
-              <button className={styles.secondaryButton} type="button" onClick={cancelProcessing}>
-                작업 중단
-              </button>
-            ) : inspecting ? (
-              <button className={styles.secondaryButton} type="button" onClick={cancelInspection}>
-                페이지 확인 중단
-              </button>
-            ) : result !== undefined ? (
-              <>
-                <button className={styles.secondaryButton} type="button" onClick={reset}>
-                  새 작업
-                </button>
-                <button
-                  className={styles.secondaryButton}
-                  type="button"
-                  onClick={() => void startProcessing()}
-                >
-                  같은 설정으로 다시 실행
-                </button>
-                <button className={styles.runButton} type="button" onClick={downloadResult}>
-                  PDF 다운로드 ↓
-                </button>
-              </>
-            ) : (
-              <button
-                className={styles.runButton}
-                type="button"
-                disabled={inspection === undefined || !runtimeSupported}
-                onClick={() => void startProcessing()}
-              >
-                {runLabel}
-              </button>
-            )}
+          <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
+            {visibleMessage}
+          </p>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
+      ) : result !== undefined && savings !== undefined ? (
+        <section
+          className={`${styles.mergeStage} ${styles.mergeResult}`}
+          aria-label="PDF 압축 결과"
+        >
+          <div className={styles.mergeResultMark} aria-hidden="true">
+            ✓
           </div>
-        </div>
-      </div>
+          <h2 id="pdf-compress-workbench-title" ref={stageHeadingRef} tabIndex={-1}>
+            용량 줄이기 완료
+          </h2>
+          <strong className={styles.mergeSizeComparison}>
+            {formatBytes(result.sourceByteLength)} → {formatBytes(result.byteLength)}
+          </strong>
+          <p className={styles.compressionSavings}>{savings}% 줄었어요</p>
+          <p className={styles.compressionResultNote}>모든 페이지가 이미지로 변환된 PDF예요.</p>
+          <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
+            PDF 다운로드 ↓
+          </button>
+          <p
+            className={styles.mergeResultStatus}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {visibleMessage}
+          </p>
+          <button className={styles.mergeTextAction} type="button" onClick={reset}>
+            다른 PDF 압축
+          </button>
+        </section>
+      ) : null}
     </section>
   );
 }
