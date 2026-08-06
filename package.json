@@ -9,6 +9,7 @@
   },
   "scripts": {
     "audit:prod": "pnpm audit --prod --audit-level moderate",
+    "analytics:report": "node scripts/report-product-analytics.mjs",
     "dev": "turbo dev",
     "build": "turbo build",
     "lint": "biome check .",
