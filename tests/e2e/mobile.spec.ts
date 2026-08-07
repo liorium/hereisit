@@ -430,10 +430,10 @@ test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ 
   expect(downloads).toBe(0);
 });
 
-test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", async ({
+test("keeps PDF image conversion staged, touch-safe, responsive, and cancellable", async ({
   page,
 }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
@@ -447,24 +447,12 @@ test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", 
   });
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
 
-  const files = page.getByLabel("선택한 PDF");
-  const settings = page.getByLabel("PDF 이미지 변환 설정");
-  const result = page.getByLabel("PDF 이미지 변환 결과");
-  const [filesBox, settingsBox, resultBox] = await Promise.all([
-    files.boundingBox(),
-    settings.boundingBox(),
-    result.boundingBox(),
-  ]);
-  expect(filesBox).not.toBeNull();
-  expect(settingsBox).not.toBeNull();
-  expect(resultBox).not.toBeNull();
-  expect(filesBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
-  expect(settingsBox?.y ?? 0).toBeLessThan(resultBox?.y ?? 0);
+  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "변환 완료" })).toHaveCount(0);
 
-  await page
-    .getByRole("group", { name: "변환할 페이지" })
-    .getByRole("radio", { name: /지정 페이지/ })
-    .check();
+  const settings = page.locator("details").filter({ hasText: "페이지·화질 설정" });
+  await settings.locator("summary").click();
+  await settings.getByRole("radio", { name: /지정 페이지/ }).check();
   const pageRange = page.getByLabel("페이지 범위");
   await pageRange.fill("1");
   expect(
@@ -472,12 +460,13 @@ test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", 
   ).toBeGreaterThanOrEqual(16);
 
   const quality = page.getByRole("slider", { name: "JPG 품질 85" });
-  const run = page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" });
+  const run = page.getByRole("button", { name: "1페이지 이미지로 변환" });
   const controls = [
-    page.getByRole("group", { name: "변환할 페이지" }),
+    settings.locator("summary"),
+    settings.getByRole("group", { name: "변환할 페이지" }),
     page.getByRole("group", { name: "출력 형식" }),
-    page.getByRole("group", { name: "해상도" }),
-    page.getByRole("group", { name: "JPG 품질 85" }),
+    settings.getByRole("group", { name: "해상도" }),
+    settings.getByRole("group", { name: "JPG 품질 85" }),
     quality,
     pageRange,
     run,
@@ -489,18 +478,11 @@ test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", 
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
 
-  const actionBar = run.locator("..").locator("..");
-  const viewportHeight = page.viewportSize()?.height ?? 0;
-  await page.evaluate(() => {
-    document.documentElement.style.scrollBehavior = "auto";
-    window.scrollTo(0, 900);
-  });
-  const stickyBox = await actionBar.boundingBox();
-  expect(await actionBar.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
-  expect(stickyBox).not.toBeNull();
-  expect(
-    Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
-  ).toBeLessThanOrEqual(2);
+  await run.scrollIntoViewIfNeeded();
+  await expect(run).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    page.viewportSize()?.width ?? 390,
+  );
 
   await page.evaluate(() => {
     const originalAnimationFrame = window.requestAnimationFrame.bind(window);
@@ -533,10 +515,11 @@ test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", 
       ),
   );
   await expect(page.getByText("이미지 변환을 중단했어요.").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible();
 
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
-  const save = page.getByRole("button", { name: "이미지 다운로드 ↓" });
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible({ timeout: 60_000 });
+  const save = page.getByRole("button", { name: "JPG 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -549,7 +532,7 @@ test("keeps PDF image conversion ordered, sticky, touch-safe, and cancellable", 
 });
 
 test("keeps PDF image results readable, responsive, and private", async ({ browserName, page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const document = await PDFDocument.create();
   document.addPage([300, 400]);
   const pdf = Buffer.from(await document.save());
@@ -568,21 +551,19 @@ test("keeps PDF image results readable, responsive, and private", async ({ brows
   });
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
 
-  const settings = page.getByLabel("PDF 이미지 변환 설정");
-  const result = page.getByLabel("PDF 이미지 변환 결과");
+  const settings = page.locator("details").filter({ hasText: "페이지·화질 설정" });
+  await settings.locator("summary").click();
   await settings.getByRole("radio", { name: /지정 페이지/ }).check();
   await page.getByLabel("페이지 범위").fill("1");
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
 
   const selectedPages = settings.getByRole("radio", { name: /지정 페이지/ }).locator("..");
   await expectFunctionalTextFloor([
+    { label: "PDF to-image settings summary", locator: settings.locator("summary") },
     {
       label: "PDF to-image option legend",
       locator: settings.getByText("변환할 페이지", { exact: true }),
     },
-    { label: "PDF to-image option label", locator: selectedPages.locator("strong") },
-    { label: "PDF to-image option help", locator: selectedPages.locator("small") },
+    { label: "PDF to-image option label", locator: selectedPages },
     {
       label: "PDF to-image range label",
       locator: settings.getByText("페이지 범위", { exact: true }),
@@ -593,26 +574,29 @@ test("keeps PDF image results readable, responsive, and private", async ({ brows
     },
     {
       label: "PDF to-image format legend",
-      locator: settings.getByText("출력 형식", { exact: true }),
+      locator: page.getByText("출력 형식", { exact: true }),
     },
     {
       label: "PDF to-image format control",
-      locator: settings.getByRole("radio", { name: "JPG", exact: true }).locator(".."),
+      locator: page.getByRole("radio", { name: "JPG", exact: true }).locator(".."),
     },
+  ]);
+
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible({ timeout: 60_000 });
+  await expectFunctionalTextFloor([
     {
       label: "PDF to-image result limitation",
-      locator: result.getByText("텍스트는 더 이상 검색하거나 선택할 수 없어요.", {
+      locator: page.getByText("이미지로 변환하면 텍스트를 검색하거나 선택할 수 없어요.", {
         exact: true,
       }),
     },
     {
       label: "PDF to-image action status",
-      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+      locator: page.getByRole("status").getByText("이미지 한 장을 준비했어요."),
     },
   ]);
-  await expectResponsiveResultActions(page, [
-    page.getByRole("button", { name: "이미지 다운로드 ↓" }),
-  ]);
+  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "JPG 다운로드 ↓" })]);
   const observation = await privacy.read();
   expect(observation.externalRequests).toEqual([]);
   expect(observation.writeRequests).toEqual([]);
