@@ -21,10 +21,12 @@ browser cannot reduce them safely, the tool says so instead of silently flatteni
 
 ## Contract
 
-The existing `pdf.compress-scanned@1` request remains compatible. The fulfilled result gains a required
-`mode` discriminator:
+The existing `pdf.compress-scanned@1` request and result remain available for compatibility. The web
+application moves to `pdf.compress-scanned@2`; its fulfilled result adds a required `mode`
+discriminator:
 
 ```ts
+type PdfCompressScannedSpecV2 = { version: 2; preset: "balanced" | "minimum" };
 type PdfCompressMode = "structure-preserving" | "rasterized";
 ```
 
@@ -78,4 +80,3 @@ or `스캔 페이지를 가볍게 다시 만들었어요.` No new setting, modal
 - Contract-wrapper tests reject mismatched mode/warning combinations.
 - Component and browser tests assert the two result messages and direct download behavior.
 - `pnpm verify` is the local gate. The known disk-bound image-engine container build is left to CI.
-

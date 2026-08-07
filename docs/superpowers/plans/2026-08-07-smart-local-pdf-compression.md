@@ -55,7 +55,8 @@
 
 **Interfaces:**
 - Produces: `PdfCompressMode = "structure-preserving" | "rasterized"`
-- Extends: `PdfCompressScannedResult` with required `mode`
+- Produces: `PdfCompressScannedSpecV2` and `PdfCompressScannedResultV2` with required `mode`
+- Preserves: the existing v1 request and result types
 
 - [ ] **Step 1: Write failing contract and pipeline tests** proving exact mode/warning validation,
   early structural success, structured no-reduction, and image-only raster fallback.
@@ -90,4 +91,3 @@
   Docker `ENOSPC` ceiling if the unrelated image-engine container stage is reached.
 - [ ] **Step 5: Commit** `feat: explain smart pdf compression`, push the branch, open the pull request,
   wait for required CI, merge, and verify the production route returns HTTP 200.
-
