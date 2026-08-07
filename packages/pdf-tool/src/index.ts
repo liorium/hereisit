@@ -1,4 +1,5 @@
 export * from "./compress-scanned-plan";
+export * from "./compression-profile";
 export * from "./file-format";
 export * from "./naming";
 export * from "./page-layout";

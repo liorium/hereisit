@@ -1,4 +1,5 @@
 import {
+  type PdfCompressionPageSignals,
   MAX_PDF_RASTER_DIMENSION,
   MAX_PDF_RASTER_PAGE_PIXELS,
   PDF_RASTER_RGBA_BYTES_PER_PIXEL,
@@ -264,6 +265,9 @@ export interface PdfRasterRenderTask {
 
 export interface PdfRasterRendererPage {
   readonly rotate: number;
+  getAnnotations?(options: { intent: "any" }): Promise<readonly unknown[]>;
+  getOperatorList?(options: { intent: "display" }): Promise<{ fnArray: readonly number[] }>;
+  getTextContent?(): Promise<{ items: readonly unknown[] }>;
   getViewport(options: { scale: number; rotation?: number }): PdfRasterViewport;
   render(options: {
     canvas: PdfRasterCanvasSurface;
@@ -271,6 +275,51 @@ export interface PdfRasterRendererPage {
     background: "#ffffff";
   }): PdfRasterRenderTask;
   cleanup(): unknown;
+}
+
+// pdfjs-dist 6.2.108 operator IDs. The runtime rejects any other PDF.js version at startup.
+const IMAGE_PAINT_OPERATIONS = new Set([83, 84, 85, 86, 87, 88, 89]);
+const NON_IMAGE_PAINT_OPERATIONS = new Set([44, 45, 46, 47, 62, 66, 74, 76, 80, 90, 91, 94]);
+
+export async function inspectPdfRasterPage(
+  page: PdfRasterRendererPage,
+): Promise<PdfCompressionPageSignals> {
+  if (
+    page.getTextContent === undefined ||
+    page.getAnnotations === undefined ||
+    page.getOperatorList === undefined
+  ) {
+    return {
+      nonWhitespaceTextItems: 0,
+      annotationCount: 0,
+      imagePaintOperations: 0,
+      nonImagePaintOperations: 1,
+    };
+  }
+  const [textContent, annotations, operatorList] = await Promise.all([
+    page.getTextContent(),
+    page.getAnnotations({ intent: "any" }),
+    page.getOperatorList({ intent: "display" }),
+  ]);
+  let imagePaintOperations = 0;
+  let nonImagePaintOperations = 0;
+  for (const operation of operatorList.fnArray) {
+    if (IMAGE_PAINT_OPERATIONS.has(operation)) imagePaintOperations += 1;
+    if (NON_IMAGE_PAINT_OPERATIONS.has(operation)) nonImagePaintOperations += 1;
+  }
+  return {
+    nonWhitespaceTextItems: textContent.items.filter(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        "str" in item &&
+        typeof item.str === "string" &&
+        item.str.trim().length > 0,
+    ).length,
+    annotationCount: annotations.length,
+    imagePaintOperations,
+    nonImagePaintOperations,
+  };
 }
 
 export interface PdfRasterRendererDocument {
