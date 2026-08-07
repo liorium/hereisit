@@ -253,7 +253,7 @@ async function settleRenderedState(page: Page): Promise<void> {
 
 test("shows only the current PDF-to-image stage", async ({ page }) => {
   await openReadyPdfToImages(page);
-  await expect(page.getByRole("heading", { name: "PDF를 JPG·PNG로 변환" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "PDF를 JPG·PNG로 변환" })).toBeVisible();
   await expect(page.getByText("결과가 여기에 준비돼요")).toHaveCount(0);
   await expect(page.getByRole("group", { name: "출력 형식" })).toHaveCount(0);
 
@@ -274,6 +274,27 @@ test("shows only the current PDF-to-image stage", async ({ page }) => {
   await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible();
   await expect(page.getByRole("button", { name: "JPG 다운로드 ↓" })).toBeVisible();
   await expect(page.getByRole("button", { name: "같은 설정으로 다시 실행" })).toHaveCount(0);
+});
+
+test("keeps the PDF-to-image flow usable at 320px", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await openReadyPdfToImages(page);
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createVectorPdf([{ width: 72, height: 72 }]),
+  });
+  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.getByRole("button", { name: "1페이지 이미지로 변환" })).toHaveCSS(
+    "min-height",
+    "44px",
+  );
 });
 
 test("converts two vector pages to an ordered default JPG ZIP without uploads", async ({
@@ -465,7 +486,7 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
   await expect(page.getByText("이 PDF는 2페이지까지 있어요.").first()).toBeVisible();
   await range.fill("2");
   await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
-  await expect(page.getByText("PDF 1페이지 → 1개 PNG")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("PDF 2페이지 → 1개 PNG")).toBeVisible({ timeout: 60_000 });
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
 
@@ -545,16 +566,18 @@ test("reports count-based rendering and encoding progress", async ({ browserName
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
   await page.evaluate(() => {
-    const progress = document.querySelector('[role="progressbar"]');
     const observedWindow = window as Window & { __hereisitProgressLabels?: string[] };
     observedWindow.__hereisitProgressLabels = [];
-    if (progress === null) throw new Error("Progress element unavailable");
     const record = () => {
+      const progress = document.querySelector('[role="progressbar"]');
+      if (progress === null) return;
       const label = progress.getAttribute("aria-valuetext");
       if (label !== null) observedWindow.__hereisitProgressLabels?.push(label);
     };
-    new MutationObserver(record).observe(progress, {
+    new MutationObserver(record).observe(document.body, {
       attributes: true,
+      childList: true,
+      subtree: true,
       attributeFilter: ["aria-valuetext"],
     });
     record();
@@ -616,7 +639,7 @@ test("cancels before a result or download is offered", async ({ page }) => {
   privacy.assertClean(false);
 });
 
-test("revokes result object URLs on settings, rerun, replacement, reset, and unmount", async ({
+test("revokes result object URLs on new selection, replacement, reset, and unmount", async ({
   browserName,
   page,
 }) => {

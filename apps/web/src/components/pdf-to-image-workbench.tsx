@@ -17,11 +17,11 @@ import {
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { downloadUrl, formatBytes } from "../lib/files";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
-import styles from "./pdf-workbench.module.css";
+import styles from "./pdf-to-image-workbench.module.css";
 
 const UNSUPPORTED_BROWSER_MESSAGE =
   "이 브라우저에서는 PDF를 이미지로 변환할 수 없어요. 최신 Safari, Chrome, Firefox 또는 Edge를 사용해 주세요.";
@@ -88,6 +88,7 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const [resultUrl, setResultUrl] = useState<string>();
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const stageTitleRef = useRef<HTMLHeadingElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfToImagesJobHandle | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
@@ -375,19 +376,33 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
     if (!busy) chooseFile(event.dataTransfer.files);
   };
 
-  const progressText = result !== undefined ? "변환 완료" : progressLabel(progress);
-  const progressPercent = result !== undefined ? 100 : Math.round((progress?.fraction ?? 0) * 100);
-  const validationMessage = inspecting
-    ? "PDF 페이지 확인이 끝나면 변환할 수 있어요."
-    : preflight === undefined
-      ? message
-      : preflight.ok
-        ? `${preflight.outputCount}페이지를 ${dpi}DPI ${format === "jpeg" ? "JPG" : "PNG"}로 변환할 준비가 됐어요.`
-        : preflight.message;
+  const screen =
+    result !== undefined
+      ? "result"
+      : processing
+        ? "processing"
+        : inspecting
+          ? "inspecting"
+          : file !== undefined && inspection !== undefined
+            ? "setup"
+            : "select";
+  const progressPercent = Math.round((progress?.fraction ?? 0) * 100);
+  const validationMessage = preflight?.ok === false ? preflight.message : message;
   const runLabel =
-    preflight?.ok === true
-      ? `${preflight.outputCount}페이지 이미지로 변환하기 →`
-      : "PDF를 이미지로 변환하기 →";
+    preflight?.ok === true ? `${preflight.outputCount}페이지 이미지로 변환` : "PDF를 이미지로 변환";
+  const outputLabel = result?.format === "png" ? "PNG" : "JPG";
+  const downloadLabel =
+    result?.mime === "application/zip" ? "ZIP 다운로드 ↓" : `${outputLabel} 다운로드 ↓`;
+  const selectionSummary =
+    selectionMode === "every-page"
+      ? "모든 페이지"
+      : parsedPageRange.ok
+        ? `지정 ${parsedPageRange.pages.length}페이지`
+        : "지정 페이지";
+
+  useEffect(() => {
+    stageTitleRef.current?.focus({ preventScroll: screen !== "select" });
+  }, [screen]);
 
   return (
     <section className={styles.shell} aria-labelledby="pdf-to-image-workbench-title">
@@ -404,9 +419,9 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
         }}
       />
 
-      {file === undefined ? (
+      {screen === "select" ? (
         <section
-          className={`${styles.emptyDropzone} ${dragging ? styles.dragging : ""}`}
+          className={`${styles.stage} ${styles.selectStage} ${dragging ? styles.dragging : ""}`}
           aria-labelledby="pdf-to-image-workbench-title"
           onDragEnter={(event) => {
             event.preventDefault();
@@ -418,341 +433,273 @@ export function PdfToImageWorkbench({ toolId }: { toolId: AvailableToolId }) {
           }}
           onDrop={onDrop}
         >
-          <div className={styles.dropIcon} aria-hidden="true">
-            <span>＋</span>
-          </div>
-          <div className={styles.dropCopy}>
-            <p className={styles.eyebrow}>LOCAL PDF TO IMAGE</p>
-            <h2 id="pdf-to-image-workbench-title">변환할 PDF를 놓거나 선택하세요</h2>
-            <p>PDF 한 개 · 1바이트–50MB · 최대 100페이지 출력</p>
-          </div>
-          <div className={styles.dropActions}>
-            <button
-              className={styles.primaryButton}
-              type="button"
-              disabled={!hydrated || !runtimeSupported}
-              onClick={() => inputRef.current?.click()}
-            >
-              PDF 선택
-            </button>
-            <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
-              {!hydrated
-                ? "PDF 이미지 변환 도구를 준비하고 있어요…"
-                : runtimeSupported
-                  ? message
-                  : UNSUPPORTED_BROWSER_MESSAGE}
-            </p>
-          </div>
-          <div className={styles.localBadge}>
-            <span aria-hidden="true">✓</span> 업로드 없음 · 내 기기에서 처리
-          </div>
+          <h2 id="pdf-to-image-workbench-title" ref={stageTitleRef} tabIndex={-1}>
+            PDF를 JPG·PNG로 변환
+          </h2>
+          <p>PDF를 페이지별 이미지로 바꿔요.</p>
+          <button
+            className={styles.primaryButton}
+            type="button"
+            disabled={!hydrated || !runtimeSupported}
+            onClick={() => inputRef.current?.click()}
+          >
+            PDF 선택
+          </button>
+          <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
+            {!hydrated
+              ? "PDF 이미지 변환 도구를 준비하고 있어요…"
+              : runtimeSupported
+                ? message
+                : UNSUPPORTED_BROWSER_MESSAGE}
+          </p>
+          <p className={styles.localNotice}>파일은 업로드하지 않고 이 기기에서 처리해요.</p>
         </section>
-      ) : (
-        <div className={styles.workbench}>
-          <div className={styles.workbenchHeader}>
+      ) : null}
+
+      {screen === "inspecting" && file !== undefined ? (
+        <section className={`${styles.stage} ${styles.centerStage}`}>
+          <h2 id="pdf-to-image-workbench-title" ref={stageTitleRef} tabIndex={-1}>
+            페이지 확인 중
+          </h2>
+          <p>{formatBytes(file.size)} PDF를 기기 안에서 확인하고 있어요.</p>
+          <div className={styles.progressTrack} aria-hidden="true">
+            <span className={styles.indeterminate} />
+          </div>
+          <button className={styles.secondaryButton} type="button" onClick={cancelInspection}>
+            페이지 확인 중단
+          </button>
+          <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
+            {message}
+          </p>
+        </section>
+      ) : null}
+
+      {screen === "setup" && file !== undefined && inspection !== undefined ? (
+        <section className={`${styles.stage} ${styles.setupStage}`}>
+          <header className={styles.stageHeader}>
             <div>
-              <p className={styles.eyebrow}>LOCAL PDF TO IMAGE</p>
-              <h2 id="pdf-to-image-workbench-title">PDF 이미지 변환 작업대</h2>
+              <h2 id="pdf-to-image-workbench-title" ref={stageTitleRef} tabIndex={-1}>
+                변환 설정
+              </h2>
+              <p>{inspection.pageCount}페이지 · 썸네일 없이 크기만 확인했어요.</p>
             </div>
-            <div className={styles.headerActions}>
-              <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
-                PDF 교체
-              </button>
-              <button type="button" onClick={reset} disabled={busy}>
-                처음부터
-              </button>
+            <button className={styles.textButton} type="button" onClick={reset}>
+              다른 PDF
+            </button>
+          </header>
+
+          <fieldset className={styles.formatGroup}>
+            <legend>출력 형식</legend>
+            <div>
+              <label>
+                <input
+                  type="radio"
+                  name="pdf-to-image-format"
+                  checked={format === "jpeg"}
+                  onChange={() => {
+                    applySettingChange("JPG로 변환해요.");
+                    setFormat("jpeg");
+                  }}
+                />
+                JPG
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="pdf-to-image-format"
+                  checked={format === "png"}
+                  onChange={() => {
+                    applySettingChange("PNG로 변환해요.");
+                    setFormat("png");
+                  }}
+                />
+                PNG
+              </label>
             </div>
-          </div>
+          </fieldset>
 
-          <div className={styles.workspace}>
-            <section className={styles.filePanel} aria-label="선택한 PDF">
-              <div className={styles.panelTitle}>
-                <strong>선택한 PDF</strong>
-                <span>1</span>
-              </div>
-              <div className={styles.fileList}>
-                <article className={styles.fileRow}>
-                  <span className={styles.fileIndex}>01</span>
-                  <div className={styles.fileCopy}>
-                    <strong>{file.name}</strong>
-                    <span>{formatBytes(file.size)}</span>
-                  </div>
-                </article>
-              </div>
-              <div className={styles.inspectionCard}>
-                <strong>{inspecting ? "페이지 확인 중…" : "PDF 정보"}</strong>
-                <p>
-                  {inspection !== undefined
-                    ? `${inspection.pageCount}페이지 · 썸네일 없이 크기만 확인했어요.`
-                    : "페이지 수와 크기를 기기 안에서만 확인해요."}
-                </p>
-              </div>
-              <p className={styles.fileTotal}>선택 {formatBytes(file.size)} · 한도 50MB</p>
-            </section>
+          <p className={styles.recommended}>
+            {format === "jpeg" ? "JPG" : "PNG"} · {dpi}DPI
+          </p>
 
-            <aside className={styles.settingsPanel} aria-label="PDF 이미지 변환 설정">
-              <div className={styles.panelTitle}>
-                <strong>설정</strong>
-                <span>LOCAL</span>
-              </div>
-
-              <div className={styles.toImageSettings}>
-                <fieldset className={styles.optionGroup}>
-                  <legend>변환할 페이지</legend>
-                  <label>
+          <details
+            className={styles.settings}
+            open={selectionMode === "extract" || dpi !== 150 || quality !== 85}
+          >
+            <summary>
+              페이지·화질 설정 · {selectionSummary} · {dpi}DPI
+            </summary>
+            <div className={styles.settingsBody}>
+              <fieldset className={styles.optionGroup}>
+                <legend>변환할 페이지</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="pdf-to-image-pages"
+                    checked={selectionMode === "every-page"}
+                    onChange={() => {
+                      applySettingChange("모든 PDF 페이지를 이미지로 변환해요.");
+                      setSelectionMode("every-page");
+                    }}
+                  />
+                  모든 페이지
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="pdf-to-image-pages"
+                    checked={selectionMode === "extract"}
+                    onChange={() => {
+                      applySettingChange("입력한 페이지만 이미지로 변환해요.");
+                      setSelectionMode("extract");
+                    }}
+                  />
+                  지정 페이지
+                </label>
+                {selectionMode === "extract" ? (
+                  <div className={styles.rangeField}>
+                    <label htmlFor="pdf-to-image-page-range">페이지 범위</label>
                     <input
-                      type="radio"
-                      name="pdf-to-image-pages"
-                      checked={selectionMode === "every-page"}
-                      disabled={busy}
-                      onChange={() => {
-                        applySettingChange("모든 PDF 페이지를 이미지로 변환해요.");
-                        setSelectionMode("every-page");
-                      }}
-                    />
-                    <span>
-                      <strong>모든 페이지</strong>
-                      <small>PDF 전체를 페이지 순서대로 변환</small>
-                    </span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pdf-to-image-pages"
-                      checked={selectionMode === "extract"}
-                      disabled={busy}
-                      onChange={() => {
-                        applySettingChange("입력한 페이지만 이미지로 변환해요.");
-                        setSelectionMode("extract");
-                      }}
-                    />
-                    <span>
-                      <strong>지정 페이지</strong>
-                      <small>예: 1-3, 5 형식으로 필요한 페이지만 선택</small>
-                    </span>
-                  </label>
-                  {selectionMode === "extract" ? (
-                    <div className={styles.rangeField}>
-                      <label htmlFor="pdf-to-image-page-range">페이지 범위</label>
-                      <input
-                        id="pdf-to-image-page-range"
-                        type="text"
-                        value={pageRange}
-                        disabled={busy}
-                        aria-invalid={!parsedPageRange.ok || preflight?.ok === false}
-                        aria-describedby="pdf-to-image-page-range-help"
-                        onChange={(event) => {
-                          applySettingChange("페이지 범위를 바꿘어요.");
-                          setPageRange(event.target.value);
-                        }}
-                      />
-                      <small id="pdf-to-image-page-range-help">
-                        {!parsedPageRange.ok
-                          ? parsedPageRange.message
-                          : preflight?.ok === false
-                            ? preflight.message
-                            : `${parsedPageRange.pages.length}페이지를 선택했어요.`}
-                      </small>
-                    </div>
-                  ) : null}
-                </fieldset>
-
-                <fieldset className={`${styles.segmentGroup} ${styles.twoColumnSegment}`}>
-                  <legend>출력 형식</legend>
-                  <div>
-                    <label>
-                      <input
-                        type="radio"
-                        name="pdf-to-image-format"
-                        checked={format === "jpeg"}
-                        disabled={busy}
-                        onChange={() => {
-                          applySettingChange("JPG로 변환해요.");
-                          setFormat("jpeg");
-                        }}
-                      />
-                      JPG
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="pdf-to-image-format"
-                        checked={format === "png"}
-                        disabled={busy}
-                        onChange={() => {
-                          applySettingChange("PNG로 변환해요.");
-                          setFormat("png");
-                        }}
-                      />
-                      PNG
-                    </label>
-                  </div>
-                </fieldset>
-
-                <fieldset className={styles.segmentGroup}>
-                  <legend>해상도</legend>
-                  <div>
-                    {([96, 150, 300] as const).map((option) => (
-                      <label key={option}>
-                        <input
-                          type="radio"
-                          name="pdf-to-image-dpi"
-                          checked={dpi === option}
-                          disabled={busy}
-                          onChange={() => {
-                            applySettingChange(`${option}DPI로 변환해요.`);
-                            setDpi(option);
-                          }}
-                        />
-                        {option}DPI
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-
-                {format === "jpeg" ? (
-                  <fieldset className={styles.qualityGroup}>
-                    <legend>JPG 품질 {quality}</legend>
-                    <input
-                      type="range"
-                      min={40}
-                      max={95}
-                      step={1}
-                      value={quality}
-                      disabled={busy}
-                      aria-label={`JPG 품질 ${quality}`}
-                      aria-valuetext={`${quality}`}
+                      id="pdf-to-image-page-range"
+                      type="text"
+                      value={pageRange}
+                      aria-invalid={!parsedPageRange.ok || preflight?.ok === false}
+                      aria-describedby="pdf-to-image-page-range-help"
                       onChange={(event) => {
-                        applySettingChange("JPG 품질을 바꿘어요.");
-                        setQuality(Number(event.target.value));
+                        applySettingChange("페이지 범위를 바꿨어요.");
+                        setPageRange(event.target.value);
                       }}
                     />
-                    <div aria-hidden="true">
-                      <span>40</span>
-                      <span>95</span>
-                    </div>
-                  </fieldset>
+                    <small id="pdf-to-image-page-range-help">
+                      {!parsedPageRange.ok
+                        ? parsedPageRange.message
+                        : preflight?.ok === false
+                          ? preflight.message
+                          : `${parsedPageRange.pages.length}페이지를 선택했어요.`}
+                    </small>
+                  </div>
                 ) : null}
+              </fieldset>
 
-                <p
-                  id="pdf-to-image-validation"
-                  className={
-                    preflight?.ok === false ? styles.validationError : styles.validationNotice
-                  }
-                >
-                  {validationMessage}
-                </p>
-
-                <div className={styles.privacyNotice}>
-                  <span aria-hidden="true">✓</span>
-                  <p>
-                    <strong>파일은 업로드하지 않아요</strong>
-                    브라우저 Worker가 기기 안에서만 렌더링합니다.
-                  </p>
+              <fieldset className={styles.segmentGroup}>
+                <legend>해상도</legend>
+                <div>
+                  {([96, 150, 300] as const).map((option) => (
+                    <label key={option}>
+                      <input
+                        type="radio"
+                        name="pdf-to-image-dpi"
+                        checked={dpi === option}
+                        onChange={() => {
+                          applySettingChange(`${option}DPI로 변환해요.`);
+                          setDpi(option);
+                        }}
+                      />
+                      {option}DPI
+                    </label>
+                  ))}
                 </div>
-              </div>
-            </aside>
+              </fieldset>
 
-            <section className={styles.resultPanel} aria-label="PDF 이미지 변환 결과">
-              <div className={styles.resultIcon} aria-hidden="true">
-                {result?.mime === "application/zip"
-                  ? "ZIP"
-                  : result?.format === "png"
-                    ? "PNG"
-                    : "JPG"}
-              </div>
-              <div className={styles.resultCopy}>
-                <strong>
-                  {result !== undefined
-                    ? result.outputFileCount === 1
-                      ? "이미지 1개 준비 완료"
-                      : `이미지 ${result.outputFileCount}개 ZIP 준비 완료`
-                    : processing
-                      ? progressLabel(progress)
-                      : inspecting
-                        ? "PDF 페이지 확인 중"
-                        : "결과가 여기에 준비돼요"}
-                </strong>
-                <p>
-                  {result !== undefined
-                    ? `${formatBytes(result.byteLength)} · ${formatDuration(result.timing.totalMs)}`
-                    : "페이지를 한 장씩 처리해 메모리 사용을 제한해요."}
-                </p>
-              </div>
-              <div
-                className={styles.progressTrack}
-                role="progressbar"
-                aria-label="PDF 이미지 변환 진행률"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={progressPercent}
-                aria-valuetext={progressText}
-              >
-                <span style={{ width: `${progressPercent}%` }} />
-              </div>
-              {result !== undefined ? (
-                <div className={styles.resultCaveats}>
-                  <p>텍스트는 더 이상 검색하거나 선택할 수 없어요.</p>
-                  <p>주석·양식은 렌더링된 모습으로 평면화돼요.</p>
-                  <p>브라우저 캔버스에서 색상 프로필이 정규화될 수 있어요.</p>
-                </div>
+              {format === "jpeg" ? (
+                <fieldset className={styles.qualityGroup}>
+                  <legend>JPG 품질 {quality}</legend>
+                  <input
+                    type="range"
+                    min={40}
+                    max={95}
+                    step={1}
+                    value={quality}
+                    aria-label={`JPG 품질 ${quality}`}
+                    aria-valuetext={`${quality}`}
+                    onChange={(event) => {
+                      applySettingChange("JPG 품질을 바꿨어요.");
+                      setQuality(Number(event.target.value));
+                    }}
+                  />
+                  <div aria-hidden="true">
+                    <span>40</span>
+                    <span>95</span>
+                  </div>
+                </fieldset>
               ) : null}
-            </section>
-          </div>
+            </div>
+          </details>
 
-          <div className={styles.actionBar}>
-            <div className={styles.statusCopy} role="status" aria-live="polite" aria-atomic="true">
-              <strong>{preflight?.ok === false && !busy ? preflight.message : message}</strong>
-              <span>
-                {processing
-                  ? progressLabel(progress)
-                  : inspecting
-                    ? "PDF 페이지 확인 중"
-                    : inspection !== undefined
-                      ? `${inspection.pageCount}페이지 PDF · ${dpi}DPI ${format === "jpeg" ? "JPG" : "PNG"}`
-                      : `선택 ${formatBytes(file.size)}`}
-              </span>
-            </div>
-            <div className={`${styles.actionButtons} ${styles.toImageActionButtons}`}>
-              {processing ? (
-                <button className={styles.secondaryButton} type="button" onClick={cancelProcessing}>
-                  작업 중단
-                </button>
-              ) : inspecting ? (
-                <button className={styles.secondaryButton} type="button" onClick={cancelInspection}>
-                  페이지 확인 중단
-                </button>
-              ) : result !== undefined ? (
-                <>
-                  <button className={styles.secondaryButton} type="button" onClick={reset}>
-                    새 작업
-                  </button>
-                  <button
-                    className={styles.secondaryButton}
-                    type="button"
-                    onClick={() => void startProcessing()}
-                  >
-                    같은 설정으로 다시 실행
-                  </button>
-                  <button className={styles.runButton} type="button" onClick={downloadResult}>
-                    {result.outputFileCount === 1 ? "이미지 다운로드 ↓" : "ZIP 다운로드 ↓"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  className={styles.runButton}
-                  type="button"
-                  disabled={preflight?.ok !== true || !runtimeSupported}
-                  aria-describedby="pdf-to-image-validation"
-                  onClick={() => void startProcessing()}
-                >
-                  {runLabel}
-                </button>
-              )}
-            </div>
+          <p
+            id="pdf-to-image-validation"
+            className={preflight?.ok === false ? styles.validationError : styles.status}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {validationMessage}
+          </p>
+          <button
+            className={styles.primaryButton}
+            type="button"
+            disabled={preflight?.ok !== true || !runtimeSupported}
+            aria-describedby="pdf-to-image-validation"
+            onClick={() => void startProcessing()}
+          >
+            {runLabel}
+          </button>
+          <p className={styles.localNotice}>파일은 업로드하지 않아요.</p>
+        </section>
+      ) : null}
+
+      {screen === "processing" ? (
+        <section className={`${styles.stage} ${styles.centerStage}`}>
+          <h2 id="pdf-to-image-workbench-title" ref={stageTitleRef} tabIndex={-1}>
+            이미지로 변환하는 중
+          </h2>
+          <p>{progressLabel(progress)}</p>
+          <div
+            className={styles.progressTrack}
+            role="progressbar"
+            aria-label="PDF 이미지 변환 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-valuetext={progressLabel(progress)}
+          >
+            <span style={{ width: `${progressPercent}%` }} />
           </div>
-        </div>
-      )}
+          <button className={styles.secondaryButton} type="button" onClick={cancelProcessing}>
+            작업 중단
+          </button>
+          <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
+            {message}
+          </p>
+        </section>
+      ) : null}
+
+      {screen === "result" && result !== undefined ? (
+        <section className={`${styles.stage} ${styles.resultStage}`}>
+          <span className={styles.resultMark} aria-hidden="true">
+            ✓
+          </span>
+          <h2 id="pdf-to-image-workbench-title" ref={stageTitleRef} tabIndex={-1}>
+            변환 완료
+          </h2>
+          <strong>
+            PDF {result.sourcePageCount}페이지 → {result.outputFileCount}개 {outputLabel}
+          </strong>
+          <p className={styles.resultSize}>{formatBytes(result.byteLength)}</p>
+          <p className={styles.warning}>이미지로 변환하면 텍스트를 검색하거나 선택할 수 없어요.</p>
+          <div className={styles.actions}>
+            <button className={styles.primaryButton} type="button" onClick={downloadResult}>
+              {downloadLabel}
+            </button>
+            <button className={styles.secondaryButton} type="button" onClick={reset}>
+              다른 PDF 변환
+            </button>
+          </div>
+          <p className={styles.status} role="status" aria-live="polite" aria-atomic="true">
+            {message}
+          </p>
+        </section>
+      ) : null}
     </section>
   );
 }

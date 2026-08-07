@@ -690,51 +690,6 @@
   line-height: 1.6;
 }
 
-.toImageSettings {
-  padding: 18px;
-  display: grid;
-  align-content: start;
-  gap: 16px;
-}
-
-.toImageSettings .optionGroup,
-.toImageSettings .segmentGroup,
-.toImageSettings .privacyNotice {
-  margin: 0;
-}
-
-.segmentGroup.twoColumnSegment > div {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.qualityGroup {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.qualityGroup legend {
-  margin-bottom: 4px;
-  color: var(--ink);
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.qualityGroup input {
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-  accent-color: var(--blue);
-}
-
-.qualityGroup > div {
-  display: flex;
-  justify-content: space-between;
-  color: var(--muted);
-  font-size: 10px;
-}
-
 .validationNotice,
 .validationError {
   margin: 0;
@@ -752,37 +707,6 @@
 .validationError {
   background: color-mix(in srgb, var(--red) 8%, white);
   color: var(--red);
-}
-
-.resultCaveats {
-  max-width: 290px;
-  margin-top: 18px;
-  padding: 13px 14px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.72);
-  text-align: left;
-}
-
-.resultCaveats p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.resultCaveats p + p {
-  margin-top: 5px;
-}
-
-.toImageActionButtons {
-  min-width: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.toImageActionButtons button {
-  max-width: 100%;
-  white-space: normal;
 }
 
 .compressionSetup {
@@ -1351,10 +1275,6 @@
     grid-template-columns: 1fr;
   }
 
-  .toImageSettings {
-    padding: 16px;
-  }
-
   .resultPanel {
     min-height: 390px;
     padding: 38px 24px;
@@ -1545,15 +1465,12 @@
   .watermarkSettings .controlField > small,
   .segmentGroup label,
   .inspectionCard p,
-  .resultCaveats p,
   .status,
   .rasterNotice,
   .privacyNotice p,
   .privacyNotice strong,
   .resultCopy p,
   .statusCopy span,
-  .qualityGroup legend,
-  .qualityGroup > div,
   .validationNotice,
   .validationError {
     font-size: 12px;
