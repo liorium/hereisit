@@ -170,7 +170,7 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     sourceFileLimits: pdfEditingSourceFileLimits,
     eyebrow: "PDF ORGANIZER",
     defaultSummary:
-      "페이지 번호 목록을 기기 안에서 확인한 뒤 순서·회전·삭제 계획대로 새 PDF를 만들어요.",
+      "페이지 미리보기를 기기 안에서 확인하며 순서·회전·삭제 계획대로 새 PDF를 만들어요.",
     notices: [
       {
         tone: "warning",

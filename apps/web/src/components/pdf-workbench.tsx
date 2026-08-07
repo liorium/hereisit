@@ -5,14 +5,7 @@ import {
   runPdfJob,
   supportsBrowserPdfRuntime,
 } from "@hereisit/browser-runtime/pdf";
-import {
-  createPdfPagePlan,
-  movePdfPage,
-  type PdfPagePlan,
-  parsePageSelection,
-  removePdfPage,
-  rotatePdfPage,
-} from "@hereisit/pdf-tool";
+import { parsePageSelection } from "@hereisit/pdf-tool";
 import type {
   PdfInspectionHandle,
   PdfJobHandle,
@@ -56,8 +49,10 @@ type PdfInputInspection =
   | { status: "ready"; pageCount: number }
   | { status: "failed"; message: string };
 
+type SharedPdfEditingIntent = Exclude<PdfEditingIntent, "organize">;
+
 const INTENT_CONFIG: Record<
-  PdfEditingIntent,
+  SharedPdfEditingIntent,
   {
     emptyTitle: string;
     selectLabel: string;
@@ -81,14 +76,6 @@ const INTENT_CONFIG: Record<
     workbenchTitle: "PDF 페이지 분할 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 페이지별 분리 최대 200페이지",
-    multiple: false,
-  },
-  organize: {
-    emptyTitle: "정리할 PDF를 놓거나 선택하세요",
-    selectLabel: "정리할 PDF 선택",
-    workbenchTitle: "PDF 페이지 정리 작업대",
-    accept: "application/pdf,.pdf",
-    fileDescription: "PDF 한 개 · 최대 50MB · 최대 500페이지",
     multiple: false,
   },
   watermark: {
@@ -142,7 +129,7 @@ export function PdfWorkbench({
   intent,
   toolId,
 }: {
-  intent: PdfEditingIntent;
+  intent: SharedPdfEditingIntent;
   toolId: AvailableToolId;
 }) {
   const implementation = getToolImplementation(toolId);
@@ -172,8 +159,6 @@ export function PdfWorkbench({
   const [splitMode, setSplitMode] = useState<"every-page" | "extract">("every-page");
   const [pageRange, setPageRange] = useState("");
   const [imagePageSize, setImagePageSize] = useState<"a4" | "image">("a4");
-  const [pagePlan, setPagePlan] = useState<PdfPagePlan>([]);
-  const [organizerPageCount, setOrganizerPageCount] = useState(0);
   const [watermarkText, setWatermarkText] = useState("대외비");
   const [watermarkPlacement, setWatermarkPlacement] = useState<"center" | "tile">("center");
   const [watermarkFontSize, setWatermarkFontSize] = useState<32 | 48 | 72>(48);
@@ -342,42 +327,6 @@ export function PdfWorkbench({
     [],
   );
 
-  const inspectOrganizerPdf = useCallback(async (file: File) => {
-    const runId = runRef.current + 1;
-    runRef.current = runId;
-    inspectionHandleRef.current?.cancel();
-    setInspecting(true);
-    setPagePlan([]);
-    setOrganizerPageCount(0);
-    setMessage("PDF 페이지를 기기 안에서 확인하고 있어요.");
-
-    let handle: PdfInspectionHandle | undefined;
-    try {
-      handle = inspectPdfFile(file);
-      inspectionHandleRef.current = handle;
-      const outcome = await handle.result;
-      if (runRef.current !== runId) return;
-      if (outcome.status === "fulfilled") {
-        setOrganizerPageCount(outcome.value.pageCount);
-        setPagePlan(createPdfPagePlan(outcome.value.pageCount));
-        setMessage(`${outcome.value.pageCount}페이지를 불러왔어요.`);
-      } else if (outcome.status === "cancelled") {
-        setMessage("페이지 확인을 중단했어요.");
-      } else {
-        setMessage(outcome.error.message);
-      }
-    } catch {
-      if (runRef.current === runId) {
-        setMessage("PDF 페이지를 확인하지 못했어요. 다른 파일로 다시 시도해 주세요.");
-      }
-    } finally {
-      if (runRef.current === runId) {
-        if (inspectionHandleRef.current === handle) inspectionHandleRef.current = undefined;
-        setInspecting(false);
-      }
-    }
-  }, []);
-
   const addFiles = useCallback(
     (fileList: FileList | readonly File[]) => {
       const candidates = Array.from(fileList);
@@ -414,12 +363,7 @@ export function PdfWorkbench({
         itemsRef.current = next;
         setItems(next);
         clearResult();
-        if (intent === "organize") {
-          const organizerFile = accepted[0]?.file;
-          if (organizerFile !== undefined) void inspectOrganizerPdf(organizerFile);
-        } else {
-          setMessage(`${accepted.length}개 파일을 준비했어요.`);
-        }
+        setMessage(`${accepted.length}개 파일을 준비했어요.`);
       }
       const rejected = candidates.length - accepted.length;
       if (rejected > 0) {
@@ -428,7 +372,7 @@ export function PdfWorkbench({
         );
       }
     },
-    [clearResult, config.multiple, inputLimit, inspectOrganizerPdf, intent, maxFileBytes, maxFiles],
+    [clearResult, config.multiple, inputLimit, intent, maxFileBytes, maxFiles],
   );
 
   usePendingToolFiles({
@@ -444,12 +388,6 @@ export function PdfWorkbench({
     itemsRef.current = next;
     setItems(next);
     clearResult();
-    if (intent === "organize") {
-      inspectionHandleRef.current?.cancel();
-      inspectionHandleRef.current = undefined;
-      setPagePlan([]);
-      setOrganizerPageCount(0);
-    }
     setMessage(next.length === 0 ? "파일을 선택하면 바로 준비할게요." : "파일을 제거했어요.");
   };
 
@@ -468,43 +406,6 @@ export function PdfWorkbench({
     setMessage(`${item.file.name}을 ${target + 1}번째로 이동했어요.`);
   };
 
-  const moveOrganizerPage = (index: number, direction: -1 | 1) => {
-    if (busy) return;
-    const item = pagePlan[index];
-    if (item === undefined) return;
-    const target = index + direction;
-    const next = movePdfPage(pagePlan, index, direction);
-    if (next === pagePlan) return;
-    setPagePlan(next);
-    clearResult();
-    setMessage(`${item.sourcePage}페이지를 ${target + 1}번째로 이동했어요.`);
-  };
-
-  const rotateOrganizerPage = (index: number) => {
-    if (busy) return;
-    const item = pagePlan[index];
-    if (item === undefined) return;
-    setPagePlan(rotatePdfPage(pagePlan, index, 1));
-    clearResult();
-    setMessage(`${item.sourcePage}페이지를 시계 방향으로 90도 회전했어요.`);
-  };
-
-  const deleteOrganizerPage = (index: number) => {
-    if (busy || pagePlan.length === 1) return;
-    const item = pagePlan[index];
-    if (item === undefined) return;
-    setPagePlan(removePdfPage(pagePlan, index));
-    clearResult();
-    setMessage(`${item.sourcePage}페이지를 결과에서 뺐어요.`);
-  };
-
-  const resetPagePlan = () => {
-    if (busy || organizerPageCount < 1) return;
-    setPagePlan(createPdfPagePlan(organizerPageCount));
-    clearResult();
-    setMessage("페이지 순서·회전·삭제 계획을 초기화했어요.");
-  };
-
   const reset = () => {
     runRef.current += 1;
     handleRef.current?.cancel();
@@ -518,8 +419,6 @@ export function PdfWorkbench({
     setInspecting(false);
     setSplitMode("every-page");
     setPageRange("");
-    setPagePlan([]);
-    setOrganizerPageCount(0);
     clearResult();
     setMessage("파일을 선택하면 바로 준비할게요.");
   };
@@ -531,17 +430,6 @@ export function PdfWorkbench({
         version: 1,
         operation: "images-to-pdf",
         page: imagePageSize === "a4" ? { size: "a4", margin: 24 } : { size: "image", margin: 0 },
-      };
-    }
-    if (intent === "organize") {
-      if (pagePlan.length === 0) {
-        setMessage("PDF 페이지 확인이 끝난 뒤 다시 시도해 주세요.");
-        return undefined;
-      }
-      return {
-        version: 1,
-        operation: "organize",
-        pages: pagePlan.map((page) => ({ ...page })),
       };
     }
     if (intent === "watermark") {
@@ -711,11 +599,9 @@ export function PdfWorkbench({
   const runLabel =
     intent === "merge"
       ? `${items.length}개 PDF 합치기 →`
-      : intent === "organize"
-        ? `${pagePlan.length}페이지 정리하기 →`
-        : intent === "watermark"
-          ? "PDF에 워터마크 넣기 →"
-          : `${items.length}개 이미지로 PDF 만들기 →`;
+      : intent === "watermark"
+        ? "PDF에 워터마크 넣기 →"
+        : `${items.length}개 이미지로 PDF 만들기 →`;
 
   const canRun =
     runtimeSupported &&
@@ -725,7 +611,6 @@ export function PdfWorkbench({
     (intent !== "split" ||
       (splitItem?.inspection?.status === "ready" &&
         (splitMode === "every-page" || parsedPageRange.ok))) &&
-    (intent !== "organize" || pagePlan.length > 0) &&
     (intent !== "watermark" ||
       (validWatermarkText && (watermarkScope === "every-page" || parsedWatermarkPageRange.ok)));
 
@@ -1114,118 +999,55 @@ export function PdfWorkbench({
           </div>
 
           <div className={styles.workspace}>
-            <section
-              className={styles.filePanel}
-              aria-label={intent === "organize" ? "PDF 페이지 순서" : "선택한 파일"}
-            >
+            <section className={styles.filePanel} aria-label="선택한 파일">
               <div className={styles.panelTitle}>
-                <strong>{intent === "organize" ? "페이지 순서" : "파일 순서"}</strong>
-                <span>{intent === "organize" ? pagePlan.length : items.length}</span>
+                <strong>파일 순서</strong>
+                <span>{items.length}</span>
               </div>
-              {intent === "organize" ? (
-                <>
-                  <div className={styles.pageList}>
-                    {pagePlan.map((page, index) => (
-                      <article className={styles.pageRow} key={page.sourcePage}>
-                        <span className={styles.pagePosition}>
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <div className={styles.pageCopy}>
-                          <strong>{`원본 ${page.sourcePage}페이지`}</strong>
-                          <span>회전 {page.rotateBy}°</span>
-                        </div>
-                        <div className={styles.pageActions}>
+              <div className={styles.fileList}>
+                {items.map((item, index) => (
+                  <article className={styles.fileRow} key={item.id}>
+                    <span className={styles.fileIndex}>{String(index + 1).padStart(2, "0")}</span>
+                    <div className={styles.fileCopy}>
+                      <strong>{item.file.name}</strong>
+                      <span>{formatBytes(item.file.size)}</span>
+                    </div>
+                    <div className={styles.fileActions}>
+                      {config.multiple ? (
+                        <>
                           <button
                             type="button"
-                            aria-label={`${page.sourcePage}페이지 위로 이동`}
+                            aria-label={`${item.file.name} 위로 이동`}
                             disabled={busy || index === 0}
-                            onClick={() => moveOrganizerPage(index, -1)}
+                            onClick={() => moveItem(index, -1)}
                           >
                             ↑
                           </button>
                           <button
                             type="button"
-                            aria-label={`${page.sourcePage}페이지 아래로 이동`}
-                            disabled={busy || index === pagePlan.length - 1}
-                            onClick={() => moveOrganizerPage(index, 1)}
+                            aria-label={`${item.file.name} 아래로 이동`}
+                            disabled={busy || index === items.length - 1}
+                            onClick={() => moveItem(index, 1)}
                           >
                             ↓
                           </button>
-                          <button
-                            type="button"
-                            aria-label={`${page.sourcePage}페이지 시계 방향으로 회전`}
-                            disabled={busy}
-                            onClick={() => rotateOrganizerPage(index)}
-                          >
-                            ↻
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`${page.sourcePage}페이지 삭제`}
-                            disabled={busy || pagePlan.length === 1}
-                            onClick={() => deleteOrganizerPage(index)}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                    {inspecting ? <p className={styles.pageLoading}>페이지 확인 중…</p> : null}
-                  </div>
-                  <p className={styles.fileTotal}>
-                    결과 {pagePlan.length}페이지 · {formatBytes(totalBytes)}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className={styles.fileList}>
-                    {items.map((item, index) => (
-                      <article className={styles.fileRow} key={item.id}>
-                        <span className={styles.fileIndex}>
-                          {String(index + 1).padStart(2, "0")}
-                        </span>
-                        <div className={styles.fileCopy}>
-                          <strong>{item.file.name}</strong>
-                          <span>{formatBytes(item.file.size)}</span>
-                        </div>
-                        <div className={styles.fileActions}>
-                          {config.multiple ? (
-                            <>
-                              <button
-                                type="button"
-                                aria-label={`${item.file.name} 위로 이동`}
-                                disabled={busy || index === 0}
-                                onClick={() => moveItem(index, -1)}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`${item.file.name} 아래로 이동`}
-                                disabled={busy || index === items.length - 1}
-                                onClick={() => moveItem(index, 1)}
-                              >
-                                ↓
-                              </button>
-                            </>
-                          ) : null}
-                          <button
-                            type="button"
-                            aria-label={`${item.file.name} 제거`}
-                            disabled={busy}
-                            onClick={() => removeItem(item.id)}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                  <p className={styles.fileTotal}>
-                    총 {formatBytes(totalBytes)} · 기기별 한도 {formatBytes(inputLimit)}
-                  </p>
-                </>
-              )}
+                        </>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-label={`${item.file.name} 제거`}
+                        disabled={busy}
+                        onClick={() => removeItem(item.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <p className={styles.fileTotal}>
+                총 {formatBytes(totalBytes)} · 기기별 한도 {formatBytes(inputLimit)}
+              </p>
             </section>
 
             <aside className={styles.settingsPanel} aria-label="PDF 설정">
@@ -1238,21 +1060,6 @@ export function PdfWorkbench({
                 <div className={styles.settingCard}>
                   <strong>선택한 순서대로 합치기</strong>
                   <p>왼쪽 목록의 01번부터 모든 페이지를 차례로 복사해요.</p>
-                </div>
-              ) : null}
-
-              {intent === "organize" ? (
-                <div className={styles.settingCard}>
-                  <strong>페이지 순서·회전·삭제</strong>
-                  <p>왼쪽 목록을 위아래로 옮기고, 90도씩 돌리거나 결과에서 빼세요.</p>
-                  <button
-                    className={styles.resetPlanButton}
-                    type="button"
-                    disabled={busy || organizerPageCount < 1}
-                    onClick={resetPagePlan}
-                  >
-                    페이지 순서 초기화
-                  </button>
                 </div>
               ) : null}
 
@@ -1542,9 +1349,7 @@ export function PdfWorkbench({
                   ? `${phaseLabel(phase)} · ${Math.round(progress * 100)}%`
                   : inspecting
                     ? "페이지 목록 확인 중"
-                    : intent === "organize" && pagePlan.length > 0
-                      ? `결과 ${pagePlan.length}페이지 · ${formatBytes(totalBytes)}`
-                      : `선택 ${items.length}개 · ${formatBytes(totalBytes)}`}
+                    : `선택 ${items.length}개 · ${formatBytes(totalBytes)}`}
               </span>
             </div>
             <div className={styles.actionButtons}>

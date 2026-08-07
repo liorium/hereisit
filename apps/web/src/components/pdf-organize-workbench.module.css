@@ -1,0 +1,341 @@
+.shell {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 10px 10px 0 var(--yellow);
+}
+
+.hiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.selectStage,
+.centerStage,
+.resultStage {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  min-height: 390px;
+  padding: 48px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.selectStage h2,
+.centerStage h2,
+.resultStage h2,
+.editHeader h2 {
+  margin: 0;
+  font-size: clamp(22px, 4vw, 34px);
+  letter-spacing: -0.04em;
+}
+
+.selectStage p,
+.centerStage p,
+.resultStage p {
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.primaryButton,
+.secondaryButton,
+.textButton,
+.headerActions button,
+.pageActions button {
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.primaryButton {
+  min-width: min(100%, 260px);
+  margin-top: 24px;
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: white;
+  font-weight: 800;
+}
+
+.secondaryButton {
+  margin-top: 22px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.textButton {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.localNotice {
+  font-size: 14px;
+}
+
+.progressTrack {
+  width: min(100%, 420px);
+  height: 10px;
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: white;
+}
+
+.progressTrack span {
+  height: 100%;
+  display: block;
+  background: var(--yellow);
+}
+
+.resultMark {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background: var(--yellow);
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.resultStage strong {
+  margin-top: 18px;
+  font-size: clamp(18px, 3vw, 26px);
+}
+
+.warning {
+  max-width: 520px;
+  font-size: 14px;
+}
+
+.editStage {
+  padding: 22px;
+}
+
+.editHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.editHeader p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.headerActions button {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: white;
+}
+
+.pageGrid {
+  margin-top: 22px;
+  margin-bottom: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  list-style: none;
+}
+
+.pageCard {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: white;
+}
+
+.pageCard:focus-within {
+  outline: 3px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.cardTopline {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cardTopline strong {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.cardTopline span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewFrame {
+  height: 168px;
+  margin-top: 8px;
+  padding: 8px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, transparent);
+  border-radius: 8px;
+  background: #f4f1e8;
+}
+
+.previewFrame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 120ms ease;
+}
+
+.previewFrame span {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.pageCard > p {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pageActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pageActions button {
+  min-width: 0;
+  padding: 4px;
+  border-radius: 8px;
+  background: white;
+  font-size: 18px;
+}
+
+.pageActions button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.editFooter {
+  margin-top: 24px;
+  padding-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 24%, transparent);
+}
+
+.editFooter .primaryButton {
+  margin-top: 0;
+}
+
+.status {
+  min-height: 44px;
+  margin: 0;
+  padding: 12px 18px;
+  border-top: 1px solid var(--ink);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .selectStage,
+  .centerStage,
+  .resultStage {
+    min-height: 330px;
+    padding: 36px 16px;
+  }
+
+  .editStage {
+    padding: 14px;
+  }
+
+  .editHeader {
+    display: block;
+  }
+
+  .headerActions {
+    margin-top: 14px;
+  }
+
+  .headerActions,
+  .headerActions button {
+    width: 100%;
+  }
+
+  .pageGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .pageCard {
+    padding: 7px;
+  }
+
+  .previewFrame {
+    height: 132px;
+    padding: 5px;
+  }
+
+  .cardTopline {
+    font-size: 11px;
+  }
+
+  .editFooter {
+    display: block;
+  }
+
+  .editFooter .primaryButton {
+    width: 100%;
+  }
+}
+
+@media (max-width: 340px) {
+  .editStage {
+    padding: 10px;
+  }
+
+  .previewFrame {
+    height: 116px;
+  }
+}
