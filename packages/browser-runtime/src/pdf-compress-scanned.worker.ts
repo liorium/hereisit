@@ -9,7 +9,7 @@ import {
   type PdfCompressScannedProgress,
   type PdfCompressScannedRunRequest,
   type PdfCompressScannedWorkerEvent,
-  pdfCompressScannedSpecSchema,
+  pdfCompressScannedSpecV2Schema,
   WORKER_PROTOCOL_VERSION,
 } from "@hereisit/tool-contracts";
 import {
@@ -259,9 +259,9 @@ function postProgress(
 function startRun(request: RunEnvelope): void {
   if (activeJob?.jobId === request.jobId) return;
 
-  let parsedSpec: ReturnType<typeof pdfCompressScannedSpecSchema.safeParse>;
+  let parsedSpec: ReturnType<typeof pdfCompressScannedSpecV2Schema.safeParse>;
   try {
-    parsedSpec = pdfCompressScannedSpecSchema.safeParse(request.spec);
+    parsedSpec = pdfCompressScannedSpecV2Schema.safeParse(request.spec);
   } catch {
     invalidSpec(request.jobId);
     return;

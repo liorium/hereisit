@@ -1,12 +1,14 @@
 import { PDFDocument } from "@cantoo/pdf-lib";
 import {
   calculatePdfCompressScannedTarget,
+  classifyPdfCompressionDocument,
   compressedPdfName,
   hasCompletePdfEnvelope,
   hasPdfSignature,
   MAX_PDF_COMPRESS_SCANNED_INPUT_BYTES,
   MAX_PDF_COMPRESS_SCANNED_PAGES,
   PdfCompressScannedPlanError,
+  type PdfCompressionPageSignals,
   planPdfCompressScannedRasterization,
 } from "@hereisit/pdf-tool";
 import {
@@ -14,10 +16,15 @@ import {
   type PdfCompressScannedErrorPayload,
   type PdfCompressScannedProgress,
   type PdfCompressScannedResult,
+  type PdfCompressScannedResultV1,
+  type PdfCompressScannedResultV2,
   type PdfCompressScannedRunRequest,
+  type PdfCompressScannedSpecV1,
+  type PdfCompressScannedSpecV2,
   pdfCompressScannedSpecSchema,
 } from "@hereisit/tool-contracts";
 import {
+  inspectPdfRasterPage,
   isPdfRasterMemoryError,
   openPdfRasterSession,
   type PdfRasterRendererAdapter,
@@ -56,9 +63,24 @@ export interface PdfCompressScannedAssemblerFactory {
   create(): Promise<PdfCompressScannedAssembler>;
 }
 
+export interface PdfStructureCompressionCandidate {
+  readonly bytes: ArrayBuffer;
+  readonly pageCount: number;
+  readonly loadMs: number;
+  readonly serializeMs: number;
+}
+
+export interface PdfStructureOptimizer {
+  optimize(input: {
+    bytes: ArrayBuffer;
+    targetBytes: number;
+  }): Promise<PdfStructureCompressionCandidate | undefined>;
+}
+
 export interface PdfCompressScannedPipelineOptions {
   rasterAdapter?: PdfRasterRendererAdapter;
   assemblerFactory?: PdfCompressScannedAssemblerFactory;
+  structureOptimizer?: PdfStructureOptimizer;
   onProgress?: (progress: PdfCompressScannedProgress) => void;
   signal?: AbortSignal;
   now?: () => number;
@@ -271,6 +293,67 @@ const DEFAULT_ASSEMBLER_FACTORY: PdfCompressScannedAssemblerFactory = {
   create: createDefaultAssembler,
 };
 
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength &&
+    bytes.buffer instanceof ArrayBuffer
+    ? bytes.buffer
+    : (bytes.slice().buffer as ArrayBuffer);
+}
+
+function createDefaultStructureOptimizer(now: () => number): PdfStructureOptimizer {
+  return {
+    async optimize({ bytes, targetBytes }) {
+      let document: PDFDocument;
+      const loadStarted = now();
+      try {
+        document = await PDFDocument.load(new Uint8Array(bytes), {
+          updateMetadata: false,
+          throwOnInvalidObject: true,
+        });
+      } catch {
+        return undefined;
+      }
+      const loadMs = now() - loadStarted;
+      const pageCount = document.getPageCount();
+      if (pageCount < 1 || pageCount > MAX_PDF_COMPRESS_SCANNED_PAGES) return undefined;
+
+      const serializeStarted = now();
+      let serialized: Uint8Array;
+      try {
+        serialized = await document.save({
+          useObjectStreams: true,
+          addDefaultPage: false,
+          objectsPerTick: 50,
+          updateFieldAppearances: false,
+        });
+      } catch {
+        return undefined;
+      }
+      const serializeMs = now() - serializeStarted;
+      const candidate = ownedArrayBuffer(serialized);
+      if (candidate.byteLength > targetBytes || !hasCompletePdfEnvelope(candidate)) return undefined;
+      return { bytes: candidate, pageCount, loadMs, serializeMs };
+    },
+  };
+}
+
+export function runPdfCompressScannedPipeline(
+  transferredInput: PdfCompressScannedRunRequest["input"],
+  rawSpec: PdfCompressScannedSpecV1,
+  options?: PdfCompressScannedPipelineOptions,
+): Promise<PdfCompressScannedResultV1>;
+export function runPdfCompressScannedPipeline(
+  transferredInput: PdfCompressScannedRunRequest["input"],
+  rawSpec: PdfCompressScannedSpecV2,
+  options?: PdfCompressScannedPipelineOptions,
+): Promise<PdfCompressScannedResultV2>;
+export function runPdfCompressScannedPipeline(
+  transferredInput: PdfCompressScannedRunRequest["input"],
+  rawSpec: unknown,
+  options?: PdfCompressScannedPipelineOptions,
+): Promise<PdfCompressScannedResult>;
+
 export async function runPdfCompressScannedPipeline(
   transferredInput: PdfCompressScannedRunRequest["input"],
   rawSpec: unknown,
@@ -306,6 +389,45 @@ export async function runPdfCompressScannedPipeline(
     throwIfCancelled();
 
     emitProgress(options.onProgress, { phase: "loading", fraction: 0.05 });
+    if (parsed.data.version === 2) {
+      let structuralCandidate: PdfStructureCompressionCandidate | undefined;
+      try {
+        structuralCandidate = await (
+          options.structureOptimizer ?? createDefaultStructureOptimizer(now)
+        ).optimize({ bytes: inputBytes, targetBytes });
+      } catch {
+        structuralCandidate = undefined;
+      }
+      throwIfCancelled();
+      if (
+        structuralCandidate !== undefined &&
+        structuralCandidate.pageCount >= 1 &&
+        structuralCandidate.pageCount <= MAX_PDF_COMPRESS_SCANNED_PAGES &&
+        structuralCandidate.bytes instanceof ArrayBuffer &&
+        structuralCandidate.bytes.byteLength <= targetBytes &&
+        hasCompletePdfEnvelope(structuralCandidate.bytes)
+      ) {
+        emitProgress(options.onProgress, { phase: "finalizing", fraction: 1 });
+        return {
+          bytes: structuralCandidate.bytes,
+          suggestedName: compressedPdfName(transferredInput.name),
+          mime: "application/pdf",
+          sourceByteLength: transferredInput.byteLength,
+          byteLength: structuralCandidate.bytes.byteLength,
+          pageCount: structuralCandidate.pageCount,
+          mode: "structure-preserving",
+          warnings: ["SIGNATURES_INVALIDATED"],
+          timing: {
+            loadMs: structuralCandidate.loadMs,
+            renderMs: 0,
+            encodeMs: 0,
+            assembleMs: 0,
+            serializeMs: structuralCandidate.serializeMs,
+            totalMs: now() - totalStarted,
+          },
+        };
+      }
+    }
     const loadStarted = now();
     try {
       session = await openPdfRasterSession(
@@ -342,12 +464,14 @@ export async function runPdfCompressScannedPipeline(
     }
 
     const visiblePages: Array<{ widthPoints: number; heightPoints: number }> = [];
+    const pageSignals: PdfCompressionPageSignals[] = [];
     try {
       for (let sourcePage = 1; sourcePage <= rasterSession.pageCount; sourcePage += 1) {
         throwIfCancelled();
-        await rasterSession.withPage(sourcePage, (page) => {
+        await rasterSession.withPage(sourcePage, async (page) => {
           const viewport = page.getViewport({ scale: 1 });
           visiblePages.push(validateVisibleViewport(viewport));
+          if (parsed.data.version === 2) pageSignals.push(await inspectPdfRasterPage(page));
         });
       }
     } catch (error) {
@@ -366,6 +490,12 @@ export async function runPdfCompressScannedPipeline(
     }
     loadMs = now() - loadStarted;
     throwIfCancelled();
+    if (
+      parsed.data.version === 2 &&
+      classifyPdfCompressionDocument(pageSignals) !== "image-only"
+    ) {
+      throw noSizeReduction();
+    }
 
     try {
       assembler = await (options.assemblerFactory ?? DEFAULT_ASSEMBLER_FACTORY).create();
@@ -560,7 +690,7 @@ export async function runPdfCompressScannedPipeline(
 
     const resultBytes = candidateBytes;
     emitProgress(options.onProgress, { phase: "finalizing", fraction: 1 });
-    return {
+    const rasterResult: PdfCompressScannedResultV1 = {
       bytes: resultBytes,
       suggestedName: compressedPdfName(transferredInput.name),
       mime: "application/pdf",
@@ -580,6 +710,9 @@ export async function runPdfCompressScannedPipeline(
         totalMs: now() - totalStarted,
       },
     };
+    return parsed.data.version === 2
+      ? { ...rasterResult, mode: "rasterized" as const }
+      : rasterResult;
   } catch (error) {
     if (options.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw new PdfCompressScannedCancellationError();

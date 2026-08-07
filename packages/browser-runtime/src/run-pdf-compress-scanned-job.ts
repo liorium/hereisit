@@ -13,10 +13,11 @@ import {
   type PdfCompressScannedJobHandle,
   type PdfCompressScannedJobOutcome,
   type PdfCompressScannedProgress,
-  type PdfCompressScannedResult,
+  type PdfCompressScannedRasterResultV2,
+  type PdfCompressScannedResultV2,
   type PdfCompressScannedRunRequest,
-  type PdfCompressScannedSpecV1,
-  pdfCompressScannedSpecSchema,
+  type PdfCompressScannedSpecV2,
+  pdfCompressScannedSpecV2Schema,
   WORKER_PROTOCOL_VERSION,
 } from "@hereisit/tool-contracts";
 
@@ -37,7 +38,8 @@ const WARNINGS = [
   "INTERACTIVE_CONTENT_REMOVED",
   "SIGNATURES_INVALIDATED",
   "COLOR_PROFILE_NORMALIZED",
-] as const satisfies PdfCompressScannedResult["warnings"];
+] as const satisfies PdfCompressScannedRasterResultV2["warnings"];
+const STRUCTURE_WARNINGS = ["SIGNATURES_INVALIDATED"] as const;
 
 const ERROR_CODES = new Set<PdfCompressScannedErrorCode>([
   "INVALID_SPEC",
@@ -75,7 +77,7 @@ interface CapturedInput {
   mimeHint: string;
   size: number;
   read(): Promise<ArrayBuffer>;
-  spec: PdfCompressScannedSpecV1;
+  spec: PdfCompressScannedSpecV2;
   expectedPageCount: number;
   onProgress?: (progress: PdfCompressScannedProgress) => void;
 }
@@ -329,7 +331,7 @@ function decodeProgress(
   };
 }
 
-function decodeTiming(value: unknown): PdfCompressScannedResult["timing"] | undefined {
+function decodeTiming(value: unknown): PdfCompressScannedResultV2["timing"] | undefined {
   if (!isPlainRecord(value)) return undefined;
   const loadMs = value.loadMs;
   const renderMs = value.renderMs;
@@ -359,7 +361,9 @@ function decodeTiming(value: unknown): PdfCompressScannedResult["timing"] | unde
   };
 }
 
-function decodeWarnings(value: unknown): PdfCompressScannedResult["warnings"] | undefined {
+function decodeRasterWarnings(
+  value: unknown,
+): PdfCompressScannedRasterResultV2["warnings"] | undefined {
   if (!Array.isArray(value)) return undefined;
   const ownKeys = Reflect.ownKeys(value);
   if (
@@ -386,7 +390,18 @@ function decodeWarnings(value: unknown): PdfCompressScannedResult["warnings"] | 
   return [first, second, third, fourth, fifth];
 }
 
-function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedResult | undefined {
+function decodeStructureWarnings(value: unknown): ["SIGNATURES_INVALIDATED"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ownKeys = Reflect.ownKeys(value);
+  return value.length === 1 &&
+    ownKeys.length === 2 &&
+    ownKeys.includes("0") &&
+    value[0] === STRUCTURE_WARNINGS[0]
+    ? [STRUCTURE_WARNINGS[0]]
+    : undefined;
+}
+
+function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedResultV2 | undefined {
   if (!isPlainRecord(value)) return undefined;
   const bytes = value.bytes;
   const suggestedName = value.suggestedName;
@@ -394,6 +409,7 @@ function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedR
   const sourceByteLength = value.sourceByteLength;
   const byteLength = value.byteLength;
   const pageCount = value.pageCount;
+  const mode = value.mode;
   const preset = value.preset;
   const dpi = value.dpi;
   const quality = value.quality;
@@ -401,7 +417,6 @@ function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedR
   const rawTiming = value.timing;
   if (!isOrdinaryArrayBuffer(bytes)) return undefined;
   const actualByteLength = arrayBufferByteLength(bytes);
-  const warnings = decodeWarnings(rawWarnings);
   const timing = decodeTiming(rawTiming);
   let targetBytes: number;
   try {
@@ -410,9 +425,6 @@ function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedR
     return undefined;
   }
   const expectedName = compressedPdfName(input.name);
-  const presetMatches =
-    (input.spec.preset === "balanced" && preset === "balanced" && dpi === 150 && quality === 72) ||
-    (input.spec.preset === "minimum" && preset === "minimum" && dpi === 96 && quality === 55);
   if (
     sourceByteLength !== input.size ||
     !isPositiveInteger(byteLength) ||
@@ -423,24 +435,36 @@ function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedR
     !isSafePublicText(suggestedName, MAX_PUBLIC_NAME_LENGTH) ||
     suggestedName !== expectedName ||
     pageCount !== input.expectedPageCount ||
-    !presetMatches ||
-    warnings === undefined ||
     timing === undefined
   ) {
     return undefined;
   }
-  return {
+  const common = {
     bytes,
     suggestedName,
-    mime: "application/pdf",
+    mime: "application/pdf" as const,
     sourceByteLength: input.size,
     byteLength,
     pageCount: input.expectedPageCount,
-    preset: preset as PdfCompressScannedResult["preset"],
-    dpi: dpi as PdfCompressScannedResult["dpi"],
-    quality: quality as PdfCompressScannedResult["quality"],
-    warnings,
     timing,
+  };
+  if (mode === "structure-preserving") {
+    const warnings = decodeStructureWarnings(rawWarnings);
+    return warnings === undefined ? undefined : { ...common, mode, warnings };
+  }
+  if (mode !== "rasterized") return undefined;
+  const warnings = decodeRasterWarnings(rawWarnings);
+  const presetMatches =
+    (input.spec.preset === "balanced" && preset === "balanced" && dpi === 150 && quality === 72) ||
+    (input.spec.preset === "minimum" && preset === "minimum" && dpi === 96 && quality === 55);
+  if (!presetMatches || warnings === undefined) return undefined;
+  return {
+    ...common,
+    mode,
+    preset: preset as PdfCompressScannedRasterResultV2["preset"],
+    dpi: dpi as PdfCompressScannedRasterResultV2["dpi"],
+    quality: quality as PdfCompressScannedRasterResultV2["quality"],
+    warnings,
   };
 }
 
@@ -457,7 +481,7 @@ function notifyProgress(
 
 function validationError(
   file: File,
-  rawSpec: PdfCompressScannedSpecV1,
+  rawSpec: PdfCompressScannedSpecV2,
   rawOptions: RunPdfCompressScannedJobOptions,
 ): { input?: CapturedInput; error?: PdfCompressScannedErrorPayload } {
   try {
@@ -515,7 +539,7 @@ function validationError(
         error: { code: "CORRUPT_PDF", message: "PDF 파일을 읽을 수 없어요.", retryable: false },
       };
     }
-    const parsedSpec = pdfCompressScannedSpecSchema.safeParse(rawSpec);
+    const parsedSpec = pdfCompressScannedSpecV2Schema.safeParse(rawSpec);
     if (!parsedSpec.success) {
       return {
         error: {
@@ -581,7 +605,7 @@ function validationError(
 
 export function runPdfCompressScannedJob(
   file: File,
-  spec: PdfCompressScannedSpecV1,
+  spec: PdfCompressScannedSpecV2,
   options: RunPdfCompressScannedJobOptions,
 ): PdfCompressScannedJobHandle {
   let settled = false;
@@ -817,6 +841,6 @@ export type {
   PdfCompressScannedJobHandle,
   PdfCompressScannedJobOutcome,
   PdfCompressScannedProgress,
-  PdfCompressScannedResult,
-  PdfCompressScannedSpecV1,
+  PdfCompressScannedResultV2,
+  PdfCompressScannedSpecV2,
 };

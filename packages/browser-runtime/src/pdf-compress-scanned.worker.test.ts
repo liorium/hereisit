@@ -1,9 +1,10 @@
 import type {
   PdfCompressScannedErrorPayload,
   PdfCompressScannedProgress,
-  PdfCompressScannedResult,
+  PdfCompressScannedRasterResultV2,
+  PdfCompressScannedResultV2,
   PdfCompressScannedRunRequest,
-  PdfCompressScannedSpecV1,
+  PdfCompressScannedSpecV2,
 } from "@hereisit/tool-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,7 +26,7 @@ vi.mock("./pdf-compress-scanned-pipeline", () => ({
   toPdfCompressScannedErrorPayload: pipelineMocks.toErrorPayload,
 }));
 
-const balancedSpec: PdfCompressScannedSpecV1 = { version: 1, preset: "balanced" };
+const balancedSpec: PdfCompressScannedSpecV2 = { version: 2, preset: "balanced" };
 const MAX_INPUT_BYTES = 50 * 1024 * 1024;
 let maximumInputBuffer: ArrayBuffer | undefined;
 
@@ -116,7 +117,7 @@ function pdfBytes(): ArrayBuffer {
   return new TextEncoder().encode("%PDF-1.4\n%%EOF").buffer;
 }
 
-function result(bytes = pdfBytes()): PdfCompressScannedResult {
+function result(bytes = pdfBytes()): PdfCompressScannedRasterResultV2 {
   return {
     bytes,
     suggestedName: "report-compressed-hereisit.pdf",
@@ -124,6 +125,7 @@ function result(bytes = pdfBytes()): PdfCompressScannedResult {
     sourceByteLength: 100,
     byteLength: bytes.byteLength,
     pageCount: 1,
+    mode: "rasterized",
     preset: "balanced",
     dpi: 150,
     quality: 72,
@@ -152,7 +154,7 @@ function runRequest(jobId = "job-1", overrides: Record<string, unknown> = {}): u
     type: "run",
     jobId,
     tool: "pdf.compress-scanned",
-    toolVersion: 1,
+    toolVersion: 2,
     input: {
       name: "report.pdf",
       mimeHint: "application/pdf",
@@ -616,9 +618,9 @@ describe("scanned-PDF compression Worker request boundary", () => {
       installChangingGetter(request, "type", "run", "cancel"),
       installChangingGetter(request, "jobId", "captured-job", "other-job"),
       installChangingGetter(request, "tool", "pdf.compress-scanned", "pdf.merge"),
-      installChangingGetter(request, "toolVersion", 1, 2),
+      installChangingGetter(request, "toolVersion", 2, 1),
       installChangingGetter(request, "input", input, null),
-      installChangingGetter(request, "spec", balancedSpec, { version: 2 }),
+      installChangingGetter(request, "spec", balancedSpec, { version: 3 }),
     ];
     const originalBytes = input.bytes;
     const inputGetters = [
@@ -730,8 +732,9 @@ describe("scanned-PDF compression Worker request boundary", () => {
 
   it.each([
     runRequest("wrong-tool", { tool: "pdf.merge" }),
-    runRequest("wrong-version", { toolVersion: 2 }),
-    runRequest("wrong-spec", { spec: { version: 1, preset: "lossless" } }),
+    runRequest("wrong-version", { toolVersion: 1 }),
+    runRequest("legacy-spec", { spec: { version: 1, preset: "balanced" } }),
+    runRequest("wrong-spec", { spec: { version: 2, preset: "lossless" } }),
   ])("rejects a tool, version, or strict-spec mismatch", async (request) => {
     const scope = await loadWorker();
     await waitForReady(scope);
@@ -755,7 +758,7 @@ describe("scanned-PDF compression Worker request boundary", () => {
   });
 
   it("ignores a duplicate active run and rejects a different concurrent run", async () => {
-    const pending = deferred<PdfCompressScannedResult>();
+    const pending = deferred<PdfCompressScannedResultV2>();
     pipelineMocks.run.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     await waitForReady(scope);
@@ -809,7 +812,7 @@ describe("scanned-PDF compression Worker request boundary", () => {
       },
     },
   ])("does not let an invalid $name abort the active job", async ({ makeCancel }) => {
-    const pending = deferred<PdfCompressScannedResult>();
+    const pending = deferred<PdfCompressScannedResultV2>();
     pipelineMocks.run.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     await waitForReady(scope);
@@ -902,7 +905,7 @@ describe("scanned-PDF compression Worker execution", () => {
   });
 
   it("aborts only the matching job and emits no progress or terminal event after cancellation", async () => {
-    const pending = deferred<PdfCompressScannedResult>();
+    const pending = deferred<PdfCompressScannedResultV2>();
     pipelineMocks.run.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     await waitForReady(scope);

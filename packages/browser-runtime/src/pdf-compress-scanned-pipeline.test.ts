@@ -1,5 +1,8 @@
-import { PDFDocument } from "@cantoo/pdf-lib";
-import type { PdfCompressScannedSpecV1 } from "@hereisit/tool-contracts";
+import { PDFDocument, StandardFonts } from "@cantoo/pdf-lib";
+import type {
+  PdfCompressScannedSpecV1,
+  PdfCompressScannedSpecV2,
+} from "@hereisit/tool-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type PdfCompressScannedAssembler,
@@ -53,6 +56,35 @@ function spec(preset: PdfCompressScannedSpecV1["preset"] = "balanced") {
   return { version: 1 as const, preset };
 }
 
+function smartSpec(preset: PdfCompressScannedSpecV2["preset"] = "balanced") {
+  return { version: 2 as const, preset };
+}
+
+async function structureOptimizablePdfInput() {
+  const document = await PDFDocument.create({ updateMetadata: false });
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const page = document.addPage([612, 792]);
+  page.drawText("HereIsIt searchable text", { x: 50, y: 700, font, size: 20 });
+  document.getForm().createTextField("name").addToPage(page, {
+    x: 50,
+    y: 620,
+    width: 200,
+    height: 30,
+  });
+  const raw = await document.save({
+    useObjectStreams: false,
+    addDefaultPage: false,
+    updateFieldAppearances: false,
+  });
+  const bytes = raw.slice().buffer as ArrayBuffer;
+  return {
+    name: "report.pdf",
+    mimeHint: "application/pdf",
+    byteLength: bytes.byteLength,
+    bytes,
+  };
+}
+
 function tickingNow(): () => number {
   let value = 0;
   return () => value++;
@@ -85,6 +117,17 @@ interface FakeRasterConfiguration {
   createCanvasErrorPage?: number;
   sessionCloseError?: unknown;
   observer?: (event: string) => void;
+  pageSignals?: Readonly<
+    Record<
+      number,
+      {
+        nonWhitespaceTextItems?: number;
+        annotationCount?: number;
+        imagePaintOperations?: number;
+        nonImagePaintOperations?: number;
+      }
+    >
+  >;
 }
 
 interface FakeRasterCounters {
@@ -190,11 +233,32 @@ function fakeRasterAdapter(configuration: FakeRasterConfiguration = {}): {
         return Promise.reject(new Error("getPage fixture failure"));
       }
       const geometry = pages[sourcePage - 1] ?? { widthPoints: 72, heightPoints: 72 };
+      const signals = configuration.pageSignals?.[sourcePage];
       counters.activePages += 1;
       counters.maxActivePages = Math.max(counters.maxActivePages, counters.activePages);
       let cleaned = false;
       return Promise.resolve({
         rotate: geometry.rotation ?? 0,
+        getTextContent() {
+          return Promise.resolve({
+            items: Array.from({ length: signals?.nonWhitespaceTextItems ?? 0 }, () => ({
+              str: "searchable",
+            })),
+          });
+        },
+        getAnnotations() {
+          return Promise.resolve(
+            Array.from({ length: signals?.annotationCount ?? 0 }, () => ({})),
+          );
+        },
+        getOperatorList() {
+          return Promise.resolve({
+            fnArray: [
+              ...Array.from({ length: signals?.imagePaintOperations ?? 1 }, () => 85),
+              ...Array.from({ length: signals?.nonImagePaintOperations ?? 0 }, () => 91),
+            ],
+          });
+        },
         getViewport(options: { scale: number; rotation?: number }) {
           counters.viewportOptions.push({ sourcePage, ...options });
           observe(`page:${sourcePage}:viewport:${options.scale}`);
@@ -478,6 +542,57 @@ afterEach(() => {
 });
 
 describe("runPdfCompressScannedPipeline output", () => {
+  it("returns a smaller structure-preserving v2 result without opening PDF.js", async () => {
+    const input = await structureOptimizablePdfInput();
+    const { adapter, counters: raster } = fakeRasterAdapter();
+
+    const result = await runPdfCompressScannedPipeline(input, smartSpec(), {
+      rasterAdapter: adapter,
+      now: tickingNow(),
+    });
+
+    expect(result).toMatchObject({
+      mode: "structure-preserving",
+      sourceByteLength: input.byteLength,
+      pageCount: 1,
+      warnings: ["SIGNATURES_INVALIDATED"],
+    });
+    expect(result.byteLength).toBeLessThanOrEqual(input.byteLength - Math.ceil(input.byteLength / 100));
+    expect(raster.events).not.toContain("session:open");
+    expect(result).not.toHaveProperty("preset");
+  });
+
+  it("preserves a structured v2 document when the structural pass cannot reduce it", async () => {
+    const { adapter, counters: raster } = fakeRasterAdapter({
+      pageSignals: { 1: { nonWhitespaceTextItems: 1 } },
+    });
+    const { factory, counters: assembler } = fakeAssemblerFactory();
+
+    await expect(
+      runPdfCompressScannedPipeline(pdfInput(), smartSpec(), {
+        rasterAdapter: adapter,
+        assemblerFactory: factory,
+        structureOptimizer: { optimize: async () => undefined },
+      }),
+    ).rejects.toMatchObject({ code: "NO_SIZE_REDUCTION", retryable: false });
+    expect(raster.render).toBe(0);
+    expect(assembler.create).toBe(0);
+  });
+
+  it("keeps the bounded raster fallback for an image-only v2 document", async () => {
+    const { adapter, counters: raster } = fakeRasterAdapter();
+    const { factory } = fakeAssemblerFactory({ candidate: completePdfBytes(900) });
+
+    const result = await runPdfCompressScannedPipeline(pdfInput(10_000), smartSpec(), {
+      rasterAdapter: adapter,
+      assemblerFactory: factory,
+      structureOptimizer: { optimize: async () => undefined },
+    });
+
+    expect(result).toMatchObject({ mode: "rasterized", preset: "balanced", dpi: 150, quality: 72 });
+    expect(raster.render).toBe(2);
+  });
+
   it("reconstructs all pages into a smaller metadata-free PDF result", async () => {
     const { adapter, counters: raster } = fakeRasterAdapter();
     const candidate = completePdfBytes(900);
@@ -841,7 +956,7 @@ describe("runPdfCompressScannedPipeline sequencing and byte gates", () => {
 
 describe("runPdfCompressScannedPipeline validation and failure mapping", () => {
   it.each([
-    { name: "wrong version", rawSpec: { version: 2, preset: "balanced" } },
+    { name: "wrong version", rawSpec: { version: 3, preset: "balanced" } },
     { name: "unknown preset", rawSpec: { version: 1, preset: "custom" } },
     { name: "unknown field", rawSpec: { version: 1, preset: "balanced", dpi: 300 } },
   ])("maps $name to INVALID_SPEC before opening a session", async ({ rawSpec }) => {

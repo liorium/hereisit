@@ -225,17 +225,22 @@ describe("pdfToImagesSpecSchema", () => {
 describe("pdfCompressScannedSpecSchema", () => {
   it("publishes the independent scanned compression identity", () => {
     expect(PDF_COMPRESS_SCANNED_TOOL_ID).toBe("pdf.compress-scanned");
-    expect(PDF_COMPRESS_SCANNED_TOOL_VERSION).toBe(1);
+    expect(PDF_COMPRESS_SCANNED_TOOL_VERSION).toBe(2);
   });
 
-  it.each(["balanced", "minimum"])("accepts the %s preset", (preset) => {
-    expect(pdfCompressScannedSpecSchema.safeParse({ version: 1, preset }).success).toBe(true);
+  it.each([
+    [1, "balanced"],
+    [1, "minimum"],
+    [2, "balanced"],
+    [2, "minimum"],
+  ])("accepts version %i with the %s preset", (version, preset) => {
+    expect(pdfCompressScannedSpecSchema.safeParse({ version, preset }).success).toBe(true);
   });
 
   it.each([
     {},
     { version: 0, preset: "balanced" },
-    { version: 2, preset: "balanced" },
+    { version: 3, preset: "balanced" },
     { version: 1 },
     { version: 1, preset: "adaptive" },
     { version: 1, preset: 96 },

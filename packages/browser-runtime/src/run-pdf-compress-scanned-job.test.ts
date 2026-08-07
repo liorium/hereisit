@@ -1,8 +1,9 @@
 import type {
   PdfCompressScannedErrorPayload,
   PdfCompressScannedProgress,
-  PdfCompressScannedResult,
-  PdfCompressScannedSpecV1,
+  PdfCompressScannedRasterResultV2,
+  PdfCompressScannedResultV2,
+  PdfCompressScannedSpecV2,
   PdfCompressScannedWorkerEvent,
 } from "@hereisit/tool-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,7 @@ import {
 
 const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const MAX_PAGES = 100;
-const balancedSpec: PdfCompressScannedSpecV1 = { version: 1, preset: "balanced" };
+const balancedSpec: PdfCompressScannedSpecV2 = { version: 2, preset: "balanced" };
 const WARNINGS = [
   "PDF_PAGES_RASTERIZED",
   "SEARCHABLE_CONTENT_REMOVED",
@@ -116,10 +117,10 @@ function pdfBytes(byteLength = 20): ArrayBuffer {
 }
 
 function scannedResult(
-  overrides: Partial<Omit<PdfCompressScannedResult, "timing">> & {
-    timing?: Partial<PdfCompressScannedResult["timing"]>;
+  overrides: Partial<Omit<PdfCompressScannedRasterResultV2, "timing">> & {
+    timing?: Partial<PdfCompressScannedRasterResultV2["timing"]>;
   } = {},
-): PdfCompressScannedResult {
+): PdfCompressScannedRasterResultV2 {
   const bytes = overrides.bytes ?? pdfBytes();
   return {
     bytes,
@@ -128,6 +129,7 @@ function scannedResult(
     sourceByteLength: 100,
     byteLength: bytes.byteLength,
     pageCount: 1,
+    mode: "rasterized",
     preset: "balanced",
     dpi: 150,
     quality: 72,
@@ -141,6 +143,28 @@ function scannedResult(
       serializeMs: 5,
       totalMs: 15,
       ...overrides.timing,
+    },
+  };
+}
+
+function structuredResult(): PdfCompressScannedResultV2 {
+  const bytes = pdfBytes();
+  return {
+    bytes,
+    suggestedName: "report-compressed-hereisit.pdf",
+    mime: "application/pdf",
+    sourceByteLength: 100,
+    byteLength: bytes.byteLength,
+    pageCount: 1,
+    mode: "structure-preserving",
+    warnings: ["SIGNATURES_INVALIDATED"],
+    timing: {
+      loadMs: 1,
+      renderMs: 0,
+      encodeMs: 0,
+      assembleMs: 0,
+      serializeMs: 2,
+      totalMs: 3,
     },
   };
 }
@@ -393,7 +417,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
 
     const handle = runPdfCompressScannedJob(
       file,
-      spec as PdfCompressScannedSpecV1,
+      spec as PdfCompressScannedSpecV2,
       options as { expectedPageCount: number },
     );
 
@@ -699,7 +723,7 @@ describe("runPdfCompressScannedJob lifecycle", () => {
       protocol: 1,
       type: "run",
       tool: "pdf.compress-scanned",
-      toolVersion: 1,
+      toolVersion: 2,
       input: {
         name: "report.pdf",
         mimeHint: "application/pdf",
@@ -1150,6 +1174,21 @@ describe("runPdfCompressScannedJob hostile progress and terminal boundary", () =
     await expect(handle.result).resolves.toEqual({ status: "fulfilled", value: clean });
   });
 
+  it("accepts an exact structure-preserving result without raster metadata", async () => {
+    installSupportedRuntime();
+    const { file } = fakePdfFile();
+    const handle = runPdfCompressScannedJob(file, balancedSpec, { expectedPageCount: 1 });
+    const worker = latestWorker();
+    const run = await waitForRun(worker);
+    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    emitFinalizing(worker, run.message.jobId);
+    const clean = structuredResult();
+
+    worker.emit({ protocol: 1, type: "complete", jobId: run.message.jobId, result: clean });
+
+    await expect(handle.result).resolves.toEqual({ status: "fulfilled", value: clean });
+  });
+
   it("accepts only matching, decoded, increasing progress and requires exact finalizing:1", async () => {
     installSupportedRuntime();
     const { file } = fakePdfFile();
@@ -1221,8 +1260,16 @@ describe("runPdfCompressScannedJob hostile progress and terminal boundary", () =
 
   const invalidResultCases: Array<{
     name: string;
-    mutate: (value: PdfCompressScannedResult) => unknown;
+    mutate: (value: PdfCompressScannedRasterResultV2) => unknown;
   }> = [
+    {
+      name: "missing mode",
+      mutate: ({ mode: _mode, ...value }) => value,
+    },
+    {
+      name: "wrong mode",
+      mutate: (value) => ({ ...value, mode: "structure-preserving" }),
+    },
     {
       name: "mismatched source size",
       mutate: (value) => ({ ...value, sourceByteLength: 99 }),
@@ -1536,7 +1583,7 @@ describe("runPdfCompressScannedJob hostile progress and terminal boundary", () =
 
   it("accepts the exact minimum tuple and exact target boundary", async () => {
     installSupportedRuntime();
-    const spec: PdfCompressScannedSpecV1 = { version: 1, preset: "minimum" };
+    const spec: PdfCompressScannedSpecV2 = { version: 2, preset: "minimum" };
     const { file } = fakePdfFile();
     const handle = runPdfCompressScannedJob(file, spec, { expectedPageCount: 1 });
     const worker = latestWorker();
