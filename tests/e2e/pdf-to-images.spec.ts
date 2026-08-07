@@ -54,6 +54,13 @@ async function openReadyPdfToImages(page: Page): Promise<void> {
   });
 }
 
+async function openPdfToImageSettings(page: Page): Promise<void> {
+  const settings = page.locator("details").filter({ hasText: "페이지·화질 설정" });
+  if (!(await settings.evaluate((node) => (node as HTMLDetailsElement).open))) {
+    await settings.locator("summary").click();
+  }
+}
+
 async function createVectorPdf(
   pages: readonly { width: number; height: number; rotation?: 90 }[],
 ): Promise<Buffer> {
@@ -230,8 +237,8 @@ async function prepareSinglePageResult(page: Page) {
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByRole("heading", { name: "변환 완료" })).toBeVisible({ timeout: 60_000 });
   return privacy;
 }
 
@@ -243,6 +250,31 @@ async function settleRenderedState(page: Page): Promise<void> {
       ),
   );
 }
+
+test("shows only the current PDF-to-image stage", async ({ page }) => {
+  await openReadyPdfToImages(page);
+  await expect(page.getByRole("heading", { name: "PDF를 JPG·PNG로 변환" })).toBeVisible();
+  await expect(page.getByText("결과가 여기에 준비돼요")).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "출력 형식" })).toHaveCount(0);
+
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createVectorPdf([{ width: 72, height: 72 }]),
+  });
+  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
+  await expect(page.getByRole("radio", { name: "JPG" })).toBeChecked();
+  await expect(page.getByText("JPG · 150DPI")).toBeVisible();
+  await expect(page.getByText("결과가 여기에 준비돼요")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByRole("heading", { name: "변환 완료" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible();
+  await expect(page.getByRole("button", { name: "JPG 다운로드 ↓" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "같은 설정으로 다시 실행" })).toHaveCount(0);
+});
 
 test("converts two vector pages to an ordered default JPG ZIP without uploads", async ({
   browserName,
@@ -268,8 +300,8 @@ test("converts two vector pages to an ordered default JPG ZIP without uploads", 
   await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
-  await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 2개 ZIP 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 2페이지 → 2개 JPG")).toBeVisible({ timeout: 60_000 });
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
 
@@ -310,13 +342,14 @@ test("keeps explicitly selected pages in source selection order inside the ZIP",
   await expect(page.getByText("2페이지 PDF를 불러왔어요.")).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
+  await openPdfToImageSettings(page);
   await page
     .getByRole("group", { name: "변환할 페이지" })
     .getByRole("radio", { name: /지정 페이지/ })
     .check();
   await page.getByLabel("페이지 범위").fill("2, 1");
-  await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 2개 ZIP 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 2페이지 → 2개 JPG")).toBeVisible({ timeout: 60_000 });
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -343,13 +376,14 @@ test("renders a page containing multiple embedded image XObjects", async ({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
   await page.getByRole("group", { name: "출력 형식" }).getByRole("radio", { name: "PNG" }).check();
+  await openPdfToImageSettings(page);
   await page.getByRole("group", { name: "해상도" }).getByRole("radio", { name: "96DPI" }).check();
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 1페이지 → 1개 PNG")).toBeVisible({ timeout: 60_000 });
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "PNG 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("report-page-001.png");
   const imageBytes = await downloadedBytes(await download.path());
@@ -407,6 +441,7 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
 
+  await openPdfToImageSettings(page);
   const quality = page.getByRole("slider", { name: "JPG 품질 85" });
   await expect(quality).toBeVisible();
   await expect(quality).toHaveAttribute("min", "40");
@@ -421,7 +456,7 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
     .check();
 
   const range = page.getByLabel("페이지 범위");
-  const run = page.getByRole("button", { name: "PDF를 이미지로 변환하기 →" });
+  const run = page.getByRole("button", { name: "PDF를 이미지로 변환" });
   await range.fill("2-");
   await expect(run).toBeDisabled();
   await expect(page.getByText("예: 1-3, 5, 8-10 형식으로 입력해 주세요.").first()).toBeVisible();
@@ -429,14 +464,14 @@ test("converts only a rotated second page to a direct 96DPI PNG", async ({ brows
   await expect(run).toBeDisabled();
   await expect(page.getByText("이 PDF는 2페이지까지 있어요.").first()).toBeVisible();
   await range.fill("2");
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 1페이지 → 1개 PNG")).toBeVisible({ timeout: 60_000 });
   await settleRenderedState(page);
   expect(downloadCount).toBe(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "PNG 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename() === "report-page-002.png").toBe(true);
   const image = await downloadedBytes(await download.path());
@@ -453,15 +488,15 @@ test("keeps a prepared PDF image result retryable when download activation fails
   await installDownloadActivationController(page);
   const privacy = await prepareSinglePageResult(page);
   await setDownloadActivationBlocked(page, true);
-  await page.getByRole("button", { name: "이미지 다운로드 ↓" }).click();
+  await page.getByRole("button", { name: "JPG 다운로드 ↓" }).click();
   await expect(page.getByRole("status")).toContainText(
     "다운로드를 시작하지 못했어요. 다시 시도해 주세요.",
   );
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible();
+  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible();
   await setDownloadActivationBlocked(page, false);
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "이미지 다운로드 ↓" }).click(),
+    page.getByRole("button", { name: "JPG 다운로드 ↓" }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("report-page-001.jpg");
   const image = await downloadedBytes(await download.path());
@@ -483,15 +518,16 @@ test("blocks every-page and extracted outputs above the 100-page cap", async ({ 
   });
   const correctiveCopy = "한 번에 최대 100페이지까지 이미지로 변환할 수 있어요.";
   await expect(page.getByText(correctiveCopy).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF를 이미지로 변환하기 →" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "PDF를 이미지로 변환" })).toBeDisabled();
 
+  await openPdfToImageSettings(page);
   await page
     .getByRole("group", { name: "변환할 페이지" })
     .getByRole("radio", { name: /지정 페이지/ })
     .check();
   await page.getByLabel("페이지 범위").fill("1-101");
   await expect(page.getByText(correctiveCopy).first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF를 이미지로 변환하기 →" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "PDF를 이미지로 변환" })).toBeDisabled();
 });
 
 test("reports count-based rendering and encoding progress", async ({ browserName, page }) => {
@@ -524,8 +560,8 @@ test("reports count-based rendering and encoding progress", async ({ browserName
     record();
   });
 
-  await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 2개 ZIP 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 2페이지 → 2개 JPG")).toBeVisible({ timeout: 60_000 });
   const labels = await page.evaluate(
     () =>
       (window as Window & { __hereisitProgressLabels?: string[] }).__hereisitProgressLabels ?? [],
@@ -567,7 +603,7 @@ test("cancels before a result or download is offered", async ({ page }) => {
       pendingFrames.length = 0;
     };
   });
-  await page.getByRole("button", { name: "2페이지 이미지로 변환하기 →" }).click();
+  await page.getByRole("button", { name: "2페이지 이미지로 변환" }).click();
   await page.getByRole("button", { name: "작업 중단" }).click();
   await page.evaluate(() => {
     (window as Window & { __hereisitReleaseFrames?: () => void }).__hereisitReleaseFrames?.();
@@ -594,21 +630,27 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
   expect(downloads).toBe(0);
 
+  await page.getByRole("button", { name: "다른 PDF 변환" }).click();
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    buffer: await createVectorPdf([{ width: 72, height: 72 }]),
+  });
+  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
+    timeout: PDF_INSPECTION_TIMEOUT_MS,
+  });
+  await openPdfToImageSettings(page);
   await page.getByRole("group", { name: "해상도" }).getByRole("radio", { name: "96DPI" }).check();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
   expect(downloads).toBe(0);
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 1 });
   expect(downloads).toBe(0);
 
-  await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
-  await expect
-    .poll(() => objectUrlCounts(page), { timeout: 60_000 })
-    .toEqual({ created: 3, revoked: 2 });
-  await expect(page.getByText("이미지 1개 준비 완료")).toBeVisible();
-  expect(downloads).toBe(0);
-
+  await page.getByRole("button", { name: "다른 PDF 변환" }).click();
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 2 });
   await page.locator("input[type=file]").setInputFiles({
     name: "replacement.pdf",
     mimeType: "application/pdf",
@@ -617,16 +659,16 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 2, revoked: 2 });
   expect(downloads).toBe(0);
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
   await expect
     .poll(() => objectUrlCounts(page), { timeout: 60_000 })
-    .toEqual({ created: 4, revoked: 3 });
+    .toEqual({ created: 3, revoked: 2 });
   expect(downloads).toBe(0);
 
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 4 });
+  await page.getByRole("button", { name: "다른 PDF 변환" }).click();
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 3, revoked: 3 });
   expect(downloads).toBe(0);
   await page.locator("input[type=file]").setInputFiles({
     name: "report.pdf",
@@ -636,10 +678,10 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
   await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({
     timeout: PDF_INSPECTION_TIMEOUT_MS,
   });
-  await page.getByRole("button", { name: "1페이지 이미지로 변환하기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
   await expect
     .poll(() => objectUrlCounts(page), { timeout: 60_000 })
-    .toEqual({ created: 5, revoked: 4 });
+    .toEqual({ created: 4, revoked: 3 });
   expect(downloads).toBe(0);
 
   await page.evaluate(() => {
@@ -651,7 +693,7 @@ test("revokes result object URLs on settings, rerun, replacement, reset, and unm
     router.push("/pdf/merge");
   });
   await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
-  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 5, revoked: 5 });
+  await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 4, revoked: 4 });
   expect(downloads).toBe(0);
   privacy.assertClean(browserName !== "firefox");
 });
