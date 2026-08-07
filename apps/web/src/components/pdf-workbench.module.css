@@ -239,81 +239,6 @@
   overflow-y: auto;
 }
 
-.pageList {
-  max-height: 440px;
-  overflow-y: auto;
-}
-
-.pageRow {
-  min-height: 112px;
-  padding: 12px;
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px 10px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.48);
-}
-
-.pagePosition {
-  color: var(--blue);
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.pageCopy {
-  min-width: 0;
-}
-
-.pageCopy strong,
-.pageCopy span {
-  display: block;
-}
-
-.pageCopy strong {
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pageCopy span {
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.pageActions {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(40px, 1fr));
-  gap: 5px;
-}
-
-.pageActions button {
-  min-width: 0;
-  height: 40px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: white;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.pageActions button:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.pageLoading {
-  margin: 0;
-  padding: 24px 16px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
 .fileRow {
   min-height: 82px;
   padding: 12px;
@@ -399,24 +324,6 @@
   color: var(--muted);
   font-size: 11px;
   line-height: 1.6;
-}
-
-.resetPlanButton {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.resetPlanButton:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .optionGroup {
@@ -1411,10 +1318,6 @@
     max-height: 330px;
   }
 
-  .pageList {
-    max-height: 360px;
-  }
-
   .fileRow {
     min-height: 92px;
   }
@@ -1422,10 +1325,6 @@
   .fileActions button {
     width: 44px;
     height: 44px;
-  }
-
-  .pageActions button {
-    min-height: 44px;
   }
 
   .optionGroup > label {
@@ -1631,15 +1530,11 @@
 
   .eyebrow,
   .panelTitle span,
-  .pagePosition,
-  .pageCopy strong,
-  .pageCopy span,
   .fileIndex,
   .fileCopy strong,
   .fileCopy span,
   .fileTotal,
   .settingCard p,
-  .resetPlanButton,
   .optionGroup legend,
   .optionGroup label strong,
   .optionGroup label small,

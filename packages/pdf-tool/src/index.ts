@@ -5,4 +5,5 @@ export * from "./page-layout";
 export * from "./page-plan";
 export * from "./page-ranges";
 export * from "./raster-plan";
+export * from "./thumbnail-plan";
 export * from "./watermark-layout";

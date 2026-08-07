@@ -103,16 +103,20 @@ test("renders the PDF organizer in the catalog-driven workspace shell", async ({
     mimeType: "application/pdf",
     buffer: Buffer.from(await document.save()),
   });
-  await expect(page.getByText("2페이지를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "페이지 순서 정리" })).toBeVisible({
+    timeout: 20_000,
+  });
 
-  await expect(page.getByRole("button", { name: "2페이지 위로 이동" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "2페이지 아래로 이동" })).toBeVisible();
-  await page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }).click();
-  await page.getByRole("button", { name: "2페이지 삭제" }).click();
-  await page.getByRole("button", { name: "페이지 순서 초기화" }).click();
-  await page.getByRole("button", { name: "2페이지 정리하기 →" }).click();
+  await expect(page.getByRole("button", { name: "원본 2페이지 위로 이동" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "원본 2페이지 아래로 이동" })).toBeVisible();
+  await page.getByRole("button", { name: "원본 2페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "원본 2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "초기화" }).click();
+  await page.getByRole("button", { name: "2페이지로 PDF 만들기" }).click();
 
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "페이지 정리 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
 });
 

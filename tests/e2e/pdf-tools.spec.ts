@@ -376,13 +376,31 @@ test("reorders, rotates, and deletes PDF pages without external uploads", async 
     mimeType: "application/pdf",
     buffer: await createPdf([100, 200, 300]),
   });
-  await expect(page.getByText("3페이지를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: "3페이지 위로 이동" }).click();
-  await page.getByRole("button", { name: "3페이지 위로 이동" }).click();
-  await page.getByRole("button", { name: "3페이지 시계 방향으로 회전" }).click();
-  await page.getByRole("button", { name: "2페이지 삭제" }).click();
-  await page.getByRole("button", { name: "2페이지 정리하기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "페이지 순서 정리" })).toBeFocused({
+    timeout: 20_000,
+  });
+  const grid = page.getByRole("list", { name: "PDF 페이지 순서" });
+  await expect(grid.locator("img")).toHaveCount(3, { timeout: 20_000 });
+  const previewSize = await grid
+    .locator("img")
+    .first()
+    .evaluate((image) => ({
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    }));
+  expect(Math.min(previewSize.width, previewSize.height)).toBeGreaterThan(0);
+  expect(Math.max(previewSize.width, previewSize.height)).toBeLessThanOrEqual(160);
+
+  const cards = grid.getByRole("listitem");
+  await cards.nth(2).dragTo(cards.nth(0));
+  await expect(cards.first()).toContainText("원본 3페이지");
+  await page.getByRole("button", { name: "원본 3페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "원본 2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "2페이지로 PDF 만들기" }).click();
+  await expect(page.getByRole("heading", { name: "페이지 정리 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("원본 3페이지 → 결과 2페이지", { exact: true })).toBeVisible();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),

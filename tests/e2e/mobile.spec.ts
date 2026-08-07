@@ -719,6 +719,7 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
   document.addPage([200, 100]);
   document.addPage([300, 100]);
 
+  await page.setViewportSize({ width: 320, height: 844 });
   await page.goto("/pdf/organize");
   const organizeInput = page.locator("input[type=file]");
   await expect(organizeInput).toBeEnabled({ timeout: 60_000 });
@@ -727,15 +728,24 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     mimeType: "application/pdf",
     buffer: Buffer.from(await document.save()),
   });
-  await expect(page.getByText("3페이지를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "페이지 순서 정리" })).toBeFocused({
+    timeout: 20_000,
+  });
+  const grid = page.getByRole("list", { name: "PDF 페이지 순서" });
+  await expect(grid.locator("img")).toHaveCount(3, { timeout: 20_000 });
+  expect(
+    await grid.evaluate(
+      (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+    ),
+  ).toBe(2);
 
   const controls = [
-    page.getByRole("button", { name: "2페이지 위로 이동" }),
-    page.getByRole("button", { name: "2페이지 아래로 이동" }),
-    page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }),
-    page.getByRole("button", { name: "2페이지 삭제" }),
-    page.getByRole("button", { name: "페이지 순서 초기화" }),
-    page.getByRole("button", { name: "3페이지 정리하기 →" }),
+    page.getByRole("button", { name: "원본 2페이지 위로 이동" }),
+    page.getByRole("button", { name: "원본 2페이지 아래로 이동" }),
+    page.getByRole("button", { name: "원본 2페이지 시계 방향으로 회전" }),
+    page.getByRole("button", { name: "원본 2페이지 삭제" }),
+    page.getByRole("button", { name: "초기화" }),
+    page.getByRole("button", { name: "3페이지로 PDF 만들기" }),
   ];
   for (const control of controls) {
     const box = await control.boundingBox();
@@ -743,70 +753,29 @@ test("keeps PDF organizer controls touch-safe without horizontal overflow", asyn
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
 
-  await page.getByRole("button", { name: "2페이지 시계 방향으로 회전" }).click();
-  await page.getByRole("button", { name: "2페이지 삭제" }).click();
-  await page.getByRole("button", { name: "페이지 순서 초기화" }).click();
-  await page.getByRole("button", { name: "3페이지 정리하기 →" }).click();
-  await expect(page.getByText("3페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "원본 2페이지 시계 방향으로 회전" }).click();
+  await page.getByRole("button", { name: "원본 2페이지 삭제" }).click();
+  await page.getByRole("button", { name: "초기화" }).click();
+  await page.getByRole("button", { name: "3페이지로 PDF 만들기" }).click();
+  await expect(page.getByRole("heading", { name: "페이지 정리 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
 
   const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   await expect(save).toBeVisible();
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  const actionBar = save.locator("..").locator("..");
-  expect(await actionBar.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
-
-  const viewportHeight = page.viewportSize()?.height ?? 0;
-  const workArea = page.getByRole("region", { name: "편집 작업 공간" });
-  await workArea.evaluate((element) => {
-    document.documentElement.style.scrollBehavior = "auto";
-    const bounds = element.getBoundingClientRect();
-    window.scrollTo(0, window.scrollY + bounds.top + 16);
-  });
-  const stickyBox = await actionBar.boundingBox();
-  expect(stickyBox).not.toBeNull();
   expect(
-    Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
-  ).toBeLessThanOrEqual(2);
+    await save.locator("..").evaluate((element) => getComputedStyle(element).position),
+  ).not.toBe("sticky");
 
   await expectFunctionalTextFloor([
     {
       label: "PDF organizer reset action",
-      locator: page.getByRole("button", { name: "페이지 순서 초기화" }),
-    },
-    {
-      label: "PDF organizer help",
-      locator: page.getByText("왼쪽 목록을 위아래로 옮기고, 90도씩 돌리거나 결과에서 빼세요.", {
-        exact: true,
-      }),
-    },
-    {
-      label: "PDF organizer page order",
-      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("01", {
-        exact: true,
-      }),
-    },
-    {
-      label: "PDF organizer page label",
-      locator: page.getByRole("region", { name: "PDF 페이지 순서" }).getByText("원본 1페이지", {
-        exact: true,
-      }),
-    },
-    {
-      label: "PDF organizer rotation state",
-      locator: page
-        .getByRole("region", { name: "PDF 페이지 순서" })
-        .getByText("회전 0°", {
-          exact: true,
-        })
-        .first(),
+      locator: page.getByRole("button", { name: "다른 PDF 정리" }),
     },
   ]);
-  const orderPanelTitle = page.getByText("페이지 순서", { exact: true }).locator("..");
-  expect(await orderPanelTitle.evaluate((element) => element.getBoundingClientRect().height)).toBe(
-    44,
-  );
 
   const layout = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,

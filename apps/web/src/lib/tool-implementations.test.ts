@@ -15,7 +15,7 @@ const expectedImplementationMapping = {
   "image.watermark": { intent: "watermark", bundleProfile: "image-watermark" },
   "pdf.merge": { intent: "merge", bundleProfile: "pdf-editing" },
   "pdf.split": { intent: "split", bundleProfile: "pdf-editing" },
-  "pdf.organize": { intent: "organize", bundleProfile: "pdf-editing" },
+  "pdf.organize": { intent: "organize", bundleProfile: "pdf-organize" },
   "pdf.watermark": { intent: "watermark", bundleProfile: "pdf-editing" },
   "pdf.image-to-pdf": { intent: "image-to-pdf", bundleProfile: "pdf-editing" },
   "pdf.to-image": { intent: "to-image", bundleProfile: "pdf-to-images" },
@@ -38,6 +38,7 @@ const supportedBundleProfiles = [
   "image-compression-server",
   "image-watermark",
   "pdf-editing",
+  "pdf-organize",
   "pdf-to-images",
   "pdf-compress-scanned",
 ] as const satisfies readonly ToolBundleProfile[];
