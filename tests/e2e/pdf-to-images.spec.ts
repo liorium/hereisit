@@ -792,7 +792,7 @@ test("loads only each raster route's inspection and dedicated Worker markers", a
     },
     {
       path: "/pdf/compress",
-      title: "스캔 PDF 용량 줄이기",
+      title: "PDF 용량 줄이기",
       required: ["hereisit-pdf-inspection-worker", "hereisit-pdf-compress-scanned-worker"],
       forbidden: ["hereisit-pdf-worker", "hereisit-pdf-to-images-worker"],
     },

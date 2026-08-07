@@ -22,7 +22,10 @@ describe("classifyPdfCompressionDocument", () => {
     ["an annotation", [{ ...imageOnlyPage, annotationCount: 1 }]],
     ["no painted image", [{ ...imageOnlyPage, imagePaintOperations: 0 }]],
     ["a non-image paint operation", [{ ...imageOnlyPage, nonImagePaintOperations: 1 }]],
-    ["one structured page in a mixed document", [imageOnlyPage, { ...imageOnlyPage, nonWhitespaceTextItems: 1 }]],
+    [
+      "one structured page in a mixed document",
+      [imageOnlyPage, { ...imageOnlyPage, nonWhitespaceTextItems: 1 }],
+    ],
   ] as const)("preserves structure for %s", (_label, pages) => {
     expect(classifyPdfCompressionDocument(pages)).toBe("structured");
   });

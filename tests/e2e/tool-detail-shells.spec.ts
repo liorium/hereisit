@@ -157,9 +157,9 @@ const remainingPdfShells = [
   },
   {
     path: "/pdf/compress",
-    title: "스캔 PDF 용량 줄이기",
+    title: "PDF 용량 줄이기",
     notice:
-      "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.",
+      "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.",
     related: ["/pdf/merge", "/pdf/split", "/pdf/to-image"],
   },
 ] as const;

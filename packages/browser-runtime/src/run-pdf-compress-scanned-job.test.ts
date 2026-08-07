@@ -464,7 +464,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
       },
       error: {
         code: "UNSUPPORTED_BROWSER",
-        message: "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.",
+        message: "이 브라우저는 로컬 PDF 압축을 지원하지 않아요.",
         retryable: false,
       },
     },
@@ -478,7 +478,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
       },
       error: {
         code: "WORKER_CRASH",
-        message: "스캔 PDF 압축 작업기를 준비하지 못했어요.",
+        message: "PDF 압축 작업기를 준비하지 못했어요.",
         retryable: true,
       },
     },
@@ -492,7 +492,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
       },
       error: {
         code: "WORKER_CRASH",
-        message: "스캔 PDF 압축 작업기를 준비하지 못했어요.",
+        message: "PDF 압축 작업기를 준비하지 못했어요.",
         retryable: true,
       },
     },
@@ -530,7 +530,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
         },
         error: {
           code: "WORKER_CRASH",
-          message: "스캔 PDF 압축 작업기를 준비하지 못했어요.",
+          message: "PDF 압축 작업기를 준비하지 못했어요.",
           retryable: true,
         },
       }),
@@ -629,7 +629,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
       status: "rejected",
       error: {
         code: "WORKER_CRASH",
-        message: "스캔 PDF 압축 작업기 응답을 확인하지 못했어요.",
+        message: "PDF 압축 작업기 응답을 확인하지 못했어요.",
         retryable: true,
       },
     });

@@ -4,7 +4,7 @@ import { expect, type Locator, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
 
 const PDF_COMPRESSION_WARNING =
-  "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
+  "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -144,23 +144,29 @@ function addPngTextChunk(png: Buffer, text: string): Buffer {
 async function createMobileScannedPdf(page: import("@playwright/test").Page): Promise<Buffer> {
   const jpegBase64 = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
-    canvas.width = 1_275;
-    canvas.height = 1_650;
+    canvas.width = 600;
+    canvas.height = 800;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("2D canvas unavailable");
-    const image = context.createImageData(canvas.width, canvas.height);
-    for (let offset = 0; offset < image.data.length; offset += 4) {
-      const pixel = offset / 4;
-      image.data[offset] = (pixel * 17) % 256;
-      image.data[offset + 1] = (pixel * 31 + Math.floor(pixel / canvas.width)) % 256;
-      image.data[offset + 2] = (pixel * 47) % 256;
-      image.data[offset + 3] = 255;
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#f4efe6");
+    gradient.addColorStop(1, "#9aa8bd");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#24364f";
+    for (let row = 0; row < 50; row += 1) {
+      context.beginPath();
+      context.moveTo(20, 100 + row * 12);
+      context.lineTo(canvas.width - 20, 100 + row * 12);
+      context.stroke();
     }
-    context.putImageData(image, 0, 0);
-    return canvas.toDataURL("image/jpeg", 1).split(",")[1] ?? "";
+    return canvas.toDataURL("image/jpeg", 0.9).split(",")[1] ?? "";
   });
   const document = await PDFDocument.create();
   const image = await document.embedJpg(Buffer.from(jpegBase64, "base64"));
+  for (let index = 0; index < 8; index += 1) {
+    await document.embedJpg(Buffer.from(jpegBase64, "base64"));
+  }
   const outputPage = document.addPage([612, 792]);
   outputPage.drawImage(image, { x: 0, y: 0, width: 612, height: 792 });
   return Buffer.from(await document.save());
@@ -414,7 +420,7 @@ test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ 
   await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByText("모든 페이지가 이미지로 변환된 PDF예요.")).toBeVisible();
+  await expect(page.getByText("스캔 페이지를 가볍게 다시 만들었어요.")).toBeVisible();
   const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);

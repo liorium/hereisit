@@ -223,7 +223,7 @@ beforeEach(() => {
   pipelineMocks.toErrorPayload.mockReset();
   pipelineMocks.toErrorPayload.mockReturnValue({
     code: "WORKER_CRASH",
-    message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+    message: "PDF 압축 작업을 완료하지 못했어요.",
     retryable: true,
   } satisfies PdfCompressScannedErrorPayload);
   rasterMocks.probe.mockReset();
@@ -954,7 +954,7 @@ describe("scanned-PDF compression Worker execution", () => {
           jobId: "job-1",
           error: {
             code: "WORKER_CRASH",
-            message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+            message: "PDF 압축 작업을 완료하지 못했어요.",
             retryable: true,
           },
         },
@@ -983,7 +983,7 @@ describe("scanned-PDF compression Worker execution", () => {
           jobId: "job-1",
           error: {
             code: "WORKER_CRASH",
-            message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+            message: "PDF 압축 작업을 완료하지 못했어요.",
             retryable: true,
           },
         },

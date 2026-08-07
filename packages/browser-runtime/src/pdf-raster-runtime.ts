@@ -1,8 +1,8 @@
 import {
-  type PdfCompressionPageSignals,
   MAX_PDF_RASTER_DIMENSION,
   MAX_PDF_RASTER_PAGE_PIXELS,
   PDF_RASTER_RGBA_BYTES_PER_PIXEL,
+  type PdfCompressionPageSignals,
 } from "@hereisit/pdf-tool";
 
 const MAX_ACTIVE_CANVAS_BYTES = 128 * 1024 * 1024;

@@ -1,8 +1,5 @@
 import { PDFDocument, StandardFonts } from "@cantoo/pdf-lib";
-import type {
-  PdfCompressScannedSpecV1,
-  PdfCompressScannedSpecV2,
-} from "@hereisit/tool-contracts";
+import type { PdfCompressScannedSpecV1, PdfCompressScannedSpecV2 } from "@hereisit/tool-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type PdfCompressScannedAssembler,
@@ -247,9 +244,7 @@ function fakeRasterAdapter(configuration: FakeRasterConfiguration = {}): {
           });
         },
         getAnnotations() {
-          return Promise.resolve(
-            Array.from({ length: signals?.annotationCount ?? 0 }, () => ({})),
-          );
+          return Promise.resolve(Array.from({ length: signals?.annotationCount ?? 0 }, () => ({})));
         },
         getOperatorList() {
           return Promise.resolve({
@@ -557,7 +552,9 @@ describe("runPdfCompressScannedPipeline output", () => {
       pageCount: 1,
       warnings: ["SIGNATURES_INVALIDATED"],
     });
-    expect(result.byteLength).toBeLessThanOrEqual(input.byteLength - Math.ceil(input.byteLength / 100));
+    expect(result.byteLength).toBeLessThanOrEqual(
+      input.byteLength - Math.ceil(input.byteLength / 100),
+    );
     expect(raster.events).not.toContain("session:open");
     expect(result).not.toHaveProperty("preset");
   });
@@ -1308,7 +1305,7 @@ describe("runPdfCompressScannedPipeline validation and failure mapping", () => {
     });
     expect(toPdfCompressScannedErrorPayload(new Error("private filename and URL"))).toEqual({
       code: "WORKER_CRASH",
-      message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+      message: "PDF 압축 작업을 완료하지 못했어요.",
       retryable: true,
     });
   });
@@ -1327,7 +1324,7 @@ describe("runPdfCompressScannedPipeline validation and failure mapping", () => {
 
     expect(payload).toEqual({
       code: "WORKER_CRASH",
-      message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+      message: "PDF 압축 작업을 완료하지 못했어요.",
       retryable: true,
     });
     expect(payload.message).not.toContain(sentinel);
@@ -1337,7 +1334,7 @@ describe("runPdfCompressScannedPipeline validation and failure mapping", () => {
       ),
     ).toEqual({
       code: "WORKER_CRASH",
-      message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+      message: "PDF 압축 작업을 완료하지 못했어요.",
       retryable: false,
     });
   });

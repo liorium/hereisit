@@ -7,8 +7,8 @@ import {
   hasPdfSignature,
   MAX_PDF_COMPRESS_SCANNED_INPUT_BYTES,
   MAX_PDF_COMPRESS_SCANNED_PAGES,
-  PdfCompressScannedPlanError,
   type PdfCompressionPageSignals,
+  PdfCompressScannedPlanError,
   planPdfCompressScannedRasterization,
 } from "@hereisit/pdf-tool";
 import {
@@ -36,7 +36,7 @@ import {
 const MEMORY_LIMIT_MESSAGE =
   "선택한 설정에서 PDF 페이지의 전체 이미지 크기가 너무 커요. 더 낮은 해상도를 선택해 주세요.";
 const PAGE_LIMIT_MESSAGE = `PDF는 1페이지부터 ${MAX_PDF_COMPRESS_SCANNED_PAGES}페이지까지 압축할 수 있어요.`;
-const WORKER_CRASH_MESSAGE = "스캔 PDF 압축 작업을 완료하지 못했어요.";
+const WORKER_CRASH_MESSAGE = "PDF 압축 작업을 완료하지 못했어요.";
 const ASSEMBLY_FAILED_MESSAGE = "압축 PDF 결과를 만들지 못했어요.";
 const NO_SIZE_REDUCTION_MESSAGE = "원본보다 1% 이상 작은 PDF를 만들지 못했어요.";
 
@@ -332,7 +332,8 @@ function createDefaultStructureOptimizer(now: () => number): PdfStructureOptimiz
       }
       const serializeMs = now() - serializeStarted;
       const candidate = ownedArrayBuffer(serialized);
-      if (candidate.byteLength > targetBytes || !hasCompletePdfEnvelope(candidate)) return undefined;
+      if (candidate.byteLength > targetBytes || !hasCompletePdfEnvelope(candidate))
+        return undefined;
       return { bytes: candidate, pageCount, loadMs, serializeMs };
     },
   };
@@ -382,7 +383,7 @@ export async function runPdfCompressScannedPipeline(
     emitProgress(options.onProgress, { phase: "validating", fraction: 0 });
     const parsed = pdfCompressScannedSpecSchema.safeParse(rawSpec);
     if (!parsed.success) {
-      return fail("INVALID_SPEC", "스캔 PDF 압축 설정이 올바르지 않아요.");
+      return fail("INVALID_SPEC", "PDF 압축 설정이 올바르지 않아요.");
     }
     validateInput(transferredInput);
     const { targetBytes } = calculatePdfCompressScannedTarget(transferredInput.byteLength);
@@ -490,10 +491,7 @@ export async function runPdfCompressScannedPipeline(
     }
     loadMs = now() - loadStarted;
     throwIfCancelled();
-    if (
-      parsed.data.version === 2 &&
-      classifyPdfCompressionDocument(pageSignals) !== "image-only"
-    ) {
+    if (parsed.data.version === 2 && classifyPdfCompressionDocument(pageSignals) !== "image-only") {
       throw noSizeReduction();
     }
 

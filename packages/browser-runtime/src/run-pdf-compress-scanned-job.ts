@@ -10,8 +10,6 @@ import {
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   type PdfCompressScannedErrorCode,
   type PdfCompressScannedErrorPayload,
-  type PdfCompressScannedJobHandle,
-  type PdfCompressScannedJobOutcome,
   type PdfCompressScannedProgress,
   type PdfCompressScannedRasterResultV2,
   type PdfCompressScannedResultV2,
@@ -56,14 +54,24 @@ const ERROR_CODES = new Set<PdfCompressScannedErrorCode>([
   "WORKER_CRASH",
 ]);
 
+export type PdfCompressScannedJobOutcome =
+  | { status: "fulfilled"; value: PdfCompressScannedResultV2 }
+  | { status: "rejected"; error: PdfCompressScannedErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfCompressScannedJobHandle {
+  result: Promise<PdfCompressScannedJobOutcome>;
+  cancel(): void;
+}
+
 const WORKER_FAILURE: PdfCompressScannedErrorPayload = {
   code: "WORKER_CRASH",
-  message: "브라우저 스캔 PDF 압축 작업기가 중단됐어요.",
+  message: "브라우저 PDF 압축 작업기가 중단됐어요.",
   retryable: true,
 };
 const PROTOCOL_FAILURE: PdfCompressScannedErrorPayload = {
   code: "WORKER_CRASH",
-  message: "스캔 PDF 압축 작업기 응답을 확인하지 못했어요.",
+  message: "PDF 압축 작업기 응답을 확인하지 못했어요.",
   retryable: true,
 };
 
@@ -401,7 +409,10 @@ function decodeStructureWarnings(value: unknown): ["SIGNATURES_INVALIDATED"] | u
     : undefined;
 }
 
-function decodeResult(value: unknown, input: CapturedInput): PdfCompressScannedResultV2 | undefined {
+function decodeResult(
+  value: unknown,
+  input: CapturedInput,
+): PdfCompressScannedResultV2 | undefined {
   if (!isPlainRecord(value)) return undefined;
   const bytes = value.bytes;
   const suggestedName = value.suggestedName;
@@ -489,7 +500,7 @@ function validationError(
       return {
         error: {
           code: "UNSUPPORTED_BROWSER",
-          message: "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.",
+          message: "이 브라우저는 로컬 PDF 압축을 지원하지 않아요.",
           retryable: false,
         },
       };
@@ -544,7 +555,7 @@ function validationError(
       return {
         error: {
           code: "INVALID_SPEC",
-          message: "스캔 PDF 압축 설정이 올바르지 않아요.",
+          message: "PDF 압축 설정이 올바르지 않아요.",
           retryable: false,
         },
       };
@@ -553,7 +564,7 @@ function validationError(
       return {
         error: {
           code: "INVALID_SPEC",
-          message: "스캔 PDF 압축 요청이 올바르지 않아요.",
+          message: "PDF 압축 요청이 올바르지 않아요.",
           retryable: false,
         },
       };
@@ -576,7 +587,7 @@ function validationError(
       return {
         error: {
           code: "INVALID_SPEC",
-          message: "스캔 PDF 압축 요청이 올바르지 않아요.",
+          message: "PDF 압축 요청이 올바르지 않아요.",
           retryable: false,
         },
       };
@@ -596,7 +607,7 @@ function validationError(
     return {
       error: {
         code: "INVALID_SPEC",
-        message: "스캔 PDF 압축 요청이 올바르지 않아요.",
+        message: "PDF 압축 요청이 올바르지 않아요.",
         retryable: false,
       },
     };
@@ -651,7 +662,7 @@ export function runPdfCompressScannedJob(
   timeoutId = setTimeout(() => {
     reject({
       code: "WORKER_CRASH",
-      message: "스캔 PDF 압축 시간이 3분 제한을 넘었어요.",
+      message: "PDF 압축 시간이 3분 제한을 넘었어요.",
       retryable: true,
     });
   }, JOB_TIMEOUT_MS);
@@ -805,7 +816,7 @@ export function runPdfCompressScannedJob(
     } catch {
       reject({
         code: "WORKER_CRASH",
-        message: "브라우저 스캔 PDF 압축 작업기를 시작하지 못했어요.",
+        message: "브라우저 PDF 압축 작업기를 시작하지 못했어요.",
         retryable: true,
       });
     }
@@ -838,8 +849,6 @@ export function runPdfCompressScannedJob(
 
 export type {
   PdfCompressScannedErrorPayload,
-  PdfCompressScannedJobHandle,
-  PdfCompressScannedJobOutcome,
   PdfCompressScannedProgress,
   PdfCompressScannedResultV2,
   PdfCompressScannedSpecV2,

@@ -1,5 +1,13 @@
 import { readFile } from "node:fs/promises";
-import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from "@cantoo/pdf-lib";
+import {
+  degrees,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFNumber,
+  PDFRawStream,
+  rgb,
+} from "@cantoo/pdf-lib";
 import { expect, type Page, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
 import {
@@ -11,9 +19,9 @@ import {
 
 const PDF_COMPRESSION_ROUTE = "/pdf/compress";
 const PDF_INSPECTION_TIMEOUT_MS = 60_000;
-const DESTRUCTIVE_WARNING =
-  "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
-const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
+const SMART_COMPRESSION_NOTICE =
+  "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.";
+const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 PDF 압축을 지원하지 않아요.";
 const SOURCE_TITLE = "ORIGINAL_SOURCE_TITLE";
 const SOURCE_AUTHOR = "ORIGINAL_SOURCE_AUTHOR";
 
@@ -49,40 +57,75 @@ async function createVectorPdf(
   return Buffer.from(await document.save());
 }
 
-async function createScannedPdf(page: Page, pageCount = 1): Promise<Buffer> {
+async function createCompressibleStructuredPdf(): Promise<Buffer> {
+  const document = await PDFDocument.create();
+  for (let index = 0; index < 12; index += 1) {
+    const page = document.addPage([612, 792]);
+    for (let row = 0; row < 20; row += 1) {
+      page.drawRectangle({
+        x: 24,
+        y: 24 + row * 32,
+        width: 564,
+        height: 16,
+        color: rgb(0.15, 0.35, 0.8),
+      });
+    }
+  }
+  return Buffer.from(await document.save({ useObjectStreams: false }));
+}
+
+async function createScannedPdf(
+  page: Page,
+  pageCount = 1,
+  pageSize: { width: number; height: number } = { width: 612, height: 792 },
+): Promise<Buffer> {
   const encodedJpeg = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
-    canvas.width = 1_275;
-    canvas.height = 1_650;
+    canvas.width = 600;
+    canvas.height = 800;
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("Test canvas unavailable");
 
-    const image = context.createImageData(canvas.width, canvas.height);
-    for (let offset = 0; offset < image.data.length; offset += 4) {
-      const pixel = offset / 4;
-      image.data[offset] = (pixel * 17) % 256;
-      image.data[offset + 1] = (pixel * 31 + Math.floor(pixel / canvas.width)) % 256;
-      image.data[offset + 2] = (pixel * 47) % 256;
-      image.data[offset + 3] = 255;
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#f4efe6");
+    gradient.addColorStop(1, "#9aa8bd");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#24364f";
+    for (let row = 0; row < 50; row += 1) {
+      context.beginPath();
+      context.moveTo(20, 170 + row * 10);
+      context.lineTo(canvas.width - 20, 170 + row * 10);
+      context.stroke();
     }
-    context.putImageData(image, 0, 0);
-    return canvas.toDataURL("image/jpeg", 1).split(",")[1] ?? "";
+    context.fillStyle = "#141fe6";
+    context.fillRect(0, 0, canvas.width, 80);
+    context.fillStyle = "#e61414";
+    context.fillRect(0, canvas.height - 80, canvas.width, 80);
+    return canvas.toDataURL("image/jpeg", 0.9).split(",")[1] ?? "";
   });
 
   const document = await PDFDocument.create();
   document.setTitle(SOURCE_TITLE);
   document.setAuthor(SOURCE_AUTHOR);
   const scan = await document.embedJpg(Buffer.from(encodedJpeg, "base64"));
+  for (let index = 0; index < 8; index += 1) {
+    await document.embedJpg(Buffer.from(encodedJpeg, "base64"));
+  }
   for (let index = 0; index < pageCount; index += 1) {
-    const outputPage = document.addPage([612, 792]);
-    outputPage.drawImage(scan, { x: 0, y: 0, width: 612, height: 792 });
-    outputPage.drawRectangle({
-      x: 0,
-      y: 0,
-      width: 612,
-      height: 72,
-      color: index % 2 === 0 ? rgb(0.9, 0.08, 0.08) : rgb(0.08, 0.12, 0.9),
-    });
+    const outputPage = document.addPage([pageSize.width, pageSize.height]);
+    outputPage.drawImage(
+      scan,
+      index % 2 === 0
+        ? { x: 0, y: 0, width: pageSize.width, height: pageSize.height }
+        : {
+            x: pageSize.width,
+            y: pageSize.height,
+            width: pageSize.width,
+            height: pageSize.height,
+            rotate: degrees(180),
+          },
+    );
   }
   return Buffer.from(await document.save());
 }
@@ -519,7 +562,7 @@ test("bounds a wide history state before enumerating its values", async ({ page 
 
 test("shows only the file-selection step before a PDF is ready", async ({ page }) => {
   await openReadyPdfCompression(page);
-  await expect(page.getByRole("heading", { level: 2, name: "스캔 PDF 용량 줄이기" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "PDF 용량 줄이기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled();
   await expect(page.getByRole("radio")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "PDF 압축 결과" })).toHaveCount(0);
@@ -598,7 +641,7 @@ test("compresses a known scan with the default preset and downloads only after o
   await expect(setup).toBeVisible();
   await expectMobileCompressionStage(page);
   await expect(setup.getByRole("radio", { name: /균형 150DPI/ })).toBeChecked();
-  await expect(setup.getByText(DESTRUCTIVE_WARNING, { exact: true })).toBeVisible();
+  await expect(setup.getByText(SMART_COMPRESSION_NOTICE, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "2페이지 용량 줄이기" })).toBeEnabled();
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
@@ -609,7 +652,7 @@ test("compresses a known scan with the default preset and downloads only after o
     page.getByText(/^\d+(?:\.\d+)?(?:B|KB|MB) → \d+(?:\.\d+)?(?:B|KB|MB)$/),
   ).toBeVisible();
   await expect(page.getByText(/^\d+% 줄었어요$/)).toBeVisible();
-  await expect(page.getByText("모든 페이지가 이미지로 변환된 PDF예요.")).toBeVisible();
+  await expect(page.getByText("스캔 페이지를 가볍게 다시 만들었어요.")).toBeVisible();
   await expect(page.getByRole("button", { name: "다른 PDF 압축" })).toBeVisible();
   await expect(page.getByText("처리 시간", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "같은 설정으로 다시 실행" })).toHaveCount(0);
@@ -646,6 +689,29 @@ test("compresses a known scan with the default preset and downloads only after o
   });
   expectPreservedPageMarkerOrder(await inspectPageMarkerColors(page, output));
   await privacy.assertClean(1, browserName !== "firefox");
+});
+
+test("preserves a structured PDF and explains the result before download", async ({ page }) => {
+  await installObjectUrlCounters(page);
+  await openReadyPdfCompression(page);
+  const source = await createCompressibleStructuredPdf();
+  await uploadPdf(page, "structured.pdf", source, 12);
+
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText("텍스트와 링크를 유지했어요.")).toBeVisible();
+  expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "PDF 다운로드 ↓" }).click(),
+  ]);
+  const output = await downloadedBytes(await download.path());
+  expectCompletePdfEnvelope(output);
+  expect(output.byteLength).toBeLessThanOrEqual(exactCompressionTarget(source.byteLength));
+  expect((await inspectPdfOutput(output)).imageDimensions).toEqual([]);
 });
 
 test("makes the same Letter scan smaller with the minimum preset and preserves output structure", async ({
@@ -758,9 +824,7 @@ test("keeps a compressed PDF result retryable when download activation fails", a
   );
 });
 
-test("shows both preset-specific no-reduction messages without creating a result URL", async ({
-  page,
-}) => {
+test("keeps structure when neither preset can safely reduce the file", async ({ page }) => {
   await installObjectUrlCounters(page);
   await openReadyPdfCompression(page);
   let downloadCount = 0;
@@ -773,7 +837,7 @@ test("shows both preset-specific no-reduction messages without creating a result
   await expect(
     page
       .getByText(
-        "균형 150DPI 설정으로는 파일 용량을 1% 이상 줄이지 못했어요. 최소 용량 96DPI를 시도해 보세요.",
+        "텍스트와 링크를 유지하면서는 용량을 1% 이상 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.",
       )
       .first(),
   ).toBeVisible({ timeout: 60_000 });
@@ -786,7 +850,7 @@ test("shows both preset-specific no-reduction messages without creating a result
   await expect(
     page
       .getByText(
-        "사용 가능한 설정으로는 파일 용량을 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.",
+        "텍스트와 링크를 유지하면서는 용량을 1% 이상 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.",
       )
       .first(),
   ).toBeVisible({ timeout: 60_000 });
@@ -803,7 +867,7 @@ test("gives preset-specific guidance when a valid oversized page is unsafe at mi
   await uploadPdf(
     page,
     "oversized-page.pdf",
-    await createVectorPdf(1, { width: 4_000, height: 4_000 }),
+    await createScannedPdf(page, 1, { width: 4_000, height: 4_000 }),
     1,
   );
 

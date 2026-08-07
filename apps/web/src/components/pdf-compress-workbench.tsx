@@ -3,8 +3,8 @@
 import {
   type PdfCompressScannedJobHandle,
   type PdfCompressScannedProgress,
-  type PdfCompressScannedResult,
-  type PdfCompressScannedSpecV1,
+  type PdfCompressScannedResultV2,
+  type PdfCompressScannedSpecV2,
   runPdfCompressScannedJob,
   supportsBrowserPdfCompressScannedRuntime,
 } from "@hereisit/browser-runtime/pdf-compress-scanned";
@@ -20,18 +20,18 @@ import styles from "./pdf-workbench.module.css";
 
 const MAX_PAGE_COUNT = 100;
 const INITIAL_MESSAGE = "파일을 선택하면 페이지를 확인할게요.";
-const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
+const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 PDF 압축을 지원하지 않아요.";
 const PAGE_LIMIT_MESSAGE = "PDF는 1페이지부터 100페이지까지 압축할 수 있어요.";
-const PDF_COMPRESS_SCANNED_WARNING = getToolImplementation("pdf.compress-scanned").notices.find(
+const PDF_COMPRESSION_NOTICE = getToolImplementation("pdf.compress-scanned").notices.find(
   ({ tone }) => tone === "warning",
 )?.text;
-if (PDF_COMPRESS_SCANNED_WARNING === undefined) {
-  throw new Error("Missing scanned PDF warning");
+if (PDF_COMPRESSION_NOTICE === undefined) {
+  throw new Error("Missing PDF compression notice");
 }
 
-type Preset = PdfCompressScannedSpecV1["preset"];
+type Preset = PdfCompressScannedSpecV2["preset"];
 type CompressionStage = "select" | "inspecting" | "setup" | "processing" | "result";
-type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResult, "bytes">;
+type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResultV2, "bytes">;
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || (file.type === "" && /\.pdf$/i.test(file.name));
@@ -253,7 +253,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     try {
       handle = runPdfCompressScannedJob(
         selectedFile,
-        { version: 1, preset: selectedPreset },
+        { version: 2, preset: selectedPreset },
         {
           expectedPageCount: selectedInspection.pageCount,
           onProgress: (event) => {
@@ -282,9 +282,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         productRun.failed(outcome.error.code);
         setProgress(undefined);
         const noReductionMessage =
-          selectedPreset === "balanced"
-            ? "균형 150DPI 설정으로는 파일 용량을 1% 이상 줄이지 못했어요. 최소 용량 96DPI를 시도해 보세요."
-            : "사용 가능한 설정으로는 파일 용량을 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.";
+          "텍스트와 링크를 유지하면서는 용량을 1% 이상 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.";
         const memoryLimitMessage =
           selectedPreset === "balanced"
             ? "균형 150DPI에서는 페이지가 너무 커요. 최소 용량 96DPI로 낮춰 다시 시도해 주세요."
@@ -301,7 +299,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       if (runRef.current === runId) {
         productRun.failed("WORKER_CRASH");
         setProgress(undefined);
-        setMessage("스캔 PDF 압축 작업기를 시작하지 못했어요. 다시 시도해 주세요.");
+        setMessage("PDF 압축 작업기를 시작하지 못했어요. 다시 시도해 주세요.");
       }
     } finally {
       if (productRunRef.current === productRun) productRunRef.current = null;
@@ -397,7 +395,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             <span>＋</span>
           </div>
           <div className={styles.dropCopy}>
-            <h2 id="pdf-compress-workbench-title">스캔 PDF 용량 줄이기</h2>
+            <h2 id="pdf-compress-workbench-title">PDF 용량 줄이기</h2>
             <p>PDF 1개 · 최대 50MB · 최대 100페이지</p>
           </div>
           <div className={styles.dropActions}>
@@ -482,7 +480,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             </label>
           </fieldset>
 
-          <p className={styles.compressionSetupWarning}>{PDF_COMPRESS_SCANNED_WARNING}</p>
+          <p className={styles.compressionSetupWarning}>{PDF_COMPRESSION_NOTICE}</p>
 
           <footer className={styles.mergeSetupFooter}>
             <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
@@ -536,7 +534,11 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             {formatBytes(result.sourceByteLength)} → {formatBytes(result.byteLength)}
           </strong>
           <p className={styles.compressionSavings}>{savings}% 줄었어요</p>
-          <p className={styles.compressionResultNote}>모든 페이지가 이미지로 변환된 PDF예요.</p>
+          <p className={styles.compressionResultNote}>
+            {result.mode === "structure-preserving"
+              ? "텍스트와 링크를 유지했어요."
+              : "스캔 페이지를 가볍게 다시 만들었어요."}
+          </p>
           <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
             PDF 다운로드 ↓
           </button>

@@ -21,10 +21,10 @@ import { probePdfRasterParserWorker } from "./pdf-raster-runtime";
 const MAX_JOB_ID_LENGTH = 128;
 const MAX_INPUT_NAME_LENGTH = 512;
 const MAX_MIME_HINT_LENGTH = 100;
-const WORKER_READINESS_MESSAGE = "스캔 PDF 압축 작업기를 준비하지 못했어요.";
-const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 스캔 PDF 압축을 지원하지 않아요.";
-const INVALID_SPEC_MESSAGE = "스캔 PDF 압축 요청이 올바르지 않아요.";
-const CONCURRENT_RUN_MESSAGE = "스캔 PDF 압축 작업기가 이미 다른 요청을 처리하고 있어요.";
+const WORKER_READINESS_MESSAGE = "PDF 압축 작업기를 준비하지 못했어요.";
+const UNSUPPORTED_BROWSER_MESSAGE = "이 브라우저는 로컬 PDF 압축을 지원하지 않아요.";
+const INVALID_SPEC_MESSAGE = "PDF 압축 요청이 올바르지 않아요.";
+const CONCURRENT_RUN_MESSAGE = "PDF 압축 작업기가 이미 다른 요청을 처리하고 있어요.";
 const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
   ArrayBuffer.prototype,
   "byteLength",
@@ -309,7 +309,7 @@ function startRun(request: RunEnvelope): void {
       } catch {
         payload = {
           code: "WORKER_CRASH",
-          message: "스캔 PDF 압축 작업을 완료하지 못했어요.",
+          message: "PDF 압축 작업을 완료하지 못했어요.",
           retryable: true,
         };
       }
