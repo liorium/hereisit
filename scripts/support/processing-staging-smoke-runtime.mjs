@@ -1,6 +1,7 @@
 const transientPolicyFailures = new Set([
   "processing staging smoke failed [public-policy]",
   "processing staging smoke failed [maintainer-policy-missing]",
+  "processing staging smoke failed [maintainer-policy-identity]",
   "processing staging smoke failed [maintainer-policy-execution]",
 ]);
 const maximumPolicyAttempts = 12;

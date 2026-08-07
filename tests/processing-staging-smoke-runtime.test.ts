@@ -49,6 +49,7 @@ describe("processing staging smoke readiness", () => {
   it.each([
     "public-policy",
     "maintainer-policy-missing",
+    "maintainer-policy-identity",
   ])("retries transient %s propagation", async (stage) => {
     let attempts = 0;
     const result = await runProcessingStagingBrowserSmoke(
