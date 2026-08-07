@@ -42,26 +42,15 @@ function makeJobId(): string {
   }
 }
 
-function releaseCanvas(canvas: OffscreenCanvas | undefined): void {
-  if (canvas === undefined) return;
-  try {
-    canvas.width = 0;
-    canvas.height = 0;
-  } catch {
-    // Feature detection remains best effort.
-  }
-}
-
 function supportsOffscreenCanvas(): boolean {
-  if (typeof OffscreenCanvas === "undefined") return false;
-  let canvas: OffscreenCanvas | undefined;
   try {
-    canvas = new OffscreenCanvas(1, 1);
-    return canvas.getContext("2d") !== null && typeof canvas.convertToBlob === "function";
+    return (
+      typeof OffscreenCanvas !== "undefined" &&
+      typeof OffscreenCanvas.prototype.getContext === "function" &&
+      typeof OffscreenCanvas.prototype.convertToBlob === "function"
+    );
   } catch {
     return false;
-  } finally {
-    releaseCanvas(canvas);
   }
 }
 

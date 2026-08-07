@@ -155,9 +155,18 @@ afterEach(() => {
 });
 
 describe("PDF thumbnail job boundary", () => {
-  it("requires Worker, File, and a usable OffscreenCanvas", () => {
+  it("requires OffscreenCanvas APIs without allocating a support canvas", () => {
     installRuntime();
     expect(supportsBrowserPdfThumbnailRuntime()).toBe(true);
+    const CanvasConstructor = vi.fn(() => {
+      throw new Error("transient allocation failure");
+    });
+    CanvasConstructor.prototype = SupportedCanvas.prototype;
+    vi.stubGlobal("OffscreenCanvas", CanvasConstructor);
+    expect(supportsBrowserPdfThumbnailRuntime()).toBe(true);
+    expect(CanvasConstructor).not.toHaveBeenCalled();
+    vi.stubGlobal("OffscreenCanvas", class {});
+    expect(supportsBrowserPdfThumbnailRuntime()).toBe(false);
     vi.stubGlobal("OffscreenCanvas", undefined);
     expect(supportsBrowserPdfThumbnailRuntime()).toBe(false);
   });
