@@ -67,8 +67,8 @@ curl -fsS https://processing-staging.hereisit.pages.dev/privacy >/dev/null
 curl -fsS https://processing-staging.hereisit.pages.dev/ | rg -F 'https://static.cloudflareinsights.com/beacon.min.js'
 ```
 
-통계 반영을 기다린 뒤 스테이징 보고서에서 허용된 네 이벤트와 고정된 집계 차원만 확인한다. 그 후 같은
-커밋을 기존 GitHub production workflow로 승격하고 다시 확인한다.
+스테이징 처리 서버 스모크는 등록 호스트가 다른 이 제3자 수집 요청만 204로 대체한다. 실제 분석 수집은
+운영 호스트에서 확인하고, 허용된 네 이벤트와 고정된 집계 차원만 점검한다.
 
 ```bash
 curl -fsS https://hereisit.pages.dev/privacy >/dev/null
