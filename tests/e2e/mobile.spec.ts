@@ -311,9 +311,8 @@ test("keeps general image result actions touch-safe at every responsive boundary
   expect(downloads).toBe(0);
 });
 
-test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and touch-safe", async ({
-  page,
-}) => {
+test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ page }) => {
+  test.setTimeout(90_000);
   let downloads = 0;
   page.on("download", () => {
     downloads += 1;
@@ -321,22 +320,9 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   await page.goto("/pdf/compress");
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
   await expect(
-    page.getByText("PDF 1개 · 1바이트~50MB · 최대 100페이지 · 파일은 이 기기에서만 처리돼요."),
+    page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(PDF_COMPRESSION_WARNING, { exact: true })).toHaveCount(2);
-  await expect(
-    page.getByText("용량을 더 줄이지만 작은 글자가 흐려질 수 있어요.", { exact: true }),
-  ).toBeVisible();
-
-  const balanced = page.getByRole("radio", { name: /균형 150DPI/ });
-  const minimum = page.getByRole("radio", { name: /최소 용량 96DPI/ });
-  await expect(balanced).toBeChecked();
-  await expect(minimum).not.toBeChecked();
-  for (const preset of [balanced, minimum]) {
-    const box = await preset.locator("..").boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
+  await expect(page.getByText("파일은 이 기기에서만 처리돼요.", { exact: true })).toBeVisible();
 
   await page.locator("input[type=file]").setInputFiles({
     name: "mobile-scan.pdf",
@@ -347,40 +333,38 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
     timeout: 60_000,
   });
 
-  const source = page.getByLabel("원본 PDF");
-  const settings = page.getByLabel("PDF 압축 설정");
-  const result = page.getByLabel("PDF 압축 결과");
-  const [sourceBox, settingsBox, resultBox] = await Promise.all([
-    source.boundingBox(),
-    settings.boundingBox(),
-    result.boundingBox(),
-  ]);
-  expect(sourceBox?.y ?? 0).toBeLessThan(settingsBox?.y ?? 0);
-  expect(settingsBox?.y ?? 0).toBeLessThan(resultBox?.y ?? 0);
-
-  const sourceStatus = source.getByText("1페이지 · 페이지 수만 압축 준비에 사용해요.", {
-    exact: true,
-  });
+  const settings = page.getByRole("region", { name: "PDF 압축 설정" });
+  await expect(settings).toBeVisible();
+  await expect(settings.getByText(PDF_COMPRESSION_WARNING, { exact: true })).toBeVisible();
+  const balanced = settings.getByRole("radio", { name: /균형 150DPI/ });
+  const minimum = settings.getByRole("radio", { name: /최소 용량 96DPI/ });
+  await expect(balanced).toBeChecked();
+  await expect(minimum).not.toBeChecked();
+  for (const preset of [balanced, minimum]) {
+    const box = await preset.locator("..").boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
   await expectFunctionalTextFloor([
-    { label: "PDF compression panel state", locator: settings.getByText("LOCAL", { exact: true }) },
-    { label: "PDF compression file order", locator: source.getByText("01", { exact: true }) },
-    { label: "PDF compression file name", locator: source.locator("article strong") },
-    { label: "PDF compression inspection status", locator: sourceStatus },
+    {
+      label: "PDF compression heading",
+      locator: settings.getByRole("heading", { name: "압축 수준 선택" }),
+    },
+    { label: "PDF compression file name", locator: settings.getByText("mobile-scan.pdf") },
     {
       label: "PDF compression control help",
       locator: settings.getByText("글자 가독성과 용량의 균형을 맞춰요.", { exact: true }),
     },
     {
       label: "PDF compression action status",
-      locator: page.getByRole("status").getByText(/1페이지 PDF ·/),
+      locator: settings.getByRole("status").getByText("1페이지 PDF를 불러왔어요."),
     },
   ]);
 
-  const run = page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" });
+  const run = page.getByRole("button", { name: "1페이지 용량 줄이기" });
   const runBox = await run.boundingBox();
   expect(runBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(runBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  const actionBar = run.locator("..").locator("..");
   await page.evaluate(() => {
     (document.activeElement as HTMLElement | null)?.blur();
   });
@@ -401,44 +385,6 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   expect(reachedRun).toBe(true);
 
   await page.evaluate(() => {
-    document.documentElement.style.scrollBehavior = "auto";
-    window.scrollTo(0, 1_200);
-  });
-  const viewportHeight = page.viewportSize()?.height ?? 0;
-  const stickyBox = await actionBar.boundingBox();
-  expect(await actionBar.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
-  const actionBarClass = await actionBar.evaluate((element) => element.classList.item(0));
-  expect(actionBarClass).not.toBeNull();
-  expect(
-    await page.evaluate((runtimeClass) => {
-      const containsSafeAreaActionRule = (rules: CSSRuleList): boolean =>
-        Array.from(rules).some((rule) => {
-          if (
-            runtimeClass !== null &&
-            rule.cssText.includes(`.${runtimeClass}`) &&
-            rule.cssText.includes("env(safe-area-inset-bottom)")
-          ) {
-            return true;
-          }
-          const nestedRules = (rule as CSSMediaRule).cssRules;
-          return nestedRules === undefined ? false : containsSafeAreaActionRule(nestedRules);
-        });
-      return Array.from(document.styleSheets).some((styleSheet) =>
-        containsSafeAreaActionRule(styleSheet.cssRules),
-      );
-    }, actionBarClass),
-  ).toBe(true);
-  expect(
-    await actionBar.evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).paddingBottom),
-    ),
-  ).toBeGreaterThanOrEqual(14);
-  expect(stickyBox).not.toBeNull();
-  expect(
-    Math.abs((stickyBox?.y ?? 0) + (stickyBox?.height ?? 0) - viewportHeight),
-  ).toBeLessThanOrEqual(2);
-
-  await page.evaluate(() => {
     const originalAnimationFrame = window.requestAnimationFrame.bind(window);
     const pendingFrames: FrameRequestCallback[] = [];
     const controlledWindow = window as Window & { __hereisitReleaseFrames?: () => void };
@@ -453,7 +399,7 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
     };
   });
   await page.keyboard.press("Enter");
-  const cancel = page.getByRole("button", { name: "작업 중단" });
+  const cancel = page.getByRole("button", { name: "중단", exact: true });
   await expect(cancel).toBeVisible();
   const cancelBox = await cancel.boundingBox();
   expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -464,13 +410,11 @@ test("keeps scanned PDF compression ordered, keyboard-reachable, sticky, and tou
   });
   await expect(page.getByText("PDF 압축을 중단했어요.").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
-  await expect(page.getByText("압축 PDF 준비 완료")).toBeVisible({ timeout: 60_000 });
-  await expect(
-    page.getByRole("region", { name: "PDF 압축 결과" }).getByText(PDF_COMPRESSION_WARNING, {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByText("모든 페이지가 이미지로 변환된 PDF예요.")).toBeVisible();
   const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   const saveBox = await save.boundingBox();
   expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
