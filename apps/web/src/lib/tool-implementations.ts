@@ -5,6 +5,7 @@ export type ToolBundleProfile =
   | "image-compression-server"
   | "image-watermark"
   | "pdf-editing"
+  | "pdf-organize"
   | "pdf-to-images"
   | "pdf-compress-scanned";
 
@@ -164,7 +165,7 @@ export const toolImplementationConfig = defineToolImplementationConfig({
   },
   "pdf.organize": {
     family: "pdf",
-    bundleProfile: "pdf-editing",
+    bundleProfile: "pdf-organize",
     intent: "organize",
     intentClass: "editing",
     sourceFileLimits: pdfEditingSourceFileLimits,

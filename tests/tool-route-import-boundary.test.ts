@@ -8,6 +8,7 @@ const workbenchModuleNames = new Set([
   "image-workbench",
   "image-watermark-workbench",
   "pdf-workbench",
+  "pdf-organize-workbench",
   "pdf-to-image-workbench",
   "pdf-compress-workbench",
 ]);
@@ -36,7 +37,7 @@ const migratedRoutes = [
   {
     route: "/pdf/organize",
     sourcePath: "apps/web/src/app/pdf/organize/page.tsx",
-    expectedWorkbench: "pdf-workbench",
+    expectedWorkbench: "pdf-organize-workbench",
   },
   {
     route: "/pdf/merge",

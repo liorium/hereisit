@@ -1,5 +1,5 @@
-import type { PdfRasterRendererAdapter } from "./pdf-raster-runtime";
 import { describe, expect, it } from "vitest";
+import type { PdfRasterRendererAdapter } from "./pdf-raster-runtime";
 import {
   PdfThumbnailPipelineError,
   runPdfThumbnailPipeline,
@@ -32,15 +32,17 @@ function pdfInput(overrides: Partial<Parameters<typeof runPdfThumbnailPipeline>[
   };
 }
 
-function fakeAdapter(options: {
-  pageCount?: number;
-  width?: number;
-  height?: number;
-  encodedBytes?: Uint8Array;
-  failRenderPage?: number;
-  failEncodePage?: number;
-  blockRenderPage?: number;
-} = {}) {
+function fakeAdapter(
+  options: {
+    pageCount?: number;
+    width?: number;
+    height?: number;
+    encodedBytes?: Uint8Array;
+    failRenderPage?: number;
+    failEncodePage?: number;
+    blockRenderPage?: number;
+  } = {},
+) {
   const pageCount = options.pageCount ?? 3;
   const encodedBytes = options.encodedBytes ?? WEBP_BYTES;
   const counters = {
@@ -188,9 +190,23 @@ describe("PDF thumbnail pipeline", () => {
         onThumbnail: (update) => updates.push(update),
       });
       expect(updates).toEqual([
-        { sourcePage: 1, status: "ready", width: 160, height: 80, mime: "image/webp", bytes: WEBP_BYTES.buffer },
+        {
+          sourcePage: 1,
+          status: "ready",
+          width: 160,
+          height: 80,
+          mime: "image/webp",
+          bytes: WEBP_BYTES.buffer,
+        },
         { sourcePage: 2, status: "failed" },
-        { sourcePage: 3, status: "ready", width: 160, height: 80, mime: "image/webp", bytes: WEBP_BYTES.buffer },
+        {
+          sourcePage: 3,
+          status: "ready",
+          width: 160,
+          height: 80,
+          mime: "image/webp",
+          bytes: WEBP_BYTES.buffer,
+        },
       ]);
       expect(result).toEqual({
         pageCount: 3,
@@ -250,8 +266,8 @@ describe("PDF thumbnail pipeline", () => {
     await expect(
       runPdfThumbnailPipeline(pdfInput({ bytes: new Uint8Array([1, 2, 3]).buffer }), { adapter }),
     ).rejects.toMatchObject({ code: "CORRUPT_PDF" });
-    expect(toPdfThumbnailErrorPayload(new PdfThumbnailPipelineError("MEMORY_LIMIT", "한도"))).toEqual(
-      { code: "MEMORY_LIMIT", message: "한도", retryable: false },
-    );
+    expect(
+      toPdfThumbnailErrorPayload(new PdfThumbnailPipelineError("MEMORY_LIMIT", "한도")),
+    ).toEqual({ code: "MEMORY_LIMIT", message: "한도", retryable: false });
   });
 });

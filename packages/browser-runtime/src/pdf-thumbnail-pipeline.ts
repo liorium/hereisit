@@ -15,6 +15,7 @@ import {
   openPdfRasterSession,
   type PdfRasterRendererAdapter,
   PdfRasterRuntimeError,
+  type PdfRasterSession,
 } from "./pdf-raster-runtime";
 
 const MAX_INPUT_BYTES = 50 * 1024 * 1024;
@@ -74,18 +75,12 @@ function validateInput(input: PdfThumbnailPipelineInput): void {
     );
   }
   if (input.byteLength !== actualByteLength) {
-    throw new PdfThumbnailPipelineError(
-      "CORRUPT_PDF",
-      "PDF 파일 크기 정보를 확인할 수 없어요.",
-    );
+    throw new PdfThumbnailPipelineError("CORRUPT_PDF", "PDF 파일 크기 정보를 확인할 수 없어요.");
   }
   const extensionIsPdf = /\.pdf$/i.test(input.name);
   const mimeIsPdf = input.mimeHint.trim().toLowerCase() === "application/pdf";
   if ((!extensionIsPdf && !mimeIsPdf) || !hasPdfSignature(input.bytes)) {
-    throw new PdfThumbnailPipelineError(
-      "CORRUPT_PDF",
-      "PDF 형식을 확인할 수 없는 파일이에요.",
-    );
+    throw new PdfThumbnailPipelineError("CORRUPT_PDF", "PDF 형식을 확인할 수 없는 파일이에요.");
   }
 }
 
@@ -118,10 +113,7 @@ function mapRasterError(error: PdfRasterRuntimeError): PdfThumbnailPipelineError
     );
   }
   if (error.code === "MEMORY_LIMIT") {
-    return new PdfThumbnailPipelineError(
-      "MEMORY_LIMIT",
-      "미리보기를 만들 메모리가 부족해요.",
-    );
+    return new PdfThumbnailPipelineError("MEMORY_LIMIT", "미리보기를 만들 메모리가 부족해요.");
   }
   return new PdfThumbnailPipelineError(
     "WORKER_CRASH",
@@ -137,7 +129,7 @@ export async function runPdfThumbnailPipeline(
   validateInput(input);
   throwIfAborted(options.signal);
 
-  let session;
+  let session: PdfRasterSession;
   try {
     session = await openPdfRasterSession(
       { bytes: input.bytes },
@@ -200,11 +192,7 @@ export async function runPdfThumbnailPipeline(
             if (blob.type !== "image/webp" || blob.size < 1 || blob.size > plan.rawByteLimit) {
               throw new PdfThumbnailPageError();
             }
-            const nextUsedBytes = acceptPdfThumbnailBytes(
-              usedBytes,
-              blob.size,
-              plan.rawByteLimit,
-            );
+            const nextUsedBytes = acceptPdfThumbnailBytes(usedBytes, blob.size, plan.rawByteLimit);
             if (nextUsedBytes === undefined) {
               return { status: "budget" as const };
             }

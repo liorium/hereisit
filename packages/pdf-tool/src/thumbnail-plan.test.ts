@@ -24,9 +24,7 @@ describe("PDF thumbnail planning", () => {
   it("rejects invalid dimensions and encoded or aggregate overflow", () => {
     expect(() => planPdfThumbnailRaster(0, 10)).toThrow(RangeError);
     expect(acceptPdfThumbnailBytes(0, 101, 100)).toBeUndefined();
-    expect(
-      acceptPdfThumbnailBytes(MAX_PDF_THUMBNAIL_TOTAL_BYTES - 10, 11, 100),
-    ).toBeUndefined();
+    expect(acceptPdfThumbnailBytes(MAX_PDF_THUMBNAIL_TOTAL_BYTES - 10, 11, 100)).toBeUndefined();
     expect(acceptPdfThumbnailBytes(10, 20, 100)).toBe(30);
   });
 });

@@ -62,7 +62,11 @@ function movePageToIndex(plan: PdfPagePlan, from: number, to: number): PdfPagePl
 
 export function PdfOrganizeWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const implementation = getToolImplementation(toolId);
-  if (toolId !== "pdf.organize" || implementation.intent !== "organize") {
+  if (
+    toolId !== "pdf.organize" ||
+    implementation.intent !== "organize" ||
+    implementation.bundleProfile !== "pdf-organize"
+  ) {
     throw new Error(`PdfOrganizeWorkbench tool mismatch: ${toolId}`);
   }
   const { maxFileBytes } = implementation.sourceFileLimits;

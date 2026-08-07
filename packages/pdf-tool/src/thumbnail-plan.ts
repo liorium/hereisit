@@ -40,7 +40,5 @@ export function acceptPdfThumbnailBytes(
   }
 
   const total = usedBytes + encodedBytes;
-  return Number.isSafeInteger(total) && total <= MAX_PDF_THUMBNAIL_TOTAL_BYTES
-    ? total
-    : undefined;
+  return Number.isSafeInteger(total) && total <= MAX_PDF_THUMBNAIL_TOTAL_BYTES ? total : undefined;
 }
