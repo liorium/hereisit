@@ -3,6 +3,7 @@ const transientPolicyFailures = new Set([
   "processing staging smoke failed [maintainer-policy-missing]",
   "processing staging smoke failed [maintainer-policy-execution]",
 ]);
+const maximumPolicyAttempts = 12;
 
 function waitForPropagation() {
   return new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -18,7 +19,7 @@ export async function runProcessingStagingBrowserSmoke(
       return await implementation(input);
     } catch (error) {
       if (
-        attempt === 3 ||
+        attempt === maximumPolicyAttempts ||
         !(error instanceof Error) ||
         !transientPolicyFailures.has(error.message)
       ) {
