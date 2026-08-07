@@ -13,6 +13,8 @@ export const PDF_MERGE_TOOL_ID = "pdf.merge" as const;
 export const PDF_SPLIT_TOOL_ID = "pdf.split" as const;
 export const PDF_IMAGES_TO_PDF_TOOL_ID = "pdf.images-to-pdf" as const;
 export const PDF_ORGANIZE_TOOL_ID = "pdf.organize" as const;
+export const PDF_THUMBNAIL_TOOL_ID = "pdf.thumbnail" as const;
+export const PDF_THUMBNAIL_TOOL_VERSION = 1 as const;
 export const PDF_WATERMARK_TOOL_ID = "pdf.watermark" as const;
 export const PDF_TOOL_VERSION = 1 as const;
 export const PDF_TO_IMAGES_TOOL_ID = "pdf.to-images" as const;
@@ -723,6 +725,91 @@ export type PdfInspectionOutcome =
 
 export interface PdfInspectionHandle {
   result: Promise<PdfInspectionOutcome>;
+  cancel(): void;
+}
+
+export interface PdfThumbnailRunRequest {
+  protocol: 1;
+  type: "run";
+  jobId: string;
+  tool: typeof PDF_THUMBNAIL_TOOL_ID;
+  toolVersion: typeof PDF_THUMBNAIL_TOOL_VERSION;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    bytes: ArrayBuffer;
+  };
+}
+
+export type PdfThumbnailWorkerRequest = PdfThumbnailRunRequest | PdfCancelRequest;
+
+export type PdfThumbnailUpdate =
+  | {
+      status: "ready";
+      sourcePage: number;
+      width: number;
+      height: number;
+      mime: "image/webp";
+      bytes: ArrayBuffer;
+    }
+  | { status: "failed"; sourcePage: number };
+
+export interface PdfThumbnailProgress {
+  completedPages: number;
+  totalPages: number;
+  fraction: number;
+}
+
+export interface PdfThumbnailResult {
+  pageCount: number;
+  renderedPageCount: number;
+  failedPageCount: number;
+  omittedPageCount: number;
+}
+
+export type PdfThumbnailWorkerEvent =
+  | {
+      protocol: 1;
+      type: "ready";
+      capabilities: {
+        tool: typeof PDF_THUMBNAIL_TOOL_ID;
+        toolVersion: typeof PDF_THUMBNAIL_TOOL_VERSION;
+      };
+    }
+  | ({
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+    } & PdfThumbnailProgress)
+  | {
+      protocol: 1;
+      type: "thumbnail";
+      jobId: string;
+      sequence: number;
+      update: PdfThumbnailUpdate;
+    }
+  | {
+      protocol: 1;
+      type: "complete";
+      jobId: string;
+      result: PdfThumbnailResult;
+    }
+  | {
+      protocol: 1;
+      type: "failed";
+      jobId: string;
+      error: PdfToolErrorPayload;
+    };
+
+export type PdfThumbnailJobOutcome =
+  | { status: "fulfilled"; value: PdfThumbnailResult }
+  | { status: "rejected"; error: PdfToolErrorPayload }
+  | { status: "cancelled" };
+
+export interface PdfThumbnailJobHandle {
+  result: Promise<PdfThumbnailJobOutcome>;
   cancel(): void;
 }
 
