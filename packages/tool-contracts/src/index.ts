@@ -20,7 +20,7 @@ export const PDF_TOOL_VERSION = 1 as const;
 export const PDF_TO_IMAGES_TOOL_ID = "pdf.to-images" as const;
 export const PDF_TO_IMAGES_TOOL_VERSION = 1 as const;
 export const PDF_COMPRESS_SCANNED_TOOL_ID = "pdf.compress-scanned" as const;
-export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 1 as const;
+export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 2 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
@@ -953,16 +953,30 @@ export interface PdfToImagesJobHandle {
   cancel(): void;
 }
 
-export const pdfCompressScannedSpecSchema = z
+export const pdfCompressScannedSpecV1Schema = z
   .object({
     version: z.literal(1),
     preset: z.enum(["balanced", "minimum"]),
   })
   .strict();
 
+export const pdfCompressScannedSpecV2Schema = z
+  .object({
+    version: z.literal(2),
+    preset: z.enum(["balanced", "minimum"]),
+  })
+  .strict();
+
+export const pdfCompressScannedSpecSchema = z.discriminatedUnion("version", [
+  pdfCompressScannedSpecV1Schema,
+  pdfCompressScannedSpecV2Schema,
+]);
+
 export type PdfCompressScannedPreset = "balanced" | "minimum";
-export type PdfCompressScannedSpecV1 = z.input<typeof pdfCompressScannedSpecSchema>;
-export type ParsedPdfCompressScannedSpecV1 = z.output<typeof pdfCompressScannedSpecSchema>;
+export type PdfCompressScannedSpecV1 = z.input<typeof pdfCompressScannedSpecV1Schema>;
+export type ParsedPdfCompressScannedSpecV1 = z.output<typeof pdfCompressScannedSpecV1Schema>;
+export type PdfCompressScannedSpecV2 = z.input<typeof pdfCompressScannedSpecV2Schema>;
+export type ParsedPdfCompressScannedSpecV2 = z.output<typeof pdfCompressScannedSpecV2Schema>;
 
 export type PdfCompressScannedWarning =
   | "PDF_PAGES_RASTERIZED"
@@ -971,17 +985,13 @@ export type PdfCompressScannedWarning =
   | "SIGNATURES_INVALIDATED"
   | "COLOR_PROFILE_NORMALIZED";
 
-export interface PdfCompressScannedResult {
+interface PdfCompressScannedResultCommon {
   bytes: ArrayBuffer;
   suggestedName: string;
   mime: "application/pdf";
   sourceByteLength: number;
   byteLength: number;
   pageCount: number;
-  preset: PdfCompressScannedPreset;
-  dpi: 96 | 150;
-  quality: 55 | 72;
-  warnings: PdfCompressScannedWarning[];
   timing: {
     loadMs: number;
     renderMs: number;
@@ -991,6 +1001,33 @@ export interface PdfCompressScannedResult {
     totalMs: number;
   };
 }
+
+export interface PdfCompressScannedResultV1 extends PdfCompressScannedResultCommon {
+  preset: PdfCompressScannedPreset;
+  dpi: 96 | 150;
+  quality: 55 | 72;
+  warnings: PdfCompressScannedWarning[];
+}
+
+export type PdfCompressScannedMode = "structure-preserving" | "rasterized";
+
+export interface PdfCompressScannedStructureResultV2 extends PdfCompressScannedResultCommon {
+  mode: "structure-preserving";
+  warnings: ["SIGNATURES_INVALIDATED"];
+}
+
+export interface PdfCompressScannedRasterResultV2 extends PdfCompressScannedResultCommon {
+  mode: "rasterized";
+  preset: PdfCompressScannedPreset;
+  dpi: 96 | 150;
+  quality: 55 | 72;
+  warnings: PdfCompressScannedWarning[];
+}
+
+export type PdfCompressScannedResultV2 =
+  | PdfCompressScannedStructureResultV2
+  | PdfCompressScannedRasterResultV2;
+export type PdfCompressScannedResult = PdfCompressScannedResultV1 | PdfCompressScannedResultV2;
 
 export type PdfCompressScannedErrorCode =
   | "INVALID_SPEC"
@@ -1024,20 +1061,32 @@ export type PdfCompressScannedProgress =
       fraction: number;
     };
 
-export interface PdfCompressScannedRunRequest {
+interface PdfCompressScannedRunRequestCommon {
   protocol: 1;
   type: "run";
   jobId: string;
   tool: "pdf.compress-scanned";
-  toolVersion: 1;
   input: {
     name: string;
     mimeHint: string;
     byteLength: number;
     bytes: ArrayBuffer;
   };
+}
+
+export interface PdfCompressScannedRunRequestV1 extends PdfCompressScannedRunRequestCommon {
+  toolVersion: 1;
   spec: PdfCompressScannedSpecV1;
 }
+
+export interface PdfCompressScannedRunRequestV2 extends PdfCompressScannedRunRequestCommon {
+  toolVersion: 2;
+  spec: PdfCompressScannedSpecV2;
+}
+
+export type PdfCompressScannedRunRequest =
+  | PdfCompressScannedRunRequestV1
+  | PdfCompressScannedRunRequestV2;
 
 export interface PdfCompressScannedCancelRequest {
   protocol: 1;

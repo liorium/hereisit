@@ -43,8 +43,8 @@ const supportedBundleProfiles = [
   "pdf-compress-scanned",
 ] as const satisfies readonly ToolBundleProfile[];
 
-const scannedPdfWarning =
-  "모든 페이지가 이미지로 바뀝니다. 검색·복사 가능한 텍스트와 OCR, 링크·양식·주석·북마크·첨부파일·레이어가 제거되거나 평면화되고 전자서명은 무효가 됩니다. 스캔 문서에 적합하며 원본 파일은 수정하지 않아요.";
+const smartPdfCompressionNotice =
+  "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.";
 
 describe("tool implementation ownership", () => {
   it("defines the exact available ID set and literal implementation mapping", () => {
@@ -127,7 +127,7 @@ describe("tool implementation ownership", () => {
     }
   });
 
-  it("owns the approved image watermark summary and exact scanned PDF warning", () => {
+  it("owns the approved image watermark summary and exact PDF compression notice", () => {
     expect(getToolImplementation("image.compress")).toMatchObject({
       defaultSummary:
         "원본 형식과 크기를 유지한 채 프로덕션급 압축을 시도하고, 작아지지 않으면 원본을 그대로 유지해요.",
@@ -143,7 +143,7 @@ describe("tool implementation ownership", () => {
       getToolImplementation("pdf.compress-scanned").notices.filter(
         ({ tone }) => tone === "warning",
       ),
-    ).toEqual([{ tone: "warning", text: scannedPdfWarning }]);
+    ).toEqual([{ tone: "warning", text: smartPdfCompressionNotice }]);
   });
 
   it("keeps related tool navigation client-only without automatic prefetch", () => {

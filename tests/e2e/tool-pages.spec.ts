@@ -62,10 +62,9 @@ const pdfToImageTool = {
 
 const pdfCompressionTool = {
   path: "/pdf/compress",
-  title: "스캔 PDF 용량 줄이기",
+  title: "PDF 용량 줄이기",
   selectLabel: "PDF 선택",
-  description:
-    "스캔한 PDF 페이지를 가볍게 다시 만들어 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
+  description: "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
 } as const;
 
 const onePixelPng = Buffer.from(

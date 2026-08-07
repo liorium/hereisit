@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  inspectPdfRasterPage,
   openPdfRasterSession,
   type PdfRasterRendererAdapter,
   type PdfRasterRendererDocument,
@@ -9,6 +10,33 @@ import {
   WorkerCanvasFactory,
   WorkerFilterFactory,
 } from "./pdf-raster-runtime";
+
+describe("inspectPdfRasterPage", () => {
+  it("counts only visible text and separates image paints from destructive-risk paints", async () => {
+    const page = {
+      getTextContent: async () => ({ items: [{ str: "   " }, { str: "searchable" }, {}] }),
+      getAnnotations: async () => [{}, {}],
+      getOperatorList: async () => ({
+        fnArray: [
+          85, // paintImageXObject
+          86, // paintInlineImageXObject
+          91, // constructPath
+          44, // showText
+          74, // paintFormXObjectBegin
+          62, // shadingFill
+          10, // save
+        ],
+      }),
+    } as unknown as PdfRasterRendererPage;
+
+    await expect(inspectPdfRasterPage(page)).resolves.toEqual({
+      nonWhitespaceTextItems: 1,
+      annotationCount: 2,
+      imagePaintOperations: 2,
+      nonImagePaintOperations: 4,
+    });
+  });
+});
 
 async function settleBeforeNextTimer<T>(promise: Promise<T>) {
   return await Promise.race([
