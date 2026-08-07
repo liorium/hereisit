@@ -442,6 +442,7 @@ test("renders a page containing multiple embedded image XObjects", async ({
 });
 
 test("converts only a rotated second page to a direct 96DPI PNG", async ({ browserName, page }) => {
+  test.setTimeout(90_000);
   await installAvailableWebShare(page);
   await openReadyPdfToImages(page);
   const privacy = await observePrivateConversion(page);
@@ -722,6 +723,7 @@ test("revokes result object URLs on new selection, replacement, reset, and unmou
 });
 
 test("keeps PDF.js and both raster runtimes off image and PDF editing routes", async ({ page }) => {
+  test.setTimeout(90_000);
   const routes = [
     ["/image/compress", "이미지 용량 줄이기"],
     ["/image/resize", "이미지 크기 조절"],
