@@ -7,6 +7,7 @@ import { runProcessingStagingBrowserSmoke } from "./support/processing-staging-s
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
 const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
+const WEB_ANALYTICS_COLLECTION_URL = "https://cloudflareinsights.com/cdn-cgi/rum";
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
 const PUBLIC_BUCKET_ZERO_SESSION_ID = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const JOB_UUID_SEGMENT = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -167,6 +168,9 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
     injectSession(context, pageOrigin, PUBLIC_BUCKET_ZERO_SESSION_ID),
   );
   const page = await runSmokeStage("public-context", () => context.newPage());
+  await runSmokeStage("public-context", () =>
+    page.route(WEB_ANALYTICS_COLLECTION_URL, (route) => route.fulfill({ status: 204 })),
+  );
   const cdp = await runSmokeStage("public-context", () => context.newCDPSession(page));
   await runSmokeStage("public-context", () => cdp.send("Network.enable"));
   const state = {
@@ -232,6 +236,9 @@ async function assertMaintainerServer(
     injectSession(context, pageOrigin, maintainerSessionId),
   );
   const page = await runSmokeStage("maintainer-context", () => context.newPage());
+  await runSmokeStage("maintainer-context", () =>
+    page.route(WEB_ANALYTICS_COLLECTION_URL, (route) => route.fulfill({ status: 204 })),
+  );
   const cdp = await runSmokeStage("maintainer-context", () => context.newCDPSession(page));
   await runSmokeStage("maintainer-context", () => cdp.send("Network.enable"));
   const state = {

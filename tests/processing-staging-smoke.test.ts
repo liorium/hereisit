@@ -76,6 +76,7 @@ function browserThatStopsAtJobSubmit() {
         on: (event: string, listener: (value: unknown) => void) => {
           listeners.set(event, [...(listeners.get(event) ?? []), listener]);
         },
+        route: async () => undefined,
         goto: async () => {
           const response = {
             url: () => `${PROCESSING_STAGING_ORIGIN}/v1/policy`,
@@ -150,6 +151,11 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("maintainer: false");
     expect(source).toContain('execution: "local"');
     expect(source).toContain('reason: "LOCAL_FALLBACK_REQUIRED"');
+    expect(source).toContain(
+      'const WEB_ANALYTICS_COLLECTION_URL = "https://cloudflareinsights.com/cdn-cgi/rum"',
+    );
+    expect(source.match(/page\.route\(WEB_ANALYTICS_COLLECTION_URL/gu)).toHaveLength(2);
+    expect(source.match(/route\.fulfill\(\{ status: 204 \}\)/gu)).toHaveLength(2);
     expect(source).toContain("maintainer: true");
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
