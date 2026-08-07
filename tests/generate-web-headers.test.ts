@@ -10,16 +10,18 @@ describe("Cloudflare Pages header generation", () => {
     expect(headers).toContain(
       "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com/beacon.min.js",
     );
-    expect(headers).toContain("connect-src 'self'");
+    expect(headers).toContain("connect-src 'self' https://cloudflareinsights.com");
     expect(headers).not.toContain("script-src *");
     expect(headers).not.toContain("connect-src *");
   });
 
   it("adds only one validated HTTPS processing origin", () => {
     expect(generateHeaders({ processingApiOrigin: "https://processing.example.com" })).toContain(
-      "connect-src 'self' https://processing.example.com",
+      "connect-src 'self' https://cloudflareinsights.com https://processing.example.com",
     );
-    expect(generateHeaders({ processingApiOrigin: null })).toContain("connect-src 'self';");
+    expect(generateHeaders({ processingApiOrigin: null })).toContain(
+      "connect-src 'self' https://cloudflareinsights.com;",
+    );
   });
 
   it("rejects executable, credentialed, and path-bearing values", () => {
@@ -41,7 +43,7 @@ describe("Cloudflare Pages header generation", () => {
         processingApiOrigin: "http://localhost:8787",
         allowLocalProcessingOrigins: true,
       }),
-    ).toContain("connect-src 'self' http://localhost:8787");
+    ).toContain("connect-src 'self' https://cloudflareinsights.com http://localhost:8787");
   });
 
   it("creates the Pages public directory on a clean checkout", async () => {

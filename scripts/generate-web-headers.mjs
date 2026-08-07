@@ -32,7 +32,7 @@ function normalizeOrigin(value, allowLocal) {
 
 export function generateHeaders({ processingApiOrigin, allowLocalProcessingOrigins = false }) {
   const origin = normalizeOrigin(processingApiOrigin, allowLocalProcessingOrigins);
-  const connectSource = origin === null ? "'self'" : `'self' ${origin}`;
+  const connectSource = `'self' https://cloudflareinsights.com${origin === null ? "" : ` ${origin}`}`;
   return `/*
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com/beacon.min.js; connect-src ${connectSource}; manifest-src 'self'
   Referrer-Policy: no-referrer
