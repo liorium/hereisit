@@ -26,7 +26,7 @@ describe("processing staging smoke readiness", () => {
     expect(waits).toBe(2);
   });
 
-  it("stops after three transient maintainer policy fallbacks", async () => {
+  it("stops after twelve transient maintainer policy fallbacks", async () => {
     let attempts = 0;
     let waits = 0;
     await expect(
@@ -42,8 +42,8 @@ describe("processing staging smoke readiness", () => {
       ),
     ).rejects.toThrow(transientPolicyFailure.message);
 
-    expect(attempts).toBe(3);
-    expect(waits).toBe(2);
+    expect(attempts).toBe(12);
+    expect(waits).toBe(11);
   });
 
   it.each([
