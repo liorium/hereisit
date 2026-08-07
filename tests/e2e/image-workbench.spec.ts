@@ -75,12 +75,12 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
       jobId: string;
       input: { bytes: ArrayBuffer };
     };
-    type TestWindow = Window & { __hereisitCompleteImageTransform?: () => void };
+    type TestWindow = Window & { __hereisitCompleteImageTransform?: () => boolean };
 
     let pending: { request: RunRequest; worker: ControlledImageWorker } | undefined;
 
     const complete = () => {
-      if (pending === undefined) return;
+      if (pending === undefined) return false;
       const { request, worker } = pending;
       pending = undefined;
       const bytes = request.input.bytes.slice(0);
@@ -106,6 +106,7 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
           },
         },
       });
+      return true;
     };
 
     class ControlledImageWorker {
@@ -153,6 +154,21 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
       value: ControlledImageWorker,
     });
   });
+}
+
+async function completeHeldImageTransform(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __hereisitCompleteImageTransform?: () => boolean;
+            }
+          ).__hereisitCompleteImageTransform?.() ?? false,
+      ),
+    )
+    .toBe(true);
 }
 
 async function installInterleavedCompletionWorker(page: Page): Promise<void> {
@@ -574,11 +590,7 @@ test("uses compression progress copy during local source-preserving work", async
   await expect(liveStatus).toHaveAttribute("aria-live", "polite");
   await expect(page.getByRole("button", { name: "중단" })).toBeVisible();
   await expect(page.getByText(/크기 조절 중/)).toHaveCount(0);
-  await page.evaluate(() =>
-    (
-      window as Window & { __hereisitCompleteImageTransform?: () => void }
-    ).__hereisitCompleteImageTransform?.(),
-  );
+  await completeHeldImageTransform(page);
   await expect(page.getByTestId("image-workbench-status")).toHaveText(
     "처리가 끝났어요. 결과를 바로 다운로드할 수 있어요.",
   );
@@ -614,11 +626,7 @@ test("keeps populated setup, processing, and result actions visible at narrow wi
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await expectStateWithinViewport(page.getByRole("button", { name: "중단" }));
 
-    await page.evaluate(() =>
-      (
-        window as Window & { __hereisitCompleteImageTransform?: () => void }
-      ).__hereisitCompleteImageTransform?.(),
-    );
+    await completeHeldImageTransform(page);
     await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toBeVisible();
     await expectStateWithinViewport(
       page.getByRole("button", { name: /원본 다운로드|결과 다운로드/ }),

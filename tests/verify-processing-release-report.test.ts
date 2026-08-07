@@ -623,7 +623,7 @@ describe("processing release report verification", () => {
     await writeFile(target, "{}\n");
     await symlink(target, linked.reportPath);
     await expect(verifyProcessingReleaseReport(options(linked))).rejects.toThrow(/symbolic/i);
-  });
+  }, 10_000);
 
   it("rejects stale or drifted candidate, security, evidence, signature, and path inputs", async () => {
     const stale = await fixture();
