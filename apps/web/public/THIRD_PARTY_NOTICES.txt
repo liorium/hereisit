@@ -572,7 +572,7 @@ SOFTWARE.
 
 ========================================================================
 Package: @playwright/test
-Version: 1.61.1
+Version: 1.62.1
 License: Apache-2.0
 
 --- LICENSE ---
@@ -2382,7 +2382,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ========================================================================
 Package: playwright-core
-Version: 1.61.1
+Version: 1.62.1
 License: Apache-2.0
 
 --- LICENSE ---
@@ -2598,7 +2598,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 ========================================================================
 Package: playwright
-Version: 1.61.1
+Version: 1.62.1
 License: Apache-2.0
 
 --- LICENSE ---

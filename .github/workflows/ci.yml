@@ -47,18 +47,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hereisit/web build
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm exec playwright install --with-deps chromium firefox
       - run: >-
           pnpm exec playwright test
           --project=chromium
           --project=firefox
           --project=mobile-chromium
           --project=mobile-firefox
-      - run: >-
-          pnpm exec playwright test
-          --project=webkit
-          --project=mobile-webkit
-          --workers=1
+      - run: pnpm test:e2e:webkit
       - name: Build product analytics fixture
         run: pnpm --filter @hereisit/web build
         env:

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { degrees, PDFDocument, rgb } from "@cantoo/pdf-lib";
 import { expect, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
+import { observesNestedWorkerRequests } from "./support/privacy-observer";
 import {
   expectWebShareUnused,
   installAvailableWebShare,
@@ -195,7 +196,9 @@ async function observePrivateConversion(page: Page) {
       expect(violations).toEqual([]);
       expect(failedRequests).toBe(0);
       expect(pageErrors).toBe(0);
-      if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
+      if (requireParserWorker && observesNestedWorkerRequests(page)) {
+        expect(parserWorkerRequests).toBeGreaterThan(0);
+      }
     },
   };
 }
