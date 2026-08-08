@@ -198,7 +198,18 @@ export function PdfWorkbench({
             : splitItem !== undefined
               ? "setup"
               : "select";
+  const watermarkScreen =
+    intent !== "watermark"
+      ? undefined
+      : result !== undefined
+        ? "result"
+        : processing
+          ? "processing"
+          : items.length > 0
+            ? "setup"
+            : "select";
   const splitStageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const watermarkStageHeadingRef = useRef<HTMLHeadingElement>(null);
   const parsedPageRange = useMemo(
     () => parsePageSelection(pageRange, splitPageCount),
     [pageRange, splitPageCount],
@@ -220,6 +231,11 @@ export function PdfWorkbench({
     if (splitScreen === undefined || splitScreen === "select") return;
     splitStageHeadingRef.current?.focus();
   }, [splitScreen]);
+
+  useEffect(() => {
+    if (watermarkScreen === undefined || watermarkScreen === "select") return;
+    watermarkStageHeadingRef.current?.focus();
+  }, [watermarkScreen]);
 
   useEffect(() => {
     if ((intent !== "merge" && intent !== "split") || processing) return;
@@ -933,6 +949,340 @@ export function PdfWorkbench({
             </button>
           </footer>
         </section>
+      ) : intent === "watermark" && result !== undefined ? (
+        <section className={`${styles.mergeStage} ${styles.mergeResult} ${styles.watermarkResult}`}>
+          <div className={styles.mergeResultMark} aria-hidden="true">
+            ✓
+          </div>
+          <h2 id="pdf-workbench-title" ref={watermarkStageHeadingRef} tabIndex={-1}>
+            워터마크 완료
+          </h2>
+          <p className={styles.mergeResultSummary}>
+            {watermarkScope === "selected-pages" && parsedWatermarkPageRange.ok
+              ? `선택 ${parsedWatermarkPageRange.pages.length}페이지에 적용`
+              : `전체 ${result.outputPageCount}페이지에 적용`}
+          </p>
+          <strong className={styles.mergeSizeComparison}>
+            {formatBytes(totalBytes)} → {formatBytes(result.byteLength)}
+          </strong>
+          <p className={styles.mergeWarning}>
+            문구는 이미지로 들어가 검색·선택할 수 없고, 기존 전자서명은 유효하지 않아요.
+          </p>
+          <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
+            PDF 다운로드 ↓
+          </button>
+          <p
+            className={styles.mergeResultStatus}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {message}
+          </p>
+          <button className={styles.mergeTextAction} type="button" onClick={reset}>
+            다른 PDF에 넣기
+          </button>
+        </section>
+      ) : intent === "watermark" && processing ? (
+        <section
+          className={`${styles.mergeStage} ${styles.mergeProgress} ${styles.watermarkProgress}`}
+        >
+          <h2 id="pdf-workbench-title" ref={watermarkStageHeadingRef} tabIndex={-1}>
+            워터마크 넣는 중
+          </h2>
+          <p>{phaseLabel(phase)}</p>
+          <div
+            className={styles.mergeProgressTrack}
+            role="progressbar"
+            aria-label="워터마크 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
+      ) : intent === "watermark" && items[0] !== undefined ? (
+        <section className={styles.watermarkSetup} aria-label="PDF 워터마크 설정">
+          <header className={styles.watermarkSetupHeader}>
+            <div>
+              <h2 id="pdf-workbench-title" ref={watermarkStageHeadingRef} tabIndex={-1}>
+                워터마크 설정
+              </h2>
+              <p>
+                <strong title={items[0].file.name}>{items[0].file.name}</strong>
+                <span>{formatBytes(items[0].file.size)}</span>
+              </p>
+            </div>
+            <button type="button" onClick={() => inputRef.current?.click()}>
+              PDF 교체
+            </button>
+          </header>
+
+          <div className={styles.watermarkSetupGrid}>
+            <div className={styles.watermarkControls}>
+              <div className={styles.watermarkTextField}>
+                <label htmlFor="pdf-watermark-text">워터마크 텍스트</label>
+                <input
+                  id="pdf-watermark-text"
+                  type="text"
+                  value={watermarkText}
+                  maxLength={80}
+                  aria-invalid={!validWatermarkText}
+                  aria-describedby="pdf-watermark-text-help"
+                  onChange={(event) => {
+                    setWatermarkText(event.target.value);
+                    clearResult();
+                  }}
+                />
+                <small id="pdf-watermark-text-help">
+                  {validWatermarkText
+                    ? `${watermarkText.length}/80자`
+                    : "문구를 1~80자로 입력해 주세요."}
+                </small>
+              </div>
+
+              <fieldset className={styles.watermarkChoiceGroup}>
+                <legend>배치</legend>
+                <div>
+                  <label>
+                    <input
+                      type="radio"
+                      name="watermark-placement"
+                      checked={watermarkPlacement === "center"}
+                      onChange={() => {
+                        setWatermarkPlacement("center");
+                        clearResult();
+                      }}
+                    />
+                    <span>
+                      <strong>가운데 한 번</strong>
+                      <small>추천</small>
+                    </span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="watermark-placement"
+                      checked={watermarkPlacement === "tile"}
+                      onChange={() => {
+                        setWatermarkPlacement("tile");
+                        clearResult();
+                      }}
+                    />
+                    <span>
+                      <strong>반복</strong>
+                      <small>페이지 전체</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+
+              <fieldset className={styles.watermarkChoiceGroup}>
+                <legend>적용 페이지</legend>
+                <div>
+                  <label>
+                    <input
+                      type="radio"
+                      name="watermark-scope"
+                      checked={watermarkScope === "every-page"}
+                      onChange={() => {
+                        setWatermarkScope("every-page");
+                        clearResult();
+                      }}
+                    />
+                    <span>
+                      <strong>전체 페이지</strong>
+                    </span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="watermark-scope"
+                      checked={watermarkScope === "selected-pages"}
+                      onChange={() => {
+                        setWatermarkScope("selected-pages");
+                        clearResult();
+                      }}
+                    />
+                    <span>
+                      <strong>지정 페이지</strong>
+                    </span>
+                  </label>
+                </div>
+                {watermarkScope === "selected-pages" ? (
+                  <div className={styles.watermarkRangeField}>
+                    <label htmlFor="pdf-watermark-page-range">페이지 범위</label>
+                    <input
+                      id="pdf-watermark-page-range"
+                      type="text"
+                      value={watermarkPageRange}
+                      placeholder="예: 1-3, 5"
+                      aria-invalid={!parsedWatermarkPageRange.ok}
+                      aria-describedby="pdf-watermark-page-range-help"
+                      onChange={(event) => {
+                        setWatermarkPageRange(event.target.value);
+                        clearResult();
+                      }}
+                    />
+                    <small id="pdf-watermark-page-range-help">
+                      {parsedWatermarkPageRange.ok
+                        ? `${parsedWatermarkPageRange.pages.length}페이지를 선택했어요.`
+                        : parsedWatermarkPageRange.message}
+                    </small>
+                  </div>
+                ) : null}
+              </fieldset>
+
+              <details className={styles.watermarkAdvanced}>
+                <summary>글자 모양 설정</summary>
+                <div className={styles.watermarkAdvancedGrid}>
+                  <div>
+                    <label htmlFor="pdf-watermark-size">글자 크기</label>
+                    <select
+                      id="pdf-watermark-size"
+                      value={watermarkFontSize}
+                      onChange={(event) => {
+                        setWatermarkFontSize(Number(event.target.value) as 32 | 48 | 72);
+                        clearResult();
+                      }}
+                    >
+                      <option value={32}>작게</option>
+                      <option value={48}>보통 · 추천</option>
+                      <option value={72}>크게</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="pdf-watermark-color">색상</label>
+                    <input
+                      id="pdf-watermark-color"
+                      type="color"
+                      value={watermarkColor}
+                      onChange={(event) => {
+                        setWatermarkColor(event.target.value);
+                        clearResult();
+                      }}
+                    />
+                  </div>
+                  <div className={styles.watermarkOpacityField}>
+                    <label htmlFor="pdf-watermark-opacity">불투명도 {watermarkOpacity}%</label>
+                    <input
+                      id="pdf-watermark-opacity"
+                      type="range"
+                      min={5}
+                      max={80}
+                      step={1}
+                      value={watermarkOpacity}
+                      onChange={(event) => {
+                        setWatermarkOpacity(Number(event.target.value));
+                        clearResult();
+                      }}
+                    />
+                  </div>
+                  <fieldset className={styles.watermarkRotationGroup}>
+                    <legend>각도</legend>
+                    <div>
+                      {([-45, 0, 45] as const).map((rotation) => (
+                        <label key={rotation}>
+                          <input
+                            type="radio"
+                            name="watermark-rotation"
+                            checked={watermarkRotation === rotation}
+                            onChange={() => {
+                              setWatermarkRotation(rotation);
+                              clearResult();
+                            }}
+                          />
+                          {rotation}°
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                </div>
+              </details>
+            </div>
+
+            <aside className={styles.watermarkPreview} aria-label="모양 미리보기">
+              <span>모양 미리보기</span>
+              <div className={styles.watermarkPreviewPage}>
+                <div className={watermarkPlacement === "tile" ? styles.watermarkPreviewTile : ""}>
+                  {(watermarkPlacement === "tile" ? [0, 1, 2, 3, 4, 5] : [0]).map((index) => (
+                    <strong
+                      key={index}
+                      style={{
+                        color: watermarkColor,
+                        fontSize: `${Math.max(16, watermarkFontSize * 0.48)}px`,
+                        opacity: watermarkOpacity / 100,
+                        transform: `rotate(${watermarkRotation}deg)`,
+                      }}
+                    >
+                      {watermarkText.trim() || "워터마크"}
+                    </strong>
+                  ))}
+                </div>
+              </div>
+              <small>실제 PDF 내용은 결과 파일에서 확인해 주세요.</small>
+            </aside>
+          </div>
+
+          <footer className={styles.watermarkSetupFooter}>
+            <div>
+              <p className={styles.watermarkLocalNotice}>
+                파일은 업로드하지 않고 이 기기에서 처리해요.
+              </p>
+              <p role="status" aria-live="polite" aria-atomic="true">
+                {message}
+              </p>
+            </div>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              disabled={!canRun}
+              onClick={() => void startProcessing()}
+            >
+              워터마크 넣기
+            </button>
+          </footer>
+        </section>
+      ) : intent === "watermark" ? (
+        <section
+          className={`${styles.watermarkSelect} ${dragging ? styles.dragging : ""}`}
+          aria-labelledby="pdf-workbench-title"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
+          }}
+          onDrop={onDrop}
+        >
+          <div className={styles.watermarkSelectMark} aria-hidden="true">
+            PDF
+          </div>
+          <h2 id="pdf-workbench-title">워터마크를 넣을 PDF를 선택하세요</h2>
+          <p>PDF 1개 · 최대 50MB</p>
+          <button
+            className={styles.mergePrimaryAction}
+            type="button"
+            disabled={!hydrated || !runtimeSupported}
+            onClick={() => inputRef.current?.click()}
+          >
+            {config.selectLabel}
+          </button>
+          <p className={styles.watermarkSelectStatus} role="status" aria-live="polite">
+            {!hydrated
+              ? "PDF 도구를 준비하고 있어요…"
+              : runtimeSupported
+                ? message
+                : "최신 Safari, Chrome, Firefox 또는 Edge에서 사용할 수 있어요."}
+          </p>
+          <p className={styles.watermarkLocalNotice}>파일은 이 기기에서만 처리돼요.</p>
+        </section>
       ) : items.length === 0 ? (
         <section
           className={`${styles.emptyDropzone} ${dragging ? styles.dragging : ""}`}
@@ -1095,192 +1445,6 @@ export function PdfWorkbench({
                 </fieldset>
               ) : null}
 
-              {intent === "watermark" ? (
-                <div className={styles.watermarkSettings}>
-                  <div className={styles.controlField}>
-                    <label htmlFor="pdf-watermark-text">워터마크 텍스트</label>
-                    <input
-                      id="pdf-watermark-text"
-                      type="text"
-                      value={watermarkText}
-                      maxLength={80}
-                      disabled={busy}
-                      aria-invalid={!validWatermarkText}
-                      onChange={(event) => {
-                        setWatermarkText(event.target.value);
-                        clearResult();
-                      }}
-                    />
-                    <small>{watermarkText.length}/80자</small>
-                  </div>
-
-                  <fieldset className={styles.segmentGroup}>
-                    <legend>배치</legend>
-                    <div>
-                      <label>
-                        <input
-                          type="radio"
-                          name="watermark-placement"
-                          checked={watermarkPlacement === "center"}
-                          disabled={busy}
-                          onChange={() => {
-                            setWatermarkPlacement("center");
-                            clearResult();
-                          }}
-                        />
-                        가운데 한 번
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="watermark-placement"
-                          checked={watermarkPlacement === "tile"}
-                          disabled={busy}
-                          onChange={() => {
-                            setWatermarkPlacement("tile");
-                            clearResult();
-                          }}
-                        />
-                        반복 타일
-                      </label>
-                    </div>
-                  </fieldset>
-
-                  <div className={styles.controlGrid}>
-                    <div className={styles.controlField}>
-                      <label htmlFor="pdf-watermark-size">글자 크기</label>
-                      <select
-                        id="pdf-watermark-size"
-                        value={watermarkFontSize}
-                        disabled={busy}
-                        onChange={(event) => {
-                          setWatermarkFontSize(Number(event.target.value) as 32 | 48 | 72);
-                          clearResult();
-                        }}
-                      >
-                        <option value={32}>32</option>
-                        <option value={48}>48</option>
-                        <option value={72}>72</option>
-                      </select>
-                    </div>
-                    <div className={styles.controlField}>
-                      <label htmlFor="pdf-watermark-color">색상</label>
-                      <input
-                        id="pdf-watermark-color"
-                        type="color"
-                        value={watermarkColor}
-                        disabled={busy}
-                        onChange={(event) => {
-                          setWatermarkColor(event.target.value);
-                          clearResult();
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className={styles.controlField}>
-                    <label htmlFor="pdf-watermark-opacity">불투명도 {watermarkOpacity}%</label>
-                    <input
-                      id="pdf-watermark-opacity"
-                      type="range"
-                      min={5}
-                      max={80}
-                      step={1}
-                      value={watermarkOpacity}
-                      disabled={busy}
-                      onChange={(event) => {
-                        setWatermarkOpacity(Number(event.target.value));
-                        clearResult();
-                      }}
-                    />
-                  </div>
-
-                  <fieldset className={styles.segmentGroup}>
-                    <legend>각도</legend>
-                    <div>
-                      {([-45, 0, 45] as const).map((rotation) => (
-                        <label key={rotation}>
-                          <input
-                            type="radio"
-                            name="watermark-rotation"
-                            checked={watermarkRotation === rotation}
-                            disabled={busy}
-                            onChange={() => {
-                              setWatermarkRotation(rotation);
-                              clearResult();
-                            }}
-                          />
-                          {rotation}°
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <fieldset className={styles.optionGroup}>
-                    <legend>적용 페이지</legend>
-                    <label>
-                      <input
-                        type="radio"
-                        name="watermark-scope"
-                        checked={watermarkScope === "every-page"}
-                        disabled={busy}
-                        onChange={() => {
-                          setWatermarkScope("every-page");
-                          clearResult();
-                          setMessage("모든 페이지에 같은 워터마크를 넣어요.");
-                        }}
-                      />
-                      <span>
-                        <strong>모든 페이지</strong>
-                        <small>PDF 전체에 같은 워터마크 적용</small>
-                      </span>
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="watermark-scope"
-                        checked={watermarkScope === "selected-pages"}
-                        disabled={busy}
-                        onChange={() => {
-                          setWatermarkScope("selected-pages");
-                          clearResult();
-                          setMessage("입력한 페이지에만 워터마크를 넣어요.");
-                        }}
-                      />
-                      <span>
-                        <strong>지정 페이지</strong>
-                        <small>예: 1-3, 5 형식으로 필요한 페이지만 선택</small>
-                      </span>
-                    </label>
-                    {watermarkScope === "selected-pages" ? (
-                      <div className={styles.rangeField}>
-                        <label htmlFor="pdf-watermark-page-range">페이지 범위</label>
-                        <input
-                          id="pdf-watermark-page-range"
-                          type="text"
-                          value={watermarkPageRange}
-                          disabled={busy}
-                          aria-invalid={!parsedWatermarkPageRange.ok}
-                          aria-describedby="pdf-watermark-page-range-help"
-                          onChange={(event) => {
-                            setWatermarkPageRange(event.target.value);
-                            clearResult();
-                          }}
-                        />
-                        <small id="pdf-watermark-page-range-help">
-                          {parsedWatermarkPageRange.ok
-                            ? `${parsedWatermarkPageRange.pages.length}페이지를 선택했어요.`
-                            : parsedWatermarkPageRange.message}
-                        </small>
-                      </div>
-                    ) : null}
-                  </fieldset>
-                  <p className={styles.rasterNotice}>
-                    워터마크 문구는 호환성을 위해 이미지로 그려져 검색하거나 선택할 수 없어요.
-                  </p>
-                </div>
-              ) : null}
-
               <div className={styles.privacyNotice}>
                 <span aria-hidden="true">✓</span>
                 <p>
@@ -1366,15 +1530,6 @@ export function PdfWorkbench({
                   <button className={styles.secondaryButton} type="button" onClick={reset}>
                     새 작업
                   </button>
-                  {intent === "watermark" ? (
-                    <button
-                      className={styles.secondaryButton}
-                      type="button"
-                      onClick={() => void startProcessing()}
-                    >
-                      같은 설정으로 다시 실행
-                    </button>
-                  ) : null}
                   <button className={styles.runButton} type="button" onClick={downloadResult}>
                     {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
                   </button>

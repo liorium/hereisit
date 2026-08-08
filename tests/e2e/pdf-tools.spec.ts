@@ -460,10 +460,16 @@ test("adds a rasterized text watermark without external or write requests", asyn
     mimeType: "application/pdf",
     buffer: await createPdf([100, 200]),
   });
+  await expect(page.getByRole("heading", { name: "워터마크 설정" })).toBeVisible();
   await page.getByLabel("워터마크 텍스트").fill("검토용");
-  await page.getByRole("group", { name: "배치" }).getByLabel("반복 타일").check();
-  await page.getByRole("button", { name: "워터마크 넣기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel("모양 미리보기")).toContainText("검토용");
+  await expect(page.getByText("글자 모양 설정")).toBeVisible();
+  await page.getByRole("group", { name: "배치" }).getByLabel("반복").check();
+  await page.getByRole("button", { name: "워터마크 넣기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "워터마크 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("전체 2페이지에 적용")).toBeVisible();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -482,7 +488,7 @@ test("adds a rasterized text watermark without external or write requests", asyn
   expect(pageErrors).toEqual([]);
 });
 
-test("watermarks only selected pages and revokes the previous result", async ({ page }) => {
+test("watermarks only selected pages and revokes completed results", async ({ page }) => {
   await page.addInitScript(() => {
     const createdKey = "__hereisitCreatedCount";
     const revokedKey = "__hereisitRevokedCount";
@@ -522,24 +528,15 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
     buffer: await createPdf([100, 200]),
   });
 
-  await page.getByRole("button", { name: "PDF에 워터마크 넣기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
-    .toBe(1);
-
   await page
     .getByRole("group", { name: "적용 페이지" })
     .getByRole("radio", {
       name: /지정 페이지/,
     })
     .check();
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
-    .toBe(1);
 
   const range = page.getByLabel("페이지 범위", { exact: true });
-  const runButton = page.getByRole("button", { name: "PDF에 워터마크 넣기 →" });
+  const runButton = page.getByRole("button", { name: "워터마크 넣기", exact: true });
   await range.fill("3-");
   await expect(runButton).toBeDisabled();
   await expect(page.getByText("예: 1-3, 5, 8-10 형식으로 입력해 주세요.")).toBeVisible();
@@ -550,10 +547,13 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
 
   await range.fill("2");
   await runButton.click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "워터마크 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("선택 1페이지에 적용")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
-    .toBe(2);
+    .toBe(1);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -564,43 +564,23 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
   expect(document.getPage(0).node.Contents()).toBeUndefined();
   expect(document.getPage(1).node.Contents()).toBeDefined();
 
-  await range.fill("1");
+  await page.getByRole("button", { name: "다른 PDF에 넣기" }).click();
   await expect
     .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
-    .toBe(2);
-  await runButton.click();
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))), {
-      timeout: 20_000,
-    })
-    .toBe(3);
-
-  await page.getByRole("button", { name: "같은 설정으로 다시 실행" }).click();
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))), {
-      timeout: 20_000,
-    })
-    .toBe(4);
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
-    .toBe(3);
-
-  await page.getByRole("button", { name: "새 작업" }).click();
-  await expect
-    .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
-    .toBe(4);
+    .toBe(1);
 
   await page.locator("input[type=file]").setInputFiles({
     name: "selected-again.pdf",
     mimeType: "application/pdf",
     buffer: await createPdf([100, 200]),
   });
-  await page.getByRole("button", { name: "PDF에 워터마크 넣기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("button", { name: "워터마크 넣기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "워터마크 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect
     .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitCreatedCount"))))
-    .toBe(5);
+    .toBe(2);
   await page.evaluate(() => {
     const nextWindow = window as Window & {
       next?: { router?: { push: (path: string) => void } };
@@ -612,7 +592,7 @@ test("watermarks only selected pages and revokes the previous result", async ({ 
   await expect(page.getByRole("heading", { level: 1, name: "PDF 합치기" })).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => Number(sessionStorage.getItem("__hereisitRevokedCount"))))
-    .toBe(5);
+    .toBe(2);
 
   expect(unexpectedRequests).toEqual([]);
 });

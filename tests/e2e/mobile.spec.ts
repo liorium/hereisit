@@ -791,8 +791,9 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   });
   const text = page.getByLabel("워터마크 텍스트");
   await text.fill("대외비");
-  const placement = page.getByRole("group", { name: "배치" }).getByLabel("반복 타일");
+  const placement = page.getByRole("group", { name: "배치" }).getByLabel("반복");
   await placement.check();
+  await page.getByText("글자 모양 설정", { exact: true }).click();
   const opacity = page.getByLabel(/불투명도/);
   const scope = page
     .getByRole("group", { name: "적용 페이지" })
@@ -802,7 +803,7 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   await range.fill("1");
   const rangeFontSize = await range.evaluate((element) => getComputedStyle(element).fontSize);
   expect(rangeFontSize).toBe("16px");
-  const run = page.getByRole("button", { name: "워터마크 넣기 →" });
+  const run = page.getByRole("button", { name: "워터마크 넣기", exact: true });
 
   for (const control of [text, placement.locator(".."), opacity, scope.locator(".."), range, run]) {
     const box = await control.boundingBox();
@@ -811,10 +812,13 @@ test("runs the watermark Worker with touch-safe controls on an iPhone", async ({
   }
 
   await run.click();
-  await expect(page.getByText("1페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "워터마크 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("선택 1페이지에 적용")).toBeVisible();
   const resultActions = [
-    page.getByRole("button", { name: "같은 설정으로 다시 실행" }),
     page.getByRole("button", { name: "PDF 다운로드 ↓" }),
+    page.getByRole("button", { name: "다른 PDF에 넣기" }),
   ];
   for (const control of resultActions) {
     const box = await control.boundingBox();

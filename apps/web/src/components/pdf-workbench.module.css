@@ -406,132 +406,6 @@
   line-height: 1.45;
 }
 
-.watermarkSettings {
-  padding: 18px;
-  display: grid;
-  gap: 16px;
-}
-
-.watermarkSettings .optionGroup {
-  margin: 0;
-}
-
-.controlField {
-  min-width: 0;
-}
-
-.controlField > label,
-.segmentGroup legend {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--ink);
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.controlField input[type="text"],
-.controlField select {
-  width: 100%;
-  height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.controlField input[aria-invalid="true"] {
-  border-color: var(--red);
-}
-
-.watermarkSettings .controlField > small {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 10px;
-  text-align: right;
-}
-
-.controlField input[type="color"] {
-  width: 100%;
-  height: 44px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-  cursor: pointer;
-}
-
-.controlField input[type="range"] {
-  width: 100%;
-  min-height: 44px;
-  margin: 0;
-  accent-color: var(--blue);
-}
-
-.controlGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.55fr);
-  gap: 10px;
-}
-
-.segmentGroup {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.segmentGroup > div {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.segmentGroup:first-of-type > div {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.segmentGroup label {
-  min-width: 0;
-  min-height: 44px;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: white;
-  font-size: 10px;
-  font-weight: 750;
-  text-align: center;
-  cursor: pointer;
-}
-
-.segmentGroup input {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
-  margin: 0;
-  accent-color: var(--blue);
-}
-
-.watermarkSettings .settingCard {
-  margin: 0;
-}
-
-.rasterNotice {
-  margin: 0;
-  padding: 11px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--yellow) 28%, white);
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
 .privacyNotice {
   margin: 18px;
   padding: 12px;
@@ -1139,6 +1013,433 @@
   margin-top: 8px;
 }
 
+.watermarkSelect,
+.watermarkSetup {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  border: 1px solid var(--ink);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 10px 10px 0 var(--yellow);
+}
+
+.watermarkSelect {
+  min-height: 430px;
+  padding: 48px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.watermarkSelect.dragging {
+  transform: translate(-2px, -2px);
+  box-shadow: 14px 14px 0 var(--yellow);
+}
+
+.watermarkSelectMark {
+  width: 72px;
+  height: 88px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 10px 10px 18px 10px;
+  background: white;
+  font-size: 15px;
+  font-weight: 950;
+  box-shadow: 6px 6px 0 var(--yellow);
+}
+
+.watermarkSelect h2 {
+  max-width: 560px;
+  margin: 28px 0 0;
+  font-size: clamp(27px, 5vw, 40px);
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+}
+
+.watermarkSelect > p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.watermarkSelect .mergePrimaryAction {
+  width: min(360px, 100%);
+  margin-top: 28px;
+}
+
+.watermarkSelect > .watermarkSelectStatus {
+  min-height: 20px;
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.watermarkSelect > .watermarkLocalNotice {
+  margin-top: 20px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.watermarkSetup {
+  overflow: hidden;
+}
+
+.watermarkSetupHeader {
+  min-height: 100px;
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.watermarkSetupHeader h2 {
+  margin: 0;
+  font-size: clamp(27px, 4vw, 36px);
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+}
+
+.watermarkSetupHeader h2:focus,
+.watermarkProgress h2:focus,
+.watermarkResult h2:focus {
+  outline: none;
+}
+
+.watermarkSetupHeader p {
+  min-width: 0;
+  margin: 10px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.watermarkSetupHeader p strong {
+  max-width: 440px;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watermarkSetupHeader p span {
+  flex: 0 0 auto;
+}
+
+.watermarkSetupHeader > button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.watermarkSetupGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.95fr);
+}
+
+.watermarkControls {
+  padding: 28px;
+  display: grid;
+  gap: 22px;
+  border-right: 1px solid var(--line);
+}
+
+.watermarkTextField label,
+.watermarkChoiceGroup legend,
+.watermarkAdvanced label,
+.watermarkRotationGroup legend {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.watermarkTextField input,
+.watermarkRangeField input,
+.watermarkAdvanced select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.watermarkTextField input[aria-invalid="true"],
+.watermarkRangeField input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.watermarkSetup .watermarkTextField small,
+.watermarkSetup .watermarkRangeField small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.watermarkSetup .watermarkTextField small {
+  text-align: right;
+}
+
+.watermarkChoiceGroup,
+.watermarkRotationGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.watermarkChoiceGroup > div:first-of-type {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.watermarkChoiceGroup > div:first-of-type > label {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+}
+
+.watermarkChoiceGroup > div:first-of-type > label:has(input:checked) {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.watermarkChoiceGroup input[type="radio"],
+.watermarkRotationGroup input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.watermarkSetup .watermarkChoiceGroup span,
+.watermarkSetup .watermarkChoiceGroup strong,
+.watermarkSetup .watermarkChoiceGroup small {
+  display: block;
+}
+
+.watermarkSetup .watermarkChoiceGroup strong {
+  font-size: 12px;
+}
+
+.watermarkSetup .watermarkChoiceGroup small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.watermarkRangeField {
+  margin-top: 12px;
+}
+
+.watermarkRangeField > label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.watermarkAdvanced {
+  border-top: 1px solid var(--line);
+}
+
+.watermarkAdvanced summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.watermarkAdvanced summary::after {
+  content: "+";
+  font-size: 20px;
+}
+
+.watermarkAdvanced[open] summary::after {
+  content: "−";
+}
+
+.watermarkAdvancedGrid {
+  padding-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 16px;
+}
+
+.watermarkAdvanced input[type="color"] {
+  width: 100%;
+  height: 48px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+}
+
+.watermarkOpacityField,
+.watermarkRotationGroup {
+  grid-column: 1 / -1;
+}
+
+.watermarkOpacityField input {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.watermarkRotationGroup > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.watermarkRotationGroup label {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+}
+
+.watermarkRotationGroup label:has(input:checked) {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.watermarkPreview {
+  min-width: 0;
+  padding: 28px;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--yellow) 12%, white);
+}
+
+.watermarkPreview > span {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.watermarkPreviewPage {
+  width: min(280px, 100%);
+  aspect-ratio: 0.72;
+  margin-top: 20px;
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  border-radius: 5px 5px 14px 5px;
+  background:
+    linear-gradient(var(--line) 0 0) 22px 38px / 68% 1px no-repeat,
+    linear-gradient(var(--line) 0 0) 22px 54px / 50% 1px no-repeat,
+    white;
+  box-shadow: 7px 7px 0 var(--yellow);
+}
+
+.watermarkPreviewPage > div {
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.watermarkPreviewPage strong {
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  font-weight: 900;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watermarkPreviewPage > .watermarkPreviewTile {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 54px 8px;
+}
+
+.watermarkPreviewTile strong {
+  max-width: 110px;
+}
+
+.watermarkSetup .watermarkPreview > small {
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.watermarkSetupFooter {
+  padding: 20px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.watermarkSetupFooter > div {
+  min-width: 0;
+}
+
+.watermarkSetupFooter p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.watermarkSetupFooter > div > .watermarkLocalNotice {
+  color: var(--green);
+  font-weight: 800;
+}
+
+.watermarkSetupFooter .mergePrimaryAction {
+  min-width: 220px;
+}
+
+.watermarkResult > .mergeWarning {
+  color: var(--muted);
+}
+
 @media (max-width: 1050px) {
   .workspace {
     grid-template-columns: minmax(240px, 0.8fr) minmax(330px, 1.2fr);
@@ -1154,6 +1455,19 @@
 @media (max-width: 800px) {
   .shell {
     width: min(100% - 32px, 640px);
+  }
+
+  .watermarkSetupGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .watermarkControls {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .watermarkPreviewPage {
+    width: min(260px, 100%);
   }
 
   .emptyDropzone {
@@ -1265,16 +1579,6 @@
     font-size: 16px;
   }
 
-  .controlField input[type="text"],
-  .controlField select {
-    height: 46px;
-    font-size: 16px;
-  }
-
-  .controlGrid {
-    grid-template-columns: 1fr;
-  }
-
   .resultPanel {
     min-height: 390px;
     padding: 38px 24px;
@@ -1382,6 +1686,60 @@
     width: calc(100% - 24px);
   }
 
+  .watermarkSelect,
+  .watermarkSetup,
+  .watermarkResult {
+    box-shadow: 5px 5px 0 var(--yellow);
+  }
+
+  .watermarkSelect {
+    min-height: 330px;
+    padding: 32px 18px;
+  }
+
+  .watermarkSelect h2 {
+    font-size: 26px;
+  }
+
+  .watermarkSetupHeader {
+    padding: 20px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .watermarkSetupHeader > button {
+    width: 100%;
+  }
+
+  .watermarkSetupHeader p strong {
+    max-width: 70vw;
+  }
+
+  .watermarkControls,
+  .watermarkPreview,
+  .watermarkSetupFooter {
+    padding: 20px;
+  }
+
+  .watermarkChoiceGroup > div:first-of-type {
+    grid-template-columns: 1fr;
+  }
+
+  .watermarkChoiceGroup > div:first-of-type > label {
+    min-height: 54px;
+  }
+
+  .watermarkSetupFooter {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .watermarkSetupFooter .mergePrimaryAction {
+    width: 100%;
+    min-width: 0;
+  }
+
   .emptyDropzone {
     min-height: 286px;
     padding: 18px 16px 46px;
@@ -1460,13 +1818,8 @@
   .optionGroup label small,
   .rangeField > label,
   .optionGroup .rangeField small,
-  .controlField > label,
-  .segmentGroup legend,
-  .watermarkSettings .controlField > small,
-  .segmentGroup label,
   .inspectionCard p,
   .status,
-  .rasterNotice,
   .privacyNotice p,
   .privacyNotice strong,
   .resultCopy p,
@@ -1479,6 +1832,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .emptyDropzone,
+  .watermarkSelect,
   .progressTrack span,
   .mergeProgressTrack span {
     transition: none;
