@@ -171,7 +171,7 @@ describe("PDF thumbnail job boundary", () => {
     expect(supportsBrowserPdfThumbnailRuntime()).toBe(false);
   });
 
-  it("waits for readiness, then transfers the source exactly once", async () => {
+  it("waits for readiness, then posts the File without reading it on the UI thread", async () => {
     installRuntime();
     const file = fakeFile();
     const read = file.arrayBuffer as ReturnType<typeof vi.fn>;
@@ -183,13 +183,13 @@ describe("PDF thumbnail job boundary", () => {
       type: "ready",
       capabilities: { tool: "pdf.thumbnail", toolVersion: 1 },
     });
-    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
     await vi.waitFor(() =>
       expect(worker.messages.some(({ message }) => isMessageType(message, "run"))).toBe(true),
     );
-    expect(
-      worker.messages.find(({ message }) => isMessageType(message, "run"))?.transfer,
-    ).toHaveLength(1);
+    expect(read).not.toHaveBeenCalled();
+    const posted = worker.messages.find(({ message }) => isMessageType(message, "run"));
+    expect(posted?.message).toMatchObject({ input: { file } });
+    expect(posted?.transfer).toEqual([]);
     handle.cancel();
   });
 

@@ -349,6 +349,27 @@ describe("runPdfPipeline", () => {
     expect(result.suggestedName).toBe("report-organized-hereisit.pdf");
   });
 
+  it("reads and organizes a PDF through the file pipeline", async () => {
+    const sourceDocument = await PDFDocument.create();
+    sourceDocument.addPage([100, 100]);
+    sourceDocument.addPage([200, 100]);
+    sourceDocument.addPage([300, 100]).setRotation(degrees(90));
+    const source = Uint8Array.from(await sourceDocument.save()).buffer;
+
+    const result = await runPdfFilePipeline([fileInput("report.pdf", source, async () => source)], {
+      version: 1,
+      operation: "organize",
+      pages: [
+        { sourcePage: 3, rotateBy: 90 },
+        { sourcePage: 1, rotateBy: 270 },
+      ],
+    });
+
+    const organized = await PDFDocument.load(result.bytes);
+    expect(organized.getPages().map((page) => page.getWidth())).toEqual([300, 100]);
+    expect(organized.getPages().map((page) => page.getRotation().angle)).toEqual([180, 270]);
+  });
+
   it("rejects an organizer page beyond the source document", async () => {
     const source = await samplePdf([100]);
     await expect(

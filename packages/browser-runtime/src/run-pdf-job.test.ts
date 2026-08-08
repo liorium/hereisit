@@ -32,6 +32,11 @@ const imagesToPdfSpec: PdfPipelineSpecV1 = {
   operation: "images-to-pdf",
   page: { size: "a4", margin: 24 },
 };
+const organizeSpec: PdfPipelineSpecV1 = {
+  version: 1,
+  operation: "organize",
+  pages: [{ sourcePage: 1, rotateBy: 0 }],
+};
 
 function fakePdfFile(read: Promise<ArrayBuffer> = Promise.resolve(Uint8Array.of(1).buffer)): File {
   return {
@@ -117,6 +122,12 @@ describe("runPdfJob", () => {
       files: [fakeImageFile(), fakeImageFile()],
       spec: imagesToPdfSpec,
       tool: "pdf.images-to-pdf",
+    },
+    {
+      name: "organize",
+      files: [fakePdfFile()],
+      spec: organizeSpec,
+      tool: "pdf.organize",
     },
   ])("posts $name files to the Worker without reading them on the main thread", async (testCase) => {
     installWorker();

@@ -25,6 +25,8 @@ export interface RunPdfJobOptions {
   onProgress?: (event: { phase: PdfPhase; fraction: number }) => void;
 }
 
+function toolForSpec(spec: PdfFileRunRequest["spec"]): PdfFileRunRequest["tool"];
+function toolForSpec(spec: PdfPipelineSpecV1): PdfToolId;
 function toolForSpec(spec: PdfPipelineSpecV1): PdfToolId {
   if (spec.operation === "merge") return PDF_MERGE_TOOL_ID;
   if (spec.operation === "split") return PDF_SPLIT_TOOL_ID;
@@ -117,19 +119,15 @@ export function runPdfJob(
     if (
       spec.operation === "merge" ||
       spec.operation === "split" ||
-      spec.operation === "images-to-pdf"
+      spec.operation === "images-to-pdf" ||
+      spec.operation === "organize"
     ) {
       try {
         const request: PdfFileRunRequest = {
           protocol: WORKER_PROTOCOL_VERSION,
           type: "run-files",
           jobId,
-          tool:
-            spec.operation === "merge"
-              ? PDF_MERGE_TOOL_ID
-              : spec.operation === "split"
-                ? PDF_SPLIT_TOOL_ID
-                : PDF_IMAGES_TO_PDF_TOOL_ID,
+          tool: toolForSpec(spec),
           toolVersion: PDF_TOOL_VERSION,
           inputs: files.map((file) => ({
             name: file.name,

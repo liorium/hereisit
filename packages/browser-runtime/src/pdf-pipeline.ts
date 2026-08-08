@@ -521,12 +521,13 @@ async function splitPdf(
 }
 
 async function organizePdf(
-  input: PdfPipelineInput,
+  fileInput: PdfPipelineFileInput,
   spec: Extract<ParsedPdfPipelineSpecV1, { operation: "organize" }>,
   timing: Timing,
   options: PdfPipelineOptions,
 ): Promise<Omit<PdfPipelineResult, "timing">> {
   const loadStarted = now();
+  const input = await readFileInput(fileInput);
   const source = await loadPdf(input);
   timing.loadMs += now() - loadStarted;
   const sourcePageCount = source.getPageCount();
@@ -857,7 +858,18 @@ export async function runPdfPipeline(
       options,
     );
   } else if (spec.operation === "organize") {
-    result = await organizePdf(inputs[0] as PdfPipelineInput, spec, timing, options);
+    const input = inputs[0] as PdfPipelineInput;
+    result = await organizePdf(
+      {
+        name: input.name,
+        mimeHint: input.mimeHint,
+        byteLength: input.byteLength,
+        readBytes: async () => input.bytes,
+      },
+      spec,
+      timing,
+      options,
+    );
   } else {
     result = await watermarkPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
   }
@@ -877,7 +889,8 @@ export async function runPdfFilePipeline(
     !parsed.success ||
     (parsed.data.operation !== "merge" &&
       parsed.data.operation !== "split" &&
-      parsed.data.operation !== "images-to-pdf")
+      parsed.data.operation !== "images-to-pdf" &&
+      parsed.data.operation !== "organize")
   ) {
     fail("INVALID_SPEC", "PDF 작업 설정이 올바르지 않아요.");
   }
@@ -891,6 +904,8 @@ export async function runPdfFilePipeline(
     result = await mergePdfs(inputs, timing, options);
   } else if (spec.operation === "images-to-pdf") {
     result = await imagesToPdf(inputs, spec, timing, options);
+  } else if (spec.operation === "organize") {
+    result = await organizePdf(inputs[0] as PdfPipelineFileInput, spec, timing, options);
   } else {
     const loadStarted = now();
     const input = await readFileInput(inputs[0] as PdfPipelineFileInput);

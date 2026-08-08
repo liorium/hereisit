@@ -62,6 +62,23 @@ function runRequest(overrides: Record<string, unknown> = {}): PdfThumbnailRunReq
   } as PdfThumbnailRunRequest;
 }
 
+function fileRunRequest(file: File, input: Record<string, unknown> = {}): unknown {
+  return {
+    protocol: 1,
+    type: "run",
+    jobId: "file-job",
+    tool: "pdf.thumbnail",
+    toolVersion: 1,
+    input: {
+      name: file.name,
+      mimeHint: file.type,
+      byteLength: file.size,
+      file,
+      ...input,
+    },
+  };
+}
+
 async function loadWorker(): Promise<StubWorkerScope> {
   const scope = new StubWorkerScope();
   vi.stubGlobal("self", scope);
@@ -73,6 +90,18 @@ async function loadWorker(): Promise<StubWorkerScope> {
 async function flushWorker(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function waitForFailure(scope: StubWorkerScope): Promise<unknown> {
+  await vi.waitFor(() =>
+    expect(
+      scope.posts.some(
+        ({ event }) =>
+          typeof event === "object" && event !== null && "type" in event && event.type === "failed",
+      ),
+    ).toBe(true),
+  );
+  return scope.posts.at(-1)?.event;
 }
 
 beforeEach(() => {
@@ -166,6 +195,85 @@ describe("PDF thumbnail Worker", () => {
     ]);
     expect(streamed[0]?.transfer).toEqual([update.bytes]);
     expect(streamed[1]?.transfer).toEqual([]);
+  });
+
+  it("reads a File inside the Worker before running the thumbnail pipeline", async () => {
+    const file = new File(["%PDF-1.7"], "private.pdf", { type: "application/pdf" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    pipelineMocks.run.mockResolvedValueOnce({
+      pageCount: 1,
+      renderedPageCount: 0,
+      failedPageCount: 1,
+      omittedPageCount: 0,
+    });
+    const scope = await loadWorker();
+
+    scope.dispatch(fileRunRequest(file));
+
+    await vi.waitFor(() => expect(pipelineMocks.run).toHaveBeenCalledOnce());
+    expect(read).toHaveBeenCalledOnce();
+    expect(pipelineMocks.run.mock.calls[0]?.[0]).toMatchObject({
+      name: "private.pdf",
+      mimeHint: "application/pdf",
+      byteLength: file.size,
+      bytes: expect.any(ArrayBuffer),
+    });
+  });
+
+  it.each([
+    ["name", "different.pdf"],
+    ["mimeHint", "text/plain"],
+    ["byteLength", 1],
+  ])("rejects mismatched File %s metadata before rendering", async (field, value) => {
+    const file = new File(["%PDF-1.7"], "private.pdf", { type: "application/pdf" });
+    const scope = await loadWorker();
+
+    scope.dispatch(fileRunRequest(file, { [field]: value }));
+
+    expect(await waitForFailure(scope)).toMatchObject({
+      type: "failed",
+      jobId: "file-job",
+      error: { code: "CORRUPT_PDF" },
+    });
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unreadable File", () => Promise.reject(new Error("private detail"))],
+    ["a File whose read size changed", () => Promise.resolve(new ArrayBuffer(1))],
+  ])("rejects %s before rendering", async (_name, read) => {
+    const file = new File(["%PDF-1.7"], "private.pdf", { type: "application/pdf" });
+    vi.spyOn(file, "arrayBuffer").mockImplementationOnce(read);
+    const scope = await loadWorker();
+
+    scope.dispatch(fileRunRequest(file));
+
+    expect(await waitForFailure(scope)).toMatchObject({
+      type: "failed",
+      jobId: "file-job",
+      error: { code: "CORRUPT_PDF" },
+    });
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+  });
+
+  it("suppresses a File read failure after cancellation", async () => {
+    let rejectRead: (reason: Error) => void = () => undefined;
+    const read = new Promise<ArrayBuffer>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    const file = new File(["%PDF-1.7"], "private.pdf", { type: "application/pdf" });
+    vi.spyOn(file, "arrayBuffer").mockReturnValueOnce(read);
+    const scope = await loadWorker();
+
+    scope.dispatch(fileRunRequest(file));
+    scope.dispatch({ protocol: 1, type: "cancel", jobId: "file-job" });
+    rejectRead(new Error("private detail"));
+    await flushWorker();
+
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+    expect(
+      scope.posts.filter(({ event }) => (event as { jobId?: string }).jobId === "file-job"),
+    ).toEqual([]);
   });
 
   it("cancels the active pipeline and suppresses a late terminal event", async () => {

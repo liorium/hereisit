@@ -353,6 +353,15 @@ test("extracts a validated page range into one PDF", async ({ page }) => {
 });
 
 test("reorders, rotates, and deletes PDF pages without external uploads", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("__hereisitOrganizerUiThreadPdfReads", "0");
+    const originalArrayBuffer = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = function arrayBuffer() {
+      const count = Number(sessionStorage.getItem("__hereisitOrganizerUiThreadPdfReads") ?? "0");
+      sessionStorage.setItem("__hereisitOrganizerUiThreadPdfReads", String(count + 1));
+      return Reflect.apply(originalArrayBuffer, this, []);
+    };
+  });
   await page.goto("/pdf/organize");
   const unexpectedRequests: string[] = [];
   const failedRequests: string[] = [];
@@ -414,6 +423,9 @@ test("reorders, rotates, and deletes PDF pages without external uploads", async 
   expect(unexpectedRequests).toEqual([]);
   expect(failedRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("__hereisitOrganizerUiThreadPdfReads")),
+  ).toBe("0");
 });
 
 test("creates one PDF page per image", async ({ page }) => {
