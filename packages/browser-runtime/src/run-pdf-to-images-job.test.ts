@@ -122,7 +122,7 @@ function latestWorker(): StubWorker {
 }
 
 async function waitForRun(worker: StubWorker): Promise<PostedMessage> {
-  if (!worker.messages.some(({ message }) => isMessageType(message, "run"))) {
+  if (!worker.messages.some(({ message }) => isMessageType(message, "run-file"))) {
     worker.emit({
       protocol: 1,
       type: "ready",
@@ -130,9 +130,9 @@ async function waitForRun(worker: StubWorker): Promise<PostedMessage> {
     });
   }
   await vi.waitFor(() => {
-    expect(worker.messages.some(({ message }) => isMessageType(message, "run"))).toBe(true);
+    expect(worker.messages.some(({ message }) => isMessageType(message, "run-file"))).toBe(true);
   });
-  const posted = worker.messages.find(({ message }) => isMessageType(message, "run"));
+  const posted = worker.messages.find(({ message }) => isMessageType(message, "run-file"));
   if (posted === undefined) throw new Error("Expected a run request.");
   return posted;
 }
@@ -274,7 +274,7 @@ describe("runPdfToImagesJob", () => {
     expect(StubWorker.instances).toHaveLength(0);
   });
 
-  it("publishes validating synchronously and waits for Worker readiness before reading", async () => {
+  it("publishes validating synchronously, waits for Worker readiness, and posts the File unread", async () => {
     installSupportedRuntime();
     const { file, arrayBuffer } = fakePdfFile();
     const onProgress = vi.fn();
@@ -284,16 +284,20 @@ describe("runPdfToImagesJob", () => {
     expect(onProgress).toHaveBeenCalledOnce();
     expect(onProgress).toHaveBeenCalledWith({ phase: "validating", fraction: 0 });
     expect(arrayBuffer).not.toHaveBeenCalled();
-    await Promise.resolve();
-    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(latestWorker().messages).toHaveLength(0);
 
     latestWorker().emit({
       protocol: 1,
       type: "ready",
       capabilities: { offscreenCanvas: true, formats: ["jpeg", "png"] },
     });
-    await Promise.resolve();
-    expect(arrayBuffer).toHaveBeenCalledOnce();
+    const run = await waitForRun(latestWorker());
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(run.transfer).toEqual([]);
+    expect(run.message).toMatchObject({
+      type: "run-file",
+      input: { name: file.name, mimeHint: file.type, byteLength: file.size, file },
+    });
   });
 
   it("rejects unsupported Worker capabilities before reading the file", async () => {
@@ -355,7 +359,7 @@ describe("runPdfToImagesJob", () => {
     worker.emit({
       protocol: 1,
       type: "complete",
-      jobId: isMessageType(run.message, "run") ? run.message.jobId : "missing",
+      jobId: isMessageType(run.message, "run-file") ? run.message.jobId : "missing",
       result: pdfToImagesResult(),
     });
 
@@ -366,29 +370,17 @@ describe("runPdfToImagesJob", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
-  it("cancels before file reading resolves without posting a run request", async () => {
+  it("cancels before Worker readiness without posting a run request", async () => {
     installSupportedRuntime();
-    let releaseRead: (bytes: ArrayBuffer) => void = () => undefined;
-    const read = new Promise<ArrayBuffer>((resolve) => {
-      releaseRead = resolve;
-    });
-    const { file, arrayBuffer } = fakePdfFile({ read });
+    const { file, arrayBuffer } = fakePdfFile();
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
-    worker.emit({
-      protocol: 1,
-      type: "ready",
-      capabilities: { offscreenCanvas: true, formats: ["jpeg", "png"] },
-    });
-    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
 
     handle.cancel();
-    releaseRead(Uint8Array.of(1).buffer);
-    await Promise.resolve();
-    await Promise.resolve();
 
     await expect(handle.result).resolves.toEqual({ status: "cancelled" });
-    expect(worker.messages.some(({ message }) => isMessageType(message, "run"))).toBe(false);
+    expect(worker.messages.some(({ message }) => isMessageType(message, "run-file"))).toBe(false);
+    expect(arrayBuffer).not.toHaveBeenCalled();
     expect(worker.terminateCount).toBe(1);
   });
 
@@ -399,7 +391,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec, { onProgress });
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
 
     handle.cancel();
     handle.cancel();
@@ -449,7 +441,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec, { onProgress });
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
 
     worker.emit(null);
     worker.emit({ protocol: 2, type: "progress", jobId: run.message.jobId, sequence: 9 });
@@ -484,7 +476,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec, { onProgress });
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
 
     worker.emit({
       ...progressEvent(run.message.jobId, 0),
@@ -504,7 +496,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
 
     worker.emit({
       protocol: 1,
@@ -534,7 +526,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const cleanResult = pdfToImagesResult();
 
     worker.emit({
@@ -560,7 +552,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const cleanResult = pdfToImagesResult();
 
     worker.emit({
@@ -633,7 +625,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const cleanResult = pdfToImagesResult();
 
     worker.emit({
@@ -658,7 +650,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const cleanResult = pdfToImagesResult();
 
     worker.emit({
@@ -687,7 +679,7 @@ describe("runPdfToImagesJob", () => {
     const handle = runPdfToImagesJob(file, pdfToImagesSpec);
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const firstResult = pdfToImagesResult();
 
     worker.emit({
@@ -724,7 +716,7 @@ describe("runPdfToImagesJob", () => {
     });
     const worker = latestWorker();
     const run = await waitForRun(worker);
-    if (!isMessageType(run.message, "run")) throw new Error("Expected a run request.");
+    if (!isMessageType(run.message, "run-file")) throw new Error("Expected a run request.");
     const result = pdfToImagesResult();
 
     worker.emit(progressEvent(run.message.jobId, 0));
@@ -733,7 +725,7 @@ describe("runPdfToImagesJob", () => {
     await expect(handle.result).resolves.toEqual({ status: "fulfilled", value: result });
   });
 
-  it("posts the exact module Worker request and transfers only the input buffer", async () => {
+  it("posts the exact module Worker request with the unread File", async () => {
     installSupportedRuntime();
     const bytes = Uint8Array.of(1, 2, 3).buffer;
     const { file } = fakePdfFile({ size: bytes.byteLength, read: Promise.resolve(bytes) });
@@ -747,18 +739,17 @@ describe("runPdfToImagesJob", () => {
       type: "module",
       name: "hereisit-pdf-to-images-worker",
     });
-    expect(run.transfer).toHaveLength(1);
-    expect(run.transfer[0]).toBe(bytes);
+    expect(run.transfer).toEqual([]);
     expect(run.message).toMatchObject({
       protocol: 1,
-      type: "run",
+      type: "run-file",
       tool: "pdf.to-images",
       toolVersion: 1,
       input: {
         name: "report.pdf",
         mimeHint: "application/pdf",
         byteLength: bytes.byteLength,
-        bytes,
+        file,
       },
       spec: pdfToImagesSpec,
     });
@@ -768,7 +759,9 @@ describe("runPdfToImagesJob", () => {
     class ThrowingPostWorker extends StubWorker {
       override postMessage(message: unknown, transfer: readonly Transferable[] = []): void {
         super.postMessage(message, transfer);
-        if (isMessageType(message, "run")) throw new DOMException("detached", "DataCloneError");
+        if (isMessageType(message, "run-file")) {
+          throw new DOMException("detached", "DataCloneError");
+        }
       }
     }
     installSupportedRuntime(ThrowingPostWorker);

@@ -628,6 +628,7 @@ test("cancels before a result or download is offered", async ({ page }) => {
     };
   });
   await page.getByRole("button", { name: "2페이지 이미지로 변환" }).click();
+  await expect(page.getByText("PDF 파일과 변환 설정 확인 중")).toBeVisible();
   await page.getByRole("button", { name: "작업 중단" }).click();
   await page.evaluate(() => {
     (window as Window & { __hereisitReleaseFrames?: () => void }).__hereisitReleaseFrames?.();

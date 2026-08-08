@@ -70,7 +70,9 @@
   font-size: clamp(2rem, 7vw, 3.5rem);
   letter-spacing: -0.045em;
   line-height: 1.08;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: keep-all;
 }
 
 .titleRow button {
@@ -213,7 +215,7 @@
   }
 
   .titleRow h1 {
-    font-size: clamp(1.75rem, 9vw, 2.3rem);
+    font-size: clamp(1.75rem, 8vw, 2rem);
     line-height: 1.08;
   }
 

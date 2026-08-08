@@ -1,5 +1,6 @@
 import type {
   PdfToImagesErrorPayload,
+  PdfToImagesFileRunRequest,
   PdfToImagesProgress,
   PdfToImagesResult,
   PdfToImagesRunRequest,
@@ -12,7 +13,8 @@ const pipelineMocks = vi.hoisted(() => ({
   toErrorPayload: vi.fn(),
 }));
 
-vi.mock("./pdf-to-images-pipeline", () => ({
+vi.mock("./pdf-to-images-pipeline", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pdf-to-images-pipeline")>()),
   runPdfToImagesPipeline: pipelineMocks.run,
   toPdfToImagesErrorPayload: pipelineMocks.toErrorPayload,
 }));
@@ -111,6 +113,26 @@ function runRequest(jobId = "job-1", overrides: Record<string, unknown> = {}): u
     },
     spec: validSpec,
     ...overrides,
+  };
+}
+
+function fileRunRequest(jobId = "job-1"): PdfToImagesFileRunRequest {
+  const file = new File([Uint8Array.of(0x25, 0x50, 0x44, 0x46, 0x2d)], "report.pdf", {
+    type: "application/pdf",
+  });
+  return {
+    protocol: 1,
+    type: "run-file",
+    jobId,
+    tool: "pdf.to-images",
+    toolVersion: 1,
+    input: {
+      name: file.name,
+      mimeHint: file.type,
+      byteLength: file.size,
+      file,
+    },
+    spec: validSpec,
   };
 }
 
@@ -213,6 +235,7 @@ describe("pdf-to-images Worker request validation", () => {
         bytes: new ArrayBuffer(2),
       },
     }),
+    { ...fileRunRequest(), input: { ...fileRunRequest().input, byteLength: 1 } },
   ])("ignores a structurally malformed request without running the pipeline", async (request) => {
     const scope = await loadWorker();
 
@@ -301,6 +324,53 @@ describe("pdf-to-images Worker request validation", () => {
 });
 
 describe("pdf-to-images Worker execution", () => {
+  it("reads a structured-cloned File inside the Worker before running the pipeline", async () => {
+    const output = result();
+    pipelineMocks.run.mockResolvedValueOnce(output);
+    const scope = await loadWorker();
+    const request = fileRunRequest();
+    const read = vi.spyOn(request.input.file, "arrayBuffer");
+
+    scope.dispatch(request);
+    await vi.waitFor(() => expect(pipelineMocks.run).toHaveBeenCalledOnce());
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(pipelineMocks.run).toHaveBeenCalledWith(
+      {
+        name: request.input.name,
+        mimeHint: request.input.mimeHint,
+        byteLength: request.input.byteLength,
+        bytes: expect.any(ArrayBuffer),
+      },
+      validSpec,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        onProgress: expect.any(Function),
+      }),
+    );
+  });
+
+  it("reports a File read failure without exposing the raw exception", async () => {
+    const scope = await loadWorker();
+    const request = fileRunRequest();
+    vi.spyOn(request.input.file, "arrayBuffer").mockRejectedValueOnce(
+      new Error("private filesystem detail"),
+    );
+    pipelineMocks.toErrorPayload.mockReturnValueOnce({
+      code: "CORRUPT_PDF",
+      message: "선택한 PDF 파일을 읽지 못했어요.",
+      retryable: true,
+    });
+
+    scope.dispatch(request);
+    await vi.waitFor(() => expect(terminalPosts(scope, request.jobId)).toHaveLength(1));
+
+    expect(pipelineMocks.toErrorPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "CORRUPT_PDF", retryable: true }),
+    );
+    expect(JSON.stringify(terminalPosts(scope, request.jobId))).not.toContain("private");
+  });
+
   it("passes its AbortSignal to the pipeline and suppresses the cancelled outcome", async () => {
     const pending = deferred<PdfToImagesResult>();
     pipelineMocks.run.mockReturnValueOnce(pending.promise);
