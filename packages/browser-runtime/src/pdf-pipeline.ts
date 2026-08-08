@@ -402,7 +402,7 @@ async function createSplitArchive(
         settle({ ok: false, error: archiveFailure });
         return;
       }
-      chunks.push(chunk.slice());
+      chunks.push(chunk);
       if (!final) return;
       const joined = new Uint8Array(archiveBytes);
       let offset = 0;
