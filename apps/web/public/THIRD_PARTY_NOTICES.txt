@@ -2079,7 +2079,7 @@ THE SOFTWARE.
 
 ========================================================================
 Package: nanoid
-Version: 3.3.16
+Version: 3.3.17
 License: MIT
 
 --- LICENSE ---
