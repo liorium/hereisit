@@ -422,8 +422,13 @@ test("creates one PDF page per image", async ({ page }) => {
     { name: "one.png", mimeType: "image/png", buffer: onePixelPng },
     { name: "two.png", mimeType: "image/png", buffer: onePixelPng },
   ]);
-  await page.getByRole("button", { name: "2개 이미지로 PDF 만들기 →" }).click();
-  await expect(page.getByText("2페이지 PDF 준비 완료")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "이미지 순서" })).toBeVisible();
+  await page.getByRole("button", { name: "2장으로 PDF 만들기" }).click();
+  await expect(page.getByRole("heading", { name: "PDF 만들기 완료" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("이미지 2장 → PDF 2페이지", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 추가" })).toHaveCount(0);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),

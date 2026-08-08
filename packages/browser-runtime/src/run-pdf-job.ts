@@ -114,13 +114,22 @@ export function runPdfJob(
       });
     }, PDF_JOB_TIMEOUT_MS);
 
-    if (spec.operation === "merge" || spec.operation === "split") {
+    if (
+      spec.operation === "merge" ||
+      spec.operation === "split" ||
+      spec.operation === "images-to-pdf"
+    ) {
       try {
         const request: PdfFileRunRequest = {
           protocol: WORKER_PROTOCOL_VERSION,
           type: "run-files",
           jobId,
-          tool: spec.operation === "merge" ? PDF_MERGE_TOOL_ID : PDF_SPLIT_TOOL_ID,
+          tool:
+            spec.operation === "merge"
+              ? PDF_MERGE_TOOL_ID
+              : spec.operation === "split"
+                ? PDF_SPLIT_TOOL_ID
+                : PDF_IMAGES_TO_PDF_TOOL_ID,
           toolVersion: PDF_TOOL_VERSION,
           inputs: files.map((file) => ({
             name: file.name,

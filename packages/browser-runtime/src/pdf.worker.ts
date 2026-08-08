@@ -72,7 +72,8 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
         !toolMatchesSpec(request.tool, request.spec) ||
         (request.type === "run-files" &&
           request.spec.operation !== "merge" &&
-          request.spec.operation !== "split")
+          request.spec.operation !== "split" &&
+          request.spec.operation !== "images-to-pdf")
       ) {
         throw new Error("INVALID_SPEC");
       }

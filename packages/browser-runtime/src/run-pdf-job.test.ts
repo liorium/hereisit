@@ -27,6 +27,11 @@ const splitSpec: PdfPipelineSpecV1 = {
   operation: "split",
   selection: { mode: "every-page" },
 };
+const imagesToPdfSpec: PdfPipelineSpecV1 = {
+  version: 1,
+  operation: "images-to-pdf",
+  page: { size: "a4", margin: 24 },
+};
 
 function fakePdfFile(read: Promise<ArrayBuffer> = Promise.resolve(Uint8Array.of(1).buffer)): File {
   return {
@@ -34,6 +39,15 @@ function fakePdfFile(read: Promise<ArrayBuffer> = Promise.resolve(Uint8Array.of(
     type: "application/pdf",
     size: 1,
     arrayBuffer: () => read,
+  } as File;
+}
+
+function fakeImageFile(): File {
+  return {
+    name: "photo.png",
+    type: "image/png",
+    size: 1,
+    arrayBuffer: () => Promise.resolve(Uint8Array.of(1).buffer),
   } as File;
 }
 
@@ -98,6 +112,12 @@ describe("runPdfJob", () => {
   it.each([
     { name: "merge", files: [fakePdfFile(), fakePdfFile()], spec: mergeSpec, tool: "pdf.merge" },
     { name: "split", files: [fakePdfFile()], spec: splitSpec, tool: "pdf.split" },
+    {
+      name: "images-to-pdf",
+      files: [fakeImageFile(), fakeImageFile()],
+      spec: imagesToPdfSpec,
+      tool: "pdf.images-to-pdf",
+    },
   ])("posts $name files to the Worker without reading them on the main thread", async (testCase) => {
     installWorker();
     const reads = testCase.files.map((file) => vi.spyOn(file, "arrayBuffer"));

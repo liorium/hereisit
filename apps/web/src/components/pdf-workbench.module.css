@@ -1107,9 +1107,9 @@
   letter-spacing: -0.05em;
 }
 
-.watermarkSetupHeader h2:focus,
-.watermarkProgress h2:focus,
-.watermarkResult h2:focus {
+.mergeSetupHeader h2:focus,
+.mergeStage h2:focus,
+.watermarkSetupHeader h2:focus {
   outline: none;
 }
 

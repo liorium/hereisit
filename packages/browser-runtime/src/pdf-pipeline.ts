@@ -205,7 +205,7 @@ function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipe
   }
 }
 
-async function readPdfInput(input: PdfPipelineFileInput): Promise<PdfPipelineInput> {
+async function readFileInput(input: PdfPipelineFileInput): Promise<PdfPipelineInput> {
   let bytes: ArrayBuffer;
   try {
     bytes = await input.readBytes();
@@ -331,7 +331,7 @@ async function mergePdfs(
 
   for (const [index, input] of inputs.entries()) {
     const loadStarted = now();
-    const source = await loadPdf(await readPdfInput(input));
+    const source = await loadPdf(await readFileInput(input));
     timing.loadMs += now() - loadStarted;
     const pageIndices = source.getPageIndices();
     sourcePageCount += pageIndices.length;
@@ -578,29 +578,23 @@ async function organizePdf(
 }
 
 async function imagesToPdf(
-  inputs: readonly PdfPipelineInput[],
+  inputs: readonly PdfPipelineFileInput[],
   spec: Extract<ParsedPdfPipelineSpecV1, { operation: "images-to-pdf" }>,
   timing: Timing,
   options: PdfPipelineOptions,
 ): Promise<Omit<PdfPipelineResult, "timing">> {
-  const prepared: {
-    input: PdfPipelineInput;
-    kind: "jpeg" | "png";
-    width: number;
-    height: number;
-    orientation: PdfImageOrientation;
-  }[] = [];
+  const output = await createOutputDocument();
   let totalPngPixels = 0;
 
-  for (const input of inputs) {
-    const inspectStarted = now();
+  for (const [index, fileInput] of inputs.entries()) {
+    const loadStarted = now();
+    const input = await readFileInput(fileInput);
     let inspected: ReturnType<typeof inspectImageHeader>;
     try {
       inspected = inspectImageHeader(input.bytes);
     } catch {
       fail("UNSUPPORTED_INPUT", "이미지 PDF 변환은 현재 JPG와 PNG 파일을 지원해요.");
     }
-    timing.loadMs += now() - inspectStarted;
     if (inspected.format !== "jpeg" && inspected.format !== "png") {
       fail("UNSUPPORTED_INPUT", "이미지 PDF 변환은 현재 JPG와 PNG 파일을 지원해요.");
     }
@@ -635,27 +629,14 @@ async function imagesToPdf(
       fail("MEMORY_LIMIT", "JPG 이미지는 한 장당 최대 50MP까지 처리할 수 있어요.");
     }
 
-    prepared.push({
-      input,
-      kind: inspected.format,
-      width: inspected.width,
-      height: inspected.height,
-      orientation: inspected.format === "jpeg" ? readJpegExifOrientation(input.bytes) : 1,
-    });
-  }
-
-  const output = await createOutputDocument();
-
-  for (const [index, preparedImage] of prepared.entries()) {
-    const loadStarted = now();
+    const orientation: PdfImageOrientation =
+      inspected.format === "jpeg" ? readJpegExifOrientation(input.bytes) : 1;
     let image: PDFImage;
     try {
       const embeddingBytes =
-        preparedImage.kind === "png"
-          ? stripPngMetadata(preparedImage.input.bytes)
-          : stripJpegMetadata(preparedImage.input.bytes);
+        inspected.format === "png" ? stripPngMetadata(input.bytes) : stripJpegMetadata(input.bytes);
       image =
-        preparedImage.kind === "png"
+        inspected.format === "png"
           ? await output.embedPng(embeddingBytes)
           : await output.embedJpg(embeddingBytes);
     } catch {
@@ -665,10 +646,10 @@ async function imagesToPdf(
 
     const processStarted = now();
     const layout = calculateOrientedPdfImageLayout(
-      preparedImage.width,
-      preparedImage.height,
+      inspected.width,
+      inspected.height,
       spec.page,
-      preparedImage.orientation,
+      orientation,
     );
     const page = output.addPage([layout.pageWidth, layout.pageHeight]);
     page.drawImage(image, {
@@ -684,7 +665,7 @@ async function imagesToPdf(
       fail("WRITE_FAILED", "이미지를 PDF 페이지에 넣지 못했어요.");
     }
     timing.processMs += now() - processStarted;
-    emit(options, "processing", 0.1 + ((index + 1) / prepared.length) * 0.7);
+    emit(options, "processing", 0.1 + ((index + 1) / inputs.length) * 0.7);
   }
 
   emit(options, "serializing", 0.85);
@@ -864,7 +845,17 @@ export async function runPdfPipeline(
   } else if (spec.operation === "split") {
     result = await splitPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
   } else if (spec.operation === "images-to-pdf") {
-    result = await imagesToPdf(inputs, spec, timing, options);
+    result = await imagesToPdf(
+      inputs.map((input) => ({
+        name: input.name,
+        mimeHint: input.mimeHint,
+        byteLength: input.byteLength,
+        readBytes: async () => input.bytes,
+      })),
+      spec,
+      timing,
+      options,
+    );
   } else if (spec.operation === "organize") {
     result = await organizePdf(inputs[0] as PdfPipelineInput, spec, timing, options);
   } else {
@@ -882,7 +873,12 @@ export async function runPdfFilePipeline(
   const started = now();
   emit(options, "validating", 0.01);
   const parsed = pdfPipelineSpecSchema.safeParse(rawSpec);
-  if (!parsed.success || (parsed.data.operation !== "merge" && parsed.data.operation !== "split")) {
+  if (
+    !parsed.success ||
+    (parsed.data.operation !== "merge" &&
+      parsed.data.operation !== "split" &&
+      parsed.data.operation !== "images-to-pdf")
+  ) {
     fail("INVALID_SPEC", "PDF 작업 설정이 올바르지 않아요.");
   }
   const spec = parsed.data;
@@ -893,9 +889,11 @@ export async function runPdfFilePipeline(
   let result: Omit<PdfPipelineResult, "timing">;
   if (spec.operation === "merge") {
     result = await mergePdfs(inputs, timing, options);
+  } else if (spec.operation === "images-to-pdf") {
+    result = await imagesToPdf(inputs, spec, timing, options);
   } else {
     const loadStarted = now();
-    const input = await readPdfInput(inputs[0] as PdfPipelineFileInput);
+    const input = await readFileInput(inputs[0] as PdfPipelineFileInput);
     timing.loadMs += now() - loadStarted;
     result = await splitPdf(input, spec, timing, options);
   }
