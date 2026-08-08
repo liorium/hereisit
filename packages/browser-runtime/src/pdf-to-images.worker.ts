@@ -4,13 +4,18 @@ import {
   PDF_TO_IMAGES_TOOL_ID,
   PDF_TO_IMAGES_TOOL_VERSION,
   type PdfToImagesErrorPayload,
+  type PdfToImagesFileRunRequest,
   type PdfToImagesProgress,
   type PdfToImagesRunRequest,
   type PdfToImagesWorkerEvent,
   pdfToImagesSpecSchema,
   WORKER_PROTOCOL_VERSION,
 } from "@hereisit/tool-contracts";
-import { runPdfToImagesPipeline, toPdfToImagesErrorPayload } from "./pdf-to-images-pipeline";
+import {
+  PdfToImagesPipelineError,
+  runPdfToImagesPipeline,
+  toPdfToImagesErrorPayload,
+} from "./pdf-to-images-pipeline";
 
 const MAX_INPUT_BYTES = 50 * 1024 * 1024;
 const scope = self as unknown as DedicatedWorkerGlobalScope;
@@ -19,8 +24,31 @@ interface RunEnvelope {
   jobId: string;
   tool: unknown;
   toolVersion: unknown;
-  input: PdfToImagesRunRequest["input"];
+  input: PdfToImagesRunRequest["input"] | PdfToImagesFileRunRequest["input"];
   spec: unknown;
+}
+
+function parseFileInput(value: unknown): PdfToImagesFileRunRequest["input"] | undefined {
+  if (!isRecord(value) || !(value.file instanceof File)) return undefined;
+  if (
+    typeof value.name !== "string" ||
+    typeof value.mimeHint !== "string" ||
+    typeof value.byteLength !== "number" ||
+    !Number.isSafeInteger(value.byteLength) ||
+    value.byteLength < 1 ||
+    value.byteLength > MAX_INPUT_BYTES ||
+    value.name !== value.file.name ||
+    value.mimeHint !== value.file.type ||
+    value.byteLength !== value.file.size
+  ) {
+    return undefined;
+  }
+  return {
+    name: value.name,
+    mimeHint: value.mimeHint,
+    byteLength: value.byteLength,
+    file: value.file,
+  };
 }
 
 interface ActiveJob {
@@ -97,7 +125,7 @@ function parseInput(value: unknown): PdfToImagesRunRequest["input"] | undefined 
 
 function parseRunEnvelope(value: Record<string, unknown>): RunEnvelope | undefined {
   if (typeof value.jobId !== "string" || value.jobId.length === 0) return undefined;
-  const input = parseInput(value.input);
+  const input = value.type === "run-file" ? parseFileInput(value.input) : parseInput(value.input);
   if (input === undefined) return undefined;
   return {
     jobId: value.jobId,
@@ -147,7 +175,34 @@ function startRun(request: RunEnvelope): void {
   let sequence = 0;
   void (async () => {
     try {
-      const result = await runPdfToImagesPipeline(request.input, parsedSpec.data, {
+      let input: PdfToImagesRunRequest["input"];
+      if ("file" in request.input) {
+        let bytes: ArrayBuffer;
+        try {
+          bytes = await request.input.file.arrayBuffer();
+        } catch {
+          throw new PdfToImagesPipelineError(
+            "CORRUPT_PDF",
+            "선택한 PDF 파일을 읽지 못했어요.",
+            true,
+          );
+        }
+        if (bytes.byteLength !== request.input.byteLength) {
+          throw new PdfToImagesPipelineError(
+            "CORRUPT_PDF",
+            "PDF 파일 크기 정보를 확인할 수 없어요.",
+          );
+        }
+        input = {
+          name: request.input.name,
+          mimeHint: request.input.mimeHint,
+          byteLength: request.input.byteLength,
+          bytes,
+        };
+      } else {
+        input = request.input;
+      }
+      const result = await runPdfToImagesPipeline(input, parsedSpec.data, {
         signal: job.controller.signal,
         onProgress: (progress) => {
           postProgress(job, sequence, progress);
@@ -194,7 +249,7 @@ scope.onmessage = (message: MessageEvent<unknown>) => {
       if (activeJob?.jobId === request.jobId) activeJob.controller.abort();
       return;
     }
-    if (request.type !== "run") return;
+    if (request.type !== "run" && request.type !== "run-file") return;
     const run = parseRunEnvelope(request);
     if (run === undefined) return;
     startRun(run);

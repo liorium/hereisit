@@ -98,3 +98,17 @@ test("keeps shared-card text clear of favorite controls in mobile browser engine
     }
   }
 });
+
+test("keeps tool-detail Korean titles intact on narrow screens", async ({ page }) => {
+  await seedToolPreferences(page);
+  await page.goto("/pdf/to-image");
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectKoreanTextLayout(
+      page.getByRole("heading", { level: 1, name: "PDF를 JPG·PNG로 변환" }),
+      { forbiddenLastLines: ["환"], textWrap: "balance" },
+    );
+    await expectNoDocumentOverflow(page);
+  }
+});

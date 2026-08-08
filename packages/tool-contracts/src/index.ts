@@ -926,13 +926,31 @@ export interface PdfToImagesRunRequest {
   spec: PdfToImagesSpecV1;
 }
 
+export interface PdfToImagesFileRunRequest {
+  protocol: 1;
+  type: "run-file";
+  jobId: string;
+  tool: "pdf.to-images";
+  toolVersion: 1;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    file: File;
+  };
+  spec: PdfToImagesSpecV1;
+}
+
 export interface PdfToImagesCancelRequest {
   protocol: 1;
   type: "cancel";
   jobId: string;
 }
 
-export type PdfToImagesWorkerRequest = PdfToImagesRunRequest | PdfToImagesCancelRequest;
+export type PdfToImagesWorkerRequest =
+  | PdfToImagesRunRequest
+  | PdfToImagesFileRunRequest
+  | PdfToImagesCancelRequest;
 
 export type PdfToImagesWorkerEvent =
   | {

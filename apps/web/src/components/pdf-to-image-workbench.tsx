@@ -47,7 +47,7 @@ function isPdf(file: File): boolean {
 
 function progressLabel(progress: PdfToImagesProgress | undefined): string {
   if (progress === undefined) return "변환 준비됨";
-  if (progress.phase === "validating") return "변환 설정 확인 중";
+  if (progress.phase === "validating") return "PDF 파일과 변환 설정 확인 중";
   if (progress.phase === "loading") return "PDF 페이지 읽는 중";
   if (progress.phase === "rendering") {
     return `${progress.completedPages}/${progress.totalPages}페이지 렌더링 중`;

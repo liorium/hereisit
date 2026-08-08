@@ -3,11 +3,11 @@ import {
   PDF_TO_IMAGES_TOOL_VERSION,
   type PdfToImagesErrorCode,
   type PdfToImagesErrorPayload,
+  type PdfToImagesFileRunRequest,
   type PdfToImagesJobHandle,
   type PdfToImagesJobOutcome,
   type PdfToImagesProgress,
   type PdfToImagesResult,
-  type PdfToImagesRunRequest,
   type PdfToImagesSpecV1,
   type PdfToImagesWorkerEvent,
   WORKER_PROTOCOL_VERSION,
@@ -344,7 +344,6 @@ export function runPdfToImagesJob(
 ): PdfToImagesJobHandle {
   let settled = false;
   let cancelled = false;
-  let readStarted = false;
   let runPosted = false;
   let lastProgressSequence = -1;
   let worker: Worker | undefined;
@@ -381,53 +380,28 @@ export function runPdfToImagesJob(
       retryable: true,
     });
   };
-  const beginFileRead = (): void => {
-    if (readStarted || settled || cancelled || worker === undefined) return;
-    readStarted = true;
-    void Promise.resolve().then(async () => {
-      if (settled || cancelled) return;
-      let bytes: ArrayBuffer;
-      try {
-        bytes = await file.arrayBuffer();
-      } catch {
-        reject({
-          code: "CORRUPT_PDF",
-          message: "선택한 PDF 파일을 읽지 못했어요.",
-          retryable: true,
-        });
-        return;
-      }
-      if (settled || cancelled) return;
-      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== file.size) {
-        reject({
-          code: "CORRUPT_PDF",
-          message: "PDF 파일 크기 정보를 확인할 수 없어요.",
-          retryable: false,
-        });
-        return;
-      }
-      const input: PdfToImagesRunRequest["input"] = {
+  const beginRun = (): void => {
+    if (runPosted || settled || cancelled || worker === undefined) return;
+    const request: PdfToImagesFileRunRequest = {
+      protocol: WORKER_PROTOCOL_VERSION,
+      type: "run-file",
+      jobId,
+      tool: PDF_TO_IMAGES_TOOL_ID,
+      toolVersion: PDF_TO_IMAGES_TOOL_VERSION,
+      input: {
         name: file.name,
         mimeHint: file.type,
         byteLength: file.size,
-        bytes,
-      };
-      const request: PdfToImagesRunRequest = {
-        protocol: WORKER_PROTOCOL_VERSION,
-        type: "run",
-        jobId,
-        tool: PDF_TO_IMAGES_TOOL_ID,
-        toolVersion: PDF_TO_IMAGES_TOOL_VERSION,
-        input,
-        spec,
-      };
-      try {
-        worker?.postMessage(request, [bytes]);
-        runPosted = true;
-      } catch {
-        workerFailure();
-      }
-    });
+        file,
+      },
+      spec,
+    };
+    try {
+      worker.postMessage(request);
+      runPosted = true;
+    } catch {
+      workerFailure();
+    }
   };
 
   timeoutId = setTimeout(() => {
@@ -473,7 +447,7 @@ export function runPdfToImagesJob(
               retryable: false,
             });
           } else {
-            beginFileRead();
+            beginRun();
           }
           return;
         }
