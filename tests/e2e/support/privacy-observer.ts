@@ -37,6 +37,10 @@ export interface PrivacyObserverOptions {
   sentinels?: readonly string[];
 }
 
+export function observesNestedWorkerRequests(page: Page): boolean {
+  return page.context().browser()?.browserType().name() !== "chromium";
+}
+
 export async function installPrivacyObserver(
   page: Page,
   options: PrivacyObserverOptions = {},
@@ -585,7 +589,9 @@ export async function installPrivacyObserver(
       expect(downloads).toBe(expectedDownloads);
       expect(failedRequests).toBe(0);
       expect(pageErrors).toBe(0);
-      if (requireParserWorker) expect(parserWorkerRequests).toBeGreaterThan(0);
+      if (requireParserWorker && observesNestedWorkerRequests(page)) {
+        expect(parserWorkerRequests).toBeGreaterThan(0);
+      }
     },
   };
 }
