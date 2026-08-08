@@ -21,6 +21,13 @@ const watermarkSpec: PdfPipelineSpecV1 = {
   selection: { mode: "every-page" },
 };
 
+const mergeSpec: PdfPipelineSpecV1 = { version: 1, operation: "merge" };
+const splitSpec: PdfPipelineSpecV1 = {
+  version: 1,
+  operation: "split",
+  selection: { mode: "every-page" },
+};
+
 function fakePdfFile(read: Promise<ArrayBuffer> = Promise.resolve(Uint8Array.of(1).buffer)): File {
   return {
     name: "report.pdf",
@@ -88,6 +95,35 @@ afterEach(() => {
 });
 
 describe("runPdfJob", () => {
+  it.each([
+    { name: "merge", files: [fakePdfFile(), fakePdfFile()], spec: mergeSpec, tool: "pdf.merge" },
+    { name: "split", files: [fakePdfFile()], spec: splitSpec, tool: "pdf.split" },
+  ])("posts $name files to the Worker without reading them on the main thread", async (testCase) => {
+    installWorker();
+    const reads = testCase.files.map((file) => vi.spyOn(file, "arrayBuffer"));
+    const handle = runPdfJob(testCase.files, testCase.spec);
+    const worker = SilentWorker.latest as SilentWorker;
+
+    try {
+      await vi.waitFor(() =>
+        expect(
+          worker.messages.some((message) => (message as { type: string }).type === "run-files"),
+        ).toBe(true),
+      );
+      expect(reads.every((read) => read.mock.calls.length === 0)).toBe(true);
+      const request = worker.messages.find(
+        (message) => (message as { type: string }).type === "run-files",
+      ) as unknown as {
+        tool: string;
+        inputs: readonly { file: File }[];
+      };
+      expect(request.tool).toBe(testCase.tool);
+      expect(request.inputs.map((input) => input.file)).toEqual(testCase.files);
+    } finally {
+      handle.cancel();
+    }
+  });
+
   it("cancels after posting a run and ignores later Worker events", async () => {
     installWorker();
     const onProgress = vi.fn();

@@ -658,6 +658,21 @@ export interface PdfRunRequest {
   spec: PdfPipelineSpecV1;
 }
 
+export interface PdfFileRunRequest {
+  protocol: 1;
+  type: "run-files";
+  jobId: string;
+  tool: typeof PDF_MERGE_TOOL_ID | typeof PDF_SPLIT_TOOL_ID;
+  toolVersion: 1;
+  inputs: readonly {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    file: File;
+  }[];
+  spec: Extract<PdfPipelineSpecV1, { operation: "merge" | "split" }>;
+}
+
 export interface PdfInspectRequest {
   protocol: 1;
   type: "inspect";
@@ -688,7 +703,11 @@ export interface PdfCancelRequest {
   jobId: string;
 }
 
-export type PdfWorkerRequest = PdfRunRequest | PdfInspectRequest | PdfCancelRequest;
+export type PdfWorkerRequest =
+  | PdfRunRequest
+  | PdfFileRunRequest
+  | PdfInspectRequest
+  | PdfCancelRequest;
 
 export type PdfWorkerEvent =
   | {

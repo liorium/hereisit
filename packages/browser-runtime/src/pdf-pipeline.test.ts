@@ -12,7 +12,7 @@ import {
 import { hasPdfSignature } from "@hereisit/pdf-tool";
 import { unzipSync, zlibSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
-import { inspectPdfInput, runPdfPipeline } from "./pdf-pipeline";
+import { inspectPdfInput, runPdfFilePipeline, runPdfPipeline } from "./pdf-pipeline";
 
 const onePixelPng = Uint8Array.from(
   atob(
@@ -174,6 +174,10 @@ function input(name: string, bytes: ArrayBuffer, mimeHint = "application/pdf") {
   return { name, mimeHint, byteLength: bytes.byteLength, bytes };
 }
 
+function fileInput(name: string, bytes: ArrayBuffer, readBytes: () => Promise<ArrayBuffer>) {
+  return { name, mimeHint: "application/pdf", byteLength: bytes.byteLength, readBytes };
+}
+
 describe("runPdfPipeline", () => {
   it("merges PDF pages in file order", async () => {
     const first = await samplePdf([100, 200]);
@@ -190,6 +194,39 @@ describe("runPdfPipeline", () => {
     expect(merged.getPages().map((page) => page.getWidth())).toEqual([100, 200, 300]);
     expect(merged.getCreator()).toBe("HereIsIt");
     expect(merged.getProducer()).toBe("HereIsIt");
+  });
+
+  it("reads the next PDF file only after copying the current source", async () => {
+    const first = await samplePdf([100]);
+    const second = await samplePdf([200]);
+    const originalCopyPages = PDFDocument.prototype.copyPages;
+    let firstCopied = false;
+    const copyPages = vi
+      .spyOn(PDFDocument.prototype, "copyPages")
+      .mockImplementation(async function (this: PDFDocument, source, indices) {
+        const pages = await originalCopyPages.call(this, source, indices);
+        firstCopied = true;
+        return pages;
+      });
+
+    try {
+      const result = await runPdfFilePipeline(
+        [
+          fileInput("first.pdf", first, async () => first),
+          fileInput("second.pdf", second, async () => {
+            expect(firstCopied).toBe(true);
+            return second;
+          }),
+        ],
+        { version: 1, operation: "merge" },
+      );
+
+      const merged = await PDFDocument.load(result.bytes, { updateMetadata: false });
+      expect(merged.getPages().map((page) => page.getWidth())).toEqual([100, 200]);
+      expect(copyPages).toHaveBeenCalledTimes(2);
+    } finally {
+      copyPages.mockRestore();
+    }
   });
 
   it("splits every page into a zero-compression ZIP", async () => {
@@ -213,6 +250,47 @@ describe("runPdfPipeline", () => {
     const document = await PDFDocument.load(secondPage as Uint8Array);
     expect(document.getPageCount()).toBe(1);
     expect(document.getPage(0).getWidth()).toBe(200);
+  });
+
+  it("reads and splits a PDF through the file pipeline", async () => {
+    const source = await samplePdf([100, 200]);
+    const result = await runPdfFilePipeline([fileInput("report.pdf", source, async () => source)], {
+      version: 1,
+      operation: "split",
+      selection: { mode: "every-page" },
+    });
+
+    const entries = unzipSync(new Uint8Array(result.bytes));
+    expect(Object.keys(entries)).toEqual(["report-page-001.pdf", "report-page-002.pdf"]);
+    const secondPage = await PDFDocument.load(entries["report-page-002.pdf"] as Uint8Array);
+    expect(secondPage.getPageCount()).toBe(1);
+    expect(secondPage.getPage(0).getWidth()).toBe(200);
+  });
+
+  it("rejects a file read whose byte length differs from its metadata", async () => {
+    const first = await samplePdf([100]);
+    const second = await samplePdf([200]);
+
+    await expect(
+      runPdfFilePipeline(
+        [
+          {
+            name: "first.pdf",
+            mimeHint: "application/pdf",
+            byteLength: first.byteLength + 1,
+            readBytes: async () => first,
+          },
+          fileInput("second.pdf", second, async () => second),
+        ],
+        { version: 1, operation: "merge" },
+      ),
+    ).rejects.toMatchObject({
+      payload: {
+        code: "CORRUPT_PDF",
+        message: "선택한 파일을 읽지 못했어요.",
+        retryable: true,
+      },
+    });
   });
 
   it("extracts selected pages into one PDF", async () => {

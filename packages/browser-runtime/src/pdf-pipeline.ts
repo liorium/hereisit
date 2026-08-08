@@ -48,6 +48,13 @@ const MAX_PDF_PAGE_DIMENSION = 14_400;
 
 export type PdfPipelineInput = PdfRunRequest["inputs"][number];
 
+export interface PdfPipelineFileInput {
+  name: string;
+  mimeHint: string;
+  byteLength: number;
+  readBytes(): Promise<ArrayBuffer>;
+}
+
 export interface PdfPipelineOptions {
   onProgress?: (phase: PdfPhase, fraction: number) => void;
   renderWatermark?: (input: { text: string; color: string }) => Promise<PdfWatermarkBitmap>;
@@ -158,7 +165,10 @@ async function renderWatermarkBitmap(input: {
   };
 }
 
-function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipelineSpecV1): void {
+function validateInputMetadata(
+  inputs: readonly { byteLength: number }[],
+  spec: ParsedPdfPipelineSpecV1,
+): void {
   const expected =
     spec.operation === "merge"
       ? { minimum: 2, maximum: 20 }
@@ -178,18 +188,39 @@ function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipe
 
   let totalBytes = 0;
   for (const input of inputs) {
-    if (
-      input.bytes.byteLength < 1 ||
-      input.bytes.byteLength !== input.byteLength ||
-      input.bytes.byteLength > MAX_FILE_BYTES
-    ) {
+    if (input.byteLength < 1 || input.byteLength > MAX_FILE_BYTES) {
       fail("MEMORY_LIMIT", "파일당 최대 50MB까지 처리할 수 있어요.");
     }
-    totalBytes += input.bytes.byteLength;
+    totalBytes += input.byteLength;
   }
   if (totalBytes > MAX_INPUT_BYTES) {
     fail("MEMORY_LIMIT", "한 작업의 파일 합계는 최대 100MB까지 처리할 수 있어요.");
   }
+}
+
+function validateInputs(inputs: readonly PdfPipelineInput[], spec: ParsedPdfPipelineSpecV1): void {
+  validateInputMetadata(inputs, spec);
+  if (inputs.some((input) => input.bytes.byteLength !== input.byteLength)) {
+    fail("CORRUPT_PDF", "선택한 파일을 읽지 못했어요.", true);
+  }
+}
+
+async function readPdfInput(input: PdfPipelineFileInput): Promise<PdfPipelineInput> {
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await input.readBytes();
+  } catch {
+    fail("CORRUPT_PDF", "선택한 파일을 읽지 못했어요.", true);
+  }
+  if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== input.byteLength) {
+    fail("CORRUPT_PDF", "선택한 파일을 읽지 못했어요.", true);
+  }
+  return {
+    name: input.name,
+    mimeHint: input.mimeHint,
+    byteLength: input.byteLength,
+    bytes,
+  };
 }
 
 function validateInspectionInput(input: PdfPipelineInput): void {
@@ -291,7 +322,7 @@ function ensureOutputLimit(byteLength: number): void {
 }
 
 async function mergePdfs(
-  inputs: readonly PdfPipelineInput[],
+  inputs: readonly PdfPipelineFileInput[],
   timing: Timing,
   options: PdfPipelineOptions,
 ): Promise<Omit<PdfPipelineResult, "timing">> {
@@ -300,7 +331,7 @@ async function mergePdfs(
 
   for (const [index, input] of inputs.entries()) {
     const loadStarted = now();
-    const source = await loadPdf(input);
+    const source = await loadPdf(await readPdfInput(input));
     timing.loadMs += now() - loadStarted;
     const pageIndices = source.getPageIndices();
     sourcePageCount += pageIndices.length;
@@ -371,7 +402,7 @@ async function createSplitArchive(
         settle({ ok: false, error: archiveFailure });
         return;
       }
-      chunks.push(chunk.slice());
+      chunks.push(chunk);
       if (!final) return;
       const joined = new Uint8Array(archiveBytes);
       let offset = 0;
@@ -820,7 +851,16 @@ export async function runPdfPipeline(
   emit(options, "loading", 0.05);
   let result: Omit<PdfPipelineResult, "timing">;
   if (spec.operation === "merge") {
-    result = await mergePdfs(inputs, timing, options);
+    result = await mergePdfs(
+      inputs.map((input) => ({
+        name: input.name,
+        mimeHint: input.mimeHint,
+        byteLength: input.byteLength,
+        readBytes: async () => input.bytes,
+      })),
+      timing,
+      options,
+    );
   } else if (spec.operation === "split") {
     result = await splitPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
   } else if (spec.operation === "images-to-pdf") {
@@ -829,6 +869,35 @@ export async function runPdfPipeline(
     result = await organizePdf(inputs[0] as PdfPipelineInput, spec, timing, options);
   } else {
     result = await watermarkPdf(inputs[0] as PdfPipelineInput, spec, timing, options);
+  }
+  emit(options, "finalizing", 1);
+  return { ...result, timing: { ...timing, totalMs: now() - started } };
+}
+
+export async function runPdfFilePipeline(
+  inputs: readonly PdfPipelineFileInput[],
+  rawSpec: unknown,
+  options: PdfPipelineOptions = {},
+): Promise<PdfPipelineResult> {
+  const started = now();
+  emit(options, "validating", 0.01);
+  const parsed = pdfPipelineSpecSchema.safeParse(rawSpec);
+  if (!parsed.success || (parsed.data.operation !== "merge" && parsed.data.operation !== "split")) {
+    fail("INVALID_SPEC", "PDF 작업 설정이 올바르지 않아요.");
+  }
+  const spec = parsed.data;
+  validateInputMetadata(inputs, spec);
+
+  const timing: Timing = { loadMs: 0, processMs: 0, saveMs: 0 };
+  emit(options, "loading", 0.05);
+  let result: Omit<PdfPipelineResult, "timing">;
+  if (spec.operation === "merge") {
+    result = await mergePdfs(inputs, timing, options);
+  } else {
+    const loadStarted = now();
+    const input = await readPdfInput(inputs[0] as PdfPipelineFileInput);
+    timing.loadMs += now() - loadStarted;
+    result = await splitPdf(input, spec, timing, options);
   }
   emit(options, "finalizing", 1);
   return { ...result, timing: { ...timing, totalMs: now() - started } };
