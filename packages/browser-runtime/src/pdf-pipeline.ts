@@ -695,8 +695,8 @@ async function watermarkPdf(
     spec.selection.mode === "every-page" ? undefined : new Set(spec.selection.pages);
 
   const processStarted = now();
-  const output = await createOutputDocument();
-  const copiedPages = await output.copyPages(source, source.getPageIndices());
+  const output = source;
+  const pages = output.getPages();
   const renderer = options.renderWatermark ?? renderWatermarkBitmap;
   const bitmap = await renderer({
     text: spec.watermark.text,
@@ -724,8 +724,7 @@ async function watermarkPdf(
   }
   const imageAspectRatio = bitmap.width / bitmap.height;
 
-  for (const [index, page] of copiedPages.entries()) {
-    output.addPage(page);
+  for (const [index, page] of pages.entries()) {
     if (selectedPages === undefined || selectedPages.has(index + 1)) {
       const cropBox = page.getCropBox();
       const { width: pageWidth, height: pageHeight } = cropBox;
@@ -774,7 +773,7 @@ async function watermarkPdf(
         });
       }
     }
-    emit(options, "processing", 0.15 + ((index + 1) / copiedPages.length) * 0.65);
+    emit(options, "processing", 0.15 + ((index + 1) / pages.length) * 0.65);
   }
   try {
     await watermarkImage.embed();

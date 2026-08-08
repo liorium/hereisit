@@ -311,6 +311,50 @@ describe("runPdfPipeline", () => {
     expect(result.warnings).toContain("WATERMARK_TEXT_RASTERIZED");
   });
 
+  it("watermarks the loaded document without copying every page", async () => {
+    const sourceDocument = await PDFDocument.create();
+    sourceDocument.setTitle("Quarterly report");
+    sourceDocument.addPage([100, 100]);
+    sourceDocument.addPage([100, 100]);
+    const source = Uint8Array.from(await sourceDocument.save()).buffer;
+    const copyPages = vi.spyOn(PDFDocument.prototype, "copyPages");
+
+    try {
+      const result = await runPdfPipeline(
+        [input("report.pdf", source)],
+        {
+          version: 1,
+          operation: "watermark",
+          watermark: {
+            text: "대외비",
+            placement: "center",
+            fontSize: 48,
+            opacity: 0.18,
+            rotation: -45,
+            color: "#334155",
+          },
+          selection: { mode: "extract", pages: [2] },
+        },
+        {
+          renderWatermark: async () => ({
+            bytes: Uint8Array.from(onePixelPng).buffer,
+            width: 1,
+            height: 1,
+          }),
+        },
+      );
+
+      const watermarked = await PDFDocument.load(result.bytes);
+      expect(copyPages).not.toHaveBeenCalled();
+      expect(watermarked.getTitle()).toBe("Quarterly report");
+      expect(watermarked.getPageCount()).toBe(2);
+      expect(watermarked.getPage(0).node.Contents()).toBeUndefined();
+      expect(watermarked.getPage(1).node.Contents()).toBeDefined();
+    } finally {
+      copyPages.mockRestore();
+    }
+  });
+
   it("maps a watermark page above the source count to PAGE_RANGE_INVALID", async () => {
     const source = await samplePdf([100]);
 
