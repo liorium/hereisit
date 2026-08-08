@@ -5,6 +5,7 @@ import {
   PDF_SPLIT_TOOL_ID,
   PDF_TOOL_VERSION,
   PDF_WATERMARK_TOOL_ID,
+  type PdfFileRunRequest,
   type PdfJobHandle,
   type PdfJobOutcome,
   type PdfPhase,
@@ -113,32 +114,23 @@ export function runPdfJob(
       });
     }, PDF_JOB_TIMEOUT_MS);
 
-    void (async () => {
+    if (spec.operation === "merge" || spec.operation === "split") {
       try {
-        const inputs: PdfRunRequest["inputs"][number][] = [];
-        for (const file of files) {
-          const bytes = await file.arrayBuffer();
-          if (cancelled || settled) return;
-          inputs.push({
+        const request: PdfFileRunRequest = {
+          protocol: WORKER_PROTOCOL_VERSION,
+          type: "run-files",
+          jobId,
+          tool: spec.operation === "merge" ? PDF_MERGE_TOOL_ID : PDF_SPLIT_TOOL_ID,
+          toolVersion: PDF_TOOL_VERSION,
+          inputs: files.map((file) => ({
             name: file.name,
             mimeHint: file.type,
             byteLength: file.size,
-            bytes,
-          });
-        }
-        const request: PdfRunRequest = {
-          protocol: WORKER_PROTOCOL_VERSION,
-          type: "run",
-          jobId,
-          tool: toolForSpec(spec),
-          toolVersion: PDF_TOOL_VERSION,
-          inputs,
+            file,
+          })),
           spec,
         };
-        worker?.postMessage(
-          request,
-          inputs.map((input) => input.bytes),
-        );
+        worker.postMessage(request);
       } catch {
         reject({
           code: "CORRUPT_PDF",
@@ -146,7 +138,42 @@ export function runPdfJob(
           retryable: true,
         });
       }
-    })();
+    } else {
+      void (async () => {
+        try {
+          const inputs: PdfRunRequest["inputs"][number][] = [];
+          for (const file of files) {
+            const bytes = await file.arrayBuffer();
+            if (cancelled || settled) return;
+            inputs.push({
+              name: file.name,
+              mimeHint: file.type,
+              byteLength: file.size,
+              bytes,
+            });
+          }
+          const request: PdfRunRequest = {
+            protocol: WORKER_PROTOCOL_VERSION,
+            type: "run",
+            jobId,
+            tool: toolForSpec(spec),
+            toolVersion: PDF_TOOL_VERSION,
+            inputs,
+            spec,
+          };
+          worker?.postMessage(
+            request,
+            inputs.map((input) => input.bytes),
+          );
+        } catch {
+          reject({
+            code: "CORRUPT_PDF",
+            message: "선택한 파일을 읽지 못했어요.",
+            retryable: true,
+          });
+        }
+      })();
+    }
   }
 
   return {

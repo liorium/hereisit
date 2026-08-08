@@ -13,7 +13,12 @@ import {
   type PdfWorkerRequest,
   WORKER_PROTOCOL_VERSION,
 } from "@hereisit/tool-contracts";
-import { inspectPdfInput, runPdfPipeline, toPdfErrorPayload } from "./pdf-pipeline";
+import {
+  inspectPdfInput,
+  runPdfFilePipeline,
+  runPdfPipeline,
+  toPdfErrorPayload,
+} from "./pdf-pipeline";
 
 const scope = self as DedicatedWorkerGlobalScope;
 const cancelledJobs = new Set<string>();
@@ -64,11 +69,14 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
       }
       if (
         request.toolVersion !== PDF_TOOL_VERSION ||
-        !toolMatchesSpec(request.tool, request.spec)
+        !toolMatchesSpec(request.tool, request.spec) ||
+        (request.type === "run-files" &&
+          request.spec.operation !== "merge" &&
+          request.spec.operation !== "split")
       ) {
         throw new Error("INVALID_SPEC");
       }
-      const result = await runPdfPipeline(request.inputs, request.spec, {
+      const pipelineOptions = {
         onProgress: (phase, fraction) => {
           if (cancelledJobs.has(jobId)) return;
           post({
@@ -80,7 +88,30 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
             fraction,
           });
         },
-      });
+      } satisfies Parameters<typeof runPdfPipeline>[2];
+      const result =
+        request.type === "run-files"
+          ? await runPdfFilePipeline(
+              request.inputs.map((input) => {
+                if (
+                  !(input.file instanceof File) ||
+                  input.name !== input.file.name ||
+                  input.mimeHint !== input.file.type ||
+                  input.byteLength !== input.file.size
+                ) {
+                  throw new Error("INVALID_FILE");
+                }
+                return {
+                  name: input.name,
+                  mimeHint: input.mimeHint,
+                  byteLength: input.byteLength,
+                  readBytes: () => input.file.arrayBuffer(),
+                };
+              }),
+              request.spec,
+              pipelineOptions,
+            )
+          : await runPdfPipeline(request.inputs, request.spec, pipelineOptions);
       if (cancelledJobs.has(jobId)) return;
       post(
         {
@@ -104,7 +135,13 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
                 message: "PDF 작업 설정이 올바르지 않아요.",
                 retryable: false,
               }
-            : toPdfErrorPayload(error),
+            : error instanceof Error && error.message === "INVALID_FILE"
+              ? {
+                  code: "CORRUPT_PDF",
+                  message: "선택한 파일을 읽지 못했어요.",
+                  retryable: true,
+                }
+              : toPdfErrorPayload(error),
       });
     } finally {
       cancelledJobs.delete(jobId);

@@ -882,10 +882,7 @@ export async function runPdfFilePipeline(
   const started = now();
   emit(options, "validating", 0.01);
   const parsed = pdfPipelineSpecSchema.safeParse(rawSpec);
-  if (
-    !parsed.success ||
-    (parsed.data.operation !== "merge" && parsed.data.operation !== "split")
-  ) {
+  if (!parsed.success || (parsed.data.operation !== "merge" && parsed.data.operation !== "split")) {
     fail("INVALID_SPEC", "PDF 작업 설정이 올바르지 않아요.");
   }
   const spec = parsed.data;

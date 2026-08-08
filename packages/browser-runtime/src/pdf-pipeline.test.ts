@@ -203,7 +203,7 @@ describe("runPdfPipeline", () => {
     let firstCopied = false;
     const copyPages = vi
       .spyOn(PDFDocument.prototype, "copyPages")
-      .mockImplementation(async function (source, indices) {
+      .mockImplementation(async function (this: PDFDocument, source, indices) {
         const pages = await originalCopyPages.call(this, source, indices);
         firstCopied = true;
         return pages;
@@ -254,14 +254,11 @@ describe("runPdfPipeline", () => {
 
   it("reads and splits a PDF through the file pipeline", async () => {
     const source = await samplePdf([100, 200]);
-    const result = await runPdfFilePipeline(
-      [fileInput("report.pdf", source, async () => source)],
-      {
-        version: 1,
-        operation: "split",
-        selection: { mode: "every-page" },
-      },
-    );
+    const result = await runPdfFilePipeline([fileInput("report.pdf", source, async () => source)], {
+      version: 1,
+      operation: "split",
+      selection: { mode: "every-page" },
+    });
 
     const entries = unzipSync(new Uint8Array(result.bytes));
     expect(Object.keys(entries)).toEqual(["report-page-001.pdf", "report-page-002.pdf"]);
