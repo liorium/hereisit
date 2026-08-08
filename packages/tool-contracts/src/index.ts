@@ -662,7 +662,7 @@ export interface PdfFileRunRequest {
   protocol: 1;
   type: "run-files";
   jobId: string;
-  tool: typeof PDF_MERGE_TOOL_ID | typeof PDF_SPLIT_TOOL_ID;
+  tool: typeof PDF_MERGE_TOOL_ID | typeof PDF_SPLIT_TOOL_ID | typeof PDF_IMAGES_TO_PDF_TOOL_ID;
   toolVersion: 1;
   inputs: readonly {
     name: string;
@@ -670,7 +670,7 @@ export interface PdfFileRunRequest {
     byteLength: number;
     file: File;
   }[];
-  spec: Extract<PdfPipelineSpecV1, { operation: "merge" | "split" }>;
+  spec: Extract<PdfPipelineSpecV1, { operation: "merge" | "split" | "images-to-pdf" }>;
 }
 
 export interface PdfInspectRequest {

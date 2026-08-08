@@ -174,8 +174,13 @@ function input(name: string, bytes: ArrayBuffer, mimeHint = "application/pdf") {
   return { name, mimeHint, byteLength: bytes.byteLength, bytes };
 }
 
-function fileInput(name: string, bytes: ArrayBuffer, readBytes: () => Promise<ArrayBuffer>) {
-  return { name, mimeHint: "application/pdf", byteLength: bytes.byteLength, readBytes };
+function fileInput(
+  name: string,
+  bytes: ArrayBuffer,
+  readBytes: () => Promise<ArrayBuffer>,
+  mimeHint = "application/pdf",
+) {
+  return { name, mimeHint, byteLength: bytes.byteLength, readBytes };
 }
 
 describe("runPdfPipeline", () => {
@@ -559,6 +564,50 @@ describe("runPdfPipeline", () => {
     const document = await PDFDocument.load(result.bytes);
     expect(document.getPageCount()).toBe(2);
     expect(new TextDecoder().decode(result.bytes)).not.toContain("GPS_PRIVATE_SENTINEL");
+  });
+
+  it("reads and embeds image files one at a time", async () => {
+    const first = Uint8Array.from(onePixelPng).buffer;
+    const second = pngWithPrivateMetadata();
+    const originalEmbedPng = PDFDocument.prototype.embedPng;
+    let firstEmbedded = false;
+    const embedPng = vi.spyOn(PDFDocument.prototype, "embedPng").mockImplementation(async function (
+      this: PDFDocument,
+      bytes,
+    ) {
+      const image = await originalEmbedPng.call(this, bytes);
+      firstEmbedded = true;
+      return image;
+    });
+
+    try {
+      const result = await runPdfFilePipeline(
+        [
+          fileInput("one.png", first, async () => first, "image/png"),
+          fileInput(
+            "two.png",
+            second,
+            async () => {
+              expect(firstEmbedded).toBe(true);
+              return second;
+            },
+            "image/png",
+          ),
+        ],
+        {
+          version: 1,
+          operation: "images-to-pdf",
+          page: { size: "a4", margin: 24 },
+        },
+      );
+
+      const document = await PDFDocument.load(result.bytes);
+      expect(document.getPageCount()).toBe(2);
+      expect(new TextDecoder().decode(result.bytes)).not.toContain("GPS_PRIVATE_SENTINEL");
+      expect(embedPng).toHaveBeenCalledTimes(2);
+    } finally {
+      embedPng.mockRestore();
+    }
   });
 
   it("preserves a phone JPEG's EXIF quarter-turn without re-encoding it", async () => {

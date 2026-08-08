@@ -15,7 +15,7 @@ import type {
 } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { downloadUrl, formatBytes, formatDuration } from "../lib/files";
+import { downloadUrl, formatBytes } from "../lib/files";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import {
   getToolImplementation,
@@ -56,7 +56,6 @@ const INTENT_CONFIG: Record<
   {
     emptyTitle: string;
     selectLabel: string;
-    workbenchTitle: string;
     accept: string;
     fileDescription: string;
     multiple: boolean;
@@ -65,7 +64,6 @@ const INTENT_CONFIG: Record<
   merge: {
     emptyTitle: "합칠 PDF를 놓거나 선택하세요",
     selectLabel: "합칠 PDF 선택",
-    workbenchTitle: "PDF 합치기 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF · 파일당 50MB · 최대 20개",
     multiple: true,
@@ -73,7 +71,6 @@ const INTENT_CONFIG: Record<
   split: {
     emptyTitle: "나눌 PDF를 놓거나 선택하세요",
     selectLabel: "PDF 선택",
-    workbenchTitle: "PDF 페이지 분할 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 페이지별 분리 최대 200페이지",
     multiple: false,
@@ -81,7 +78,6 @@ const INTENT_CONFIG: Record<
   watermark: {
     emptyTitle: "워터마크를 넣을 PDF를 놓거나 선택하세요",
     selectLabel: "워터마크를 넣을 PDF 선택",
-    workbenchTitle: "PDF 워터마크 작업대",
     accept: "application/pdf,.pdf",
     fileDescription: "PDF 한 개 · 최대 50MB · 모든 페이지 또는 지정 페이지",
     multiple: false,
@@ -89,7 +85,6 @@ const INTENT_CONFIG: Record<
   "image-to-pdf": {
     emptyTitle: "PDF로 만들 이미지를 놓거나 선택하세요",
     selectLabel: "JPG·PNG 이미지 선택",
-    workbenchTitle: "이미지 PDF 작업대",
     accept: "image/jpeg,image/png,.jpg,.jpeg,.png",
     fileDescription: "JPG·PNG · 파일당 50MB · 압축 해제 메모리 자동 제한",
     multiple: true,
@@ -208,8 +203,19 @@ export function PdfWorkbench({
           : items.length > 0
             ? "setup"
             : "select";
+  const imageToPdfScreen =
+    intent !== "image-to-pdf"
+      ? undefined
+      : result !== undefined
+        ? "result"
+        : processing
+          ? "processing"
+          : items.length > 0
+            ? "setup"
+            : "select";
   const splitStageHeadingRef = useRef<HTMLHeadingElement>(null);
   const watermarkStageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const imageToPdfStageHeadingRef = useRef<HTMLHeadingElement>(null);
   const parsedPageRange = useMemo(
     () => parsePageSelection(pageRange, splitPageCount),
     [pageRange, splitPageCount],
@@ -236,6 +242,11 @@ export function PdfWorkbench({
     if (watermarkScreen === undefined || watermarkScreen === "select") return;
     watermarkStageHeadingRef.current?.focus();
   }, [watermarkScreen]);
+
+  useEffect(() => {
+    if (imageToPdfScreen === undefined || imageToPdfScreen === "select") return;
+    imageToPdfStageHeadingRef.current?.focus();
+  }, [imageToPdfScreen]);
 
   useEffect(() => {
     if ((intent !== "merge" && intent !== "split") || processing) return;
@@ -612,13 +623,6 @@ export function PdfWorkbench({
     );
   };
 
-  const runLabel =
-    intent === "merge"
-      ? `${items.length}개 PDF 합치기 →`
-      : intent === "watermark"
-        ? "PDF에 워터마크 넣기 →"
-        : `${items.length}개 이미지로 PDF 만들기 →`;
-
   const canRun =
     runtimeSupported &&
     !busy &&
@@ -655,7 +659,192 @@ export function PdfWorkbench({
         }}
       />
 
-      {intent === "merge" && result !== undefined ? (
+      {intent === "image-to-pdf" && result !== undefined ? (
+        <section className={`${styles.mergeStage} ${styles.mergeResult}`}>
+          <div className={styles.mergeResultMark} aria-hidden="true">
+            ✓
+          </div>
+          <h2 id="pdf-workbench-title" ref={imageToPdfStageHeadingRef} tabIndex={-1}>
+            PDF 만들기 완료
+          </h2>
+          <p className={styles.mergeResultSummary}>
+            이미지 {items.length}장 → PDF {result.outputPageCount}페이지
+          </p>
+          <strong className={styles.mergeSizeComparison}>
+            {formatBytes(totalBytes)} → {formatBytes(result.byteLength)}
+          </strong>
+          {result.warnings.includes("IMAGE_COLOR_MAY_CHANGE") ? (
+            <p className={styles.mergeWarning}>
+              광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.
+            </p>
+          ) : null}
+          <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
+            PDF 다운로드 ↓
+          </button>
+        </section>
+      ) : intent === "image-to-pdf" && processing ? (
+        <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
+          <h2 id="pdf-workbench-title" ref={imageToPdfStageHeadingRef} tabIndex={-1}>
+            PDF 만드는 중
+          </h2>
+          <p>{phaseLabel(phase)}</p>
+          <div
+            className={styles.mergeProgressTrack}
+            role="progressbar"
+            aria-label="이미지 PDF 변환 진행률"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+          >
+            <span style={{ width: `${Math.round(progress * 100)}%` }} />
+          </div>
+          <button className={styles.mergeSecondaryAction} type="button" onClick={cancelProcessing}>
+            중단
+          </button>
+        </section>
+      ) : intent === "image-to-pdf" && items.length > 0 ? (
+        <section className={styles.mergeSetup} aria-label="이미지 PDF 설정">
+          <header className={styles.mergeSetupHeader}>
+            <div>
+              <h2 id="pdf-workbench-title" ref={imageToPdfStageHeadingRef} tabIndex={-1}>
+                이미지 순서
+              </h2>
+              <p>
+                {items.length}장 · {formatBytes(totalBytes)}
+              </p>
+            </div>
+            <div className={styles.mergeHeaderActions}>
+              <button type="button" onClick={() => inputRef.current?.click()}>
+                이미지 추가
+              </button>
+              <button type="button" onClick={reset}>
+                전체 삭제
+              </button>
+            </div>
+          </header>
+
+          <section className={styles.mergeFileList} aria-label="PDF 페이지 이미지 순서">
+            {items.map((item, index) => (
+              <article className={styles.mergeFileRow} key={item.id}>
+                <span className={styles.mergePosition}>{index + 1}</span>
+                <div className={styles.mergeFileCopy}>
+                  <strong title={item.file.name}>{item.file.name}</strong>
+                  <div className={styles.mergeFileMeta}>
+                    <span>{formatBytes(item.file.size)}</span>
+                    <span>PDF {index + 1}페이지</span>
+                  </div>
+                </div>
+                <div className={styles.mergeFileActions}>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 위로 이동`}
+                    disabled={index === 0}
+                    onClick={() => moveItem(index, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 아래로 이동`}
+                    disabled={index === items.length - 1}
+                    onClick={() => moveItem(index, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${item.file.name} 제거`}
+                    onClick={() => removeItem(item.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              </article>
+            ))}
+          </section>
+
+          <fieldset className={styles.splitOptions}>
+            <legend>페이지 크기</legend>
+            <label>
+              <input
+                type="radio"
+                name="page-size"
+                checked={imagePageSize === "a4"}
+                onChange={() => changeImagePageSize("a4")}
+              />
+              <span>
+                <strong>A4 자동 방향</strong>
+                <small>사진 방향에 맞춰 여백을 넣어요</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="page-size"
+                checked={imagePageSize === "image"}
+                onChange={() => changeImagePageSize("image")}
+              />
+              <span>
+                <strong>이미지에 맞춤</strong>
+                <small>이미지 비율 그대로 페이지를 만들어요</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <footer className={styles.mergeSetupFooter}>
+            <p className={styles.mergeLocalNotice}>
+              이미지는 업로드하지 않고 이 기기에서 처리해요.
+            </p>
+            <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
+              {message}
+            </p>
+            <button
+              className={styles.mergePrimaryAction}
+              type="button"
+              disabled={!canRun}
+              onClick={() => void startProcessing()}
+            >
+              {items.length}장으로 PDF 만들기
+            </button>
+          </footer>
+        </section>
+      ) : intent === "image-to-pdf" ? (
+        <section
+          className={`${styles.watermarkSelect} ${dragging ? styles.dragging : ""}`}
+          aria-labelledby="pdf-workbench-title"
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
+          }}
+          onDrop={onDrop}
+        >
+          <div className={styles.watermarkSelectMark} aria-hidden="true">
+            IMG
+          </div>
+          <h2 id="pdf-workbench-title">PDF로 만들 이미지를 선택하세요</h2>
+          <p>JPG·PNG · 한 이미지가 한 페이지가 돼요</p>
+          <button
+            className={styles.mergePrimaryAction}
+            type="button"
+            disabled={!hydrated || !runtimeSupported}
+            onClick={() => inputRef.current?.click()}
+          >
+            {config.selectLabel}
+          </button>
+          <p className={styles.watermarkSelectStatus} role="status" aria-live="polite">
+            {!hydrated
+              ? "PDF 도구를 준비하고 있어요…"
+              : runtimeSupported
+                ? message
+                : "최신 Safari, Chrome, Firefox 또는 Edge에서 사용할 수 있어요."}
+          </p>
+          <p className={styles.watermarkLocalNotice}>이미지는 이 기기에서만 처리돼요.</p>
+        </section>
+      ) : intent === "merge" && result !== undefined ? (
         <section className={`${styles.mergeStage} ${styles.mergeResult}`}>
           <div className={styles.mergeResultMark} aria-hidden="true">
             ✓
@@ -1331,223 +1520,7 @@ export function PdfWorkbench({
             <span aria-hidden="true">✓</span> 업로드 없음 · 내 기기에서 처리
           </div>
         </section>
-      ) : (
-        <div className={styles.workbench}>
-          <div className={styles.workbenchHeader}>
-            <div>
-              <p className={styles.eyebrow}>LOCAL PDF WORKBENCH</p>
-              <h2 id="pdf-workbench-title">{config.workbenchTitle}</h2>
-            </div>
-            <div className={styles.headerActions}>
-              <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
-                {config.multiple ? "＋ 추가" : "PDF 교체"}
-              </button>
-              <button type="button" onClick={reset} disabled={processing}>
-                처음부터
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.workspace}>
-            <section className={styles.filePanel} aria-label="선택한 파일">
-              <div className={styles.panelTitle}>
-                <strong>파일 순서</strong>
-                <span>{items.length}</span>
-              </div>
-              <div className={styles.fileList}>
-                {items.map((item, index) => (
-                  <article className={styles.fileRow} key={item.id}>
-                    <span className={styles.fileIndex}>{String(index + 1).padStart(2, "0")}</span>
-                    <div className={styles.fileCopy}>
-                      <strong>{item.file.name}</strong>
-                      <span>{formatBytes(item.file.size)}</span>
-                    </div>
-                    <div className={styles.fileActions}>
-                      {config.multiple ? (
-                        <>
-                          <button
-                            type="button"
-                            aria-label={`${item.file.name} 위로 이동`}
-                            disabled={busy || index === 0}
-                            onClick={() => moveItem(index, -1)}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`${item.file.name} 아래로 이동`}
-                            disabled={busy || index === items.length - 1}
-                            onClick={() => moveItem(index, 1)}
-                          >
-                            ↓
-                          </button>
-                        </>
-                      ) : null}
-                      <button
-                        type="button"
-                        aria-label={`${item.file.name} 제거`}
-                        disabled={busy}
-                        onClick={() => removeItem(item.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <p className={styles.fileTotal}>
-                총 {formatBytes(totalBytes)} · 기기별 한도 {formatBytes(inputLimit)}
-              </p>
-            </section>
-
-            <aside className={styles.settingsPanel} aria-label="PDF 설정">
-              <div className={styles.panelTitle}>
-                <strong>설정</strong>
-                <span>LOCAL</span>
-              </div>
-
-              {intent === "merge" ? (
-                <div className={styles.settingCard}>
-                  <strong>선택한 순서대로 합치기</strong>
-                  <p>왼쪽 목록의 01번부터 모든 페이지를 차례로 복사해요.</p>
-                </div>
-              ) : null}
-
-              {intent === "image-to-pdf" ? (
-                <fieldset className={styles.optionGroup}>
-                  <legend>페이지 크기</legend>
-                  <label>
-                    <input
-                      type="radio"
-                      name="page-size"
-                      checked={imagePageSize === "a4"}
-                      disabled={busy}
-                      onChange={() => changeImagePageSize("a4")}
-                    />
-                    <span>
-                      <strong>A4 자동 방향</strong>
-                      <small>사진 방향에 맞춰 여백을 넣어요</small>
-                    </span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="page-size"
-                      checked={imagePageSize === "image"}
-                      disabled={busy}
-                      onChange={() => changeImagePageSize("image")}
-                    />
-                    <span>
-                      <strong>이미지에 맞춤</strong>
-                      <small>이미지 비율 그대로 페이지를 만들어요</small>
-                    </span>
-                  </label>
-                </fieldset>
-              ) : null}
-
-              <div className={styles.privacyNotice}>
-                <span aria-hidden="true">✓</span>
-                <p>
-                  <strong>파일은 업로드하지 않아요</strong>
-                  브라우저 Worker가 기기 안에서만 처리합니다.
-                </p>
-              </div>
-            </aside>
-
-            <section className={styles.resultPanel} aria-label="PDF 결과 미리보기">
-              <div className={styles.resultIcon} aria-hidden="true">
-                PDF
-              </div>
-              <div className={styles.resultCopy}>
-                <strong>
-                  {result !== undefined
-                    ? result.mime === "application/zip"
-                      ? `${result.outputDocumentCount}개 PDF 준비 완료`
-                      : `${result.outputPageCount}페이지 PDF 준비 완료`
-                    : processing
-                      ? phaseLabel(phase)
-                      : inspecting
-                        ? "페이지 목록 읽는 중"
-                        : "결과가 여기에 준비돼요"}
-                </strong>
-                <p>
-                  {result !== undefined
-                    ? `${formatBytes(result.byteLength)} · ${formatDuration(result.timing.totalMs)}`
-                    : "파일 내용이나 이름을 서버로 보내지 않습니다."}
-                </p>
-              </div>
-              <div
-                className={styles.progressTrack}
-                role="progressbar"
-                aria-label="PDF 작업 진행률"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(progress * 100)}
-              >
-                <span style={{ width: `${Math.round(progress * 100)}%` }} />
-              </div>
-              {result?.warnings.includes("SIGNATURES_INVALIDATED") ? (
-                <p className={styles.resultWarning}>
-                  새 PDF에서는 기존 전자서명이 유효하지 않아요. 북마크·양식은 유지되지 않을 수
-                  있어요.
-                </p>
-              ) : null}
-              {result?.warnings.includes("IMAGE_COLOR_MAY_CHANGE") ? (
-                <p className={styles.resultWarning}>
-                  광색역·16비트 이미지는 PDF에서 색감이나 정밀도가 달라질 수 있어요.
-                </p>
-              ) : null}
-              {result?.warnings.includes("WATERMARK_TEXT_RASTERIZED") ? (
-                <p className={styles.resultWarning}>
-                  워터마크 문구는 이미지로 그려져 결과 PDF에서 검색하거나 선택할 수 없어요.
-                </p>
-              ) : null}
-            </section>
-          </div>
-
-          <div className={styles.actionBar}>
-            <div className={styles.statusCopy} role="status" aria-live="polite" aria-atomic="true">
-              <strong>{message}</strong>
-              <span>
-                {processing
-                  ? `${phaseLabel(phase)} · ${Math.round(progress * 100)}%`
-                  : inspecting
-                    ? "페이지 목록 확인 중"
-                    : `선택 ${items.length}개 · ${formatBytes(totalBytes)}`}
-              </span>
-            </div>
-            <div className={styles.actionButtons}>
-              {processing ? (
-                <button className={styles.secondaryButton} type="button" onClick={cancelProcessing}>
-                  중단
-                </button>
-              ) : inspecting ? (
-                <button className={styles.secondaryButton} type="button" onClick={cancelInspection}>
-                  페이지 확인 중단
-                </button>
-              ) : result !== undefined ? (
-                <>
-                  <button className={styles.secondaryButton} type="button" onClick={reset}>
-                    새 작업
-                  </button>
-                  <button className={styles.runButton} type="button" onClick={downloadResult}>
-                    {result.mime === "application/zip" ? "ZIP 다운로드 ↓" : "PDF 다운로드 ↓"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  className={styles.runButton}
-                  type="button"
-                  disabled={!canRun}
-                  onClick={() => void startProcessing()}
-                >
-                  {runLabel}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      ) : null}
     </section>
   );
 }
