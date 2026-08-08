@@ -166,6 +166,28 @@ function runRequest(jobId = "job-1", overrides: Record<string, unknown> = {}): u
   };
 }
 
+function fileRunRequest(
+  jobId = "file-job",
+  file = new File([pdfBytes()], "report.pdf", {
+    type: "application/pdf",
+  }),
+): unknown {
+  return {
+    protocol: 1,
+    type: "run",
+    jobId,
+    tool: "pdf.compress-scanned",
+    toolVersion: 2,
+    input: {
+      name: file.name,
+      mimeHint: file.type,
+      byteLength: file.size,
+      file,
+    },
+    spec: balancedSpec,
+  };
+}
+
 function terminalPosts(scope: StubWorkerScope, jobId: string): ScopePost[] {
   return scope.posts.filter(({ event }) => {
     if (typeof event !== "object" || event === null) return false;
@@ -831,6 +853,99 @@ describe("scanned-PDF compression Worker request boundary", () => {
 });
 
 describe("scanned-PDF compression Worker execution", () => {
+  it("reads a validated File inside the Worker before running the pipeline", async () => {
+    const file = new File([pdfBytes()], "report.pdf", { type: "application/pdf" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    pipelineMocks.run.mockResolvedValueOnce(result());
+    const scope = await loadWorker();
+    await waitForReady(scope);
+
+    scope.dispatch(fileRunRequest("file-job", file));
+    await flushWorker();
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(pipelineMocks.run).toHaveBeenCalledOnce();
+    expect(pipelineMocks.run.mock.calls[0]?.[0]).toMatchObject({
+      name: "report.pdf",
+      mimeHint: "application/pdf",
+      byteLength: file.size,
+      bytes: expect.any(ArrayBuffer),
+    });
+  });
+
+  it("rejects an unreadable File inside the Worker without running the pipeline", async () => {
+    const file = new File([pdfBytes()], "report.pdf", { type: "application/pdf" });
+    vi.spyOn(file, "arrayBuffer").mockRejectedValueOnce(new Error("private read detail"));
+    const scope = await loadWorker();
+    await waitForReady(scope);
+
+    scope.dispatch(fileRunRequest("unreadable-file", file));
+    await flushWorker();
+
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+    expect(terminalPosts(scope, "unreadable-file")).toEqual([
+      {
+        event: {
+          protocol: 1,
+          type: "failed",
+          jobId: "unreadable-file",
+          error: {
+            code: "CORRUPT_PDF",
+            message: "선택한 PDF 파일을 읽지 못했어요.",
+            retryable: true,
+          },
+        },
+        transfer: [],
+      },
+    ]);
+  });
+
+  it.each([
+    ["name", "different.pdf"],
+    ["mimeHint", "text/plain"],
+    ["byteLength", 1],
+  ])("ignores File input with mismatched %s metadata", async (field, value) => {
+    const request = fileRunRequest("mismatched-file") as {
+      input: Record<string, unknown>;
+    };
+    request.input[field] = value;
+    const scope = await loadWorker();
+    await waitForReady(scope);
+
+    scope.dispatch(request);
+    await flushWorker();
+
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+    expect(terminalPosts(scope, "mismatched-file")).toHaveLength(0);
+  });
+
+  it("rejects a File whose read size changes before the pipeline runs", async () => {
+    const file = new File([pdfBytes()], "report.pdf", { type: "application/pdf" });
+    vi.spyOn(file, "arrayBuffer").mockResolvedValueOnce(new ArrayBuffer(file.size + 1));
+    const scope = await loadWorker();
+    await waitForReady(scope);
+
+    scope.dispatch(fileRunRequest("changed-file", file));
+    await flushWorker();
+
+    expect(pipelineMocks.run).not.toHaveBeenCalled();
+    expect(terminalPosts(scope, "changed-file")).toEqual([
+      {
+        event: {
+          protocol: 1,
+          type: "failed",
+          jobId: "changed-file",
+          error: {
+            code: "CORRUPT_PDF",
+            message: "PDF 파일 크기 정보를 확인할 수 없어요.",
+            retryable: false,
+          },
+        },
+        transfer: [],
+      },
+    ]);
+  });
+
   it("passes validated data and an AbortSignal to the pipeline", async () => {
     const output = result();
     pipelineMocks.run.mockResolvedValueOnce(output);

@@ -10,10 +10,10 @@ import {
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   type PdfCompressScannedErrorCode,
   type PdfCompressScannedErrorPayload,
+  type PdfCompressScannedFileRunRequest,
   type PdfCompressScannedProgress,
   type PdfCompressScannedRasterResultV2,
   type PdfCompressScannedResultV2,
-  type PdfCompressScannedRunRequest,
   type PdfCompressScannedSpecV2,
   pdfCompressScannedSpecV2Schema,
   WORKER_PROTOCOL_VERSION,
@@ -81,10 +81,10 @@ export interface RunPdfCompressScannedJobOptions {
 }
 
 interface CapturedInput {
+  file: File;
   name: string;
   mimeHint: string;
   size: number;
-  read(): Promise<ArrayBuffer>;
   spec: PdfCompressScannedSpecV2;
   expectedPageCount: number;
   onProgress?: (progress: PdfCompressScannedProgress) => void;
@@ -594,10 +594,10 @@ function validationError(
     }
     return {
       input: {
+        file,
         name,
         mimeHint,
         size,
-        read: () => Reflect.apply(arrayBuffer, file, []) as Promise<ArrayBuffer>,
         spec: parsedSpec.data,
         expectedPageCount,
         ...(onProgress === undefined ? {} : { onProgress }),
@@ -622,7 +622,6 @@ export function runPdfCompressScannedJob(
   let settled = false;
   let cancelled = false;
   let readyAccepted = false;
-  let readStarted = false;
   let runPosted = false;
   let lastProgressSequence = -1;
   let lastProgressFraction = -1;
@@ -673,53 +672,28 @@ export function runPdfCompressScannedJob(
   } else if (validation.input !== undefined) {
     const input = validation.input;
     captured = input;
-    const beginFileRead = (): void => {
-      if (readStarted || settled || cancelled || worker === undefined) return;
-      readStarted = true;
-      void Promise.resolve().then(async () => {
-        if (settled || cancelled) return;
-        let bytes: ArrayBuffer;
-        try {
-          bytes = await input.read();
-        } catch {
-          reject({
-            code: "CORRUPT_PDF",
-            message: "선택한 PDF 파일을 읽지 못했어요.",
-            retryable: true,
-          });
-          return;
-        }
-        if (settled || cancelled) return;
-        if (!isOrdinaryArrayBuffer(bytes) || arrayBufferByteLength(bytes) !== input.size) {
-          reject({
-            code: "CORRUPT_PDF",
-            message: "PDF 파일 크기 정보를 확인할 수 없어요.",
-            retryable: false,
-          });
-          return;
-        }
-        const request: PdfCompressScannedRunRequest = {
-          protocol: WORKER_PROTOCOL_VERSION,
-          type: "run",
-          jobId,
-          tool: PDF_COMPRESS_SCANNED_TOOL_ID,
-          toolVersion: PDF_COMPRESS_SCANNED_TOOL_VERSION,
-          input: {
-            name: input.name,
-            mimeHint: input.mimeHint,
-            byteLength: input.size,
-            bytes,
-          },
-          spec: input.spec,
-        };
-        try {
-          runPosted = true;
-          worker?.postMessage(request, [bytes]);
-        } catch {
-          runPosted = false;
-          protocolFailure();
-        }
-      });
+    const beginRun = (): void => {
+      if (runPosted || settled || cancelled || worker === undefined) return;
+      const request: PdfCompressScannedFileRunRequest = {
+        protocol: WORKER_PROTOCOL_VERSION,
+        type: "run",
+        jobId,
+        tool: PDF_COMPRESS_SCANNED_TOOL_ID,
+        toolVersion: PDF_COMPRESS_SCANNED_TOOL_VERSION,
+        input: {
+          name: input.name,
+          mimeHint: input.mimeHint,
+          byteLength: input.size,
+          file: input.file,
+        },
+        spec: input.spec,
+      };
+      try {
+        worker.postMessage(request);
+        runPosted = true;
+      } catch {
+        protocolFailure();
+      }
     };
 
     try {
@@ -774,7 +748,7 @@ export function runPdfCompressScannedJob(
               protocolFailure();
             } else if (readiness.supported) {
               readyAccepted = true;
-              beginFileRead();
+              beginRun();
             } else {
               reject(readiness.error);
             }
