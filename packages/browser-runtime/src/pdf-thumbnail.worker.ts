@@ -21,6 +21,12 @@ interface ActiveJob {
 
 let activeJob: ActiveJob | undefined;
 
+type ParsedInput =
+  | { kind: "bytes"; input: PdfThumbnailRunRequest["input"] }
+  | { kind: "file"; name: string; mimeHint: string; byteLength: number; file: File }
+  | { kind: "file-error" }
+  | { kind: "invalid" };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -29,8 +35,8 @@ function post(event: PdfThumbnailWorkerEvent, transfer: Transferable[] = []): vo
   scope.postMessage(event, transfer);
 }
 
-function parseInput(value: unknown): PdfThumbnailRunRequest["input"] | undefined {
-  if (!isRecord(value) || !(value.bytes instanceof ArrayBuffer)) return undefined;
+function parseInput(value: unknown): ParsedInput {
+  if (!isRecord(value)) return { kind: "invalid" };
   if (
     typeof value.name !== "string" ||
     value.name.length < 1 ||
@@ -40,16 +46,38 @@ function parseInput(value: unknown): PdfThumbnailRunRequest["input"] | undefined
     !Number.isSafeInteger(value.byteLength) ||
     typeof value.byteLength !== "number" ||
     value.byteLength < 1 ||
-    value.byteLength > MAX_INPUT_BYTES ||
-    value.byteLength !== value.bytes.byteLength
+    value.byteLength > MAX_INPUT_BYTES
   ) {
-    return undefined;
+    return "file" in value ? { kind: "file-error" } : { kind: "invalid" };
+  }
+  if ("file" in value) {
+    if (
+      !(value.file instanceof File) ||
+      value.name !== value.file.name ||
+      value.mimeHint !== value.file.type ||
+      value.byteLength !== value.file.size
+    ) {
+      return { kind: "file-error" };
+    }
+    return {
+      kind: "file",
+      name: value.name,
+      mimeHint: value.mimeHint,
+      byteLength: value.byteLength,
+      file: value.file,
+    };
+  }
+  if (!(value.bytes instanceof ArrayBuffer) || value.byteLength !== value.bytes.byteLength) {
+    return { kind: "invalid" };
   }
   return {
-    name: value.name,
-    mimeHint: value.mimeHint,
-    byteLength: value.byteLength,
-    bytes: value.bytes,
+    kind: "bytes",
+    input: {
+      name: value.name,
+      mimeHint: value.mimeHint,
+      byteLength: value.byteLength,
+      bytes: value.bytes,
+    },
   };
 }
 
@@ -66,11 +94,28 @@ function invalidRequest(jobId: string): void {
   });
 }
 
+function invalidFile(jobId: string): void {
+  post({
+    protocol: WORKER_PROTOCOL_VERSION,
+    type: "failed",
+    jobId,
+    error: {
+      code: "CORRUPT_PDF",
+      message: "선택한 PDF 파일을 읽지 못했어요.",
+      retryable: true,
+    },
+  });
+}
+
 function startRun(request: Record<string, unknown>): void {
   const jobId = request.jobId;
   if (typeof jobId !== "string" || jobId.length < 1) return;
-  const input = parseInput(request.input);
-  if (input === undefined) return;
+  const parsedInput = parseInput(request.input);
+  if (parsedInput.kind === "invalid") return;
+  if (parsedInput.kind === "file-error") {
+    invalidFile(jobId);
+    return;
+  }
   if (
     request.tool !== PDF_THUMBNAIL_TOOL_ID ||
     request.toolVersion !== PDF_THUMBNAIL_TOOL_VERSION ||
@@ -111,6 +156,31 @@ function startRun(request: Record<string, unknown>): void {
 
   void (async () => {
     try {
+      let input: PdfThumbnailRunRequest["input"];
+      if (parsedInput.kind === "file") {
+        let bytes: ArrayBuffer;
+        try {
+          bytes = await parsedInput.file.arrayBuffer();
+        } catch {
+          if (activeJob !== job || job.controller.signal.aborted) return;
+          invalidFile(jobId);
+          return;
+        }
+        if (activeJob !== job || job.controller.signal.aborted) return;
+        if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== parsedInput.byteLength) {
+          invalidFile(jobId);
+          return;
+        }
+        input = {
+          name: parsedInput.name,
+          mimeHint: parsedInput.mimeHint,
+          byteLength: parsedInput.byteLength,
+          bytes,
+        };
+      } else {
+        input = parsedInput.input;
+      }
+      if (activeJob !== job || job.controller.signal.aborted) return;
       const result = await runPdfThumbnailPipeline(input, {
         signal: job.controller.signal,
         onThumbnail: postThumbnail,

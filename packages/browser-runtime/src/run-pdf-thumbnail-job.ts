@@ -2,11 +2,11 @@ import { acceptPdfThumbnailBytes, PDF_THUMBNAIL_LONG_EDGE } from "@hereisit/pdf-
 import {
   PDF_THUMBNAIL_TOOL_ID,
   PDF_THUMBNAIL_TOOL_VERSION,
+  type PdfThumbnailFileRunRequest,
   type PdfThumbnailJobHandle,
   type PdfThumbnailJobOutcome,
   type PdfThumbnailProgress,
   type PdfThumbnailResult,
-  type PdfThumbnailRunRequest,
   type PdfThumbnailUpdate,
   type PdfToolErrorCode,
   type PdfToolErrorPayload,
@@ -160,7 +160,6 @@ export function runPdfThumbnailJob(
 ): PdfThumbnailJobHandle {
   let settled = false;
   let cancelled = false;
-  let readStarted = false;
   let runPosted = false;
   let lastSequence = -1;
   let nextSourcePage = 1;
@@ -196,50 +195,27 @@ export function runPdfThumbnailJob(
       retryable: true,
     });
   };
-  const beginFileRead = (): void => {
-    if (readStarted || settled || cancelled || worker === undefined) return;
-    readStarted = true;
-    void Promise.resolve().then(async () => {
-      let bytes: ArrayBuffer;
-      try {
-        bytes = await file.arrayBuffer();
-      } catch {
-        reject({
-          code: "CORRUPT_PDF",
-          message: "선택한 PDF 파일을 읽지 못했어요.",
-          retryable: true,
-        });
-        return;
-      }
-      if (settled || cancelled) return;
-      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== file.size) {
-        reject({
-          code: "CORRUPT_PDF",
-          message: "PDF 파일 크기 정보를 확인할 수 없어요.",
-          retryable: false,
-        });
-        return;
-      }
-      const request: PdfThumbnailRunRequest = {
-        protocol: WORKER_PROTOCOL_VERSION,
-        type: "run",
-        jobId,
-        tool: PDF_THUMBNAIL_TOOL_ID,
-        toolVersion: PDF_THUMBNAIL_TOOL_VERSION,
-        input: {
-          name: file.name,
-          mimeHint: file.type,
-          byteLength: file.size,
-          bytes,
-        },
-      };
-      try {
-        worker?.postMessage(request, [bytes]);
-        runPosted = true;
-      } catch {
-        workerFailure();
-      }
-    });
+  const beginRun = (): void => {
+    if (runPosted || settled || cancelled || worker === undefined) return;
+    const request: PdfThumbnailFileRunRequest = {
+      protocol: WORKER_PROTOCOL_VERSION,
+      type: "run",
+      jobId,
+      tool: PDF_THUMBNAIL_TOOL_ID,
+      toolVersion: PDF_THUMBNAIL_TOOL_VERSION,
+      input: {
+        name: file.name,
+        mimeHint: file.type,
+        byteLength: file.size,
+        file,
+      },
+    };
+    try {
+      worker.postMessage(request);
+      runPosted = true;
+    } catch {
+      workerFailure();
+    }
   };
 
   timeoutId = setTimeout(() => {
@@ -280,7 +256,7 @@ export function runPdfThumbnailJob(
               capabilities.tool === PDF_THUMBNAIL_TOOL_ID &&
               capabilities.toolVersion === PDF_THUMBNAIL_TOOL_VERSION
             ) {
-              beginFileRead();
+              beginRun();
             }
             return;
           }
