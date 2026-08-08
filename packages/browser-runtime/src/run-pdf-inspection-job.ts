@@ -1,7 +1,7 @@
 import {
+  type PdfFileInspectRequest,
   type PdfInspectionHandle,
   type PdfInspectionOutcome,
-  type PdfInspectRequest,
   type PdfToolErrorPayload,
   type PdfWorkerEvent,
   WORKER_PROTOCOL_VERSION,
@@ -15,7 +15,7 @@ export { supportsBrowserPdfRuntime } from "./pdf-runtime-support";
 export function inspectPdfFile(file: File): PdfInspectionHandle {
   let settled = false;
   let cancelled = false;
-  let readStarted = false;
+  let inspectionPosted = false;
   let worker: Worker | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let resolveResult: (outcome: PdfInspectionOutcome) => void = () => undefined;
@@ -35,34 +35,29 @@ export function inspectPdfFile(file: File): PdfInspectionHandle {
 
   const reject = (error: PdfToolErrorPayload) => settle({ status: "rejected", error });
 
-  const beginFileRead = () => {
-    if (readStarted || settled || cancelled || worker === undefined) return;
-    readStarted = true;
-    void (async () => {
-      try {
-        const bytes = await file.arrayBuffer();
-        if (cancelled || settled) return;
-        const input: PdfInspectRequest["input"] = {
-          name: file.name,
-          mimeHint: file.type,
-          byteLength: file.size,
-          bytes,
-        };
-        const request: PdfInspectRequest = {
-          protocol: WORKER_PROTOCOL_VERSION,
-          type: "inspect",
-          jobId,
-          input,
-        };
-        worker?.postMessage(request, [bytes]);
-      } catch {
-        reject({
-          code: "CORRUPT_PDF",
-          message: "선택한 PDF 파일을 읽지 못했어요.",
-          retryable: true,
-        });
-      }
-    })();
+  const beginInspection = () => {
+    if (inspectionPosted || settled || cancelled || worker === undefined) return;
+    const request: PdfFileInspectRequest = {
+      protocol: WORKER_PROTOCOL_VERSION,
+      type: "inspect",
+      jobId,
+      input: {
+        name: file.name,
+        mimeHint: file.type,
+        byteLength: file.size,
+        file,
+      },
+    };
+    try {
+      worker.postMessage(request);
+      inspectionPosted = true;
+    } catch {
+      reject({
+        code: "CORRUPT_PDF",
+        message: "선택한 PDF 파일을 읽지 못했어요.",
+        retryable: true,
+      });
+    }
   };
 
   if (!supportsBrowserPdfRuntime()) {
@@ -87,7 +82,7 @@ export function inspectPdfFile(file: File): PdfInspectionHandle {
         const event = message.data;
         if (event.protocol !== WORKER_PROTOCOL_VERSION) return;
         if (event.type === "ready") {
-          beginFileRead();
+          beginInspection();
           return;
         }
         if (event.jobId !== jobId) return;

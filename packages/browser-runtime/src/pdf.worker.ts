@@ -7,6 +7,7 @@ import {
   PDF_SPLIT_TOOL_ID,
   PDF_TOOL_VERSION,
   PDF_WATERMARK_TOOL_ID,
+  type PdfInspectRequest,
   type PdfPipelineSpecV1,
   type PdfToolId,
   type PdfWorkerEvent,
@@ -57,7 +58,31 @@ scope.onmessage = (message: MessageEvent<PdfWorkerRequest>) => {
   void (async () => {
     try {
       if (request.type === "inspect") {
-        const result = await inspectPdfInput(request.input);
+        let input: PdfInspectRequest["input"];
+        if ("file" in request.input) {
+          const { file, name, mimeHint, byteLength } = request.input;
+          if (
+            !(file instanceof File) ||
+            name !== file.name ||
+            mimeHint !== file.type ||
+            byteLength !== file.size
+          ) {
+            throw new Error("INVALID_FILE");
+          }
+          let bytes: ArrayBuffer;
+          try {
+            bytes = await file.arrayBuffer();
+          } catch {
+            throw new Error("INVALID_FILE");
+          }
+          if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== byteLength) {
+            throw new Error("INVALID_FILE");
+          }
+          input = { name, mimeHint, byteLength, bytes };
+        } else {
+          input = request.input;
+        }
+        const result = await inspectPdfInput(input);
         if (cancelledJobs.has(jobId)) return;
         post({
           protocol: WORKER_PROTOCOL_VERSION,

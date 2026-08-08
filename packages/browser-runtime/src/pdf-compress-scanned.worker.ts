@@ -6,6 +6,7 @@ import {
   PDF_COMPRESS_SCANNED_TOOL_ID,
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   type PdfCompressScannedErrorPayload,
+  type PdfCompressScannedFileRunRequest,
   type PdfCompressScannedProgress,
   type PdfCompressScannedRunRequest,
   type PdfCompressScannedWorkerEvent,
@@ -38,7 +39,7 @@ interface RunEnvelope {
   jobId: string;
   tool: unknown;
   toolVersion: unknown;
-  input: PdfCompressScannedRunRequest["input"];
+  input: PdfCompressScannedRunRequest["input"] | PdfCompressScannedFileRunRequest["input"];
   spec: unknown;
 }
 
@@ -212,6 +213,35 @@ function parseInput(value: unknown): PdfCompressScannedRunRequest["input"] | und
   };
 }
 
+function parseFileInput(value: unknown): PdfCompressScannedFileRunRequest["input"] | undefined {
+  if (
+    typeof File === "undefined" ||
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, ["name", "mimeHint", "byteLength", "file"])
+  ) {
+    return undefined;
+  }
+  const name = value.name;
+  const mimeHint = value.mimeHint;
+  const byteLength = value.byteLength;
+  const file = value.file;
+  if (
+    !isBoundedString(name, 1, MAX_INPUT_NAME_LENGTH) ||
+    !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
+    !(file instanceof File) ||
+    !Number.isSafeInteger(byteLength) ||
+    typeof byteLength !== "number" ||
+    byteLength < 1 ||
+    byteLength > MAX_PDF_COMPRESS_SCANNED_INPUT_BYTES ||
+    name !== file.name ||
+    mimeHint !== file.type ||
+    byteLength !== file.size
+  ) {
+    return undefined;
+  }
+  return { name, mimeHint, byteLength, file };
+}
+
 function captureSpec(value: unknown): unknown {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["version", "preset"])) return undefined;
   const version = value.version;
@@ -230,7 +260,7 @@ function parseRunEnvelope(
   const toolVersion = value.toolVersion;
   const rawInput = value.input;
   const rawSpec = value.spec;
-  const input = parseInput(rawInput);
+  const input = parseFileInput(rawInput) ?? parseInput(rawInput);
   if (input === undefined) return undefined;
   return {
     jobId,
@@ -284,7 +314,52 @@ function startRun(request: RunEnvelope): void {
   let sequence = 0;
   void (async () => {
     try {
-      const output = await runPdfCompressScannedPipeline(request.input, parsedSpec.data, {
+      let input: PdfCompressScannedRunRequest["input"];
+      if ("file" in request.input) {
+        let bytes: ArrayBuffer;
+        try {
+          bytes = await request.input.file.arrayBuffer();
+        } catch {
+          if (job.controller.signal.aborted || activeJob !== job) return;
+          post({
+            protocol: WORKER_PROTOCOL_VERSION,
+            type: "failed",
+            jobId: job.jobId,
+            error: {
+              code: "CORRUPT_PDF",
+              message: "선택한 PDF 파일을 읽지 못했어요.",
+              retryable: true,
+            },
+          });
+          return;
+        }
+        if (job.controller.signal.aborted || activeJob !== job) return;
+        if (
+          !isOrdinaryArrayBuffer(bytes) ||
+          arrayBufferByteLength(bytes) !== request.input.byteLength
+        ) {
+          post({
+            protocol: WORKER_PROTOCOL_VERSION,
+            type: "failed",
+            jobId: job.jobId,
+            error: {
+              code: "CORRUPT_PDF",
+              message: "PDF 파일 크기 정보를 확인할 수 없어요.",
+              retryable: false,
+            },
+          });
+          return;
+        }
+        input = {
+          name: request.input.name,
+          mimeHint: request.input.mimeHint,
+          byteLength: request.input.byteLength,
+          bytes,
+        };
+      } else {
+        input = request.input;
+      }
+      const output = await runPdfCompressScannedPipeline(input, parsedSpec.data, {
         signal: job.controller.signal,
         onProgress(progress) {
           postProgress(job, sequence, progress);

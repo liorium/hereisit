@@ -617,6 +617,29 @@ test("explains an unsupported browser before selection without starting local wo
     .toEqual({ fileReads: 0, workerStarts: 0 });
 });
 
+test("keeps full PDF reads off the UI thread during inspection and compression", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("__hereisitUiThreadPdfReads", "0");
+    const originalArrayBuffer = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = function arrayBuffer() {
+      const count = Number(sessionStorage.getItem("__hereisitUiThreadPdfReads") ?? "0");
+      sessionStorage.setItem("__hereisitUiThreadPdfReads", String(count + 1));
+      return Reflect.apply(originalArrayBuffer, this, []);
+    };
+  });
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "scan.pdf", await createScannedPdf(page), 1);
+
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
+  await expect(page.getByRole("heading", { level: 2, name: "용량 줄이기 완료" })).toBeVisible({
+    timeout: 60_000,
+  });
+
+  expect(await page.evaluate(() => sessionStorage.getItem("__hereisitUiThreadPdfReads"))).toBe("0");
+});
+
 test("compresses a known scan with the default preset and downloads only after one explicit download", async ({
   browserName,
   page,

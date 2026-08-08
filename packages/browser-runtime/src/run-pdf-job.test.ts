@@ -274,7 +274,7 @@ describe("runPdfJob", () => {
 });
 
 describe("inspectPdfFile", () => {
-  it("waits for inspection Worker readiness before reading the file", async () => {
+  it("waits for inspection Worker readiness before posting the file", async () => {
     installWorker();
     const arrayBuffer = vi.fn(async () => Uint8Array.of(1).buffer);
     const handle = inspectPdfFile({
@@ -302,9 +302,14 @@ describe("inspectPdfFile", () => {
         ],
       },
     });
-    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(worker.messages.some((message) => message.type === "inspect")).toBe(true),
+    );
+    expect(arrayBuffer).not.toHaveBeenCalled();
     const request = worker.messages.find((message) => message.type === "inspect");
-    expect(request).toBeDefined();
+    expect(request).toMatchObject({
+      input: { file: expect.anything() },
+    });
 
     worker.emit({
       protocol: 1,

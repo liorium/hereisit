@@ -45,7 +45,7 @@ afterEach(() => {
 });
 
 describe("inspectPdfFile direct module boundary", () => {
-  it("waits for Worker readiness before reading and settles the first inspection result", async () => {
+  it("posts the File after Worker readiness without reading it on the UI thread", async () => {
     installWorker();
     const arrayBuffer = vi.fn(async () => Uint8Array.of(1).buffer);
     const handle = inspectPdfFile({
@@ -73,9 +73,20 @@ describe("inspectPdfFile direct module boundary", () => {
         ],
       },
     });
-    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(worker.messages.some((message) => message.type === "inspect")).toBe(true),
+    );
+    expect(arrayBuffer).not.toHaveBeenCalled();
     const request = worker.messages.find((message) => message.type === "inspect");
-    expect(request).toBeDefined();
+    expect(request).toMatchObject({
+      type: "inspect",
+      input: {
+        name: "report.pdf",
+        mimeHint: "application/pdf",
+        byteLength: 1,
+        file: expect.anything(),
+      },
+    });
 
     worker.emit({
       protocol: 1,

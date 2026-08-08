@@ -685,6 +685,18 @@ export interface PdfInspectRequest {
   };
 }
 
+export interface PdfFileInspectRequest {
+  protocol: 1;
+  type: "inspect";
+  jobId: string;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    file: File;
+  };
+}
+
 export interface PdfInspectionPage {
   sourcePage: number;
   width: number;
@@ -707,6 +719,7 @@ export type PdfWorkerRequest =
   | PdfRunRequest
   | PdfFileRunRequest
   | PdfInspectRequest
+  | PdfFileInspectRequest
   | PdfCancelRequest;
 
 export type PdfWorkerEvent =
@@ -1121,6 +1134,21 @@ export interface PdfCompressScannedRunRequestV2 extends PdfCompressScannedRunReq
   spec: PdfCompressScannedSpecV2;
 }
 
+export interface PdfCompressScannedFileRunRequest {
+  protocol: 1;
+  type: "run";
+  jobId: string;
+  tool: "pdf.compress-scanned";
+  toolVersion: 2;
+  input: {
+    name: string;
+    mimeHint: string;
+    byteLength: number;
+    file: File;
+  };
+  spec: PdfCompressScannedSpecV2;
+}
+
 export type PdfCompressScannedRunRequest =
   | PdfCompressScannedRunRequestV1
   | PdfCompressScannedRunRequestV2;
@@ -1133,6 +1161,7 @@ export interface PdfCompressScannedCancelRequest {
 
 export type PdfCompressScannedWorkerRequest =
   | PdfCompressScannedRunRequest
+  | PdfCompressScannedFileRunRequest
   | PdfCompressScannedCancelRequest;
 
 export type PdfCompressScannedWorkerEvent =

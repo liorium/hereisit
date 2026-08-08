@@ -429,7 +429,7 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
     expect(StubWorker.instances).toHaveLength(0);
   });
 
-  it("constructs the dedicated module Worker but performs zero reads before exact readiness", async () => {
+  it("constructs the dedicated module Worker and posts the File without a UI-thread read", async () => {
     installSupportedRuntime();
     const { file, arrayBuffer } = fakePdfFile();
     const onProgress = vi.fn();
@@ -449,8 +449,10 @@ describe("runPdfCompressScannedJob validation and readiness", () => {
 
     worker.emit(readyEvent());
     worker.emit(readyEvent());
-    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
-    expect(arrayBuffer).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(worker.messages.some(({ message }) => isMessageType(message, "run"))).toBe(true),
+    );
+    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -685,30 +687,7 @@ describe("runPdfCompressScannedJob lifecycle", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
-  it("maps file read rejection and byte-length mismatch without posting run", async () => {
-    installSupportedRuntime();
-    const unreadable = fakePdfFile({ read: Promise.reject(new Error("read failed")) });
-    const first = runPdfCompressScannedJob(unreadable.file, balancedSpec, {
-      expectedPageCount: 1,
-    });
-    latestWorker().emit(readyEvent());
-    await expect(first.result).resolves.toMatchObject({
-      status: "rejected",
-      error: { code: "CORRUPT_PDF", retryable: true },
-    });
-    expect(latestWorker().messages).toHaveLength(0);
-
-    const mismatch = fakePdfFile({ size: 100, read: Promise.resolve(new ArrayBuffer(99)) });
-    const second = runPdfCompressScannedJob(mismatch.file, balancedSpec, { expectedPageCount: 1 });
-    latestWorker().emit(readyEvent());
-    await expect(second.result).resolves.toMatchObject({
-      status: "rejected",
-      error: { code: "CORRUPT_PDF", retryable: false },
-    });
-    expect(latestWorker().messages).toHaveLength(0);
-  });
-
-  it("posts the exact request once and transfers only the source buffer", async () => {
+  it("posts the exact File request once without a UI-thread read or transfer buffer", async () => {
     installSupportedRuntime();
     const bytes = new ArrayBuffer(100);
     const { file, arrayBuffer } = fakePdfFile({ read: Promise.resolve(bytes) });
@@ -717,8 +696,8 @@ describe("runPdfCompressScannedJob lifecycle", () => {
     const worker = latestWorker();
     const run = await waitForRun(worker);
 
-    expect(arrayBuffer).toHaveBeenCalledOnce();
-    expect(run.transfer).toEqual([bytes]);
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(run.transfer).toEqual([]);
     expect(run.message).toMatchObject({
       protocol: 1,
       type: "run",
@@ -728,7 +707,7 @@ describe("runPdfCompressScannedJob lifecycle", () => {
         name: "report.pdf",
         mimeHint: "application/pdf",
         byteLength: 100,
-        bytes,
+        file,
       },
       spec: balancedSpec,
     });
@@ -737,7 +716,7 @@ describe("runPdfCompressScannedJob lifecycle", () => {
       ["protocol", "type", "jobId", "tool", "toolVersion", "input", "spec"].sort(),
     );
     expect(Object.keys(request.input as object).sort()).toEqual(
-      ["name", "mimeHint", "byteLength", "bytes"].sort(),
+      ["name", "mimeHint", "byteLength", "file"].sort(),
     );
     expect(Object.keys(request.spec as object).sort()).toEqual(["version", "preset"].sort());
     expect(JSON.stringify(request)).not.toContain("expectedPageCount");
@@ -797,28 +776,6 @@ describe("runPdfCompressScannedJob lifecycle", () => {
     await expect(handle.result).resolves.toEqual({ status: "cancelled" });
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(worker.messages).toHaveLength(0);
-    expect(worker.terminateCount).toBe(1);
-  });
-
-  it("cancels while reading without posting a run", async () => {
-    installSupportedRuntime();
-    let releaseRead: (bytes: ArrayBuffer) => void = () => undefined;
-    const read = new Promise<ArrayBuffer>((resolve) => {
-      releaseRead = resolve;
-    });
-    const { file, arrayBuffer } = fakePdfFile({ read });
-    const handle = runPdfCompressScannedJob(file, balancedSpec, { expectedPageCount: 1 });
-    const worker = latestWorker();
-    worker.emit(readyEvent());
-    await vi.waitFor(() => expect(arrayBuffer).toHaveBeenCalledOnce());
-
-    handle.cancel();
-    releaseRead(new ArrayBuffer(100));
-    await Promise.resolve();
-    await Promise.resolve();
-
-    await expect(handle.result).resolves.toEqual({ status: "cancelled" });
-    expect(worker.messages.some(({ message }) => isMessageType(message, "run"))).toBe(false);
     expect(worker.terminateCount).toBe(1);
   });
 
