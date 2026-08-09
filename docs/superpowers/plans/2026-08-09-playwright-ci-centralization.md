@@ -385,6 +385,7 @@ Run:
 git diff --stat origin/main...HEAD
 git diff --name-status origin/main...HEAD
 rg -n "test:e2e:webkit|test-playwright-webkit-container|PLAYWRIGHT_(WEBKIT|CONTAINER)" \
+  --glob '!tests/playwright-ci-workflow.test.ts' \
   .github AGENTS.md README.md docs/deployment.md docs/testing package.json playwright.config.ts scripts tests
 ```
 
@@ -522,10 +523,11 @@ HEREISIT_E2E_PRODUCT_ANALYTICS=1 pnpm test:e2e:ci \
   --project=chromium --grep analytics
 ```
 
-Legacy-reference inspection excludes `tests/playwright-ci-workflow.test.ts` because it intentionally contains
-negative assertions:
+The corrected Step 2 legacy-reference inspection excludes `tests/playwright-ci-workflow.test.ts` because it
+intentionally contains negative assertions:
 
 ```bash
-rg -n 'pnpm test:e2e:ci|PLAYWRIGHT_WEBKIT|pnpm exec playwright test' \
-  --glob '!tests/playwright-ci-workflow.test.ts'
+rg -n "test:e2e:webkit|test-playwright-webkit-container|PLAYWRIGHT_(WEBKIT|CONTAINER)" \
+  --glob '!tests/playwright-ci-workflow.test.ts' \
+  .github AGENTS.md README.md docs/deployment.md docs/testing package.json playwright.config.ts scripts tests
 ```
