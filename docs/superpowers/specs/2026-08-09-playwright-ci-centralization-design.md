@@ -1,7 +1,7 @@
 # Playwright CI centralization design
 
 **Date:** 2026-08-09
-**Status:** Approved section by section; awaiting final document review
+**Status:** Approved for implementation
 
 ## 목적
 
@@ -33,7 +33,10 @@ GitHub Actions의 기존 `browser` job을 단일 자동 실행 위치로 사용�
 
 일반 Chromium·Firefox 프로젝트와 WebKit 프로젝트는 같은 job에서 순서대로 실행한다. WebKit 명령에는
 `--workers=1`을 유지한다. 첫 실행이 실패해도 두 번째 실행을 계속하고, 하나라도 실패하면 job 전체를
-실패로 끝낸다. 이 결과를 얻는 데 필요한 최소한의 셸 상태 집계만 workflow step 안에 둔다.
+실패로 끝낸다. 두 실행은 각각 `test-results/primary`, `test-results/webkit`과
+`playwright-report/primary`, `playwright-report/webkit`에 결과를 남겨 뒤 실행이 앞선 실패 증거를 지우지
+않게 한다. 내장 GitHub reporter와 HTML reporter를 함께 사용하며 새 의존성은 추가하지 않는다. 이 결과를
+얻는 데 필요한 최소한의 셸 상태 집계만 workflow step 안에 둔다.
 
 로컬 서버에서 지원하는 기본 흐름은 다음 두 가지다.
 
