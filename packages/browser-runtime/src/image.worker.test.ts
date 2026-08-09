@@ -91,17 +91,18 @@ function runRequest(
   };
 }
 
-function terminalPosts(scope: StubWorkerScope, jobId = "job-1") {
+function terminalPosts(scope: StubWorkerScope, jobId?: string) {
   return scope.posts.filter(({ event }) => {
     if (typeof event !== "object" || event === null) return false;
     const candidate = event as { type?: unknown; jobId?: unknown };
     return (
-      candidate.jobId === jobId && (candidate.type === "complete" || candidate.type === "failed")
+      (jobId === undefined || candidate.jobId === jobId) &&
+      (candidate.type === "complete" || candidate.type === "failed")
     );
   });
 }
 
-function failure(scope: StubWorkerScope, jobId = "job-1"): ToolErrorPayload | undefined {
+function failure(scope: StubWorkerScope, jobId?: string): ToolErrorPayload | undefined {
   const event = terminalPosts(scope, jobId).at(-1)?.event as
     | { error?: ToolErrorPayload }
     | undefined;
@@ -193,6 +194,61 @@ describe("image Worker file input", () => {
   });
 
   it.each([
+    ["a 128-character job ID", "complete", () => ({ ...runRequest(), jobId: "j".repeat(128) })],
+    ["a 129-character job ID", "ignore", () => ({ ...runRequest(), jobId: "j".repeat(129) })],
+    [
+      "a 512-character filename",
+      "complete",
+      () =>
+        runRequest(new File([Uint8Array.of(1)], `${"n".repeat(508)}.png`, { type: "image/png" })),
+    ],
+    [
+      "a 513-character filename",
+      "invalid",
+      () =>
+        runRequest(new File([Uint8Array.of(1)], `${"n".repeat(509)}.png`, { type: "image/png" })),
+    ],
+    [
+      "a 100-character MIME hint",
+      "complete",
+      () =>
+        runRequest(
+          new File([Uint8Array.of(1)], "photo.png", {
+            type: `image/${"x".repeat(94)}`,
+          }),
+        ),
+    ],
+    [
+      "a 101-character MIME hint",
+      "invalid",
+      () =>
+        runRequest(
+          new File([Uint8Array.of(1)], "photo.png", {
+            type: `image/${"x".repeat(95)}`,
+          }),
+        ),
+    ],
+  ])("handles %s at its boundary", async (_label, outcome, makeRequest) => {
+    const scope = await loadWorker();
+    scope.dispatch(makeRequest());
+
+    if (outcome === "ignore") {
+      await Promise.resolve();
+      expect(terminalPosts(scope)).toEqual([]);
+      expect(pipelineMocks.process).not.toHaveBeenCalled();
+      return;
+    }
+    await vi.waitFor(() => expect(terminalPosts(scope)).toHaveLength(1));
+    if (outcome === "complete") {
+      expect(terminalPosts(scope)[0]?.event).toMatchObject({ type: "complete" });
+      expect(pipelineMocks.process).toHaveBeenCalledOnce();
+    } else {
+      expect(failure(scope)).toMatchObject({ code: "INVALID_SPEC", retryable: false });
+      expect(pipelineMocks.process).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
     [
       "name",
       (request: Record<string, unknown>) => ({
@@ -235,6 +291,21 @@ describe("image Worker file input", () => {
     await vi.waitFor(() => expect(terminalPosts(scope)).toHaveLength(1));
     expect(failure(scope)).toMatchObject({ code: "INVALID_SPEC", retryable: false });
     expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes an unexpected pipeline rejection", async () => {
+    pipelineMocks.process.mockRejectedValueOnce(new Error("PRIVATE_PIPELINE_FAILURE"));
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest());
+
+    await vi.waitFor(() => expect(terminalPosts(scope)).toHaveLength(1));
+    expect(failure(scope)).toEqual({
+      code: "WORKER_CRASH",
+      message: "이미지를 처리하는 중 오류가 발생했습니다.",
+      retryable: true,
+    });
+    expect(JSON.stringify(terminalPosts(scope))).not.toContain("PRIVATE_PIPELINE_FAILURE");
   });
 
   it("sanitizes a File read error", async () => {
@@ -305,6 +376,16 @@ describe("image Worker file input", () => {
     await vi.waitFor(() => expect(terminalPosts(scope, "job-2")).toHaveLength(1));
     expect(failure(scope, "job-2")).toMatchObject({ code: "WORKER_CRASH", retryable: true });
     expect(pipelineMocks.process).not.toHaveBeenCalled();
+
+    pending.resolve(Uint8Array.of(1).buffer);
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-1")).toHaveLength(1));
+    expect(terminalPosts(scope, "job-1")[0]?.event).toMatchObject({ type: "complete" });
+    expect(pipelineMocks.process).toHaveBeenCalledOnce();
+
+    scope.dispatch({ ...runRequest(), jobId: "job-3" });
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-3")).toHaveLength(1));
+    expect(terminalPosts(scope, "job-3")[0]?.event).toMatchObject({ type: "complete" });
+    expect(pipelineMocks.process).toHaveBeenCalledTimes(2);
   });
 
   it("cancels before a pending File read resolves without running the pipeline", async () => {
