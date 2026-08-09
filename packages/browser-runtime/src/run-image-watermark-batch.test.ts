@@ -54,6 +54,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 interface FakeFileOptions {
+  declaredSize?: number;
   name?: string;
   type?: string;
   size?: number;
@@ -68,6 +69,9 @@ function fakeFile(options: FakeFileOptions = {}): {
   const file = new File([new Uint8Array(size)], options.name ?? "photo.png", {
     type: options.type ?? "image/png",
   });
+  if (options.declaredSize !== undefined) {
+    Object.defineProperty(file, "size", { get: () => options.declaredSize });
+  }
   const arrayBuffer = vi.spyOn(file, "arrayBuffer");
   if (options.read !== undefined) arrayBuffer.mockReturnValue(options.read);
   return {
@@ -365,6 +369,14 @@ describe("supportsBrowserImageWatermarkRuntime", () => {
 });
 
 describe("runImageWatermarkBatch validation and readiness", () => {
+  it("uses a tiny native payload for a validation-only declared size", async () => {
+    const source = fakeFile({ declaredSize: MAX_SOURCE_BYTES + 1 });
+
+    expect(source.file).toBeInstanceOf(File);
+    expect(source.file.size).toBe(MAX_SOURCE_BYTES + 1);
+    expect((await source.file.arrayBuffer()).byteLength).toBe(4);
+  });
+
   it("dispatches the source File without reading it in the UI realm", async () => {
     installSupportedRuntime();
     const file = new File([pngBuffer(58)], "source.png", { type: "image/png" });
@@ -408,7 +420,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     MAX_SOURCE_BYTES + 1,
   ])("rejects a %d-byte source item without reading or assigning it", async (size) => {
     installSupportedRuntime();
-    const invalid = fakeFile({ size });
+    const invalid = fakeFile({ ...(size > 4 ? { declaredSize: size } : { size }) });
     const handle = runImageWatermarkBatch([item("invalid", invalid.file)]);
 
     await expect(handle.result).resolves.toMatchObject([
@@ -435,7 +447,10 @@ describe("runImageWatermarkBatch validation and readiness", () => {
   it("rejects every item when total source size exceeds 250MiB", async () => {
     installSupportedRuntime();
     const sources = Array.from({ length: 6 }, (_, index) =>
-      fakeFile({ name: `${index}.png`, size: index === 5 ? 1 : MAX_SOURCE_BYTES }),
+      fakeFile({
+        name: `${index}.png`,
+        ...(index === 5 ? { size: 1 } : { declaredSize: MAX_SOURCE_BYTES }),
+      }),
     );
     const handle = runImageWatermarkBatch(
       sources.map(({ file }, index) => item(`item-${index}`, file)),
@@ -457,9 +472,9 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     installSupportedRuntime();
     const events: ImageWatermarkRuntimeEvent[] = [];
     const sources = [
-      fakeFile({ name: "oversize.png", size: MAX_SOURCE_BYTES + 1 }),
+      fakeFile({ name: "oversize.png", declaredSize: MAX_SOURCE_BYTES + 1 }),
       ...Array.from({ length: 4 }, (_, index) =>
-        fakeFile({ name: `${index}.png`, size: MAX_SOURCE_BYTES }),
+        fakeFile({ name: `${index}.png`, declaredSize: MAX_SOURCE_BYTES }),
       ),
     ];
     const handle = runImageWatermarkBatch(
@@ -492,7 +507,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
   ])("rejects a %d-byte logo before construction or reads", async (size) => {
     installSupportedRuntime();
     const source = fakeFile();
-    const logo = fakeFile({ name: "logo.png", size });
+    const logo = fakeFile({ ...(size > 4 ? { declaredSize: size } : { size }), name: "logo.png" });
     const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
       logoFile: logo.file,
     });

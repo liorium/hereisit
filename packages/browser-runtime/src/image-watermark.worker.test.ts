@@ -349,14 +349,17 @@ describe("image-watermark Worker hostile request boundary", () => {
     [{ protocol: 2, type: "run", jobId: "job-1" }, 1],
     [{ protocol: 1, type: "run", jobId: "" }, 1],
     [runRequest("bad-input", { input: null }), 2],
-    [runRequest("bad-length", {
-      input: {
-        name: "photo.png",
-        mimeHint: "image/png",
-        byteLength: 1,
-        bytes: new ArrayBuffer(2),
-      },
-    }), 2],
+    [
+      runRequest("bad-length", {
+        input: {
+          name: "photo.png",
+          mimeHint: "image/png",
+          byteLength: 1,
+          bytes: new ArrayBuffer(2),
+        },
+      }),
+      2,
+    ],
     [{ protocol: 1, type: "cancel", jobId: "stale-job" }, 1],
   ])("contains malformed or stale request %# without invoking a pipeline helper", async (request, posts) => {
     const scope = await loadWorker();
@@ -665,9 +668,11 @@ describe("image-watermark Worker terminal lifecycle", () => {
     ["size", { byteLength: 5 }],
   ])("rejects mismatched source %s metadata", async (_label, override) => {
     const scope = await loadWorker();
-    scope.dispatch(runRequest("job-mismatch", {
-      input: { ...workerFileInput(), ...override },
-    }));
+    scope.dispatch(
+      runRequest("job-mismatch", {
+        input: { ...workerFileInput(), ...override },
+      }),
+    );
     await flushWorker();
     expect(terminalPosts(scope, "job-mismatch")).toMatchObject([
       { event: { type: "failed", error: { code: "INVALID_SPEC" } } },
@@ -700,6 +705,22 @@ describe("image-watermark Worker terminal lifecycle", () => {
     await vi.waitFor(() => expect(terminalPosts(scope, "job-wrong-length")).toHaveLength(1));
 
     expect(terminalPosts(scope, "job-wrong-length")).toMatchObject([
+      { event: { type: "failed", error: { code: "CORRUPT_INPUT", retryable: false } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-ordinary source read buffer", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
+    const bytes = new ArrayBuffer(4);
+    Object.setPrototypeOf(bytes, null);
+    vi.spyOn(file, "arrayBuffer").mockResolvedValue(bytes);
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-non-ordinary", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-non-ordinary")).toHaveLength(1));
+
+    expect(terminalPosts(scope, "job-non-ordinary")).toMatchObject([
       { event: { type: "failed", error: { code: "CORRUPT_INPUT", retryable: false } } },
     ]);
     expect(pipelineMocks.process).not.toHaveBeenCalled();
