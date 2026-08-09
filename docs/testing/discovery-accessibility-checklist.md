@@ -47,5 +47,5 @@ motion enabled, menu, panel, and card transitions must not introduce non-essenti
 
 ## Automated gate
 
-Before release, run the repository's discovery Playwright matrix and `pnpm verify:all`. Automated passing
-results do not replace or alter the manual result records above.
+Before release, use the GitHub Actions `browser` job for the repository's discovery Playwright matrix.
+Automated passing results do not replace or alter the manual result records above.

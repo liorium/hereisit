@@ -38,19 +38,11 @@ Web Analytics 값은 `sampleInterval`을 반영한 추정치다. 차단 도구�
 완전한 전체 건수가 아닐 수 있다. Analytics Engine 이벤트는 3개월, Web Analytics는 이전 6개월까지
 조회할 수 있다.
 
-## 테스트용 분석 빌드
+## 분석 브라우저 검증 정책
 
-일반 로컬 빌드는 분석 요청을 만들지 않는다. 개인정보·장애 격리 브라우저 검증은 명시적인 빌드에서만
-실행한다.
-
-```bash
-ALLOW_LOCAL_PROCESSING_ORIGINS=1 \
-NEXT_PUBLIC_PROCESSING_API_ORIGIN=http://127.0.0.1:4173 \
-pnpm --filter @hereisit/web build
-
-HEREISIT_E2E_PRODUCT_ANALYTICS=1 \
-pnpm exec playwright test tests/e2e/product-analytics.spec.ts --project=chromium
-```
+GitHub Actions `browser` job의 `Test product analytics` 단계가 명시적인 분석 fixture를 빌드하고
+개인정보·장애 격리 브라우저 검사를 실행한다. 일상적인 로컬 검증에서는 이 fixture를 빌드하거나
+Playwright를 실행하지 않는다. 실패 시 개인정보 안전 CI artifact만 7일 동안 보존한다.
 
 ## 활성화와 배포 확인
 

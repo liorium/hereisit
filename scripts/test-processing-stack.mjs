@@ -150,7 +150,7 @@ function publicPolicy() {
   };
 }
 
-function publicEngineStatus(status) {
+export function publicEngineStatus(status) {
   const now = new Date().toISOString();
   const processingMs = status.measurements?.processingMs ?? 0;
   const timing = { queueMs: 0, processingMs, totalMs: processingMs };
@@ -158,13 +158,24 @@ function publicEngineStatus(status) {
     const result =
       status.result.kind === "download"
         ? {
-            ...status.result,
+            kind: "download",
+            mime: status.result.mime,
+            byteLength: status.result.byteLength,
+            width: status.result.width,
+            height: status.result.height,
+            engineBuildId: status.result.engineBuildId,
+            codecBuildId: status.result.codecBuildId,
+            warnings: status.result.warnings,
             timing,
             expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
           }
         : {
-            ...status.result,
+            kind: "original-retained",
             reason: "NO_SIZE_REDUCTION",
+            testedCandidates: status.result.testedCandidates,
+            engineBuildId: status.result.engineBuildId,
+            codecBuildId: status.result.codecBuildId,
+            warnings: status.result.warnings,
             timing,
           };
     return {
@@ -316,8 +327,11 @@ async function startComposedProcessingApi(port, engineOrigin, pageOrigin) {
       }
       if (method === "GET" && action === "result") {
         const engine = await fetch(`${engineOrigin}/v1/jobs/${jobId}/output`);
+        const contentLength = engine.headers.get("content-length");
+        if (contentLength === null) throw new Error("composed engine result length missing");
         response.writeHead(engine.status, {
           ...publicCorsHeaders(pageOrigin),
+          "content-length": contentLength,
           "content-type": engine.headers.get("content-type") ?? "application/octet-stream",
           "x-download-lease": "a".repeat(43),
         });
