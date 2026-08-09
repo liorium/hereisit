@@ -293,6 +293,44 @@ describe("image Worker file input", () => {
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
 
+  it("reports MEMORY_LIMIT for an empty File with matching metadata before reading it", async () => {
+    const scope = await loadWorker();
+    const file = new File([], "empty.png", { type: "image/png" });
+    const read = vi.spyOn(file, "arrayBuffer");
+
+    scope.dispatch(runRequest(file));
+
+    await vi.waitFor(() => expect(terminalPosts(scope)).toHaveLength(1));
+    expect(failure(scope)).toEqual({
+      code: "MEMORY_LIMIT",
+      message: "파일은 50MB 이하만 처리할 수 있습니다.",
+      retryable: false,
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("reports MEMORY_LIMIT for a File over the input limit with matching metadata before reading it", async () => {
+    const scope = await loadWorker();
+    let read: ReturnType<typeof vi.spyOn>;
+    {
+      const file = new File([new Uint8Array(50 * MEBIBYTE + 1)], "large.png", {
+        type: "image/png",
+      });
+      read = vi.spyOn(file, "arrayBuffer");
+      scope.dispatch(runRequest(file));
+    }
+
+    await vi.waitFor(() => expect(terminalPosts(scope)).toHaveLength(1));
+    expect(failure(scope)).toEqual({
+      code: "MEMORY_LIMIT",
+      message: "파일은 50MB 이하만 처리할 수 있습니다.",
+      retryable: false,
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
   it("sanitizes an unexpected pipeline rejection", async () => {
     pipelineMocks.process.mockRejectedValueOnce(new Error("PRIVATE_PIPELINE_FAILURE"));
     const scope = await loadWorker();

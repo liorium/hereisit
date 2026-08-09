@@ -28,6 +28,7 @@
 - `packages/browser-runtime/src/run-image-batch.test.ts` — proves UI-realm non-reading, structured clone shape, scheduling, limits, crashes, and cancellation.
 - `packages/browser-runtime/src/image.worker.ts` — validates requests, reads native Files, checks returned bytes, and calls the existing pipeline.
 - `packages/browser-runtime/src/image.worker.test.ts` — proves hostile-boundary, read, error, concurrency, and cancellation behavior.
+- `tests/e2e/image-workbench.spec.ts` — keeps controlled image Worker doubles on the native-File envelope used by protected browser CI.
 - `docs/architecture.md` — records the common image Worker file-I/O boundary and the compression exceptions.
 
 ### Task 1: Send native source Files from the batch runner
@@ -199,6 +200,7 @@ git diff --check
 ```
 
 Expected: all PASS and `rg -n 'item\.file\.arrayBuffer\(' packages/browser-runtime/src/run-image-batch.ts` returns no matches.
+Also search every `image.pipeline` Worker double and `input.bytes` consumer; update only controlled image Worker doubles to consume the exact native-File envelope. Do not run Playwright locally.
 
 Commit:
 
@@ -270,7 +272,7 @@ Add tests that expect:
 - pipeline receives an ordinary `ArrayBuffer` containing the File bytes;
 - exact-shaped input with a non-native `file` is `INVALID_SPEC`;
 - extra request/input keys, hostile prototypes, and throwing getters do not escape the handler;
-- name, MIME, declared size, zero size, and `50MiB + 1` mismatches fail before pipeline use;
+- name, MIME, and declared-size mismatches fail as `INVALID_SPEC` before pipeline use; actual metadata-matching empty and `50MiB + 1` native Files fail as non-retryable `MEMORY_LIMIT` before reading;
 - valid job IDs receive exactly one terminal event.
 
 - [ ] **Step 3: Write failing read-error, wrong-buffer, concurrency, and cancellation tests**
@@ -314,7 +316,7 @@ async function readFileInput(
 ): Promise<{ name: string; mimeHint: string; byteLength: number; bytes: ArrayBuffer }>;
 ```
 
-Use plain-record and exact-key checks. Bound IDs to 128 characters, names to 512, MIME hints to 100, and inputs to `50 * 1024 * 1024`. Require `file instanceof File`, exact metadata equality, an ordinary own-key-free `ArrayBuffer`, and post-read length equality.
+Use plain-record and exact-key checks. Bound IDs to 128 characters, names to 512, MIME hints to 100, and inputs to `50 * 1024 * 1024`. Require `file instanceof File` and exact metadata equality first; matching native-File envelopes below 1 byte or above the input limit return non-retryable `MEMORY_LIMIT` before reading, while malformed or metadata-mismatched envelopes remain `INVALID_SPEC`. Require an ordinary own-key-free `ArrayBuffer` and post-read length equality.
 
 Validate `spec` with `imagePipelineSpecSchema.safeParse()` before reading the file. Read untrusted request fields only inside guarded parsing so hostile getters and prototypes cannot escape the message handler. Unknown exceptions must use the fixed public message `이미지를 처리하는 중 오류가 발생했습니다.` rather than `error.message`.
 

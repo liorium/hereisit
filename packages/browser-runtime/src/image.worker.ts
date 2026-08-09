@@ -15,6 +15,7 @@ const MAX_INPUT_BYTES = 50 * 1024 * 1024;
 const MAX_ID_LENGTH = 128;
 const MAX_NAME_LENGTH = 512;
 const MAX_MIME_HINT_LENGTH = 100;
+const INPUT_MEMORY_LIMIT_MESSAGE = "파일은 50MB 이하만 처리할 수 있습니다.";
 const FALLBACK_ERROR_MESSAGE = "이미지를 처리하는 중 오류가 발생했습니다.";
 const CANCELLED_MESSAGE = "작업을 중단했습니다.";
 const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
@@ -33,9 +34,11 @@ interface RunEnvelope {
   jobId: string;
   tool: unknown;
   toolVersion: unknown;
-  input: ImageWorkerFileInput;
+  input: ParsedFileInput;
   spec: unknown;
 }
+
+type ParsedFileInput = { kind: "file"; value: ImageWorkerFileInput } | { kind: "memory-limit" };
 
 let activeJob: ActiveJob | undefined;
 
@@ -98,7 +101,7 @@ function arrayBufferByteLength(value: ArrayBuffer): number {
   return Reflect.apply(ARRAY_BUFFER_BYTE_LENGTH_GETTER, value, []) as number;
 }
 
-function parseFileInput(value: unknown): ImageWorkerFileInput | undefined {
+function parseFileInput(value: unknown): ParsedFileInput | undefined {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["name", "mimeHint", "byteLength", "file"])) {
     return undefined;
   }
@@ -110,15 +113,14 @@ function parseFileInput(value: unknown): ImageWorkerFileInput | undefined {
     !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
     typeof byteLength !== "number" ||
     !Number.isSafeInteger(byteLength) ||
-    byteLength < 1 ||
-    byteLength > MAX_INPUT_BYTES ||
     file.name !== name ||
     file.type !== mimeHint ||
     file.size !== byteLength
   ) {
     return undefined;
   }
-  return { name, mimeHint, byteLength, file };
+  if (byteLength < 1 || byteLength > MAX_INPUT_BYTES) return { kind: "memory-limit" };
+  return { kind: "file", value: { name, mimeHint, byteLength, file } };
 }
 
 function parseRunEnvelope(value: unknown): RunEnvelope | undefined {
@@ -207,6 +209,15 @@ async function run(request: RunEnvelope): Promise<void> {
     invalidRun(request.jobId, "지원하지 않는 도구 버전입니다.");
     return;
   }
+  if (request.input.kind === "memory-limit") {
+    safePost({
+      protocol: WORKER_PROTOCOL_VERSION,
+      type: "failed",
+      jobId: request.jobId,
+      error: { code: "MEMORY_LIMIT", message: INPUT_MEMORY_LIMIT_MESSAGE, retryable: false },
+    });
+    return;
+  }
   if (activeJob !== undefined) {
     safePost({
       protocol: WORKER_PROTOCOL_VERSION,
@@ -228,7 +239,7 @@ async function run(request: RunEnvelope): Promise<void> {
   let sequence = 0;
   try {
     job.controller.signal.throwIfAborted();
-    const input = await readFileInput(request.input, job.controller.signal);
+    const input = await readFileInput(request.input.value, job.controller.signal);
     job.controller.signal.throwIfAborted();
     const result = await processImagePipeline(input, parsedSpec, (phase, fraction) => {
       job.controller.signal.throwIfAborted();
