@@ -291,18 +291,23 @@ export interface ToolErrorPayload {
   retryable: boolean;
 }
 
+export interface WorkerFileInput {
+  name: string;
+  mimeHint: string;
+  byteLength: number;
+  file: File;
+}
+
+export type ImageWorkerFileInput = WorkerFileInput;
+export type ImageWatermarkWorkerFileInput = WorkerFileInput;
+
 export interface ImageRunRequest {
   protocol: 1;
   type: "run";
   jobId: string;
   tool: "image.pipeline";
   toolVersion: typeof IMAGE_TOOL_VERSION;
-  input: {
-    name: string;
-    mimeHint: string;
-    byteLength: number;
-    bytes: ArrayBuffer;
-  };
+  input: ImageWorkerFileInput;
   spec: ImagePipelineSpec;
 }
 
@@ -376,13 +381,6 @@ export interface ImageWatermarkInput {
   mimeHint: string;
   byteLength: number;
   bytes: ArrayBuffer;
-}
-
-export interface ImageWatermarkWorkerFileInput {
-  name: string;
-  mimeHint: string;
-  byteLength: number;
-  file: File;
 }
 
 export type ImageWatermarkLogoInput = ImageWatermarkInput;
