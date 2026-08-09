@@ -30,14 +30,13 @@ Requirements: Node.js 24 LTS and pnpm 11.11.0.
 ~~~bash
 pnpm install --frozen-lockfile
 pnpm verify
-pnpm exec playwright install --with-deps chromium firefox webkit
-PLAYWRIGHT_WEBKIT=1 pnpm verify:all
+pnpm verify:all
 pnpm cloudflare:preview
 ~~~
 
-The full release matrix attempts desktop Chromium, Firefox, and WebKit plus mobile Chromium and WebKit.
-If this host cannot install or launch WebKit, record those projects as `not run` with the dependency
-reason; do not call them passed. GitHub CI must run the complete matrix for the exact release SHA.
+The GitHub Actions `browser` job is the authoritative browser release gate for the exact pull-request SHA.
+It runs desktop and mobile Chromium, Firefox, and WebKit; routine local verification does not install or run
+Playwright browsers.
 
 The developer server (`pnpm dev`) and developer-facing Pages preview (`pnpm cloudflare:preview`) use
 http://127.0.0.1:3000, one at a time. The Pages preview serves `apps/web/out` through the same Wrangler

@@ -43,21 +43,10 @@ all nine keyboard-accessible anchors, cancellation and settings invalidation, ex
 PDF-page rasterization, page organization, PDF text watermarking, downloaded artifacts, mobile layouts,
 Worker isolation, and that processing makes no external, write, or request-body traffic:
 
-~~~bash
-pnpm exec playwright install --with-deps chromium firefox
-pnpm build
-pnpm test:e2e
-# or run core and browser checks together
-pnpm verify:all
-~~~
-
-The default local suite covers desktop Chromium and Firefox plus mobile Chromium. To include the same
-desktop and mobile WebKit projects used by CI:
-
-~~~bash
-pnpm exec playwright install --with-deps webkit
-PLAYWRIGHT_WEBKIT=1 pnpm test:e2e
-~~~
+The GitHub Actions `browser` job runs the complete automated Playwright matrix for every pull request:
+desktop and mobile Chromium, Firefox, and WebKit. It installs browsers on the hosted runner, keeps WebKit
+on one worker, and uploads screenshots, traces, and the HTML report only when the job fails. Routine local
+verification is `pnpm verify`; use `pnpm verify:all` only when the local processing-stack test is also needed.
 
 Build and preview the exact Cloudflare Pages output locally:
 

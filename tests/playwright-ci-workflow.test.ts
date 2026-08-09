@@ -59,4 +59,22 @@ describe("Playwright CI workflow", () => {
     expect(config).toContain('command: "pnpm --filter @hereisit/web preview:test"');
     expect(config).toContain('["html", { open: "never" }]');
   });
+
+  it("documents Playwright as CI-only routine verification", () => {
+    const agents = readFileSync("AGENTS.md", "utf8");
+    const readme = readFileSync("README.md", "utf8");
+    const deployment = readFileSync("docs/deployment.md", "utf8");
+    const checklist = readFileSync("docs/testing/discovery-accessibility-checklist.md", "utf8");
+
+    expect(agents).toContain("Automated Playwright E2E runs in GitHub Actions only.");
+    expect(agents).toContain(
+      "`pnpm verify:all` — run core verification and the local processing-stack test.",
+    );
+    for (const document of [readme, deployment, checklist]) {
+      expect(document).toContain("GitHub Actions `browser` job");
+      expect(document).not.toContain("PLAYWRIGHT_WEBKIT=1");
+    }
+    expect(readme).not.toContain("pnpm exec playwright install --with-deps");
+    expect(deployment).not.toContain("pnpm exec playwright install --with-deps");
+  });
 });
