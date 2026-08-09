@@ -58,7 +58,6 @@ interface FakeFileOptions {
   type?: string;
   size?: number;
   read?: Promise<ArrayBuffer>;
-  arrayBuffer?: unknown;
 }
 
 function fakeFile(options: FakeFileOptions = {}): {
@@ -66,15 +65,13 @@ function fakeFile(options: FakeFileOptions = {}): {
   arrayBuffer: ReturnType<typeof vi.fn>;
 } {
   const size = options.size ?? 4;
-  const read = options.read ?? Promise.resolve(new ArrayBuffer(size > MAX_SOURCE_BYTES ? 1 : size));
-  const arrayBuffer = vi.fn(() => read);
+  const file = new File([new Uint8Array(size)], options.name ?? "photo.png", {
+    type: options.type ?? "image/png",
+  });
+  const arrayBuffer = vi.spyOn(file, "arrayBuffer");
+  if (options.read !== undefined) arrayBuffer.mockReturnValue(options.read);
   return {
-    file: {
-      name: options.name ?? "photo.png",
-      type: options.type ?? "image/png",
-      size,
-      arrayBuffer: options.arrayBuffer ?? arrayBuffer,
-    } as unknown as File,
+    file,
     arrayBuffer,
   };
 }
@@ -150,7 +147,6 @@ function installSupportedRuntime(
   } = {},
 ): void {
   vi.stubGlobal("Worker", options.worker ?? StubWorker);
-  vi.stubGlobal("File", class {});
   vi.stubGlobal("OffscreenCanvas", SupportedOffscreenCanvas);
   vi.stubGlobal("navigator", {
     hardwareConcurrency: options.cores ?? 8,
@@ -369,6 +365,30 @@ describe("supportsBrowserImageWatermarkRuntime", () => {
 });
 
 describe("runImageWatermarkBatch validation and readiness", () => {
+  it("dispatches the source File without reading it in the UI realm", async () => {
+    installSupportedRuntime();
+    const file = new File([pngBuffer(58)], "source.png", { type: "image/png" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    const handle = runImageWatermarkBatch([item("source", file)], { concurrency: 1 });
+    const worker = StubWorker.instances[0] as StubWorker;
+
+    worker.emit(readyEvent());
+    const posted = await waitForMessage(worker, "run");
+
+    expect(read).not.toHaveBeenCalled();
+    expect(posted.transfer).toEqual([]);
+    expect(posted.message).toMatchObject({
+      type: "run",
+      input: {
+        name: "source.png",
+        mimeHint: "image/png",
+        byteLength: 58,
+        file,
+      },
+    });
+    handle.cancel();
+  });
+
   it("throws on empty and 101-item batches before Worker construction or reads", () => {
     installSupportedRuntime();
     const source = fakeFile();
@@ -539,7 +559,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(StubWorker.instances).toHaveLength(0);
   });
 
-  it("constructs two dedicated slots but reads each source only after that slot is ready", async () => {
+  it("constructs two dedicated slots and dispatches each source only after that slot is ready", async () => {
     installSupportedRuntime();
     const first = fakeFile({ name: "first.png" });
     const second = fakeFile({ name: "second.png" });
@@ -558,16 +578,16 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     StubWorker.instances[0]?.emit(readyEvent());
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(StubWorker.instances[0] as StubWorker, "run");
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     StubWorker.instances[1]?.emit(readyEvent());
-    await vi.waitFor(() => expect(second.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(StubWorker.instances[1] as StubWorker, "run");
     handle.cancel();
     await handle.result;
   });
 
-  it("reads one logo after readiness, transfers one copy per slot, and gates source reads on matching logo-ready", async () => {
+  it("reads one logo after readiness, transfers one copy per slot, and gates source dispatch on matching logo-ready", async () => {
     installSupportedRuntime();
     const first = fakeFile({ name: "first.png" });
     const second = fakeFile({ name: "second.png" });
@@ -616,11 +636,11 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(first.arrayBuffer).not.toHaveBeenCalled();
 
     firstWorker.emit({ protocol: 1, type: "logo-ready", assetId: firstAsset });
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(firstWorker, "run");
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     secondWorker.emit({ protocol: 1, type: "logo-ready", assetId: secondAsset });
-    await vi.waitFor(() => expect(second.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(secondWorker, "run");
     handle.cancel();
     await handle.result;
   });
@@ -807,9 +827,9 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
-  it("rejects one unreadable source and reuses the slot for the next item", async () => {
+  it("reuses a slot after the Worker reports corrupt source input", async () => {
     installSupportedRuntime();
-    const unreadable = fakeFile({ read: Promise.reject(new Error("read failed")) });
+    const unreadable = fakeFile();
     const next = fakeFile({ name: "next.png" });
     const handle = runImageWatermarkBatch(
       [item("unreadable", unreadable.file), item("next", next.file)],
@@ -820,8 +840,13 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
 
     worker.emit(readyEvent());
     const run = await waitForMessage(worker, "run");
-    expect(next.arrayBuffer).toHaveBeenCalledOnce();
-    emitComplete(worker, run);
+    emitFailed(worker, run, {
+      code: "CORRUPT_INPUT",
+      message: "이미지 파일을 읽지 못했어요.",
+      retryable: true,
+    });
+    const nextRun = await waitForMessage(worker, "run", 2);
+    emitComplete(worker, nextRun);
 
     await expect(handle.result).resolves.toMatchObject([
       { itemId: "unreadable", status: "rejected", error: { code: "CORRUPT_INPUT" } },
@@ -829,21 +854,24 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     ]);
   });
 
-  it("contains hostile source-buffer reflection and reuses the slot", async () => {
+  it("does not inspect a hostile source read method before dispatch", async () => {
     installSupportedRuntime();
-    const hostileBytes = new Proxy(new ArrayBuffer(4), {
-      getPrototypeOf(): never {
-        throw new Error("hostile buffer prototype");
-      },
-    });
-    const hostile = fakeFile({ read: Promise.resolve(hostileBytes) });
+    const hostileRead = deferred<ArrayBuffer>();
+    const hostile = fakeFile({ read: hostileRead.promise });
     const handle = runImageWatermarkBatch([item("hostile", hostile.file), item("next")], {
       concurrency: 1,
     });
     const worker = StubWorker.instances[0];
     if (worker === undefined) throw new Error("Expected a Worker.");
     worker.emit(readyEvent());
-    const nextRun = await waitForMessage(worker, "run");
+    const firstRun = await waitForMessage(worker, "run");
+    expect(hostile.arrayBuffer).not.toHaveBeenCalled();
+    emitFailed(worker, firstRun, {
+      code: "CORRUPT_INPUT",
+      message: "이미지 파일을 읽지 못했어요.",
+      retryable: true,
+    });
+    const nextRun = await waitForMessage(worker, "run", 2);
     emitComplete(worker, nextRun);
 
     await expect(handle.result).resolves.toMatchObject([
@@ -1717,10 +1745,9 @@ describe("runImageWatermarkBatch cancellation", () => {
     expect([...returnedLogoBytes]).toEqual([0, 0, 0, 0]);
   });
 
-  it("cancels during a source read, posts no run, and starts no later read", async () => {
+  it("cancels an active source dispatch without reading a later source", async () => {
     installSupportedRuntime();
-    const firstRead = deferred<ArrayBuffer>();
-    const first = fakeFile({ size: 4, read: firstRead.promise });
+    const first = fakeFile({ size: 4 });
     const second = fakeFile({ name: "second.png" });
     const handle = runImageWatermarkBatch(
       [item("first", first.file), item("second", second.file)],
@@ -1729,18 +1756,16 @@ describe("runImageWatermarkBatch cancellation", () => {
     const worker = StubWorker.instances[0];
     if (worker === undefined) throw new Error("Expected a Worker.");
     worker.emit(readyEvent());
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(worker, "run");
 
     handle.cancel();
-    firstRead.resolve(new ArrayBuffer(4));
-    await Promise.resolve();
-    await Promise.resolve();
 
     await expect(handle.result).resolves.toEqual([
       { itemId: "first", status: "cancelled" },
       { itemId: "second", status: "cancelled" },
     ]);
-    expect(messagesOfType(worker, "run")).toHaveLength(0);
+    expect(messagesOfType(worker, "run")).toHaveLength(1);
+    expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
     expect(worker.terminateCount).toBe(1);
   });

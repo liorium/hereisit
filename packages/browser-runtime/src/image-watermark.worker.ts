@@ -6,6 +6,7 @@ import {
   type ImageWatermarkErrorPayload,
   type ImageWatermarkInput,
   type ImageWatermarkPhase,
+  type ImageWatermarkWorkerFileInput,
   type ImageWatermarkWorkerEvent,
   imageWatermarkSpecSchema,
   type ParsedImageWatermarkSpecV1,
@@ -13,6 +14,7 @@ import {
 } from "@hereisit/tool-contracts";
 import {
   closePreparedImageWatermarkLogo,
+  ImageWatermarkPipelineError,
   type PreparedImageWatermarkLogo,
   prepareImageWatermarkLogo,
   processImageWatermarkPipeline,
@@ -49,7 +51,7 @@ interface RunEnvelope {
   jobId: string;
   tool: unknown;
   toolVersion: unknown;
-  input: ImageWatermarkInput;
+  input: ImageWatermarkWorkerFileInput;
   spec: unknown;
   logoAssetId: string | undefined;
 }
@@ -137,6 +139,62 @@ function parseInput(value: unknown, maximumBytes: number): ImageWatermarkInput |
   return { name, mimeHint, byteLength, bytes };
 }
 
+function parseFileInput(
+  value: unknown,
+  maximumBytes: number,
+): ImageWatermarkWorkerFileInput | undefined {
+  if (!isPlainRecord(value) || !hasExactKeys(value, ["name", "mimeHint", "byteLength", "file"])) {
+    return undefined;
+  }
+  const { name, mimeHint, byteLength, file } = value;
+  if (
+    typeof File === "undefined" ||
+    !(file instanceof File) ||
+    !isBoundedString(name, 1, MAX_INPUT_NAME_LENGTH) ||
+    !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
+    typeof byteLength !== "number" ||
+    !Number.isSafeInteger(byteLength) ||
+    byteLength < 1 ||
+    byteLength > maximumBytes ||
+    file.name !== name ||
+    file.type !== mimeHint ||
+    file.size !== byteLength
+  ) {
+    return undefined;
+  }
+  return { name, mimeHint, byteLength, file };
+}
+
+async function readFileInput(
+  input: ImageWatermarkWorkerFileInput,
+  signal: AbortSignal,
+): Promise<ImageWatermarkInput> {
+  let bytes: unknown;
+  try {
+    signal.throwIfAborted();
+    bytes = await input.file.arrayBuffer();
+    signal.throwIfAborted();
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new ImageWatermarkPipelineError("CORRUPT_INPUT", "이미지 파일을 읽지 못했어요.", true);
+  }
+  try {
+    if (!isOrdinaryArrayBuffer(bytes) || arrayBufferByteLength(bytes) !== input.byteLength) {
+      throw new ImageWatermarkPipelineError(
+        "CORRUPT_INPUT",
+        "이미지 파일 크기를 확인하지 못했어요.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof ImageWatermarkPipelineError) throw error;
+    throw new ImageWatermarkPipelineError(
+      "CORRUPT_INPUT",
+      "이미지 파일 크기를 확인하지 못했어요.",
+    );
+  }
+  return { name: input.name, mimeHint: input.mimeHint, byteLength: input.byteLength, bytes };
+}
+
 function parseConfigureLogoEnvelope(
   value: Record<PropertyKey, unknown>,
   assetId: string,
@@ -167,7 +225,7 @@ function parseRunEnvelope(
   const spec = value.spec;
   const rawLogoAssetId = hasLogoAssetId ? value.logoAssetId : undefined;
   if (rawLogoAssetId !== undefined && !isSafeId(rawLogoAssetId)) return undefined;
-  const input = parseInput(rawInput, MAX_SOURCE_BYTES);
+  const input = parseFileInput(rawInput, MAX_SOURCE_BYTES);
   if (input === undefined) return undefined;
   return { jobId, tool, toolVersion, input, spec, logoAssetId: rawLogoAssetId };
 }
@@ -385,8 +443,11 @@ function startRun(request: RunEnvelope): void {
   let terminalPosted = false;
   void (async () => {
     try {
+      postProgress(job, sequence, "validating", 0.01);
+      sequence += 1;
+      const input = await readFileInput(request.input, job.controller.signal);
       const output = await processImageWatermarkPipeline(
-        request.input,
+        input,
         spec,
         logo,
         (phase, fraction) => {
@@ -461,6 +522,7 @@ scope.onmessage = (message: MessageEvent<unknown>) => {
     if (!isSafeId(jobId)) return;
     const run = parseRunEnvelope(request, jobId);
     if (run !== undefined) startRun(run);
+    else invalidRun(jobId);
   } catch {
     // Worker messages are untrusted structured-clone input.
   }

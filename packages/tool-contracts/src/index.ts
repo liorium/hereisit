@@ -378,6 +378,13 @@ export interface ImageWatermarkInput {
   bytes: ArrayBuffer;
 }
 
+export interface ImageWatermarkWorkerFileInput {
+  name: string;
+  mimeHint: string;
+  byteLength: number;
+  file: File;
+}
+
 export type ImageWatermarkLogoInput = ImageWatermarkInput;
 
 export type ImageWatermarkPhase =
@@ -442,7 +449,7 @@ export type ImageWatermarkWorkerRequest =
       jobId: string;
       tool: typeof IMAGE_WATERMARK_TOOL_ID;
       toolVersion: typeof IMAGE_WATERMARK_TOOL_VERSION;
-      input: ImageWatermarkInput;
+      input: ImageWatermarkWorkerFileInput;
       spec: ImageWatermarkSpecV1;
       logoAssetId?: string;
     }

@@ -87,7 +87,7 @@ interface CapturedFile {
   name: string;
   mimeHint: string;
   size: number;
-  read(): Promise<ArrayBuffer>;
+  file: File;
 }
 
 interface CapturedItem extends CapturedFile {
@@ -97,7 +97,7 @@ interface CapturedItem extends CapturedFile {
   needsLogo: boolean;
 }
 
-type SlotState = "starting" | "ready" | "configuring-logo" | "idle" | "reading" | "running";
+type SlotState = "starting" | "ready" | "configuring-logo" | "idle" | "running";
 
 interface WorkerSlot {
   worker: Worker;
@@ -247,27 +247,17 @@ function requestedConcurrency(value: RunImageWatermarkBatchOptions["concurrency"
 }
 
 function captureFile(value: unknown): CapturedFile | undefined {
-  if (!isObjectRecord(value)) return undefined;
+  if (typeof File === "undefined" || !(value instanceof File)) return undefined;
   try {
-    const name = value.name;
-    const mimeHint = value.type;
-    const size = value.size;
-    const arrayBuffer = value.arrayBuffer;
+    const { name, type: mimeHint, size } = value;
     if (
       !isBoundedString(name, 1, MAX_INPUT_NAME_LENGTH) ||
       !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
-      typeof size !== "number" ||
-      !Number.isSafeInteger(size) ||
-      typeof arrayBuffer !== "function"
+      !Number.isSafeInteger(size)
     ) {
       return undefined;
     }
-    return {
-      name,
-      mimeHint,
-      size,
-      read: () => Reflect.apply(arrayBuffer, value, []) as Promise<ArrayBuffer>,
-    };
+    return { name, mimeHint, size, file: value };
   } catch {
     return undefined;
   }
@@ -737,39 +727,14 @@ export function runImageWatermarkBatch(
       void assignNext(slot);
       return;
     }
-    const generation = ++slot.generation;
+    slot.generation += 1;
     const jobId = makeId("job");
     slot.itemIndex = index;
     slot.jobId = jobId;
-    slot.state = "reading";
+    slot.state = "running";
     slot.lastSequence = -1;
     slot.lastFraction = -1;
     armSlotTimeout(slot);
-
-    let bytes: ArrayBuffer;
-    try {
-      bytes = await captured.read();
-    } catch {
-      if (slot.generation !== generation || slot.itemIndex !== index || settled || cancelled)
-        return;
-      settleSlotItem(slot, {
-        itemId: captured.itemId,
-        status: "rejected",
-        error: CORRUPT_INPUT_ERROR,
-      });
-      return;
-    }
-    if (slot.generation !== generation || slot.itemIndex !== index || settled || cancelled) return;
-    const validatedBytes = validatedReadBuffer(bytes, captured.size);
-    if (validatedBytes === undefined) {
-      settleSlotItem(slot, {
-        itemId: captured.itemId,
-        status: "rejected",
-        error: { ...CORRUPT_INPUT_ERROR, retryable: false },
-      });
-      return;
-    }
-    bytes = validatedBytes;
 
     const request: ImageWatermarkWorkerRequest = {
       protocol: WORKER_PROTOCOL_VERSION,
@@ -781,14 +746,13 @@ export function runImageWatermarkBatch(
         name: captured.name,
         mimeHint: captured.mimeHint,
         byteLength: captured.size,
-        bytes,
+        file: captured.file,
       },
       spec: captured.spec,
       ...(captured.needsLogo ? { logoAssetId } : {}),
     };
     try {
-      slot.state = "running";
-      slot.worker.postMessage(request, [bytes]);
+      slot.worker.postMessage(request);
     } catch {
       failSlot(slot, WORKER_FAILURE_ERROR);
     }
@@ -840,7 +804,7 @@ export function runImageWatermarkBatch(
     void (async () => {
       let readValue: unknown;
       try {
-        readValue = await logo.read();
+        readValue = await logo.file.arrayBuffer();
       } catch {
         if (!settled && !cancelled) rejectUnsettled(CORRUPT_INPUT_ERROR);
         return;
@@ -970,11 +934,6 @@ export function runImageWatermarkBatch(
           failSlot(slot, WORKER_FAILURE_ERROR);
           return;
         }
-        if (slot.state === "reading") {
-          failSlot(slot, WORKER_FAILURE_ERROR);
-          return;
-        }
-
         const captured = capturedItems.get(slot.itemIndex);
         if (captured === undefined) {
           failSlot(slot, WORKER_FAILURE_ERROR);
