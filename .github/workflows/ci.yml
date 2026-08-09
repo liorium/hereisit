@@ -47,14 +47,28 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @hereisit/web build
-      - run: pnpm exec playwright install --with-deps chromium firefox
-      - run: >-
-          pnpm exec playwright test
-          --project=chromium
-          --project=firefox
-          --project=mobile-chromium
-          --project=mobile-firefox
-      - run: pnpm test:e2e:webkit
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Test browser matrix
+        run: |
+          set +e
+          PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/primary \
+            pnpm test:e2e:ci -- \
+            --project=chromium \
+            --project=firefox \
+            --project=mobile-chromium \
+            --project=mobile-firefox \
+            --output=test-results/primary
+          primary_status=$?
+          PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/webkit \
+            pnpm test:e2e:ci -- \
+            --project=webkit \
+            --project=mobile-webkit \
+            --workers=1 \
+            --output=test-results/webkit
+          webkit_status=$?
+          if (( primary_status != 0 || webkit_status != 0 )); then
+            exit 1
+          fi
       - name: Build product analytics fixture
         run: pnpm --filter @hereisit/web build
         env:
@@ -62,7 +76,7 @@ jobs:
           NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
       - name: Test product analytics
         run: >-
-          pnpm exec playwright test
+          pnpm test:e2e:ci --
           tests/e2e/product-analytics.spec.ts
           tests/e2e/image-workbench.spec.ts
           tests/e2e/pdf-tools.spec.ts

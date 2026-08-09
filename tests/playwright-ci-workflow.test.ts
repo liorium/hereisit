@@ -1,0 +1,62 @@
+import { existsSync, readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+const config = readFileSync("playwright.config.ts", "utf8");
+
+describe("Playwright CI workflow", () => {
+  it("runs all browser projects on the hosted runner without Docker", () => {
+    expect(manifest.scripts["test:e2e:ci"]).toBe("playwright test");
+    expect(manifest.scripts["verify:all"]).toBe("pnpm verify && pnpm test:processing-stack");
+    expect(manifest.scripts).not.toHaveProperty("test:e2e");
+    expect(manifest.scripts).not.toHaveProperty("test:e2e:ui");
+    expect(manifest.scripts).not.toHaveProperty("test:e2e:webkit");
+
+    expect(workflow).toContain("pnpm exec playwright install --with-deps chromium firefox webkit");
+    for (const project of [
+      "chromium",
+      "firefox",
+      "mobile-chromium",
+      "mobile-firefox",
+      "webkit",
+      "mobile-webkit",
+    ]) {
+      expect(workflow).toContain(`--project=${project}`);
+    }
+    expect(workflow).toContain("--workers=1");
+    expect(workflow).toContain("--output=test-results/primary");
+    expect(workflow).toContain("--output=test-results/webkit");
+    expect(workflow).toContain("PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/primary");
+    expect(workflow).toContain("PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/webkit");
+    expect(workflow).not.toContain("pnpm test:e2e:webkit");
+    expect(workflow).not.toContain("test-playwright-webkit-container");
+    expect(existsSync("scripts/test-playwright-webkit-container.mjs")).toBe(false);
+  });
+
+  it("attempts WebKit after the first browser group and combines both statuses", () => {
+    const firstGroup = workflow.indexOf("--project=mobile-firefox");
+    const firstStatus = workflow.indexOf("primary_status=$?", firstGroup);
+    const webkitGroup = workflow.indexOf("--project=webkit", firstStatus);
+    const webkitStatus = workflow.indexOf("webkit_status=$?", webkitGroup);
+    const combinedExit = workflow.indexOf(
+      "if (( primary_status != 0 || webkit_status != 0 )); then",
+      webkitStatus,
+    );
+
+    expect(workflow).toContain("set +e");
+    expect(firstGroup).toBeGreaterThan(-1);
+    expect(firstStatus).toBeGreaterThan(firstGroup);
+    expect(webkitGroup).toBeGreaterThan(firstStatus);
+    expect(webkitStatus).toBeGreaterThan(webkitGroup);
+    expect(combinedExit).toBeGreaterThan(webkitStatus);
+  });
+
+  it("includes WebKit only in CI and uses the normal preview server", () => {
+    expect(config).toContain("const includeWebKit = isCI;");
+    expect(config).not.toContain("PLAYWRIGHT_WEBKIT");
+    expect(config).not.toContain("PLAYWRIGHT_CONTAINER");
+    expect(config).toContain('command: "pnpm --filter @hereisit/web preview:test"');
+    expect(config).toContain('["html", { open: "never" }]');
+  });
+});
