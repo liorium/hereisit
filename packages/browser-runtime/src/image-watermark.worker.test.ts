@@ -160,7 +160,7 @@ function configureRequest(
     assetId,
     tool: "image.watermark",
     toolVersion: 1,
-    input: input(),
+    input: workerFileInput(),
     ...overrides,
   };
 }
@@ -391,7 +391,7 @@ describe("image-watermark Worker hostile request boundary", () => {
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
 
-  it("ignores malformed and oversized logo configuration envelopes", async () => {
+  it("rejects malformed and oversized logo configuration envelopes for valid assets", async () => {
     const oversized = new ArrayBuffer(10 * MEBIBYTE + 1);
     const scope = await loadWorker();
 
@@ -405,7 +405,10 @@ describe("image-watermark Worker hostile request boundary", () => {
     scope.dispatch(configureRequest("asset-large", { input: input(oversized) }));
     await flushWorker();
 
-    expect(scope.posts).toHaveLength(1);
+    expect(scope.posts).toHaveLength(4);
+    expect(logoTerminalPosts(scope, "asset-null")).toHaveLength(1);
+    expect(logoTerminalPosts(scope, "asset-mismatch")).toHaveLength(1);
+    expect(logoTerminalPosts(scope, "asset-large")).toHaveLength(1);
     expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
@@ -451,6 +454,41 @@ describe("image-watermark Worker hostile request boundary", () => {
         },
         transfer: [],
       },
+    ]);
+    expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
+  });
+
+  it("reads and prepares a logo File inside the Worker", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "logo.png", { type: "image/png" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    pipelineMocks.prepareLogo.mockResolvedValue(preparedLogo("logo"));
+    const scope = await loadWorker();
+
+    scope.dispatch(configureRequest("asset-file", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(pipelineMocks.prepareLogo).toHaveBeenCalledOnce());
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(new Uint8Array(pipelineMocks.prepareLogo.mock.calls[0]?.[0].bytes)).toEqual(
+      Uint8Array.of(1, 2, 3, 4),
+    );
+    expect(logoTerminalPosts(scope, "asset-file")).toMatchObject([
+      { event: { type: "logo-ready" } },
+    ]);
+  });
+
+  it.each([
+    ["rejected read", () => Promise.reject(new DOMException("read failed", "NotReadableError")), true],
+    ["changed length", () => Promise.resolve(new ArrayBuffer(5)), false],
+  ])("rejects a logo %s without caching it", async (_label, makeReadResult, retryable) => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "logo.png", { type: "image/png" });
+    vi.spyOn(file, "arrayBuffer").mockImplementation(makeReadResult);
+    const scope = await loadWorker();
+
+    scope.dispatch(configureRequest("asset-bad", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(logoTerminalPosts(scope, "asset-bad")).toHaveLength(1));
+
+    expect(logoTerminalPosts(scope, "asset-bad")).toMatchObject([
+      { event: { type: "logo-failed", error: { code: "CORRUPT_INPUT", retryable } } },
     ]);
     expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
   });
@@ -524,7 +562,12 @@ describe("image-watermark Worker logo cache", () => {
     await flushWorker();
 
     expect(pipelineMocks.prepareLogo).toHaveBeenCalledExactlyOnceWith(
-      configuration.input,
+      expect.objectContaining({
+        name: "photo.png",
+        mimeHint: "image/png",
+        byteLength: 4,
+        bytes: expect.any(ArrayBuffer),
+      }),
       expect.any(AbortSignal),
     );
     expect(logoTerminalPosts(scope, "asset-1")).toEqual([

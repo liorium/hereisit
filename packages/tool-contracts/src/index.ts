@@ -441,7 +441,7 @@ export type ImageWatermarkWorkerRequest =
       assetId: string;
       tool: typeof IMAGE_WATERMARK_TOOL_ID;
       toolVersion: typeof IMAGE_WATERMARK_TOOL_VERSION;
-      input: ImageWatermarkLogoInput;
+      input: ImageWatermarkWorkerFileInput;
     }
   | {
       protocol: 1;

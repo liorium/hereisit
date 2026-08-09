@@ -44,7 +44,7 @@ interface ConfigureLogoEnvelope {
   assetId: string;
   tool: unknown;
   toolVersion: unknown;
-  input: ImageWatermarkInput;
+  input: ImageWatermarkWorkerFileInput;
 }
 
 interface RunEnvelope {
@@ -116,29 +116,6 @@ function arrayBufferByteLength(value: ArrayBuffer): number {
   return Reflect.apply(ARRAY_BUFFER_BYTE_LENGTH_GETTER, value, []) as number;
 }
 
-function parseInput(value: unknown, maximumBytes: number): ImageWatermarkInput | undefined {
-  if (!isPlainRecord(value) || !hasExactKeys(value, ["name", "mimeHint", "byteLength", "bytes"])) {
-    return undefined;
-  }
-  const name = value.name;
-  const mimeHint = value.mimeHint;
-  const byteLength = value.byteLength;
-  const bytes = value.bytes;
-  if (
-    !isBoundedString(name, 1, MAX_INPUT_NAME_LENGTH) ||
-    !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
-    !isOrdinaryArrayBuffer(bytes) ||
-    typeof byteLength !== "number" ||
-    !Number.isSafeInteger(byteLength) ||
-    byteLength < 1 ||
-    byteLength > maximumBytes ||
-    byteLength !== arrayBufferByteLength(bytes)
-  ) {
-    return undefined;
-  }
-  return { name, mimeHint, byteLength, bytes };
-}
-
 function parseFileInput(
   value: unknown,
   maximumBytes: number,
@@ -205,7 +182,7 @@ function parseConfigureLogoEnvelope(
   const tool = value.tool;
   const toolVersion = value.toolVersion;
   const rawInput = value.input;
-  const input = parseInput(rawInput, MAX_LOGO_BYTES);
+  const input = parseFileInput(rawInput, MAX_LOGO_BYTES);
   if (input === undefined) return undefined;
   return { assetId, tool, toolVersion, input };
 }
@@ -346,7 +323,8 @@ function configureLogo(request: ConfigureLogoEnvelope): void {
   void (async () => {
     let prepared: PreparedImageWatermarkLogo | undefined;
     try {
-      prepared = await prepareImageWatermarkLogo(request.input, configuration.controller.signal);
+      const input = await readFileInput(request.input, configuration.controller.signal);
+      prepared = await prepareImageWatermarkLogo(input, configuration.controller.signal);
       if (activeLogoConfiguration !== configuration) {
         closeLogo(prepared);
         prepared = undefined;
@@ -514,6 +492,7 @@ scope.onmessage = (message: MessageEvent<unknown>) => {
       if (!isSafeId(assetId)) return;
       const configuration = parseConfigureLogoEnvelope(request, assetId);
       if (configuration !== undefined) configureLogo(configuration);
+      else invalidLogo(assetId);
       return;
     }
 

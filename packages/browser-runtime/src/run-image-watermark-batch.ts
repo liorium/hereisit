@@ -575,8 +575,6 @@ export function runImageWatermarkBatch(
   let settled = false;
   let completed = 0;
   let outputBytes = 0;
-  let logoReadStarted = false;
-  let retainedLogo: Uint8Array | undefined;
   let resolveResult: (value: readonly ImageWatermarkBatchItemResult[]) => void = () => undefined;
   const result = new Promise<readonly ImageWatermarkBatchItemResult[]>((resolve) => {
     resolveResult = resolve;
@@ -616,18 +614,10 @@ export function runImageWatermarkBatch(
     }
   };
 
-  const releaseLogo = (): void => {
-    if (retainedLogo !== undefined) {
-      retainedLogo.fill(0);
-      retainedLogo = undefined;
-    }
-  };
-
   const finishIfReady = (): void => {
     if (settled || completed !== items.length) return;
     settled = true;
     for (const slot of [...slots]) terminateSlot(slot);
-    releaseLogo();
     resolveResult(
       results.filter((entry): entry is ImageWatermarkBatchItemResult => entry !== undefined),
     );
@@ -763,12 +753,10 @@ export function runImageWatermarkBatch(
       settled ||
       cancelled ||
       slot.state !== "ready" ||
-      retainedLogo === undefined ||
       capturedLogo === undefined
     ) {
       return;
     }
-    const bytes = retainedLogo.slice().buffer;
     const request: ImageWatermarkWorkerRequest = {
       protocol: WORKER_PROTOCOL_VERSION,
       type: "configure-logo",
@@ -779,67 +767,17 @@ export function runImageWatermarkBatch(
         name: capturedLogo.name,
         mimeHint: capturedLogo.mimeHint,
         byteLength: capturedLogo.size,
-        bytes,
+        file: capturedLogo.file,
       },
     };
     try {
       clearSlotTimeout(slot);
       slot.state = "configuring-logo";
       armSlotTimeout(slot);
-      slot.worker.postMessage(request, [bytes]);
+      slot.worker.postMessage(request);
     } catch {
-      try {
-        new Uint8Array(bytes).fill(0);
-      } catch {
-        // A transferred or hostile buffer has no locally owned bytes left to release.
-      }
       failSlot(slot, WORKER_FAILURE_ERROR);
     }
-  };
-
-  const beginLogoRead = (): void => {
-    if (logoReadStarted || capturedLogo === undefined || settled || cancelled) return;
-    const logo = capturedLogo;
-    logoReadStarted = true;
-    void (async () => {
-      let readValue: unknown;
-      try {
-        readValue = await logo.file.arrayBuffer();
-      } catch {
-        if (!settled && !cancelled) rejectUnsettled(CORRUPT_INPUT_ERROR);
-        return;
-      }
-
-      let ownedBytes: ArrayBuffer | undefined;
-      try {
-        if (isOrdinaryArrayBuffer(readValue)) ownedBytes = readValue;
-      } catch {
-        // Hostile values are validation failures and have no ordinary buffer to release.
-      }
-      if (ownedBytes === undefined) {
-        if (!settled && !cancelled) {
-          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
-        }
-        return;
-      }
-
-      try {
-        if (settled || cancelled) return;
-        const validatedBytes = validatedReadBuffer(ownedBytes, logo.size);
-        if (validatedBytes === undefined) {
-          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
-          return;
-        }
-        retainedLogo = new Uint8Array(validatedBytes).slice();
-        for (const slot of slots) configureLogo(slot);
-      } finally {
-        try {
-          new Uint8Array(ownedBytes).fill(0);
-        } catch {
-          // A detached buffer has no remaining bytes to release.
-        }
-      }
-    })();
   };
 
   const attachWorker = (slot: WorkerSlot): void => {
@@ -867,7 +805,6 @@ export function runImageWatermarkBatch(
             clearSlotTimeout(slot);
             slot.state = "ready";
             armSlotTimeout(slot);
-            beginLogoRead();
             configureLogo(slot);
           } else {
             clearSlotTimeout(slot);
@@ -1124,7 +1061,6 @@ export function runImageWatermarkBatch(
       }
       queue.length = 0;
       settled = true;
-      releaseLogo();
       resolveResult(
         results.filter((entry): entry is ImageWatermarkBatchItemResult => entry !== undefined),
       );
