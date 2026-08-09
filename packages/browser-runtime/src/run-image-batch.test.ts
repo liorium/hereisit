@@ -170,6 +170,22 @@ describe("runImageBatch", () => {
     expect(secondRead).not.toHaveBeenCalled();
   });
 
+  it("keeps an unsafe public item ID out of the internal worker correlation ID", async () => {
+    installRuntime(ControlledWorker);
+    const itemId = `\u0000${"x".repeat(128)}`;
+    const handle = runImageBatch([{ itemId, file: fakeFile("one.png"), spec }], {
+      concurrency: 1,
+    });
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const request = postedRun(worker);
+
+    expect(request.jobId).not.toContain(itemId);
+    expect(request.jobId.length).toBeLessThanOrEqual(128);
+    complete(worker, request);
+
+    await expect(handle.result).resolves.toMatchObject([{ itemId, status: "fulfilled" }]);
+  });
+
   it("settles cancellation once and ignores a late completion", async () => {
     installRuntime(ControlledWorker);
     const events: unknown[] = [];
@@ -302,7 +318,7 @@ describe("runImageBatch", () => {
       protocol: 1,
       type: "complete",
       jobId: request.jobId,
-      result: { ...result(byteLength), bytes: new ArrayBuffer(byteLength) },
+      result: result(byteLength),
     });
 
     await expect(handle.result).resolves.toMatchObject([
@@ -329,7 +345,7 @@ describe("runImageBatch", () => {
         protocol: 1,
         type: "complete",
         jobId: request.jobId,
-        result: { ...result(maximum), bytes: new ArrayBuffer(maximum) },
+        result: result(maximum),
       });
     }
     const finalRequest = postedRun(worker, 5);

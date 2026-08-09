@@ -319,9 +319,8 @@ function parseWorkerEvent(value: unknown): ParsedWorkerEvent | undefined {
   return undefined;
 }
 
-function makeJobId(itemId: string): string {
-  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  return `${itemId}-${suffix}`;
+function makeJobId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }
 
 function autoConcurrency(): number {
@@ -508,7 +507,7 @@ export function runImageBatch(
     const item = items[index];
     if (item === undefined) return;
     slot.itemIndex = index;
-    slot.jobId = makeJobId(item.itemId);
+    slot.jobId = makeJobId();
     armSlotTimeout(slot);
 
     try {
