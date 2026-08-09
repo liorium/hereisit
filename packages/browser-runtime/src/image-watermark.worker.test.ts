@@ -727,6 +727,32 @@ describe("image-watermark Worker terminal lifecycle", () => {
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
 
+  it("rejects an exact-shaped source envelope with a non-native File", async () => {
+    const scope = await loadWorker();
+
+    scope.dispatch(
+      runRequest("job-non-native-file", {
+        input: {
+          name: "photo.png",
+          mimeHint: "image/png",
+          byteLength: 4,
+          file: {
+            name: "photo.png",
+            type: "image/png",
+            size: 4,
+            arrayBuffer: vi.fn(),
+          },
+        },
+      }),
+    );
+    await flushWorker();
+
+    expect(terminalPosts(scope, "job-non-native-file")).toMatchObject([
+      { event: { type: "failed", error: { code: "INVALID_SPEC" } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
   it("maps a rejected source read to a retryable corrupt-input error", async () => {
     const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
     vi.spyOn(file, "arrayBuffer").mockRejectedValue(

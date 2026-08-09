@@ -97,7 +97,6 @@ type SlotState = "starting" | "ready" | "configuring-logo" | "idle" | "running";
 interface WorkerSlot {
   worker: Worker;
   state: SlotState;
-  generation: number;
   logoConfigured: boolean;
   itemIndex?: number;
   jobId?: string;
@@ -654,7 +653,6 @@ export function runImageWatermarkBatch(
       slot.state === "starting" || slot.state === "ready" || slot.state === "configuring-logo";
     const index = slot.itemIndex;
     const captured = index === undefined ? undefined : capturedItems.get(index);
-    slot.generation += 1;
     delete slot.itemIndex;
     delete slot.jobId;
     terminateSlot(slot);
@@ -702,7 +700,6 @@ export function runImageWatermarkBatch(
       void assignNext(slot);
       return;
     }
-    slot.generation += 1;
     const jobId = makeId("job");
     slot.itemIndex = index;
     slot.jobId = jobId;
@@ -955,7 +952,6 @@ export function runImageWatermarkBatch(
     const slot: WorkerSlot = {
       worker,
       state: "starting",
-      generation: 0,
       logoConfigured: false,
       lastSequence: -1,
       lastFraction: -1,

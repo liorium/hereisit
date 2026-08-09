@@ -155,9 +155,10 @@ batch. It uses at most two dedicated Workers, falling back to one when reported 
 or at most 4GiB, with a 180-second watchdog for each startup/logo-configuration phase and active item.
 A setup timeout fails terminally; other repeated setup faults are bounded to one replacement before the
 batch is rejected. The runner structured-clones each validated source/logo `File` to an active Worker without reading or
-retaining its bytes in the UI realm. Each Worker validates the envelope against the native `File`, reads
-and length-checks it, decodes one reusable logo bitmap, and closes that bitmap when the Worker is
-replaced, cancelled, fails, or finishes.
+retaining its full bytes in the UI realm. During watermark processing, each Worker validates the envelope against the
+native `File`, reads and length-checks the full file, decodes one reusable logo bitmap, and closes that bitmap when the
+Worker is replaced, cancelled, fails, or finishes. The supported home launcher may separately read at most the first
+64KiB of a selected source for format detection before handing its `File` to image watermarking.
 
 PDF inputs are structurally checked before parsing and bounded by file size, page count, decoded stream
 bytes, object and cross-reference counts, filter depth, output size, and a three-minute watchdog. PNGs
@@ -189,10 +190,11 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - File contents and filenames are excluded from analytics and logs.
 - Browser results live in object URLs and memory owned by the current tab.
 - Generated image, PDF, and ZIP results never use Web Share; an explicit download-labelled action activates the tab-owned Blob URL.
-- Image-watermark source/logo `File` handles move only to dedicated Workers, and only Workers read their
-  bytes. Source and logo `File` objects never receive object URLs and are never decoded by the main-thread
-  UI; filename, size, and Worker-validated dimensions are shown as metadata instead. No remote decoder,
-  upload, CDN, WebAssembly, or server fallback exists.
+- Image-watermark source/logo `File` handles move to dedicated Workers, where full-file reads for watermark
+  processing occur. The supported home launcher may first read at most a 64KiB source prefix for format detection;
+  apart from that bounded detection read, source and logo `File` objects never receive object URLs or are decoded by
+  the main-thread UI. Filename, size, and Worker-validated dimensions are shown as metadata instead. No remote
+  decoder, upload, CDN, WebAssembly, or server fallback exists.
 - Only Worker-validated, newly encoded image results and generated ZIP archives receive image-watermark
   object URLs. They are excluded from network and analytics payloads and remain in tab-owned memory.
 - Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
