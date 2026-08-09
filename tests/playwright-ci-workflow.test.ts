@@ -52,6 +52,10 @@ describe("Playwright CI workflow", () => {
     expect(combinedExit).toBeGreaterThan(webkitStatus);
   });
 
+  it("forwards project and grep options to Playwright", () => {
+    expect(workflow).not.toMatch(/pnpm test:e2e:ci --(?:\s|$)/);
+  });
+
   it("includes WebKit only in CI and uses the normal preview server", () => {
     expect(config).toContain("const includeWebKit = isCI;");
     expect(config).not.toContain("PLAYWRIGHT_WEBKIT");

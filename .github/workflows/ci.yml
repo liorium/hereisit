@@ -52,7 +52,7 @@ jobs:
         run: |
           set +e
           PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/primary \
-            pnpm test:e2e:ci -- \
+            pnpm test:e2e:ci \
             --project=chromium \
             --project=firefox \
             --project=mobile-chromium \
@@ -60,7 +60,7 @@ jobs:
             --output=test-results/primary
           primary_status=$?
           PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/webkit \
-            pnpm test:e2e:ci -- \
+            pnpm test:e2e:ci \
             --project=webkit \
             --project=mobile-webkit \
             --workers=1 \
@@ -76,7 +76,7 @@ jobs:
           NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
       - name: Test product analytics
         run: >-
-          pnpm test:e2e:ci --
+          pnpm test:e2e:ci
           tests/e2e/product-analytics.spec.ts
           tests/e2e/image-workbench.spec.ts
           tests/e2e/pdf-tools.spec.ts
