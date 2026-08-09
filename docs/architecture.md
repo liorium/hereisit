@@ -68,6 +68,10 @@ The source-relative `smaller-only` goal is a hard postcondition. The runtime ada
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
 
+- 크기 조절과 형식 변환의 전체 파일 읽기는 전용 이미지 Worker가 수행한다.
+- 스마트 로컬 압축은 공통 배치 단계의 추가 UI 전체 읽기를 피하지만, 파일 선택 검사와 무손실 로컬 메타데이터 처리는 아직 UI 영역에서 파일을 읽는다.
+- 네이티브 File 구조화 복제의 브라우저 내부 복사 전략은 보장하지 않는다. 제품 코드가 전송용 전체 ArrayBuffer를 UI 영역에 만들지 않는 것을 보장한다.
+
 `image.watermark@1` is a separate contract and Worker path. It adds one validated text string or one
 JPG/PNG/WebP logo at a top/middle/bottom × left/center/right anchor, preserving the source's displayed
 dimensions and orientation. Text size is relative to the shorter side; logo width is relative to source
