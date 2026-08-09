@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { engineJobStatusSchema } from "../packages/server-contracts/src";
 import { imageOptimizeStatusResponseSchema } from "../packages/tool-contracts/src/image-optimize";
 import {
   projectSmokeRequest,
@@ -14,25 +15,41 @@ import {
 
 describe("processing stack harness", () => {
   it("projects engine download results into the strict public contract", () => {
-    const projected = publicEngineStatus({
-      jobId: "123e4567-e89b-42d3-a456-426614174000",
-      state: "succeeded",
-      phase: "completed",
-      fraction: 1,
-      sequence: 10,
-      result: {
-        kind: "download",
-        mime: "image/jpeg",
-        byteLength: 350_527,
-        width: 640,
-        height: 427,
-        testedCandidates: 3,
-        engineBuildId: "engine-test",
-        codecBuildId: "mozjpeg-4.1.1",
-        warnings: [],
-      },
-      measurements: { processingMs: 1_332 },
-    });
+    const projected = publicEngineStatus(
+      engineJobStatusSchema.parse({
+        protocol: 1,
+        jobId: "123e4567-e89b-42d3-a456-426614174000",
+        state: "succeeded",
+        phase: "preparing-output",
+        fraction: 1,
+        sequence: 10,
+        result: {
+          kind: "download",
+          mime: "image/jpeg",
+          byteLength: 350_527,
+          width: 640,
+          height: 427,
+          testedCandidates: 3,
+          engineBuildId: "engine-test",
+          codecBuildId: "mozjpeg-4.1.1",
+          warnings: [],
+        },
+        inspection: {
+          verifiedInputMime: "image/jpeg",
+          inputHasAlpha: false,
+          contentClass: "photo",
+        },
+        measurements: {
+          processedInputBytes: 500_000,
+          processedPixels: 273_280,
+          cpuMs: 1_200,
+          memoryByteMilliseconds: 50_000_000,
+          peakMemoryBytes: 37_000_000,
+          testedCandidates: 3,
+          processingMs: 1_332,
+        },
+      }),
+    );
 
     const parsed = imageOptimizeStatusResponseSchema.parse(projected);
 
