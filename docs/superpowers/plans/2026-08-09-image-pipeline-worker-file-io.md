@@ -427,6 +427,8 @@ git commit -m "docs: describe common image Worker I/O"
 - Consumes: final reviewed branch from Tasks 1–3.
 - Produces: protected squash merge, passing main release/staging deployment, synchronized local `main`, and zero task-created temporary/Docker state.
 
+The controller must complete the mandatory broad whole-branch code review and its single fix wave, if any, after Task 3 and before dispatching this release task. Task 4 introduces no source change; its later task review validates release and cleanup evidence.
+
 - [ ] **Step 1: Re-run final-head gate before publication**
 
 Run `pnpm verify`, `git diff --check origin/main...HEAD`, and `git status --short`. Expected: exact final HEAD is green and clean; no local Playwright.
@@ -485,9 +487,9 @@ git -C /home/ubuntu/workspace/projects/hereisit pull --ff-only
 
 Wait for merge-SHA main `verify`, Cloudflare Pages, and `Deploy successful main CI commit to staging`. Main-push `browser` is expected to skip because the protected PR already ran it. Do not bypass protection.
 
-- [ ] **Step 5: Remove only task-created state and report exact evidence**
+- [ ] **Step 5: Remove only task-created runtime state and report exact evidence**
 
-Remove the plan SDD workspace and `/tmp/hereisit-image-pipeline-worker-io` worktree only after merge/deploy verification. Remove task-created Docker images and build cache; preserve shared Playwright browser caches and unrelated worktrees.
+Remove task-created Docker images, containers, volumes, build cache, and the temporary PR body after merge/deploy verification; preserve shared Playwright browser caches and unrelated worktrees. Keep this plan's SDD workspace and `/tmp/hereisit-image-pipeline-worker-io` worktree until the controller completes the Task 4 release review. The controller then deletes only this plan's SDD workspace and worktree.
 
 Verify:
 
@@ -502,4 +504,4 @@ docker system df
 docker builder du
 ```
 
-Expected: local `main` equals `origin/main`, the task branch/worktree/stash/temp body are absent, and task-created images, containers, volumes, and build cache are zero.
+Expected before controller cleanup: local `main` equals `origin/main`, the task branch/stash/temp body are absent, and task-created images, containers, volumes, and build cache are zero. After Task 4 review, the controller also removes this plan's SDD workspace and `/tmp/hereisit-image-pipeline-worker-io` worktree and verifies their absence.
