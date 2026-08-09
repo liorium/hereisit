@@ -54,11 +54,11 @@ function deferred<T>(): Deferred<T> {
 }
 
 interface FakeFileOptions {
+  declaredSize?: number;
   name?: string;
   type?: string;
   size?: number;
   read?: Promise<ArrayBuffer>;
-  arrayBuffer?: unknown;
 }
 
 function fakeFile(options: FakeFileOptions = {}): {
@@ -66,15 +66,16 @@ function fakeFile(options: FakeFileOptions = {}): {
   arrayBuffer: ReturnType<typeof vi.fn>;
 } {
   const size = options.size ?? 4;
-  const read = options.read ?? Promise.resolve(new ArrayBuffer(size > MAX_SOURCE_BYTES ? 1 : size));
-  const arrayBuffer = vi.fn(() => read);
+  const file = new File([new Uint8Array(size)], options.name ?? "photo.png", {
+    type: options.type ?? "image/png",
+  });
+  if (options.declaredSize !== undefined) {
+    Object.defineProperty(file, "size", { get: () => options.declaredSize });
+  }
+  const arrayBuffer = vi.spyOn(file, "arrayBuffer");
+  if (options.read !== undefined) arrayBuffer.mockReturnValue(options.read);
   return {
-    file: {
-      name: options.name ?? "photo.png",
-      type: options.type ?? "image/png",
-      size,
-      arrayBuffer: options.arrayBuffer ?? arrayBuffer,
-    } as unknown as File,
+    file,
     arrayBuffer,
   };
 }
@@ -150,7 +151,6 @@ function installSupportedRuntime(
   } = {},
 ): void {
   vi.stubGlobal("Worker", options.worker ?? StubWorker);
-  vi.stubGlobal("File", class {});
   vi.stubGlobal("OffscreenCanvas", SupportedOffscreenCanvas);
   vi.stubGlobal("navigator", {
     hardwareConcurrency: options.cores ?? 8,
@@ -369,6 +369,38 @@ describe("supportsBrowserImageWatermarkRuntime", () => {
 });
 
 describe("runImageWatermarkBatch validation and readiness", () => {
+  it("uses a tiny native payload for a validation-only declared size", async () => {
+    const source = fakeFile({ declaredSize: MAX_SOURCE_BYTES + 1 });
+
+    expect(source.file).toBeInstanceOf(File);
+    expect(source.file.size).toBe(MAX_SOURCE_BYTES + 1);
+    expect((await source.file.arrayBuffer()).byteLength).toBe(4);
+  });
+
+  it("dispatches the source File without reading it in the UI realm", async () => {
+    installSupportedRuntime();
+    const file = new File([pngBuffer(58)], "source.png", { type: "image/png" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    const handle = runImageWatermarkBatch([item("source", file)], { concurrency: 1 });
+    const worker = StubWorker.instances[0] as StubWorker;
+
+    worker.emit(readyEvent());
+    const posted = await waitForMessage(worker, "run");
+
+    expect(read).not.toHaveBeenCalled();
+    expect(posted.transfer).toEqual([]);
+    expect(posted.message).toMatchObject({
+      type: "run",
+      input: {
+        name: "source.png",
+        mimeHint: "image/png",
+        byteLength: 58,
+        file,
+      },
+    });
+    handle.cancel();
+  });
+
   it("throws on empty and 101-item batches before Worker construction or reads", () => {
     installSupportedRuntime();
     const source = fakeFile();
@@ -388,7 +420,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     MAX_SOURCE_BYTES + 1,
   ])("rejects a %d-byte source item without reading or assigning it", async (size) => {
     installSupportedRuntime();
-    const invalid = fakeFile({ size });
+    const invalid = fakeFile({ ...(size > 4 ? { declaredSize: size } : { size }) });
     const handle = runImageWatermarkBatch([item("invalid", invalid.file)]);
 
     await expect(handle.result).resolves.toMatchObject([
@@ -415,7 +447,10 @@ describe("runImageWatermarkBatch validation and readiness", () => {
   it("rejects every item when total source size exceeds 250MiB", async () => {
     installSupportedRuntime();
     const sources = Array.from({ length: 6 }, (_, index) =>
-      fakeFile({ name: `${index}.png`, size: index === 5 ? 1 : MAX_SOURCE_BYTES }),
+      fakeFile({
+        name: `${index}.png`,
+        ...(index === 5 ? { size: 1 } : { declaredSize: MAX_SOURCE_BYTES }),
+      }),
     );
     const handle = runImageWatermarkBatch(
       sources.map(({ file }, index) => item(`item-${index}`, file)),
@@ -437,9 +472,9 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     installSupportedRuntime();
     const events: ImageWatermarkRuntimeEvent[] = [];
     const sources = [
-      fakeFile({ name: "oversize.png", size: MAX_SOURCE_BYTES + 1 }),
+      fakeFile({ name: "oversize.png", declaredSize: MAX_SOURCE_BYTES + 1 }),
       ...Array.from({ length: 4 }, (_, index) =>
-        fakeFile({ name: `${index}.png`, size: MAX_SOURCE_BYTES }),
+        fakeFile({ name: `${index}.png`, declaredSize: MAX_SOURCE_BYTES }),
       ),
     ];
     const handle = runImageWatermarkBatch(
@@ -472,7 +507,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
   ])("rejects a %d-byte logo before construction or reads", async (size) => {
     installSupportedRuntime();
     const source = fakeFile();
-    const logo = fakeFile({ name: "logo.png", size });
+    const logo = fakeFile({ ...(size > 4 ? { declaredSize: size } : { size }), name: "logo.png" });
     const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
       logoFile: logo.file,
     });
@@ -519,7 +554,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     worker.emit(readyEvent());
     const configuration = await waitForMessage(worker, "configure-logo");
     expect((configuration.message as { input: { mimeHint: string } }).input.mimeHint).toBe("");
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
     expect(source.arrayBuffer).not.toHaveBeenCalled();
 
     handle.cancel();
@@ -539,7 +574,7 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(StubWorker.instances).toHaveLength(0);
   });
 
-  it("constructs two dedicated slots but reads each source only after that slot is ready", async () => {
+  it("constructs two dedicated slots and dispatches each source only after that slot is ready", async () => {
     installSupportedRuntime();
     const first = fakeFile({ name: "first.png" });
     const second = fakeFile({ name: "second.png" });
@@ -558,25 +593,45 @@ describe("runImageWatermarkBatch validation and readiness", () => {
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     StubWorker.instances[0]?.emit(readyEvent());
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(StubWorker.instances[0] as StubWorker, "run");
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     StubWorker.instances[1]?.emit(readyEvent());
-    await vi.waitFor(() => expect(second.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(StubWorker.instances[1] as StubWorker, "run");
     handle.cancel();
     await handle.result;
   });
 
-  it("reads one logo after readiness, transfers one copy per slot, and gates source reads on matching logo-ready", async () => {
+  it("dispatches the logo File to every Worker without reading it in the UI realm", async () => {
+    installSupportedRuntime({ deviceMemory: 8, cores: 8 });
+    const logo = new File([pngBuffer(58)], "logo.png", { type: "image/png" });
+    const read = vi.spyOn(logo, "arrayBuffer");
+    const handle = runImageWatermarkBatch(
+      [item("one", undefined, logoSpec), item("two", undefined, logoSpec)],
+      { concurrency: 2, logoFile: logo },
+    );
+
+    for (const worker of StubWorker.instances) worker.emit(readyEvent());
+    const messages = await Promise.all(
+      StubWorker.instances.map((worker) => waitForMessage(worker, "configure-logo")),
+    );
+
+    expect(read).not.toHaveBeenCalled();
+    expect(messages.every(({ transfer }) => transfer.length === 0)).toBe(true);
+    expect(messages.map(({ message }) => (message as { input: unknown }).input)).toEqual([
+      { name: "logo.png", mimeHint: "image/png", byteLength: 58, file: logo },
+      { name: "logo.png", mimeHint: "image/png", byteLength: 58, file: logo },
+    ]);
+    handle.cancel();
+  });
+
+  it("dispatches one logo File per ready slot without transfer and gates source dispatch on matching logo-ready", async () => {
     installSupportedRuntime();
     const first = fakeFile({ name: "first.png" });
     const second = fakeFile({ name: "second.png" });
-    const originalLogoBytes = Uint8Array.of(1, 2, 3, 4).buffer;
     const logo = fakeFile({
       name: "logo.png",
       type: "image/png",
-      size: originalLogoBytes.byteLength,
-      read: Promise.resolve(originalLogoBytes),
     });
     const handle = runImageWatermarkBatch(
       [item("first", first.file, logoSpec), item("second", second.file, logoSpec)],
@@ -592,35 +647,30 @@ describe("runImageWatermarkBatch validation and readiness", () => {
 
     firstWorker.emit(readyEvent());
     secondWorker.emit(readyEvent());
-    await vi.waitFor(() => expect(logo.arrayBuffer).toHaveBeenCalledOnce());
     const firstConfiguration = await waitForMessage(firstWorker, "configure-logo");
     const secondConfiguration = await waitForMessage(secondWorker, "configure-logo");
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
     expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     const firstAsset = messageId(firstConfiguration, "assetId");
     const secondAsset = messageId(secondConfiguration, "assetId");
     expect(firstAsset).toBe(secondAsset);
-    const firstTransfer = firstConfiguration.transfer[0];
-    const secondTransfer = secondConfiguration.transfer[0];
-    expect(firstConfiguration.transfer).toHaveLength(1);
-    expect(secondConfiguration.transfer).toHaveLength(1);
-    expect(firstTransfer).toBeInstanceOf(ArrayBuffer);
-    expect(secondTransfer).toBeInstanceOf(ArrayBuffer);
-    expect(firstTransfer).not.toBe(secondTransfer);
-    expect(firstTransfer).not.toBe(originalLogoBytes);
-    expect(secondTransfer).not.toBe(originalLogoBytes);
+    expect(firstConfiguration.transfer).toEqual([]);
+    expect(secondConfiguration.transfer).toEqual([]);
+    expect((firstConfiguration.message as { input: { file: File } }).input.file).toBe(logo.file);
+    expect((secondConfiguration.message as { input: { file: File } }).input.file).toBe(logo.file);
 
     firstWorker.emit({ protocol: 1, type: "logo-ready", assetId: "foreign-asset" });
     await Promise.resolve();
     expect(first.arrayBuffer).not.toHaveBeenCalled();
 
     firstWorker.emit({ protocol: 1, type: "logo-ready", assetId: firstAsset });
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(firstWorker, "run");
     expect(second.arrayBuffer).not.toHaveBeenCalled();
 
     secondWorker.emit({ protocol: 1, type: "logo-ready", assetId: secondAsset });
-    await vi.waitFor(() => expect(second.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(secondWorker, "run");
     handle.cancel();
     await handle.result;
   });
@@ -807,9 +857,9 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
-  it("rejects one unreadable source and reuses the slot for the next item", async () => {
+  it("reuses a slot after the Worker reports corrupt source input", async () => {
     installSupportedRuntime();
-    const unreadable = fakeFile({ read: Promise.reject(new Error("read failed")) });
+    const unreadable = fakeFile();
     const next = fakeFile({ name: "next.png" });
     const handle = runImageWatermarkBatch(
       [item("unreadable", unreadable.file), item("next", next.file)],
@@ -820,8 +870,13 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
 
     worker.emit(readyEvent());
     const run = await waitForMessage(worker, "run");
-    expect(next.arrayBuffer).toHaveBeenCalledOnce();
-    emitComplete(worker, run);
+    emitFailed(worker, run, {
+      code: "CORRUPT_INPUT",
+      message: "이미지 파일을 읽지 못했어요.",
+      retryable: true,
+    });
+    const nextRun = await waitForMessage(worker, "run", 2);
+    emitComplete(worker, nextRun);
 
     await expect(handle.result).resolves.toMatchObject([
       { itemId: "unreadable", status: "rejected", error: { code: "CORRUPT_INPUT" } },
@@ -829,55 +884,30 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     ]);
   });
 
-  it("contains hostile source-buffer reflection and reuses the slot", async () => {
+  it("does not inspect a hostile source read method before dispatch", async () => {
     installSupportedRuntime();
-    const hostileBytes = new Proxy(new ArrayBuffer(4), {
-      getPrototypeOf(): never {
-        throw new Error("hostile buffer prototype");
-      },
-    });
-    const hostile = fakeFile({ read: Promise.resolve(hostileBytes) });
+    const hostileRead = deferred<ArrayBuffer>();
+    const hostile = fakeFile({ read: hostileRead.promise });
     const handle = runImageWatermarkBatch([item("hostile", hostile.file), item("next")], {
       concurrency: 1,
     });
     const worker = StubWorker.instances[0];
     if (worker === undefined) throw new Error("Expected a Worker.");
     worker.emit(readyEvent());
-    const nextRun = await waitForMessage(worker, "run");
+    const firstRun = await waitForMessage(worker, "run");
+    expect(hostile.arrayBuffer).not.toHaveBeenCalled();
+    emitFailed(worker, firstRun, {
+      code: "CORRUPT_INPUT",
+      message: "이미지 파일을 읽지 못했어요.",
+      retryable: true,
+    });
+    const nextRun = await waitForMessage(worker, "run", 2);
     emitComplete(worker, nextRun);
 
     await expect(handle.result).resolves.toMatchObject([
       { itemId: "hostile", status: "rejected", error: { code: "CORRUPT_INPUT" } },
       { itemId: "next", status: "fulfilled" },
     ]);
-  });
-
-  it("zeroes a mismatched returned logo buffer before rejecting the batch", async () => {
-    installSupportedRuntime();
-    const returnedLogoBytes = Uint8Array.of(1, 2, 3);
-    const logo = fakeFile({
-      name: "logo.png",
-      type: "image/png",
-      size: 4,
-      read: Promise.resolve(returnedLogoBytes.buffer),
-    });
-    const source = fakeFile();
-    const handle = runImageWatermarkBatch([item("logo", source.file, logoSpec)], {
-      concurrency: 1,
-      logoFile: logo.file,
-    });
-    const worker = StubWorker.instances[0];
-    if (worker === undefined) throw new Error("Expected a Worker.");
-
-    worker.emit(readyEvent());
-
-    await expect(handle.result).resolves.toMatchObject([
-      { itemId: "logo", status: "rejected", error: { code: "CORRUPT_INPUT" } },
-    ]);
-    expect([...returnedLogoBytes]).toEqual([0, 0, 0]);
-    expect(messagesOfType(worker, "configure-logo")).toHaveLength(0);
-    expect(source.arrayBuffer).not.toHaveBeenCalled();
-    expect(worker.terminateCount).toBe(1);
   });
 
   it("settles a logo configuration failure without reading a source", async () => {
@@ -990,7 +1020,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     emitComplete(replacement, run);
 
     await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
   });
 
   it("replaces a configuring slot that sends an unrouteable plain object", async () => {
@@ -1023,7 +1053,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     const run = await waitForMessage(replacement, "run");
     emitComplete(replacement, run);
     await expect(handle.result).resolves.toMatchObject([{ itemId: "logo", status: "fulfilled" }]);
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
   });
 
   it("rejects a matching logo acknowledgement that carries a foreign job ID", async () => {
@@ -1364,17 +1394,11 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     expect(StubWorker.instances).toHaveLength(2);
   });
 
-  it("settles, terminates, and releases retained logo bytes when configuration stays silent", async () => {
+  it("settles and terminates when configuration stays silent", async () => {
     vi.useFakeTimers();
     installSupportedRuntime();
     const source = fakeFile();
-    const logoBytes = new Uint8Array([1, 2, 3, 4]);
-    const logo = fakeFile({
-      name: "logo.png",
-      type: "image/png",
-      read: Promise.resolve(logoBytes.buffer),
-    });
-    const fillSpy = vi.spyOn(Uint8Array.prototype, "fill");
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
     const handle = runImageWatermarkBatch([item("silent-logo", source.file, logoSpec)], {
       concurrency: 1,
       logoFile: logo.file,
@@ -1387,11 +1411,9 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     });
 
     worker.emit(readyEvent());
-    await Promise.resolve();
-    await Promise.resolve();
     expect(messagesOfType(worker, "configure-logo")).toHaveLength(1);
     expect(source.arrayBuffer).not.toHaveBeenCalled();
-    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(1);
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(179_999);
     expect(worker.terminateCount).toBe(0);
@@ -1406,15 +1428,14 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     ]);
     expect(worker.terminateCount).toBe(1);
     expect(source.arrayBuffer).not.toHaveBeenCalled();
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
-    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(2);
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(180_000);
     expect(StubWorker.instances).toHaveLength(1);
     expect(worker.terminateCount).toBe(1);
   });
 
-  it("settles and releases retained logo bytes when configuration cannot be posted", async () => {
+  it("settles when configuration cannot be posted", async () => {
     vi.useFakeTimers();
     class ThrowingConfigurationWorker extends StubWorker {
       override postMessage(message: unknown, transfer: readonly Transferable[] = []): void {
@@ -1431,13 +1452,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     }
     installSupportedRuntime({ worker: ThrowingConfigurationWorker });
     const source = fakeFile();
-    const logoBytes = new Uint8Array([1, 2, 3, 4]);
-    const logo = fakeFile({
-      name: "logo.png",
-      type: "image/png",
-      read: Promise.resolve(logoBytes.buffer),
-    });
-    const fillSpy = vi.spyOn(Uint8Array.prototype, "fill");
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
     const handle = runImageWatermarkBatch([item("unpostable-logo", source.file, logoSpec)], {
       concurrency: 1,
       logoFile: logo.file,
@@ -1470,8 +1485,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     expect(replacement.terminateCount).toBe(1);
     expect(StubWorker.instances).toHaveLength(2);
     expect(source.arrayBuffer).not.toHaveBeenCalled();
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
-    expect(fillSpy.mock.calls.filter(([value]) => value === 0)).toHaveLength(4);
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(180_000);
     expect(StubWorker.instances).toHaveLength(2);
@@ -1505,7 +1519,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     ]);
   });
 
-  it("configures a replacement from the one retained logo read after a crash", async () => {
+  it("configures a replacement from the captured logo File after a crash", async () => {
     installSupportedRuntime();
     const logo = fakeFile({ name: "logo.png", type: "image/png" });
     const handle = runImageWatermarkBatch(
@@ -1529,7 +1543,7 @@ describe("runImageWatermarkBatch scheduling and Worker failures", () => {
     if (replacement === undefined) throw new Error("Expected replacement.");
     replacement.emit(readyEvent());
     const replacementConfiguration = await waitForMessage(replacement, "configure-logo");
-    expect(logo.arrayBuffer).toHaveBeenCalledOnce();
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
     replacement.emit({
       protocol: 1,
       type: "logo-ready",
@@ -1681,15 +1695,9 @@ describe("runImageWatermarkBatch cancellation", () => {
     expect(second.arrayBuffer).not.toHaveBeenCalled();
   });
 
-  it("cancels during the single logo read without configuring or reading sources", async () => {
+  it("cancels after logo File dispatch without reading sources in the UI realm", async () => {
     installSupportedRuntime();
-    const logoRead = deferred<ArrayBuffer>();
-    const logo = fakeFile({
-      name: "logo.png",
-      type: "image/png",
-      size: 4,
-      read: logoRead.promise,
-    });
+    const logo = fakeFile({ name: "logo.png", type: "image/png" });
     const first = fakeFile({ name: "first.png" });
     const second = fakeFile({ name: "second.png" });
     const handle = runImageWatermarkBatch(
@@ -1698,29 +1706,22 @@ describe("runImageWatermarkBatch cancellation", () => {
     );
     const workers = [...StubWorker.instances];
     for (const worker of workers) worker.emit(readyEvent());
-    await vi.waitFor(() => expect(logo.arrayBuffer).toHaveBeenCalledOnce());
-
-    const returnedLogoBytes = Uint8Array.of(1, 2, 3, 4);
     handle.cancel();
-    logoRead.resolve(returnedLogoBytes.buffer);
-    await Promise.resolve();
-    await Promise.resolve();
 
     await expect(handle.result).resolves.toEqual([
       { itemId: "first", status: "cancelled" },
       { itemId: "second", status: "cancelled" },
     ]);
     expect(workers.every((worker) => worker.terminateCount === 1)).toBe(true);
-    expect(workers.flatMap((worker) => messagesOfType(worker, "configure-logo"))).toHaveLength(0);
+    expect(workers.flatMap((worker) => messagesOfType(worker, "configure-logo"))).toHaveLength(2);
+    expect(logo.arrayBuffer).not.toHaveBeenCalled();
     expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
-    expect([...returnedLogoBytes]).toEqual([0, 0, 0, 0]);
   });
 
-  it("cancels during a source read, posts no run, and starts no later read", async () => {
+  it("cancels an active source dispatch without reading a later source", async () => {
     installSupportedRuntime();
-    const firstRead = deferred<ArrayBuffer>();
-    const first = fakeFile({ size: 4, read: firstRead.promise });
+    const first = fakeFile({ size: 4 });
     const second = fakeFile({ name: "second.png" });
     const handle = runImageWatermarkBatch(
       [item("first", first.file), item("second", second.file)],
@@ -1729,18 +1730,16 @@ describe("runImageWatermarkBatch cancellation", () => {
     const worker = StubWorker.instances[0];
     if (worker === undefined) throw new Error("Expected a Worker.");
     worker.emit(readyEvent());
-    await vi.waitFor(() => expect(first.arrayBuffer).toHaveBeenCalledOnce());
+    await waitForMessage(worker, "run");
 
     handle.cancel();
-    firstRead.resolve(new ArrayBuffer(4));
-    await Promise.resolve();
-    await Promise.resolve();
 
     await expect(handle.result).resolves.toEqual([
       { itemId: "first", status: "cancelled" },
       { itemId: "second", status: "cancelled" },
     ]);
-    expect(messagesOfType(worker, "run")).toHaveLength(0);
+    expect(messagesOfType(worker, "run")).toHaveLength(1);
+    expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
     expect(worker.terminateCount).toBe(1);
   });

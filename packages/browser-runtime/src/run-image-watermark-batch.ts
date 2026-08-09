@@ -62,11 +62,6 @@ const LOGO_REQUIRED_ERROR: ImageWatermarkErrorPayload = {
   message: "사용할 로고 이미지를 선택해 주세요.",
   retryable: false,
 };
-const CORRUPT_INPUT_ERROR: ImageWatermarkErrorPayload = {
-  code: "CORRUPT_INPUT",
-  message: "이미지 파일을 읽지 못했어요.",
-  retryable: true,
-};
 const WORKER_FAILURE_ERROR: ImageWatermarkErrorPayload = {
   code: "WORKER_CRASH",
   message: "브라우저 이미지 워터마크 작업기가 중단됐어요.",
@@ -87,7 +82,7 @@ interface CapturedFile {
   name: string;
   mimeHint: string;
   size: number;
-  read(): Promise<ArrayBuffer>;
+  file: File;
 }
 
 interface CapturedItem extends CapturedFile {
@@ -97,12 +92,11 @@ interface CapturedItem extends CapturedFile {
   needsLogo: boolean;
 }
 
-type SlotState = "starting" | "ready" | "configuring-logo" | "idle" | "reading" | "running";
+type SlotState = "starting" | "ready" | "configuring-logo" | "idle" | "running";
 
 interface WorkerSlot {
   worker: Worker;
   state: SlotState;
-  generation: number;
   logoConfigured: boolean;
   itemIndex?: number;
   jobId?: string;
@@ -181,16 +175,6 @@ function isOrdinaryArrayBuffer(value: unknown): value is ArrayBuffer {
   );
 }
 
-function validatedReadBuffer(value: unknown, expectedByteLength: number): ArrayBuffer | undefined {
-  try {
-    return isOrdinaryArrayBuffer(value) && arrayBufferByteLength(value) === expectedByteLength
-      ? value
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function releaseCanvas(canvas: OffscreenCanvas | undefined): void {
   if (canvas === undefined) return;
   try {
@@ -247,27 +231,17 @@ function requestedConcurrency(value: RunImageWatermarkBatchOptions["concurrency"
 }
 
 function captureFile(value: unknown): CapturedFile | undefined {
-  if (!isObjectRecord(value)) return undefined;
+  if (typeof File === "undefined" || !(value instanceof File)) return undefined;
   try {
-    const name = value.name;
-    const mimeHint = value.type;
-    const size = value.size;
-    const arrayBuffer = value.arrayBuffer;
+    const { name, type: mimeHint, size } = value;
     if (
       !isBoundedString(name, 1, MAX_INPUT_NAME_LENGTH) ||
       !isBoundedString(mimeHint, 0, MAX_MIME_HINT_LENGTH) ||
-      typeof size !== "number" ||
-      !Number.isSafeInteger(size) ||
-      typeof arrayBuffer !== "function"
+      !Number.isSafeInteger(size)
     ) {
       return undefined;
     }
-    return {
-      name,
-      mimeHint,
-      size,
-      read: () => Reflect.apply(arrayBuffer, value, []) as Promise<ArrayBuffer>,
-    };
+    return { name, mimeHint, size, file: value };
   } catch {
     return undefined;
   }
@@ -585,8 +559,6 @@ export function runImageWatermarkBatch(
   let settled = false;
   let completed = 0;
   let outputBytes = 0;
-  let logoReadStarted = false;
-  let retainedLogo: Uint8Array | undefined;
   let resolveResult: (value: readonly ImageWatermarkBatchItemResult[]) => void = () => undefined;
   const result = new Promise<readonly ImageWatermarkBatchItemResult[]>((resolve) => {
     resolveResult = resolve;
@@ -626,18 +598,10 @@ export function runImageWatermarkBatch(
     }
   };
 
-  const releaseLogo = (): void => {
-    if (retainedLogo !== undefined) {
-      retainedLogo.fill(0);
-      retainedLogo = undefined;
-    }
-  };
-
   const finishIfReady = (): void => {
     if (settled || completed !== items.length) return;
     settled = true;
     for (const slot of [...slots]) terminateSlot(slot);
-    releaseLogo();
     resolveResult(
       results.filter((entry): entry is ImageWatermarkBatchItemResult => entry !== undefined),
     );
@@ -689,7 +653,6 @@ export function runImageWatermarkBatch(
       slot.state === "starting" || slot.state === "ready" || slot.state === "configuring-logo";
     const index = slot.itemIndex;
     const captured = index === undefined ? undefined : capturedItems.get(index);
-    slot.generation += 1;
     delete slot.itemIndex;
     delete slot.jobId;
     terminateSlot(slot);
@@ -737,39 +700,13 @@ export function runImageWatermarkBatch(
       void assignNext(slot);
       return;
     }
-    const generation = ++slot.generation;
     const jobId = makeId("job");
     slot.itemIndex = index;
     slot.jobId = jobId;
-    slot.state = "reading";
+    slot.state = "running";
     slot.lastSequence = -1;
     slot.lastFraction = -1;
     armSlotTimeout(slot);
-
-    let bytes: ArrayBuffer;
-    try {
-      bytes = await captured.read();
-    } catch {
-      if (slot.generation !== generation || slot.itemIndex !== index || settled || cancelled)
-        return;
-      settleSlotItem(slot, {
-        itemId: captured.itemId,
-        status: "rejected",
-        error: CORRUPT_INPUT_ERROR,
-      });
-      return;
-    }
-    if (slot.generation !== generation || slot.itemIndex !== index || settled || cancelled) return;
-    const validatedBytes = validatedReadBuffer(bytes, captured.size);
-    if (validatedBytes === undefined) {
-      settleSlotItem(slot, {
-        itemId: captured.itemId,
-        status: "rejected",
-        error: { ...CORRUPT_INPUT_ERROR, retryable: false },
-      });
-      return;
-    }
-    bytes = validatedBytes;
 
     const request: ImageWatermarkWorkerRequest = {
       protocol: WORKER_PROTOCOL_VERSION,
@@ -781,30 +718,22 @@ export function runImageWatermarkBatch(
         name: captured.name,
         mimeHint: captured.mimeHint,
         byteLength: captured.size,
-        bytes,
+        file: captured.file,
       },
       spec: captured.spec,
       ...(captured.needsLogo ? { logoAssetId } : {}),
     };
     try {
-      slot.state = "running";
-      slot.worker.postMessage(request, [bytes]);
+      slot.worker.postMessage(request);
     } catch {
       failSlot(slot, WORKER_FAILURE_ERROR);
     }
   }
 
   const configureLogo = (slot: WorkerSlot): void => {
-    if (
-      settled ||
-      cancelled ||
-      slot.state !== "ready" ||
-      retainedLogo === undefined ||
-      capturedLogo === undefined
-    ) {
+    if (settled || cancelled || slot.state !== "ready" || capturedLogo === undefined) {
       return;
     }
-    const bytes = retainedLogo.slice().buffer;
     const request: ImageWatermarkWorkerRequest = {
       protocol: WORKER_PROTOCOL_VERSION,
       type: "configure-logo",
@@ -815,67 +744,17 @@ export function runImageWatermarkBatch(
         name: capturedLogo.name,
         mimeHint: capturedLogo.mimeHint,
         byteLength: capturedLogo.size,
-        bytes,
+        file: capturedLogo.file,
       },
     };
     try {
       clearSlotTimeout(slot);
       slot.state = "configuring-logo";
       armSlotTimeout(slot);
-      slot.worker.postMessage(request, [bytes]);
+      slot.worker.postMessage(request);
     } catch {
-      try {
-        new Uint8Array(bytes).fill(0);
-      } catch {
-        // A transferred or hostile buffer has no locally owned bytes left to release.
-      }
       failSlot(slot, WORKER_FAILURE_ERROR);
     }
-  };
-
-  const beginLogoRead = (): void => {
-    if (logoReadStarted || capturedLogo === undefined || settled || cancelled) return;
-    const logo = capturedLogo;
-    logoReadStarted = true;
-    void (async () => {
-      let readValue: unknown;
-      try {
-        readValue = await logo.read();
-      } catch {
-        if (!settled && !cancelled) rejectUnsettled(CORRUPT_INPUT_ERROR);
-        return;
-      }
-
-      let ownedBytes: ArrayBuffer | undefined;
-      try {
-        if (isOrdinaryArrayBuffer(readValue)) ownedBytes = readValue;
-      } catch {
-        // Hostile values are validation failures and have no ordinary buffer to release.
-      }
-      if (ownedBytes === undefined) {
-        if (!settled && !cancelled) {
-          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
-        }
-        return;
-      }
-
-      try {
-        if (settled || cancelled) return;
-        const validatedBytes = validatedReadBuffer(ownedBytes, logo.size);
-        if (validatedBytes === undefined) {
-          rejectUnsettled({ ...CORRUPT_INPUT_ERROR, retryable: false });
-          return;
-        }
-        retainedLogo = new Uint8Array(validatedBytes).slice();
-        for (const slot of slots) configureLogo(slot);
-      } finally {
-        try {
-          new Uint8Array(ownedBytes).fill(0);
-        } catch {
-          // A detached buffer has no remaining bytes to release.
-        }
-      }
-    })();
   };
 
   const attachWorker = (slot: WorkerSlot): void => {
@@ -903,7 +782,6 @@ export function runImageWatermarkBatch(
             clearSlotTimeout(slot);
             slot.state = "ready";
             armSlotTimeout(slot);
-            beginLogoRead();
             configureLogo(slot);
           } else {
             clearSlotTimeout(slot);
@@ -970,11 +848,6 @@ export function runImageWatermarkBatch(
           failSlot(slot, WORKER_FAILURE_ERROR);
           return;
         }
-        if (slot.state === "reading") {
-          failSlot(slot, WORKER_FAILURE_ERROR);
-          return;
-        }
-
         const captured = capturedItems.get(slot.itemIndex);
         if (captured === undefined) {
           failSlot(slot, WORKER_FAILURE_ERROR);
@@ -1079,7 +952,6 @@ export function runImageWatermarkBatch(
     const slot: WorkerSlot = {
       worker,
       state: "starting",
-      generation: 0,
       logoConfigured: false,
       lastSequence: -1,
       lastFraction: -1,
@@ -1165,7 +1037,6 @@ export function runImageWatermarkBatch(
       }
       queue.length = 0;
       settled = true;
-      releaseLogo();
       resolveResult(
         results.filter((entry): entry is ImageWatermarkBatchItemResult => entry !== undefined),
       );

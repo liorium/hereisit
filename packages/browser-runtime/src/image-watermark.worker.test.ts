@@ -9,6 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PreparedImageWatermarkLogo } from "./image-watermark-pipeline";
 
 const pipelineMocks = vi.hoisted(() => ({
+  PipelineError: class extends Error {
+    constructor(
+      readonly code: ImageWatermarkErrorPayload["code"],
+      message: string,
+      readonly retryable = false,
+    ) {
+      super(message);
+    }
+  },
   closeLogo: vi.fn(),
   prepareLogo: vi.fn(),
   process: vi.fn(),
@@ -17,6 +26,7 @@ const pipelineMocks = vi.hoisted(() => ({
 
 vi.mock("./image-watermark-pipeline", () => ({
   closePreparedImageWatermarkLogo: pipelineMocks.closeLogo,
+  ImageWatermarkPipelineError: pipelineMocks.PipelineError,
   prepareImageWatermarkLogo: pipelineMocks.prepareLogo,
   processImageWatermarkPipeline: pipelineMocks.process,
   toImageWatermarkErrorPayload: pipelineMocks.toErrorPayload,
@@ -116,6 +126,14 @@ function input(bytes = Uint8Array.of(0x89, 0x50, 0x4e, 0x47).buffer): ImageWater
   };
 }
 
+function workerFileInput(
+  file = new File([Uint8Array.of(0x89, 0x50, 0x4e, 0x47)], "photo.png", {
+    type: "image/png",
+  }),
+) {
+  return { name: file.name, mimeHint: file.type, byteLength: file.size, file };
+}
+
 function runRequest(
   jobId = "job-1",
   overrides: Record<string, unknown> = {},
@@ -126,7 +144,7 @@ function runRequest(
     jobId,
     tool: "image.watermark",
     toolVersion: 1,
-    input: input(),
+    input: workerFileInput(),
     spec: textSpec,
     ...overrides,
   };
@@ -142,7 +160,7 @@ function configureRequest(
     assetId,
     tool: "image.watermark",
     toolVersion: 1,
-    input: input(),
+    input: workerFileInput(),
     ...overrides,
   };
 }
@@ -238,11 +256,16 @@ beforeEach(() => {
   pipelineMocks.prepareLogo.mockReset();
   pipelineMocks.process.mockReset();
   pipelineMocks.toErrorPayload.mockReset();
-  pipelineMocks.toErrorPayload.mockReturnValue({
-    code: "WORKER_CRASH",
-    message: "이미지 워터마크 작업을 완료하지 못했어요.",
-    retryable: true,
-  } satisfies ImageWatermarkErrorPayload);
+  pipelineMocks.toErrorPayload.mockImplementation((error: unknown) => {
+    if (error instanceof pipelineMocks.PipelineError) {
+      return { code: error.code, message: error.message, retryable: error.retryable };
+    }
+    return {
+      code: "WORKER_CRASH",
+      message: "이미지 워터마크 작업을 완료하지 못했어요.",
+      retryable: true,
+    } satisfies ImageWatermarkErrorPayload;
+  });
   WorkerProbeCanvas.instances = [];
 });
 
@@ -321,27 +344,30 @@ describe("image-watermark Worker readiness", () => {
 
 describe("image-watermark Worker hostile request boundary", () => {
   it.each([
-    null,
-    {},
-    { protocol: 2, type: "run", jobId: "job-1" },
-    { protocol: 1, type: "run", jobId: "" },
-    runRequest("bad-input", { input: null }),
-    runRequest("bad-length", {
-      input: {
-        name: "photo.png",
-        mimeHint: "image/png",
-        byteLength: 1,
-        bytes: new ArrayBuffer(2),
-      },
-    }),
-    { protocol: 1, type: "cancel", jobId: "stale-job" },
-  ])("ignores malformed or stale request %# without invoking a pipeline helper", async (request) => {
+    [null, 1],
+    [{}, 1],
+    [{ protocol: 2, type: "run", jobId: "job-1" }, 1],
+    [{ protocol: 1, type: "run", jobId: "" }, 1],
+    [runRequest("bad-input", { input: null }), 2],
+    [
+      runRequest("bad-length", {
+        input: {
+          name: "photo.png",
+          mimeHint: "image/png",
+          byteLength: 1,
+          bytes: new ArrayBuffer(2),
+        },
+      }),
+      2,
+    ],
+    [{ protocol: 1, type: "cancel", jobId: "stale-job" }, 1],
+  ])("contains malformed or stale request %# without invoking a pipeline helper", async (request, posts) => {
     const scope = await loadWorker();
 
     scope.dispatch(request);
     await flushWorker();
 
-    expect(scope.posts).toHaveLength(1);
+    expect(scope.posts).toHaveLength(posts);
     expect(pipelineMocks.process).not.toHaveBeenCalled();
     expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
   });
@@ -365,7 +391,7 @@ describe("image-watermark Worker hostile request boundary", () => {
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
 
-  it("ignores malformed and oversized logo configuration envelopes", async () => {
+  it("rejects malformed and oversized logo configuration envelopes for valid assets", async () => {
     const oversized = new ArrayBuffer(10 * MEBIBYTE + 1);
     const scope = await loadWorker();
 
@@ -379,7 +405,10 @@ describe("image-watermark Worker hostile request boundary", () => {
     scope.dispatch(configureRequest("asset-large", { input: input(oversized) }));
     await flushWorker();
 
-    expect(scope.posts).toHaveLength(1);
+    expect(scope.posts).toHaveLength(4);
+    expect(logoTerminalPosts(scope, "asset-null")).toHaveLength(1);
+    expect(logoTerminalPosts(scope, "asset-mismatch")).toHaveLength(1);
+    expect(logoTerminalPosts(scope, "asset-large")).toHaveLength(1);
     expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
     expect(pipelineMocks.process).not.toHaveBeenCalled();
   });
@@ -429,6 +458,45 @@ describe("image-watermark Worker hostile request boundary", () => {
     expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
   });
 
+  it("reads and prepares a logo File inside the Worker", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "logo.png", { type: "image/png" });
+    const read = vi.spyOn(file, "arrayBuffer");
+    pipelineMocks.prepareLogo.mockResolvedValue(preparedLogo("logo"));
+    const scope = await loadWorker();
+
+    scope.dispatch(configureRequest("asset-file", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(pipelineMocks.prepareLogo).toHaveBeenCalledOnce());
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(new Uint8Array(pipelineMocks.prepareLogo.mock.calls[0]?.[0].bytes)).toEqual(
+      Uint8Array.of(1, 2, 3, 4),
+    );
+    expect(logoTerminalPosts(scope, "asset-file")).toMatchObject([
+      { event: { type: "logo-ready" } },
+    ]);
+  });
+
+  it.each([
+    [
+      "rejected read",
+      () => Promise.reject(new DOMException("read failed", "NotReadableError")),
+      true,
+    ],
+    ["changed length", () => Promise.resolve(new ArrayBuffer(5)), false],
+  ])("rejects a logo %s without caching it", async (_label, makeReadResult, retryable) => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "logo.png", { type: "image/png" });
+    vi.spyOn(file, "arrayBuffer").mockImplementation(makeReadResult);
+    const scope = await loadWorker();
+
+    scope.dispatch(configureRequest("asset-bad", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(logoTerminalPosts(scope, "asset-bad")).toHaveLength(1));
+
+    expect(logoTerminalPosts(scope, "asset-bad")).toMatchObject([
+      { event: { type: "logo-failed", error: { code: "CORRUPT_INPUT", retryable } } },
+    ]);
+    expect(pipelineMocks.prepareLogo).not.toHaveBeenCalled();
+  });
+
   it("ignores a duplicate active run and rejects a different concurrent run once", async () => {
     const pending = deferred<ImageWatermarkResult>();
     pipelineMocks.process.mockReturnValueOnce(pending.promise);
@@ -437,6 +505,7 @@ describe("image-watermark Worker hostile request boundary", () => {
     scope.dispatch(runRequest("job-1"));
     scope.dispatch(runRequest("job-1"));
     scope.dispatch(runRequest("job-2"));
+    await flushWorker();
 
     expect(pipelineMocks.process).toHaveBeenCalledOnce();
     expect(terminalPosts(scope, "job-1")).toHaveLength(0);
@@ -497,7 +566,12 @@ describe("image-watermark Worker logo cache", () => {
     await flushWorker();
 
     expect(pipelineMocks.prepareLogo).toHaveBeenCalledExactlyOnceWith(
-      configuration.input,
+      expect.objectContaining({
+        name: "photo.png",
+        mimeHint: "image/png",
+        byteLength: 4,
+        bytes: expect.any(ArrayBuffer),
+      }),
       expect.any(AbortSignal),
     );
     expect(logoTerminalPosts(scope, "asset-1")).toEqual([
@@ -613,6 +687,134 @@ describe("image-watermark Worker logo cache", () => {
 });
 
 describe("image-watermark Worker terminal lifecycle", () => {
+  it("reads a source File inside the Worker before pipeline handoff", async () => {
+    const file = new File([Uint8Array.of(0x89, 0x50, 0x4e, 0x47)], "photo.png", {
+      type: "image/png",
+    });
+    const read = vi.spyOn(file, "arrayBuffer");
+    pipelineMocks.process.mockResolvedValue(result());
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-file", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(pipelineMocks.process).toHaveBeenCalledOnce());
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(pipelineMocks.process.mock.calls[0]?.[0]).toMatchObject({
+      name: "photo.png",
+      mimeHint: "image/png",
+      byteLength: 4,
+    });
+    expect(new Uint8Array(pipelineMocks.process.mock.calls[0]?.[0].bytes)).toEqual(
+      Uint8Array.of(0x89, 0x50, 0x4e, 0x47),
+    );
+  });
+
+  it.each([
+    ["name", { name: "other.png" }],
+    ["MIME", { mimeHint: "image/jpeg" }],
+    ["size", { byteLength: 5 }],
+  ])("rejects mismatched source %s metadata", async (_label, override) => {
+    const scope = await loadWorker();
+    scope.dispatch(
+      runRequest("job-mismatch", {
+        input: { ...workerFileInput(), ...override },
+      }),
+    );
+    await flushWorker();
+    expect(terminalPosts(scope, "job-mismatch")).toMatchObject([
+      { event: { type: "failed", error: { code: "INVALID_SPEC" } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact-shaped source envelope with a non-native File", async () => {
+    const scope = await loadWorker();
+
+    scope.dispatch(
+      runRequest("job-non-native-file", {
+        input: {
+          name: "photo.png",
+          mimeHint: "image/png",
+          byteLength: 4,
+          file: {
+            name: "photo.png",
+            type: "image/png",
+            size: 4,
+            arrayBuffer: vi.fn(),
+          },
+        },
+      }),
+    );
+    await flushWorker();
+
+    expect(terminalPosts(scope, "job-non-native-file")).toMatchObject([
+      { event: { type: "failed", error: { code: "INVALID_SPEC" } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("maps a rejected source read to a retryable corrupt-input error", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
+    vi.spyOn(file, "arrayBuffer").mockRejectedValue(
+      new DOMException("read failed", "NotReadableError"),
+    );
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-unreadable", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-unreadable")).toHaveLength(1));
+
+    expect(terminalPosts(scope, "job-unreadable")).toMatchObject([
+      { event: { type: "failed", error: { code: "CORRUPT_INPUT", retryable: true } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("rejects a source read whose returned length changed", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
+    vi.spyOn(file, "arrayBuffer").mockResolvedValue(new ArrayBuffer(5));
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-wrong-length", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-wrong-length")).toHaveLength(1));
+
+    expect(terminalPosts(scope, "job-wrong-length")).toMatchObject([
+      { event: { type: "failed", error: { code: "CORRUPT_INPUT", retryable: false } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-ordinary source read buffer", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
+    const bytes = new ArrayBuffer(4);
+    Object.setPrototypeOf(bytes, null);
+    vi.spyOn(file, "arrayBuffer").mockResolvedValue(bytes);
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-non-ordinary", { input: workerFileInput(file) }));
+    await vi.waitFor(() => expect(terminalPosts(scope, "job-non-ordinary")).toHaveLength(1));
+
+    expect(terminalPosts(scope, "job-non-ordinary")).toMatchObject([
+      { event: { type: "failed", error: { code: "CORRUPT_INPUT", retryable: false } } },
+    ]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
+  it("settles cancellation once while a source File read is pending", async () => {
+    const pending = deferred<ArrayBuffer>();
+    const file = new File([Uint8Array.of(1, 2, 3, 4)], "photo.png", { type: "image/png" });
+    vi.spyOn(file, "arrayBuffer").mockReturnValue(pending.promise);
+    const scope = await loadWorker();
+
+    scope.dispatch(runRequest("job-reading", { input: workerFileInput(file) }));
+    await flushWorker();
+    scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-reading" });
+    pending.resolve(Uint8Array.of(1, 2, 3, 4).buffer);
+    await flushWorker();
+
+    expect(terminalPosts(scope, "job-reading")).toEqual([cancelledTerminalPost("job-reading")]);
+    expect(pipelineMocks.process).not.toHaveBeenCalled();
+  });
+
   it("passes validated data, reports monotonic progress, and transfers the final buffer once", async () => {
     const output = result();
     pipelineMocks.process.mockImplementation(
@@ -630,7 +832,12 @@ describe("image-watermark Worker terminal lifecycle", () => {
     await flushWorker();
 
     expect(pipelineMocks.process).toHaveBeenCalledExactlyOnceWith(
-      request.input,
+      expect.objectContaining({
+        name: "photo.png",
+        mimeHint: "image/png",
+        byteLength: 4,
+        bytes: expect.any(ArrayBuffer),
+      }),
       textSpec,
       undefined,
       expect.any(Function),
@@ -644,13 +851,21 @@ describe("image-watermark Worker terminal lifecycle", () => {
         jobId: "job-1",
         sequence: 0,
         phase: "validating",
-        fraction: 0.02,
+        fraction: 0.01,
       },
       {
         protocol: 1,
         type: "progress",
         jobId: "job-1",
         sequence: 1,
+        phase: "validating",
+        fraction: 0.02,
+      },
+      {
+        protocol: 1,
+        type: "progress",
+        jobId: "job-1",
+        sequence: 2,
         phase: "decoding",
         fraction: 0.4,
       },
@@ -658,7 +873,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
         protocol: 1,
         type: "progress",
         jobId: "job-1",
-        sequence: 2,
+        sequence: 3,
         phase: "finalizing",
         fraction: 1,
       },
@@ -727,6 +942,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     pipelineMocks.process.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     scope.dispatch(runRequest("job-1"));
+    await vi.waitFor(() => expect(pipelineMocks.process).toHaveBeenCalledOnce());
     const report = pipelineMocks.process.mock.calls[0]?.[3] as PipelineCall["report"];
     const signal = pipelineMocks.process.mock.calls[0]?.[4] as AbortSignal;
 
@@ -743,7 +959,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     await flushWorker();
 
     expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
-    expect(scope.posts.some(({ event }) => eventType(event) === "progress")).toBe(false);
+    expect(scope.posts.filter(({ event }) => eventType(event) === "progress")).toHaveLength(1);
   });
 
   it("retains the active slot after cancellation until the aborted pipeline settles", async () => {
@@ -751,6 +967,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     pipelineMocks.process.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     scope.dispatch(runRequest("job-1"));
+    await vi.waitFor(() => expect(pipelineMocks.process).toHaveBeenCalledOnce());
 
     scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
     expect(terminalPosts(scope, "job-1")).toEqual([cancelledTerminalPost("job-1")]);
@@ -779,6 +996,7 @@ describe("image-watermark Worker terminal lifecycle", () => {
     pipelineMocks.process.mockReturnValueOnce(pending.promise);
     const scope = await loadWorker();
     scope.dispatch(runRequest("job-1"));
+    await vi.waitFor(() => expect(pipelineMocks.process).toHaveBeenCalledOnce());
 
     scope.dispatch({ protocol: 1, type: "cancel", jobId: "job-1" });
     pending.reject(new Error("PRIVATE_LATE_FAILURE"));
@@ -805,6 +1023,6 @@ describe("image-watermark Worker terminal lifecycle", () => {
     await flushWorker();
 
     expect(terminalPosts(scope, "job-1")).toHaveLength(1);
-    expect(scope.posts.some(({ event }) => eventType(event) === "progress")).toBe(false);
+    expect(scope.posts.filter(({ event }) => eventType(event) === "progress")).toHaveLength(1);
   });
 });
