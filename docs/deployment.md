@@ -34,7 +34,7 @@ pnpm verify:all
 pnpm cloudflare:preview
 ~~~
 
-The GitHub Actions `browser` job is the authoritative browser release gate for the exact pull-request SHA.
+The GitHub Actions `browser` job is the authoritative browser release gate for the pull-request merge candidate.
 It runs desktop and mobile Chromium, Firefox, and WebKit; routine local verification does not install or run
 Playwright browsers.
 

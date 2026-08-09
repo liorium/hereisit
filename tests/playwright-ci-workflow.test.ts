@@ -52,6 +52,14 @@ describe("Playwright CI workflow", () => {
     expect(combinedExit).toBeGreaterThan(webkitStatus);
   });
 
+  it("retains privacy-safe failure artifacts for each retry attempt", () => {
+    expect(workflow).toContain("if: failure()");
+    expect(workflow).toContain("name: playwright-failure-$" + "{{ github.run_attempt }}");
+    expect(workflow).toContain("test-results/");
+    expect(workflow).toContain("playwright-report/");
+    expect(workflow).toContain("retention-days: 7");
+  });
+
   it("forwards project and grep options to Playwright", () => {
     expect(workflow).not.toMatch(/pnpm test:e2e:ci --(?:\s|$)/);
   });
@@ -68,16 +76,18 @@ describe("Playwright CI workflow", () => {
     const agents = readFileSync("AGENTS.md", "utf8");
     const readme = readFileSync("README.md", "utf8");
     const deployment = readFileSync("docs/deployment.md", "utf8");
+    const productAnalytics = readFileSync("docs/deployment/product-analytics.md", "utf8");
     const checklist = readFileSync("docs/testing/discovery-accessibility-checklist.md", "utf8");
 
     expect(agents).toContain("Automated Playwright E2E runs in GitHub Actions only.");
     expect(agents).toContain(
       "`pnpm verify:all` — run core verification and the local processing-stack test.",
     );
-    for (const document of [readme, deployment, checklist]) {
+    for (const document of [readme, deployment, productAnalytics, checklist]) {
       expect(document).toContain("GitHub Actions `browser` job");
       expect(document).not.toContain("PLAYWRIGHT_WEBKIT=1");
     }
+    expect(productAnalytics).not.toContain("pnpm exec playwright test");
     expect(readme).not.toContain("pnpm exec playwright install --with-deps");
     expect(deployment).not.toContain("pnpm exec playwright install --with-deps");
   });

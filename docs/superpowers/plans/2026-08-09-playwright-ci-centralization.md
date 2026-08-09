@@ -505,3 +505,27 @@ gh api repos/liorium/hereisit/branches/main/protection --jq '.required_status_ch
 ```
 
 Expected: the temporary worktree is absent, no Playwright Docker image is listed, the intentionally preserved shared cache is reported, and GitHub returns `verify` and `browser` as required checks.
+
+## Implementation corrections
+
+Actual package-script invocations omit the literal separator. The corrected primary, WebKit, and analytics
+examples are:
+
+```bash
+PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/primary pnpm test:e2e:ci \
+  --project=chromium --project=firefox --project=mobile-chromium --project=mobile-firefox \
+  --output=test-results/primary
+PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/webkit pnpm test:e2e:ci \
+  --project=webkit --project=mobile-webkit --workers=1 --output=test-results/webkit
+HEREISIT_E2E_PRODUCT_ANALYTICS=1 pnpm test:e2e:ci \
+  tests/e2e/product-analytics.spec.ts tests/e2e/image-workbench.spec.ts tests/e2e/pdf-tools.spec.ts \
+  --project=chromium --grep analytics
+```
+
+Legacy-reference inspection excludes `tests/playwright-ci-workflow.test.ts` because it intentionally contains
+negative assertions:
+
+```bash
+rg -n 'pnpm test:e2e:ci|PLAYWRIGHT_WEBKIT|pnpm exec playwright test' \
+  --glob '!tests/playwright-ci-workflow.test.ts'
+```
