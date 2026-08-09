@@ -6,8 +6,8 @@ import {
   type ImageWatermarkErrorPayload,
   type ImageWatermarkInput,
   type ImageWatermarkPhase,
-  type ImageWatermarkWorkerFileInput,
   type ImageWatermarkWorkerEvent,
+  type ImageWatermarkWorkerFileInput,
   imageWatermarkSpecSchema,
   type ParsedImageWatermarkSpecV1,
   WORKER_PROTOCOL_VERSION,
@@ -164,10 +164,7 @@ async function readFileInput(
     }
   } catch (error) {
     if (error instanceof ImageWatermarkPipelineError) throw error;
-    throw new ImageWatermarkPipelineError(
-      "CORRUPT_INPUT",
-      "이미지 파일 크기를 확인하지 못했어요.",
-    );
+    throw new ImageWatermarkPipelineError("CORRUPT_INPUT", "이미지 파일 크기를 확인하지 못했어요.");
   }
   return { name: input.name, mimeHint: input.mimeHint, byteLength: input.byteLength, bytes };
 }

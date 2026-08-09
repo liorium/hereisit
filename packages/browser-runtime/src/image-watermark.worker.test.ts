@@ -477,7 +477,11 @@ describe("image-watermark Worker hostile request boundary", () => {
   });
 
   it.each([
-    ["rejected read", () => Promise.reject(new DOMException("read failed", "NotReadableError")), true],
+    [
+      "rejected read",
+      () => Promise.reject(new DOMException("read failed", "NotReadableError")),
+      true,
+    ],
     ["changed length", () => Promise.resolve(new ArrayBuffer(5)), false],
   ])("rejects a logo %s without caching it", async (_label, makeReadResult, retryable) => {
     const file = new File([Uint8Array.of(1, 2, 3, 4)], "logo.png", { type: "image/png" });

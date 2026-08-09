@@ -62,11 +62,6 @@ const LOGO_REQUIRED_ERROR: ImageWatermarkErrorPayload = {
   message: "사용할 로고 이미지를 선택해 주세요.",
   retryable: false,
 };
-const CORRUPT_INPUT_ERROR: ImageWatermarkErrorPayload = {
-  code: "CORRUPT_INPUT",
-  message: "이미지 파일을 읽지 못했어요.",
-  retryable: true,
-};
 const WORKER_FAILURE_ERROR: ImageWatermarkErrorPayload = {
   code: "WORKER_CRASH",
   message: "브라우저 이미지 워터마크 작업기가 중단됐어요.",
@@ -179,16 +174,6 @@ function isOrdinaryArrayBuffer(value: unknown): value is ArrayBuffer {
     Object.getPrototypeOf(value) === ArrayBuffer.prototype &&
     Reflect.ownKeys(value).length === 0
   );
-}
-
-function validatedReadBuffer(value: unknown, expectedByteLength: number): ArrayBuffer | undefined {
-  try {
-    return isOrdinaryArrayBuffer(value) && arrayBufferByteLength(value) === expectedByteLength
-      ? value
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function releaseCanvas(canvas: OffscreenCanvas | undefined): void {
@@ -749,12 +734,7 @@ export function runImageWatermarkBatch(
   }
 
   const configureLogo = (slot: WorkerSlot): void => {
-    if (
-      settled ||
-      cancelled ||
-      slot.state !== "ready" ||
-      capturedLogo === undefined
-    ) {
+    if (settled || cancelled || slot.state !== "ready" || capturedLogo === undefined) {
       return;
     }
     const request: ImageWatermarkWorkerRequest = {
