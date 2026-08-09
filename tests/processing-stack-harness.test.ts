@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { imageOptimizeStatusResponseSchema } from "../packages/tool-contracts/src/image-optimize";
 import {
   projectSmokeRequest,
   summarizeSmokeRequests,
@@ -6,11 +7,39 @@ import {
 import {
   createEdgeForwardHeaders,
   dynamicWorkerConfig,
+  publicEngineStatus,
   redactProcessingStackOutput,
   shouldForwardEdgeResponseHeader,
 } from "../scripts/test-processing-stack.mjs";
 
 describe("processing stack harness", () => {
+  it("projects engine download results into the strict public contract", () => {
+    const projected = publicEngineStatus({
+      jobId: "123e4567-e89b-42d3-a456-426614174000",
+      state: "succeeded",
+      phase: "completed",
+      fraction: 1,
+      sequence: 10,
+      result: {
+        kind: "download",
+        mime: "image/jpeg",
+        byteLength: 350_527,
+        width: 640,
+        height: 427,
+        testedCandidates: 3,
+        engineBuildId: "engine-test",
+        codecBuildId: "mozjpeg-4.1.1",
+        warnings: [],
+      },
+      measurements: { processingMs: 1_332 },
+    });
+
+    const parsed = imageOptimizeStatusResponseSchema.parse(projected);
+
+    expect(parsed.result).toMatchObject({ kind: "download" });
+    expect(parsed.result).not.toHaveProperty("testedCandidates");
+  });
+
   it("redacts credentials and authenticated upload paths from child output", () => {
     const output = redactProcessingStackOutput(
       "Authorization: Bearer private /v1/jobs/123e4567-e89b-42d3-a456-426614174000/input x-download-lease=lease",
