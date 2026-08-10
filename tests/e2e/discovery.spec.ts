@@ -973,7 +973,7 @@ test("shows the ordinary selector after a handed-off destination reload", async 
   await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
 });
 
-test("asks for reselect when a controlled clock expires the pending handoff", async ({ page }) => {
+test("consumes a pending image handoff without OffscreenCanvas", async ({ page }) => {
   await page.addInitScript(() => {
     const trackedWindow = window as Window & {
       __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
@@ -1026,12 +1026,12 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
   await search.getByRole("option", { name: /이미지 용량 줄이기/ }).click();
 
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByTestId("image-workbench-status")).toHaveText("파일을 다시 선택해 주세요");
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("1개 이미지를 확인했어요.");
   await expect(page.getByText(/expires-locally\.png/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
 });
 
-test("asks for reselect when a pending handoff reaches a different tool", async ({ page }) => {
+test("does not leave a consumed image handoff for a different tool", async ({ page }) => {
   await page.addInitScript(() => {
     const trackedWindow = window as Window & { __hereisitEnableImageRuntime?: () => void };
     const nativeOffscreenCanvas = globalThis.OffscreenCanvas;
@@ -1069,9 +1069,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
   await search.getByRole("option", { name: /PDF 합치기/ }).click();
 
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
-  await expect(
-    page.getByText("파일을 다시 선택해 주세요", { exact: true }).filter({ visible: true }),
-  ).toBeVisible();
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/target-mismatch\.png/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "합칠 PDF 선택" })).toBeEnabled();
 });
