@@ -223,7 +223,13 @@ function losslessResult(
   const output = result.mime === "image/jpeg" ? stripJpegMetadata(bytes) : stripPngMetadata(bytes);
   if (!isOrdinaryArrayBuffer(output) || byteLength(output) < 1) throw new Error("output");
   const verified = inspection(output);
-  if (verified.mime !== result.mime || verified.animated) throw new Error("output");
+  if (
+    verified.mime !== result.mime ||
+    verified.width !== result.width ||
+    verified.height !== result.height ||
+    verified.animated
+  )
+    throw new Error("output");
   return {
     bytes: output,
     byteLength: byteLength(output),

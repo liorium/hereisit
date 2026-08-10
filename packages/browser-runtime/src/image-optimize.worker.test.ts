@@ -168,6 +168,21 @@ describe("image optimize Worker", () => {
     expect(scope.posts.at(-1)?.transfer).toEqual([output]);
   });
 
+  it("rejects lossless output whose verified dimensions differ from the source", async () => {
+    const scope = await loadWorker();
+    fileFormatMocks.inspect
+      .mockReturnValueOnce({ mime: "image/png", width: 2, height: 1, animated: false })
+      .mockReturnValueOnce({ mime: "image/png", width: 1, height: 2, animated: false });
+
+    scope.dispatch(request("lossless"));
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    expect(terminal(scope)[0]).toMatchObject({
+      type: "failed",
+      error: { code: "CORRUPT_INPUT", retryable: false },
+    });
+  });
+
   it("inspects and strips an eligible JPEG before transferring the result", async () => {
     const scope = await loadWorker();
     const output = Uint8Array.of(8, 7, 6).buffer;

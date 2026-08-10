@@ -126,6 +126,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [message, setMessage] = useState("처리 방식을 확인하고 있어요.");
   const [imageRuntimeSupported, setImageRuntimeSupported] = useState(false);
   const [inspectionRuntimeSupported, setInspectionRuntimeSupported] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -247,16 +248,19 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       {
         onProgress: (completed, total) => {
           if (selectionGenerationRef.current === generation)
-            setMessage(`${completed}/${total} 이미지 확인 중`);
+            setMessage(`${Math.min(completed + 1, total)}/${total} 이미지 확인 중`);
         },
       },
     );
     inspectionRef.current = inspection;
+    setInspecting(true);
+    if (candidates.length > 0) setMessage(`1/${candidates.length} 이미지 확인 중`);
     const inspectedResults = await inspection.result;
     if (selectionGenerationRef.current !== generation || inspectionRef.current !== inspection) {
       return;
     }
     inspectionRef.current = null;
+    setInspecting(false);
     const next: WorkItem[] = [];
     for (const inspectedResult of inspectedResults) {
       const source = candidates.find((candidate) => candidate.id === inspectedResult.itemId);
@@ -426,7 +430,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   };
 
   const processItems = async () => {
-    if (processing || remoteDeliveryBusy || items.length === 0 || policy.state === "checking")
+    if (
+      inspectionRef.current !== null ||
+      processing ||
+      remoteDeliveryBusy ||
+      items.length === 0 ||
+      policy.state === "checking"
+    )
       return;
     const sourceItems = items.filter((item) => item.status === "ready" || item.status === "failed");
     if (sourceItems.length === 0) return;
@@ -812,6 +822,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       (policy.state !== "checking" && statusMessage === policy.text));
   const runDisabled =
     actionableCount === 0 ||
+    inspecting ||
     policy.state === "checking" ||
     remoteDeliveryBusy ||
     (policy.state === "local" &&
@@ -830,6 +841,10 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const resetWorkbench = async () => {
     if (remoteDeliveryLockRef.current) return;
+    selectionGenerationRef.current += 1;
+    inspectionRef.current?.cancel();
+    inspectionRef.current = null;
+    setInspecting(false);
     processingControllerRef.current?.abort();
     batchRef.current?.cancel();
     productRunRef.current?.cancelled();
