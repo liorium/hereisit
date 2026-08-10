@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import * as smokeModule from "../scripts/smoke-image-compress-server.mjs";
 import {
+  classifyJobCreateRateLimit,
   runProcessingPublicSmokeCli,
   runProcessingStagingSmokeCli,
   smokeImageCompressServer,
@@ -142,6 +143,27 @@ function browserThatStopsAtJobSubmit(publicServer = false) {
 }
 
 describe("authenticated processing staging smoke", () => {
+  it("distinguishes HereIsIt rate limits from an upstream 429", () => {
+    expect(
+      classifyJobCreateRateLimit({
+        scope: "network",
+        body: { contract: "tool-job@1", error: { code: "RATE_LIMITED" } },
+      }),
+    ).toBe("network");
+    expect(
+      classifyJobCreateRateLimit({
+        scope: "session",
+        body: { contract: "tool-job@1", error: { code: "RATE_LIMITED" } },
+      }),
+    ).toBe("session");
+    expect(
+      classifyJobCreateRateLimit({
+        body: { contract: "tool-job@1", error: { code: "RATE_LIMITED" } },
+      }),
+    ).toBe("application-unscoped");
+    expect(classifyJobCreateRateLimit({ body: "upstream response" })).toBe("upstream");
+  });
+
   it("selects a file before opening its conditional compression settings", async () => {
     browserLaunch.mockResolvedValue(browserThatStopsAtJobSubmit());
     browserSmoke.mockImplementation((input, implementation) => implementation(input));
@@ -357,6 +379,7 @@ describe("authenticated processing staging smoke", () => {
 
   it("keeps the module surface narrow and rejects non-HTTP origins before browser launch", async () => {
     expect(Object.keys(smokeModule).sort()).toEqual([
+      "classifyJobCreateRateLimit",
       "projectSmokeRequest",
       "runProcessingPublicSmokeCli",
       "runProcessingStagingSmokeCli",

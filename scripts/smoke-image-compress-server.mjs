@@ -43,6 +43,8 @@ const safeFailures = new Set([
   `${stableFailure} [job-create-network]`,
   `${stableFailure} [job-create-network-rate-limit]`,
   `${stableFailure} [job-create-session-rate-limit]`,
+  `${stableFailure} [job-create-application-unscoped-rate-limit]`,
+  `${stableFailure} [job-create-upstream-rate-limit]`,
   `${stableFailure} [job-create-unknown-rate-limit]`,
   `${stableFailure} [job-create-503]`,
   `${stableFailure} [job-create-missing]`,
@@ -97,6 +99,37 @@ export function summarizeSmokeRequests(requests) {
     });
     return `${projected.method} ${projected.path}`;
   });
+}
+
+export function classifyJobCreateRateLimit({ scope, body }) {
+  if (scope === "network" || scope === "session") return scope;
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    body.contract === "tool-job@1" &&
+    body.error !== null &&
+    typeof body.error === "object" &&
+    body.error.code === "RATE_LIMITED"
+  ) {
+    return "application-unscoped";
+  }
+  return "upstream";
+}
+
+async function inspectJobCreateRateLimit(response) {
+  let scope;
+  try {
+    scope = await response.headerValue("x-hereisit-rate-limit-scope");
+  } catch {
+    scope = response.headers()["x-hereisit-rate-limit-scope"];
+  }
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    // An upstream 429 may not use the HereIsIt JSON contract.
+  }
+  return classifyJobCreateRateLimit({ scope, body });
 }
 
 function assertOrigin(value, label) {
@@ -267,6 +300,7 @@ async function assertServerJob(
     jobCreateNetworkFailures: 0,
     jobCreateStatuses: [],
     jobCreateRateLimitScopes: [],
+    jobCreateRateLimitInspections: [],
     downloadAcknowledgements: 0,
     downloadAcknowledged: false,
     invalidPolicy: false,
@@ -302,6 +336,7 @@ async function assertServerJob(
       state.jobCreateStatuses.push(response.status());
       if (response.status() === 429) {
         state.jobCreateRateLimitScopes.push(response.headers()["x-hereisit-rate-limit-scope"]);
+        state.jobCreateRateLimitInspections.push(inspectJobCreateRateLimit(response));
       }
     }
     if (
@@ -364,12 +399,18 @@ async function assertServerJob(
       }
       const createStatus = state.jobCreateStatuses.at(-1);
       if (createStatus === 429) {
-        const scope = state.jobCreateRateLimitScopes.at(-1);
-        if (scope === "network") {
+        const classification = (await Promise.all(state.jobCreateRateLimitInspections)).at(-1);
+        if (classification === "network") {
           throw new Error(`${stableFailure} [job-create-network-rate-limit]`);
         }
-        if (scope === "session") {
+        if (classification === "session") {
           throw new Error(`${stableFailure} [job-create-session-rate-limit]`);
+        }
+        if (classification === "application-unscoped") {
+          throw new Error(`${stableFailure} [job-create-application-unscoped-rate-limit]`);
+        }
+        if (classification === "upstream") {
+          throw new Error(`${stableFailure} [job-create-upstream-rate-limit]`);
         }
         throw new Error(`${stableFailure} [job-create-unknown-rate-limit]`);
       }
