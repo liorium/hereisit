@@ -115,7 +115,7 @@ describe("runner protocol and resource supervisor", () => {
       exceeded: { exceeded: "memory" },
     });
     expect(onProcessGroup).toHaveBeenCalledWith(31);
-    supervisor.stop();
+    await supervisor.stop();
     expect(clear).toHaveBeenCalledWith(7);
   });
 
@@ -129,7 +129,36 @@ describe("runner protocol and resource supervisor", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
     expect(sample).toHaveBeenCalledTimes(1);
-    supervisor.stop();
+    await supervisor.stop();
+  });
+
+  it("waits for a sample that started before terminal shutdown", async () => {
+    let resolveSample!: (value: LinuxResourceObservation) => void;
+    const sample = new Promise<LinuxResourceObservation>((resolve) => {
+      resolveSample = resolve;
+    });
+    const acceptObservation = vi.fn();
+    const supervisor = startResourceSupervisor({
+      sample: () => sample,
+      onProcessGroup: vi.fn(),
+      acceptObservation,
+      schedule: () => 1,
+      clear: vi.fn(),
+    });
+
+    let stopped = false;
+    const stopping = supervisor.stop().then((latestObservation) => {
+      stopped = true;
+      return latestObservation;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    resolveSample(observation({ exceeded: "memory" }));
+    await expect(stopping).resolves.toMatchObject({ exceeded: { exceeded: "memory" } });
+    expect(acceptObservation).toHaveBeenCalledWith(
+      expect.objectContaining({ exceeded: { exceeded: "memory" } }),
+    );
   });
 
   it("turns sampler crashes into a terminal measurement breach", async () => {
@@ -152,7 +181,7 @@ describe("runner protocol and resource supervisor", () => {
       exceeded: { exceeded: "measurement" },
       sample: { measurementFailed: true },
     });
-    supervisor.stop();
+    await supervisor.stop();
   });
 
   it("ignores a late measurement failure after the runner has reported terminal status", async () => {
@@ -183,7 +212,7 @@ describe("runner protocol and resource supervisor", () => {
     });
     await Promise.resolve();
     expect(settled).toBe(false);
-    supervisor.stop();
+    await supervisor.stop();
   });
 
   it.each([
@@ -232,6 +261,19 @@ describe("runner protocol and resource supervisor", () => {
 
   it("fails closed when a terminal runner status has no accepted observation", () => {
     expect(finalizeRunnerStatus(request, succeededStatus, null)).toMatchObject({
+      state: "failed",
+      sequence: 9,
+      error: { code: "ENGINE_CRASH", retryable: false },
+    });
+  });
+
+  it("fails closed when peak memory was not measured", () => {
+    expect(
+      finalizeRunnerStatus(request, succeededStatus, {
+        ...observation(null),
+        peakMemoryBytes: 0,
+      }),
+    ).toMatchObject({
       state: "failed",
       sequence: 9,
       error: { code: "ENGINE_CRASH", retryable: false },

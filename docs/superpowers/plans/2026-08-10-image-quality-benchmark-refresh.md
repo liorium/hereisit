@@ -378,7 +378,7 @@ test "$(git -C /home/ubuntu/workspace/projects/hereisit rev-parse HEAD)" = \
 
 Wait for main `verify` and Pages production deployment. Dispatch `image-quality-benchmark.yml` on `main`, require its `headSha` to equal the recorded merge SHA, wait for success, download the report, and run the changed verifier locally. Record per-format p95, maximum memory, output ratios, quality metrics, and estimated cost.
 
-No processing-staging deployment is required because this plan changes only an offline verifier and tests; if an engine file changes due a measured failure, require the existing processing-staging deployment and authenticated smoke before completion.
+The engine measurement path changed, so require the existing processing-staging deployment and authenticated smoke before completion.
 
 - [ ] **Step 3: Final scope and cleanliness audit**
 

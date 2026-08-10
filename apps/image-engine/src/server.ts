@@ -162,29 +162,32 @@ async function startServer(): Promise<void> {
         startNs,
         cgroupBaseline,
       });
-      let latestObservation: Awaited<ReturnType<typeof sampler.sample>> | null = null;
       const supervisor = startResourceSupervisor({
         sample: () => sampler.sample(),
         onProcessGroup: register,
         acceptObservation: async (observation) => {
-          if (observation.exceeded === null) latestObservation = observation;
-          if (runnerReportedTerminal) return false;
           if (observation.exceeded?.exceeded !== "measurement") return true;
+          if (runnerReportedTerminal) return false;
           return processGroupAlive(runnerPgid);
         },
       });
       const completion = Promise.race([
         terminalCompletion
-          .then((status) => finalizeRunnerStatus(input.request, status, latestObservation))
+          .then(async (status) => {
+            const observation = await supervisor.stop();
+            return finalizeRunnerStatus(input.request, status, observation);
+          })
           .catch(async (error) => {
+            await supervisor.stop();
             await terminate();
             throw error;
           }),
         supervisor.completion.then(async (observation) => {
+          await supervisor.stop();
           await terminate();
           return resourceFailureStatus(input.request, observation, runnerSequence + 1);
         }),
-      ]).finally(() => supervisor.stop());
+      ]);
       return { runnerPgid, completion };
     },
   };

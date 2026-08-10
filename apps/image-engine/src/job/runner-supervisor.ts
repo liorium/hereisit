@@ -44,6 +44,9 @@ export function startResourceSupervisor(input: {
   const clear = input.clear ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
   let settled = false;
   let sampling = false;
+  let stopped = false;
+  let currentSample: Promise<void> = Promise.resolve();
+  let latestObservation: LinuxResourceObservation | null = null;
   let consecutiveMeasurementFailures = 0;
   let resolveCompletion!: (observation: LinuxResourceObservation) => void;
   const completion = new Promise<LinuxResourceObservation>((resolve) => {
@@ -52,7 +55,7 @@ export function startResourceSupervisor(input: {
   const tick = () => {
     if (settled || sampling) return;
     sampling = true;
-    void input
+    currentSample = input
       .sample()
       .then(async (observation) => {
         if ((await input.acceptObservation?.(observation)) === false) return;
@@ -62,6 +65,7 @@ export function startResourceSupervisor(input: {
         } else {
           consecutiveMeasurementFailures = 0;
         }
+        latestObservation = observation;
         for (const pgid of observation.processGroups) input.onProcessGroup(pgid);
         if (observation.exceeded !== null && !settled) {
           settled = true;
@@ -69,27 +73,20 @@ export function startResourceSupervisor(input: {
         }
       })
       .catch(async () => {
-        if (
-          (await input.acceptObservation?.({
-            exceeded: { exceeded: "measurement" },
-            sample: { measurementFailed: true },
-            memoryByteMilliseconds: 0,
-            peakMemoryBytes: 0,
-            processGroups: [],
-          })) === false
-        )
-          return;
-        consecutiveMeasurementFailures += 1;
-        if (consecutiveMeasurementFailures < 2) return;
-        if (settled) return;
-        settled = true;
-        resolveCompletion({
+        const observation: LinuxResourceObservation = {
           exceeded: { exceeded: "measurement" },
           sample: { measurementFailed: true },
           memoryByteMilliseconds: 0,
           peakMemoryBytes: 0,
           processGroups: [],
-        });
+        };
+        if ((await input.acceptObservation?.(observation)) === false) return;
+        consecutiveMeasurementFailures += 1;
+        if (consecutiveMeasurementFailures < 2) return;
+        if (settled) return;
+        latestObservation = observation;
+        settled = true;
+        resolveCompletion(observation);
       })
       .finally(() => {
         sampling = false;
@@ -99,9 +96,14 @@ export function startResourceSupervisor(input: {
   tick();
   return {
     completion,
-    stop(): void {
-      settled = true;
-      clear(handle);
+    async stop(): Promise<LinuxResourceObservation | null> {
+      if (!stopped) {
+        stopped = true;
+        settled = true;
+        clear(handle);
+      }
+      await currentSample;
+      return latestObservation;
     },
   };
 }
@@ -153,7 +155,12 @@ export function finalizeRunnerStatus(
   observation: LinuxResourceObservation | null,
 ): EngineJobStatus {
   if (!("measurements" in status)) throw new TypeError("runner terminal status is required");
-  if (observation === null || observation.exceeded !== null) {
+  if (
+    observation === null ||
+    observation.exceeded !== null ||
+    !Number.isFinite(observation.peakMemoryBytes) ||
+    observation.peakMemoryBytes <= 0
+  ) {
     return resourceFailureStatus(
       request,
       observation ?? {
