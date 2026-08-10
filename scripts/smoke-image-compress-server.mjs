@@ -198,8 +198,6 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
     requestFailed: false,
     sourceFilenameLeak: false,
     invalidPolicy: false,
-    jobCreateNetworkFailures: 0,
-    jobCreateStatuses: [],
     policies: [],
     policyReads: [],
   };
@@ -264,6 +262,8 @@ async function assertServerJob(
     sourceFilenameLeak: false,
     inputOptions: 0,
     inputPuts: 0,
+    jobCreateNetworkFailures: 0,
+    jobCreateStatuses: [],
     downloadAcknowledgements: 0,
     downloadAcknowledged: false,
     invalidPolicy: false,

@@ -223,9 +223,13 @@ describe("authenticated processing staging smoke", () => {
 
   it("classifies a failed job creation before reporting a missing upload", async () => {
     const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+    const serverJobSource = source.slice(
+      source.indexOf("async function assertServerJob"),
+      source.indexOf("async function main"),
+    );
 
-    expect(source).toContain("jobCreateStatuses");
-    expect(source).toContain("jobCreateNetworkFailures");
+    expect(serverJobSource).toContain("jobCreateStatuses: []");
+    expect(serverJobSource).toContain("jobCreateNetworkFailures: 0");
     expect(source).toContain("[job-create-network]");
     expect(source).toContain("[job-create-429]");
     expect(source).toContain("[job-create-503]");
