@@ -334,6 +334,8 @@ Expected: audit, lint, 11 package typechecks, all Vitest suites, Worker integrat
 
 Before pushing, delete the obsolete `install: true` input from the pinned `docker/setup-buildx-action` steps in both `.github/workflows/image-quality-benchmark.yml` and `.github/workflows/processing-staging.yml`. The pinned v4 action declares no `install` input and defaults `use: true`, so this deletion preserves the selected builder while removing the warning. Commit the two-line deletion as `ci: remove obsolete Buildx inputs`.
 
+If the exact branch run reports GitHub's Node 20 deprecation for the pinned artifact uploader, resolve the current official `actions/upload-artifact` release to its immutable commit and verify its declared inputs before replacing the four existing workflow pins together. The confirmed v7.0.1 commit is `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`; it uses Node 24 and retains `name`, `path`, `if-no-files-found`, `retention-days`, and `include-hidden-files`.
+
 Run:
 
 ```bash
