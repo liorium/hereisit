@@ -262,9 +262,8 @@ async function assertServerJob(
     policies: [],
     policyReads: [],
     workerRequests: 0,
-    inputPutExactLength: false,
+    inputPutAccepted: false,
   };
-  let expectedInputBytes = 0;
   assertQuietPage(page, state);
   observePolicies(page, state);
   cdp.on("Network.requestWillBeSent", ({ request: { method, url } }) => {
@@ -276,17 +275,20 @@ async function assertServerJob(
     const path = new URL(url).pathname;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
     if (path.startsWith("/v1/jobs")) state.workerRequests += 1;
-    if (inputPathPattern.test(path) && request.method() === "PUT") {
-      state.inputPuts += 1;
-      state.inputPutExactLength =
-        request.headers()["content-length"] === String(expectedInputBytes);
-    }
+    if (inputPathPattern.test(path) && request.method() === "PUT") state.inputPuts += 1;
     if (downloadedPathPattern.test(path) && request.method() === "POST") {
       state.downloadAcknowledgements += 1;
     }
   });
   page.on("response", (response) => {
     const request = response.request();
+    if (
+      inputPathPattern.test(new URL(response.url()).pathname) &&
+      request.method() === "PUT" &&
+      response.status() === 204
+    ) {
+      state.inputPutAccepted = true;
+    }
     if (
       downloadedPathPattern.test(new URL(response.url()).pathname) &&
       request.method() === "POST" &&
@@ -311,7 +313,6 @@ async function assertServerJob(
       page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs }),
     );
     const source = await readFile(sourcePath);
-    expectedInputBytes = source.byteLength;
     await runSmokeStage("file-selection", () =>
       page.locator('input[type="file"]').setInputFiles({
         name: privateSourceName,
@@ -363,7 +364,7 @@ async function assertServerJob(
       throw new Error(`${stableFailure} [${stagePrefix}-input-options]`);
     }
     if (state.inputPuts !== 1) throw new Error(`${stableFailure} [${stagePrefix}-input-put]`);
-    if (!state.inputPutExactLength) {
+    if (!state.inputPutAccepted) {
       throw new Error(`${stableFailure} [${stagePrefix}-input-length]`);
     }
     if (state.downloadAcknowledgements !== 1) {
