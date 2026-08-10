@@ -1,8 +1,9 @@
-const transientPolicyFailures = new Set([
+const transientFailures = new Set([
   "processing staging smoke failed [public-policy]",
   "processing staging smoke failed [maintainer-policy-missing]",
   "processing staging smoke failed [maintainer-policy-identity]",
   "processing staging smoke failed [maintainer-policy-execution]",
+  "processing staging smoke failed [job-create-upstream-rate-limit]",
 ]);
 const maximumPolicyAttempts = 12;
 
@@ -22,7 +23,7 @@ export async function runProcessingStagingBrowserSmoke(
       if (
         attempt === maximumPolicyAttempts ||
         !(error instanceof Error) ||
-        !transientPolicyFailures.has(error.message)
+        !transientFailures.has(error.message)
       ) {
         throw error;
       }
