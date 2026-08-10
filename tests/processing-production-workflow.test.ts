@@ -54,7 +54,11 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("randomUUID()");
     expect(workflow).toContain("::add-mask::");
     expect(workflow).toContain("PRODUCTION_CANARY_MAINTAINER_HASHES_JSON");
+    expect(workflow).toContain("PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID");
     expect(workflow).toContain('maintainer_hashes="$PRODUCTION_CANARY_MAINTAINER_HASHES_JSON"');
+    expect(workflow).toContain(
+      '--network-rate-limit-namespace-id "$PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID"',
+    );
     expect(workflow).toContain('PRODUCTION_MAINTAINER_SESSION_ID="$PRODUCTION_CANARY_SESSION_ID"');
     expect(workflow).toContain('--maintainer-session-hashes-json "$maintainer_hashes"');
     expect(workflow).toContain('--queue "$QUEUE_NAME" --expected paused');
