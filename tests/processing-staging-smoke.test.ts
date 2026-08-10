@@ -221,6 +221,17 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("[download-ack]");
   });
 
+  it("classifies a failed job creation before reporting a missing upload", async () => {
+    const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+
+    expect(source).toContain("jobCreateStatuses");
+    expect(source).toContain("jobCreateNetworkFailures");
+    expect(source).toContain("[job-create-network]");
+    expect(source).toContain("[job-create-429]");
+    expect(source).toContain("[job-create-503]");
+    expect(source).toContain("[job-create-missing]");
+  });
+
   it("does not expose a production result-minting dependency parameter", async () => {
     const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
     expect(source).not.toMatch(/runProcessingStagingSmokeCli\([\s\S]*?smoke\s*=/u);

@@ -40,6 +40,10 @@ const safeFailures = new Set([
   `${stableFailure} [file-selection]`,
   `${stableFailure} [job-submit]`,
   `${stableFailure} [job-completion]`,
+  `${stableFailure} [job-create-network]`,
+  `${stableFailure} [job-create-429]`,
+  `${stableFailure} [job-create-503]`,
+  `${stableFailure} [job-create-missing]`,
   `${stableFailure} [download-handoff]`,
   `${stableFailure} [browser-download]`,
   `${stableFailure} [download-ack]`,
@@ -194,6 +198,8 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
     requestFailed: false,
     sourceFilenameLeak: false,
     invalidPolicy: false,
+    jobCreateNetworkFailures: 0,
+    jobCreateStatuses: [],
     policies: [],
     policyReads: [],
   };
@@ -282,8 +288,16 @@ async function assertServerJob(
       state.downloadAcknowledgements += 1;
     }
   });
+  page.on("requestfailed", (request) => {
+    if (new URL(request.url()).pathname === "/v1/jobs" && request.method() === "POST") {
+      state.jobCreateNetworkFailures += 1;
+    }
+  });
   page.on("response", (response) => {
     const request = response.request();
+    if (new URL(response.url()).pathname === "/v1/jobs" && request.method() === "POST") {
+      state.jobCreateStatuses.push(response.status());
+    }
     if (
       inputPathPattern.test(new URL(response.url()).pathname) &&
       request.method() === "PUT" &&
@@ -338,6 +352,15 @@ async function assertServerJob(
       execution: "server",
       reason: null,
     });
+    if (state.inputOptions !== 1) {
+      if (state.jobCreateNetworkFailures > 0) {
+        throw new Error(`${stableFailure} [job-create-network]`);
+      }
+      const createStatus = state.jobCreateStatuses.at(-1);
+      if (createStatus === 429) throw new Error(`${stableFailure} [job-create-429]`);
+      if (createStatus === 503) throw new Error(`${stableFailure} [job-create-503]`);
+      if (createStatus === undefined) throw new Error(`${stableFailure} [job-create-missing]`);
+    }
     if (state.inputOptions !== 1) {
       throw new Error(`${stableFailure} [${stagePrefix}-input-options]`);
     }
