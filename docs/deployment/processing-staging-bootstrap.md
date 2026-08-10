@@ -90,3 +90,36 @@ release attestation, accounting epoch, public local-only policy, and deployment 
 authenticated browser smoke must complete or the primary Queue is paused again. The production Pages
 tree is built from the exact approved commit with the production API origin, and only sanitized canary
 evidence is retained for seven days.
+
+## Public production admission and disable
+
+The release path is fixed:
+
+```text
+main CI → Processing staging → protected Processing production canary (0%)
+→ protected Processing production admission (100%)
+→ automatic circuit local fallback or protected disable (effective 0%)
+```
+
+Admission consumes only the exact successful production canary artifact and SHA. It rebuilds and
+matches the Worker, rollout-zero config, release report, and immutable engine digest, then permits only
+the rollout change from `0` to `100`. The canary artifact also carries its validated production resource
+manifest so admission performs no resource provisioning before its recovery guard is armed. The primary Queue is paused during mutation, the DLQ is never
+resumed, and an anonymous browser job must upload, compress, download, acknowledge deletion, and leave
+no active operational residue before success is recorded.
+
+The projected monthly ceiling is fixed at USD 5 (`5000000` microUSD), and the live cost ceiling is USD
+0.50 per 1,000 jobs. These are application admission limits, not a Cloudflare billing hard cap. The
+existing D1 circuit opens automatically when the measured guards fail and immediately makes policy
+local-only. A failed promotion also attempts Queue pause and rollout-zero Worker restoration
+independently.
+
+To disable admission manually, dispatch `Processing production admission` from `main` with its only
+choice, `disable`, then approve the existing `processing-production` environment. It discovers the uniquely named
+production D1 live, conditionally opens the same circuit over its current active
+attestation, verifies `execution=local` and `disclosure.upload=false`, and does not reset automatically. It therefore
+continues to work after deployment artifacts expire. The next ordinary release installs a new attested rollout-zero canary; a later public
+promotion requires a fresh protected admission run.
+
+Promotion recovery runs after both failure and cancellation. Manual disable opens the D1 circuit before independently
+attempting both Queue pauses, so a Queue API failure cannot leave anonymous server admission enabled.

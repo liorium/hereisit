@@ -1,14 +1,16 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sha256Bytes } from "../scripts/image-lab-common.mjs";
 import {
   captureWorkerArtifactHashWitnessFile,
+  createWorkerAdmissionAttestationBatch,
   createWorkerArtifactHashWitness,
   createWorkerVersionAttestationBatch,
   finalizeWorkerVersionChainFiles,
   runWorkerVersionChainCli,
+  verifyWorkerAdmissionTransition,
   verifyWorkerArtifactHashWitness,
   verifyWorkerVersionChain,
 } from "../scripts/verify-worker-version-chain.mjs";
@@ -21,6 +23,7 @@ const ids = {
   secret3: "00000000-0000-0000-0000-000000000005",
   secret4: "00000000-0000-0000-0000-000000000006",
   final: "00000000-0000-0000-0000-000000000007",
+  public: "00000000-0000-0000-0000-000000000008",
 };
 
 function cloudflareVersion(id: string, number: number, trigger: "upload" | "secret") {
@@ -47,6 +50,7 @@ const versions = {
   secret3: cloudflareVersion(ids.secret3, 5, "secret"),
   secret4: cloudflareVersion(ids.secret4, 6, "secret"),
   final: cloudflareVersion(ids.final, 7, "upload"),
+  public: cloudflareVersion(ids.public, 8, "upload"),
 };
 
 const hashes = {
@@ -88,7 +92,135 @@ function validInput() {
   };
 }
 
+function processingConfig(releaseReport: string, rollout: "0" | "100") {
+  return `${JSON.stringify({
+    name: "hereisit-processing-production",
+    main: "dist/worker.mjs",
+    version_metadata: { binding: "WORKER_VERSION" },
+    vars: {
+      IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: rollout,
+      RELEASE_REPORT_SHA256: sha256Bytes(releaseReport),
+      ENGINE_IMAGE_DIGEST: "sha256:engine",
+      MAX_PROJECTED_MONTHLY_COST_MICROUSD: "5000000",
+      MAX_LIVE_COST_PER_1000_MICROUSD: "500000",
+      MAINTAINER_SESSION_HASHES: "[]",
+      WEB_ORIGIN: "https://hereisit.pages.dev",
+    },
+    d1_databases: [{ binding: "DB", database_id: ids.prior }],
+  })}\n`;
+}
+
+function admissionInput() {
+  const workerModule = "export default { fetch() {} };\n";
+  const releaseReport = '{"schema":"release@1"}\n';
+  const currentConfig = processingConfig(releaseReport, "0");
+  const nextConfig = processingConfig(releaseReport, "100");
+  return {
+    before: [versions.final],
+    after: [versions.final, versions.public],
+    deployment: { version_id: ids.public },
+    beforeDeployment: { versions: [{ version_id: ids.final, percentage: 100 }] },
+    afterDeployment: { versions: [{ version_id: ids.public, percentage: 100 }] },
+    currentAttestation: {
+      ...verifyWorkerVersionChain({
+        ...validInput(),
+        bootstrapHashes: {
+          workerModuleSha256: sha256Bytes(workerModule),
+          generatedConfigSha256: sha256Bytes(currentConfig),
+          releaseReportSha256: sha256Bytes(releaseReport),
+        },
+        finalHashes: {
+          workerModuleSha256: sha256Bytes(workerModule),
+          generatedConfigSha256: sha256Bytes(currentConfig),
+          releaseReportSha256: sha256Bytes(releaseReport),
+        },
+      }),
+    },
+    workerModule,
+    currentConfig,
+    nextConfig,
+    releaseReport,
+    fromPublicAdmissionPercent: 0,
+    publicAdmissionPercent: 100,
+    verifiedAt: "2026-08-10T00:09:00.000Z",
+  };
+}
+
 describe("Worker version chain verifier", () => {
+  it("attests the one-version rollout-zero to public transition", () => {
+    expect(verifyWorkerAdmissionTransition(admissionInput())).toEqual({
+      schema: "hereisit-worker-admission-transition@1",
+      version: 1,
+      verifiedAt: "2026-08-10T00:09:00.000Z",
+      fromVersionId: ids.final,
+      activeVersionId: ids.public,
+      fromPublicAdmissionPercent: 0,
+      publicAdmissionPercent: 100,
+      workerModuleSha256: sha256Bytes(admissionInput().workerModule),
+      previousConfigSha256: sha256Bytes(admissionInput().currentConfig),
+      generatedConfigSha256: sha256Bytes(admissionInput().nextConfig),
+      releaseReportSha256: sha256Bytes(admissionInput().releaseReport),
+      versions: [{ versionId: ids.public, state: "active", publicAdmissionPercent: 100 }],
+    });
+  });
+
+  it.each([
+    ["a partial rollout", () => ({ publicAdmissionPercent: 5 })],
+    [
+      "a non-zero starting rollout",
+      () => ({
+        fromPublicAdmissionPercent: 100,
+        currentConfig: processingConfig(admissionInput().releaseReport, "100"),
+      }),
+    ],
+    [
+      "an extra Worker version",
+      () => ({ after: [versions.final, versions.public, versions.secret1] }),
+    ],
+    [
+      "a non-Wrangler upload",
+      () => ({
+        after: [
+          versions.final,
+          { ...versions.public, metadata: { ...versions.public.metadata, source: "api" } },
+        ],
+      }),
+    ],
+    ["a deployment/version mismatch", () => ({ deployment: { version_id: ids.bootstrap } })],
+    [
+      "an inactive canary version",
+      () => ({ beforeDeployment: { versions: [{ version_id: ids.bootstrap, percentage: 100 }] } }),
+    ],
+    [
+      "a partial public deployment",
+      () => ({
+        afterDeployment: {
+          versions: [
+            { version_id: ids.final, percentage: 5 },
+            { version_id: ids.public, percentage: 95 },
+          ],
+        },
+      }),
+    ],
+    ["changed Worker bytes", () => ({ workerModule: "export default { changed: true };\n" })],
+    ["changed release bytes", () => ({ releaseReport: "{}\n" })],
+    [
+      "a current config absent from the canary attestation",
+      () => ({ currentConfig: `${admissionInput().currentConfig} ` }),
+    ],
+    [
+      "a non-rollout config change",
+      () => ({
+        nextConfig: admissionInput().nextConfig.replace(
+          '"MAX_PROJECTED_MONTHLY_COST_MICROUSD":"5000000"',
+          '"MAX_PROJECTED_MONTHLY_COST_MICROUSD":"5000001"',
+        ),
+      }),
+    ],
+  ])("rejects %s", (_label, mutate) => {
+    expect(() => verifyWorkerAdmissionTransition({ ...admissionInput(), ...mutate() })).toThrow();
+  });
+
   it("attests one bootstrap, four secret intermediates, and one active final version", () => {
     expect(verifyWorkerVersionChain(validInput())).toEqual({
       schema: "hereisit-worker-version-attestations@1",
@@ -308,6 +440,60 @@ describe("Worker version chain verifier", () => {
     ).toThrow(/active/i);
   });
 
+  it("retires the canary and persists only the new public active version", () => {
+    const attestation = verifyWorkerAdmissionTransition(admissionInput());
+    const batch = createWorkerAdmissionAttestationBatch(attestation);
+
+    expect(batch.statements).toEqual([
+      {
+        sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE version_id = ?",
+        params: ["retired", Date.parse(attestation.verifiedAt), ids.final],
+      },
+      expect.objectContaining({
+        params: [
+          ids.public,
+          attestation.workerModuleSha256,
+          attestation.generatedConfigSha256,
+          attestation.releaseReportSha256,
+          "active",
+          1,
+          Date.parse(attestation.verifiedAt),
+          null,
+        ],
+      }),
+    ]);
+    expect(batch.verification).toEqual([
+      expect.objectContaining({
+        params: [ids.final, ids.public],
+        expected: [
+          {
+            versionId: ids.final,
+            kind: "retired",
+            publicAdmissionAllowed: 0,
+            retiredAt: Date.parse(attestation.verifiedAt),
+          },
+          {
+            versionId: ids.public,
+            kind: "active",
+            publicAdmissionAllowed: 1,
+            retiredAt: null,
+          },
+        ],
+      }),
+      expect.objectContaining({
+        params: [ids.public],
+        expected: [
+          {
+            versionId: ids.public,
+            workerModuleSha256: attestation.workerModuleSha256,
+            generatedConfigSha256: attestation.generatedConfigSha256,
+            releaseReportSha256: attestation.releaseReportSha256,
+          },
+        ],
+      }),
+    ]);
+  });
+
   it("atomically captures a bounded bootstrap witness file without overwriting", async () => {
     const directory = await mkdtemp(join(tmpdir(), "hereisit-worker-witness-"));
     const workerModuleFile = join(directory, "worker.mjs");
@@ -508,6 +694,96 @@ describe("Worker version chain verifier", () => {
       await expect(
         runWorkerVersionChainCli(["--mode", "capture-bootstrap", "--token", "no"]),
       ).rejects.toThrow(/argument|unknown/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("finalizes admission from bounded files into a private non-overwritten artifact", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hereisit-worker-admission-"));
+    const input = admissionInput();
+    const paths = Object.fromEntries(
+      [
+        "before",
+        "after",
+        "deployment",
+        "beforeDeployment",
+        "afterDeployment",
+        "attestation",
+        "workerModule",
+        "currentConfig",
+        "nextConfig",
+        "releaseReport",
+        "output",
+      ].map((name) => [name, join(directory, `${name}.json`)]),
+    );
+    try {
+      await Promise.all([
+        writeFile(paths.before, JSON.stringify(input.before), "utf8"),
+        writeFile(paths.after, JSON.stringify(input.after), "utf8"),
+        writeFile(paths.beforeDeployment, JSON.stringify(input.beforeDeployment), "utf8"),
+        writeFile(paths.afterDeployment, JSON.stringify(input.afterDeployment), "utf8"),
+        writeFile(
+          paths.deployment,
+          `${JSON.stringify({
+            type: "deploy",
+            version: 1,
+            version_id: ids.public,
+            targets: ["https://hereisit-processing-production.example.workers.dev"],
+          })}\n`,
+          "utf8",
+        ),
+        writeFile(paths.attestation, JSON.stringify(input.currentAttestation), "utf8"),
+        writeFile(paths.workerModule, input.workerModule, "utf8"),
+        writeFile(paths.currentConfig, input.currentConfig, "utf8"),
+        writeFile(paths.nextConfig, input.nextConfig, "utf8"),
+        writeFile(paths.releaseReport, input.releaseReport, "utf8"),
+      ]);
+      const argv = [
+        "--mode",
+        "finalize-admission",
+        "--before",
+        paths.before,
+        "--after",
+        paths.after,
+        "--deployment-output",
+        paths.deployment,
+        "--before-deployment",
+        paths.beforeDeployment,
+        "--after-deployment",
+        paths.afterDeployment,
+        "--current-attestation",
+        paths.attestation,
+        "--worker-module",
+        paths.workerModule,
+        "--current-config",
+        paths.currentConfig,
+        "--next-config",
+        paths.nextConfig,
+        "--release-report",
+        paths.releaseReport,
+        "--output",
+        paths.output,
+      ];
+      const result = await runWorkerVersionChainCli(argv, {
+        now: () => new Date(input.verifiedAt),
+      });
+      expect(JSON.parse(await readFile(paths.output, "utf8"))).toEqual(result.attestation);
+      expect((await stat(paths.output)).mode & 0o777).toBe(0o600);
+      await expect(
+        runWorkerVersionChainCli(argv, { now: () => new Date(input.verifiedAt) }),
+      ).rejects.toThrow(/exist|overwrite/i);
+      await expect(
+        runWorkerVersionChainCli([...argv, "--token", "secret"], {
+          now: () => new Date(input.verifiedAt),
+        }),
+      ).rejects.toThrow(/unknown.*argument/i);
+      const reordered = [...argv];
+      [reordered[2], reordered[4]] = [reordered[4], reordered[2]];
+      [reordered[3], reordered[5]] = [reordered[5], reordered[3]];
+      await expect(
+        runWorkerVersionChainCli(reordered, { now: () => new Date(input.verifiedAt) }),
+      ).rejects.toThrow(/order/i);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

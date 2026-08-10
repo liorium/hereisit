@@ -170,6 +170,7 @@ jobs:
             --queue-name "$QUEUE_NAME" \
             --dlq-name "$DLQ_NAME" \
             --output .artifacts/runtime/resources-production.json
+          cp .artifacts/runtime/resources-production.json .artifacts/deployment/resources-production.json
           PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
             --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
           PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs \
@@ -488,6 +489,7 @@ jobs:
             .artifacts/deployment/gate-results.json
             .artifacts/deployment/policy-smoke.json
             .artifacts/deployment/canary-smoke.json
+            .artifacts/deployment/resources-production.json
           compression-level: 0
           if-no-files-found: error
           include-hidden-files: true

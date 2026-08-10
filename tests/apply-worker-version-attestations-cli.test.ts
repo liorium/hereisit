@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runApplyWorkerVersionAttestationsCli } from "../scripts/apply-worker-version-attestations.mjs";
-import { createWorkerVersionAttestationBatch } from "../scripts/verify-worker-version-chain.mjs";
+import {
+  createWorkerAdmissionAttestationBatch,
+  createWorkerVersionAttestationBatch,
+} from "../scripts/verify-worker-version-chain.mjs";
 
 const migrationName = "0002_worker_version_attestations.sql";
 const hashes = {
@@ -30,6 +33,29 @@ function validAttestation() {
       state: index === 0 ? "bootstrap" : index === 5 ? "active" : "secret-intermediate",
       publicAdmissionPercent: 0,
     })),
+  };
+}
+
+function validAdmissionAttestation() {
+  return {
+    schema: "hereisit-worker-admission-transition@1",
+    version: 1,
+    verifiedAt: "2026-08-10T00:09:00.000Z",
+    fromVersionId: "00000000-0000-0000-0000-000000000006",
+    activeVersionId: "00000000-0000-0000-0000-000000000007",
+    fromPublicAdmissionPercent: 0,
+    publicAdmissionPercent: 100,
+    workerModuleSha256: "a".repeat(64),
+    previousConfigSha256: "b".repeat(64),
+    generatedConfigSha256: "d".repeat(64),
+    releaseReportSha256: "c".repeat(64),
+    versions: [
+      {
+        versionId: "00000000-0000-0000-0000-000000000007",
+        state: "active",
+        publicAdmissionPercent: 100,
+      },
+    ],
   };
 }
 
@@ -266,6 +292,46 @@ describe("Worker version attestation application CLI", () => {
       expect(calls.every((call) => call.authorization === "Bearer deployment-token")).toBe(true);
       expect(JSON.stringify(calls.map((call) => call.body))).not.toContain("deployment-token");
       expect(JSON.stringify(calls.map((call) => call.body))).not.toContain(attestationFile);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches the one-version admission schema through the same guarded D1 path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hereisit-admission-cli-"));
+    const attestationFile = join(directory, "attestation.json");
+    const attestation = validAdmissionAttestation();
+    const batch = createWorkerAdmissionAttestationBatch(attestation);
+    try {
+      await writeFile(attestationFile, JSON.stringify(attestation), "utf8");
+      const fetchImpl: typeof fetch = async (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        if (body.sql === "SELECT name FROM d1_migrations WHERE name = ?") {
+          return d1Response([d1Result({ results: [{ name: migrationName }] })]);
+        }
+        if (Array.isArray(body.batch)) {
+          return d1Response(body.batch.map(() => d1Result({ changed: true })));
+        }
+        const verification = batch.verification.find((query) => query.sql === body.sql);
+        if (verification !== undefined) {
+          return d1Response([d1Result({ results: verification.expected })]);
+        }
+        throw new Error("unexpected D1 request");
+      };
+
+      await expect(
+        runCli(
+          [
+            "--attestation",
+            attestationFile,
+            "--account-id",
+            "0123456789abcdef0123456789abcdef",
+            "--database-id",
+            "11111111-2222-3333-4444-555555555555",
+          ],
+          { env: { CLOUDFLARE_D1_API_TOKEN: "deployment-token" }, fetchImpl },
+        ),
+      ).resolves.toEqual({ applied: true, statements: 2, verificationQueries: 2 });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

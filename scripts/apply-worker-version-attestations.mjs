@@ -7,7 +7,10 @@ import {
   parseCliArguments,
   sha256Canonical,
 } from "./image-lab-common.mjs";
-import { createWorkerVersionAttestationBatch } from "./verify-worker-version-chain.mjs";
+import {
+  createWorkerAdmissionAttestationBatch,
+  createWorkerVersionAttestationBatch,
+} from "./verify-worker-version-chain.mjs";
 
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -289,7 +292,10 @@ export async function runApplyWorkerVersionAttestationsCli(
     throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
   }
   const attestation = await readBoundedAttestationJson(args.attestation);
-  const batch = createWorkerVersionAttestationBatch(attestation);
+  const batch =
+    attestation?.schema === "hereisit-worker-admission-transition@1"
+      ? createWorkerAdmissionAttestationBatch(attestation)
+      : createWorkerVersionAttestationBatch(attestation);
   return applyWorkerVersionAttestationBatch({
     accountId: args["account-id"],
     databaseId: args["database-id"],
