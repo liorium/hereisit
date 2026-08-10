@@ -206,8 +206,9 @@ describe("image optimize Worker batches", () => {
   });
 
   it.each([
-    0, -1,
-  ])("rejects duplicate or regressive progress sequence %i", async (secondSequence) => {
+    ["duplicate", 0, 0],
+    ["regression", 1, 0],
+  ] as const)("rejects a valid %s progress sequence", async (_kind, firstSequence, secondSequence) => {
     installRuntime();
     const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
     const worker = ControlledWorker.created[0] as ControlledWorker;
@@ -216,7 +217,7 @@ describe("image optimize Worker batches", () => {
       protocol: 1,
       type: "progress",
       jobId: posted.jobId,
-      sequence: 0,
+      sequence: firstSequence,
       phase: "inspecting",
       fraction: null,
     });
@@ -229,6 +230,7 @@ describe("image optimize Worker batches", () => {
       fraction: null,
     });
 
+    expect(worker.terminateCount).toBe(1);
     await expect(handle.result).resolves.toMatchObject([
       { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
     ]);
