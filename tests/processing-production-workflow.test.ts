@@ -50,7 +50,12 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("local maintainer_hashes='[]'");
     expect(workflow).toContain('if [[ "$1" == active ]]');
     expect(workflow).toContain('daily_limit="$CANARY_DAILY_WEIGHTED_UNIT_LIMIT"');
-    expect(workflow).toContain('maintainer_hashes="$PRODUCTION_MAINTAINER_HASHES_JSON"');
+    expect(workflow).toContain("Create isolated canary session");
+    expect(workflow).toContain("randomUUID()");
+    expect(workflow).toContain("::add-mask::");
+    expect(workflow).toContain("PRODUCTION_CANARY_MAINTAINER_HASHES_JSON");
+    expect(workflow).toContain('maintainer_hashes="$PRODUCTION_CANARY_MAINTAINER_HASHES_JSON"');
+    expect(workflow).toContain('PRODUCTION_MAINTAINER_SESSION_ID="$PRODUCTION_CANARY_SESSION_ID"');
     expect(workflow).toContain('--maintainer-session-hashes-json "$maintainer_hashes"');
     expect(workflow).toContain('--queue "$QUEUE_NAME" --expected paused');
     expect(workflow).toContain('--queue "$DLQ_NAME" --expected paused');
