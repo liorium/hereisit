@@ -155,12 +155,12 @@ export function finalizeRunnerStatus(
   observation: LinuxResourceObservation | null,
 ): EngineJobStatus {
   if (!("measurements" in status)) throw new TypeError("runner terminal status is required");
-  if (
+  const unmeasured =
     observation === null ||
-    observation.exceeded !== null ||
     !Number.isFinite(observation.peakMemoryBytes) ||
-    observation.peakMemoryBytes <= 0
-  ) {
+    observation.peakMemoryBytes <= 0;
+  if (unmeasured && status.state !== "succeeded") return status;
+  if (unmeasured || observation.exceeded !== null) {
     return resourceFailureStatus(
       request,
       observation ?? {

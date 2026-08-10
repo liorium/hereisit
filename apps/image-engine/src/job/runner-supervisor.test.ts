@@ -63,6 +63,18 @@ const succeededStatus: EngineJobStatus = {
   },
 };
 
+const unsupportedStatus: EngineJobStatus = {
+  protocol: 1,
+  jobId: request.jobId,
+  state: "failed",
+  phase: null,
+  fraction: null,
+  sequence: 8,
+  measurements: succeededStatus.measurements,
+  inspection: null,
+  error: { code: "UNSUPPORTED_INPUT", retryable: false },
+};
+
 function observation(exceeded: LinuxResourceObservation["exceeded"]): LinuxResourceObservation {
   return {
     exceeded,
@@ -265,6 +277,10 @@ describe("runner protocol and resource supervisor", () => {
       sequence: 9,
       error: { code: "ENGINE_CRASH", retryable: false },
     });
+  });
+
+  it("preserves a concrete runner failure when no observation was measurable", () => {
+    expect(finalizeRunnerStatus(request, unsupportedStatus, null)).toEqual(unsupportedStatus);
   });
 
   it("fails closed when peak memory was not measured", () => {

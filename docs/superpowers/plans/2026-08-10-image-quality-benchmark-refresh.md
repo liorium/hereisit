@@ -382,7 +382,7 @@ The engine measurement path changed, so require the existing processing-staging 
 
 - [ ] **Step 3: Final scope and cleanliness audit**
 
-Confirm the final diff contains only approved docs, verifier, and tests; primary `main` equals `origin/main`; no unrelated worktree changed; no task container is running; and no task artifact is staged or committed.
+Confirm the final diff contains only the approved docs, verifier, engine measurement path, workflows, and tests; primary `main` equals `origin/main`; no unrelated worktree changed; no task container is running; and no task artifact is staged or committed.
 
 - [ ] **Step 4: Remove task resources**
 
