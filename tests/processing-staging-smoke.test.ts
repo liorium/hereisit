@@ -201,6 +201,14 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain('getByRole("radio", { name: /최소 용량/ }).check()');
   });
 
+  it("proves exact uploads through the validating endpoint response", async () => {
+    const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+
+    expect(source).not.toContain('request.headers()["content-length"]');
+    expect(source).toContain("inputPutAccepted");
+    expect(source).toContain("response.status() === 204");
+  });
+
   it("does not expose a production result-minting dependency parameter", async () => {
     const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
     expect(source).not.toMatch(/runProcessingStagingSmokeCli\([\s\S]*?smoke\s*=/u);
