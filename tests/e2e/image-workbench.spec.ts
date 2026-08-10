@@ -73,7 +73,7 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
     type RunRequest = {
       type: "run";
       jobId: string;
-      input: { bytes: ArrayBuffer };
+      input: { name: string; mimeHint: string; byteLength: number; file: File };
     };
     type TestWindow = Window & { __hereisitCompleteImageTransform?: () => boolean };
 
@@ -83,7 +83,7 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
       if (pending === undefined) return false;
       const { request, worker } = pending;
       pending = undefined;
-      const bytes = request.input.bytes.slice(0);
+      const bytes = new ArrayBuffer(request.input.byteLength);
       worker.emit({
         protocol: 1,
         type: "complete",
@@ -119,7 +119,15 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
         if (
           request.type !== "run" ||
           typeof request.jobId !== "string" ||
-          !(request.input?.bytes instanceof ArrayBuffer)
+          request.input === undefined ||
+          Object.keys(request.input).length !== 4 ||
+          typeof request.input.name !== "string" ||
+          typeof request.input.mimeHint !== "string" ||
+          !Number.isSafeInteger(request.input.byteLength) ||
+          !(request.input.file instanceof File) ||
+          request.input.file.name !== request.input.name ||
+          request.input.file.type !== request.input.mimeHint ||
+          request.input.file.size !== request.input.byteLength
         ) {
           throw new TypeError("Unexpected image Worker request.");
         }
@@ -176,14 +184,14 @@ async function installInterleavedCompletionWorker(page: Page): Promise<void> {
     type RunRequest = {
       type: "run";
       jobId: string;
-      input: { bytes: ArrayBuffer };
+      input: { name: string; mimeHint: string; byteLength: number; file: File };
     };
 
     let firstRun: { request: RunRequest; worker: ControlledImageWorker } | undefined;
     let runCount = 0;
 
     const complete = (worker: ControlledImageWorker, request: RunRequest, ordinal: number) => {
-      const bytes = request.input.bytes.slice(0);
+      const bytes = new ArrayBuffer(request.input.byteLength);
       worker.emit({
         protocol: 1,
         type: "complete",
@@ -218,7 +226,15 @@ async function installInterleavedCompletionWorker(page: Page): Promise<void> {
         if (
           request.type !== "run" ||
           typeof request.jobId !== "string" ||
-          !(request.input?.bytes instanceof ArrayBuffer)
+          request.input === undefined ||
+          Object.keys(request.input).length !== 4 ||
+          typeof request.input.name !== "string" ||
+          typeof request.input.mimeHint !== "string" ||
+          !Number.isSafeInteger(request.input.byteLength) ||
+          !(request.input.file instanceof File) ||
+          request.input.file.name !== request.input.name ||
+          request.input.file.type !== request.input.mimeHint ||
+          request.input.file.size !== request.input.byteLength
         ) {
           throw new TypeError("Unexpected image Worker request.");
         }
