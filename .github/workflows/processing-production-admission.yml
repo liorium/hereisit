@@ -1,0 +1,493 @@
+name: Processing production admission
+
+on:
+  workflow_run:
+    workflows: ["Processing production"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Fail closed to local processing
+        required: true
+        type: choice
+        options: [disable]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: processing-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.11.0"
+  CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+  WORKER_SCRIPT_NAME: hereisit-processing-production
+  D1_NAME: hereisit-processing-production
+  BUCKET_NAME: hereisit-processing-production
+  USAGE_LOG_BUCKET_NAME: hereisit-processing-usage-production
+  USAGE_ANALYTICS_DATASET_NAME: hereisit_processing_usage_production
+  PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_production
+  QUEUE_NAME: hereisit-image-jobs-production
+  DLQ_NAME: hereisit-image-jobs-dlq-production
+  WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
+  WORKER_MODULE: .artifacts/build/api-worker.mjs
+  PRODUCTION_API_ORIGIN: https://hereisit-processing-production.liorium.workers.dev
+  PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+  CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
+
+jobs:
+  promote:
+    name: Promote the exact production canary to public admission
+    if: >-
+      github.repository == 'liorium/hereisit' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    environment: processing-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      PRODUCTION_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: processing-production-canary-${{ github.event.workflow_run.head_sha }}
+          path: .artifacts/canary
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Bind the exact successful production canary
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRODUCTION_RUN_ID" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
+          ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-image-digest.txt)"
+          [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
+          node --input-type=module - <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const exact = (value, keys, label) => {
+            if (value === null || typeof value !== "object" || Array.isArray(value)) {
+              throw new Error(`${label} is invalid`);
+            }
+            if (Object.keys(value).sort().join() !== [...keys].sort().join()) {
+              throw new Error(`${label} fields are invalid`);
+            }
+          };
+          const read = async (name) => JSON.parse(await readFile(`.artifacts/canary/${name}`, "utf8"));
+          const canary = await read("canary-smoke.json");
+          exact(canary, ["schema", "version", "passed", "rolloutPercent", "nonMaintainerLocal", "maintainerServer", "browserPreflight", "exactLengthUpload", "directDownload", "downloadAcknowledged", "sourceFilenameLeak"], "canary smoke");
+          if (canary.schema !== "hereisit-processing-production-canary-smoke@1" || canary.version !== 1 || canary.passed !== true || canary.rolloutPercent !== 0 || canary.nonMaintainerLocal !== true || canary.maintainerServer !== true || canary.browserPreflight !== true || canary.exactLengthUpload !== true || canary.directDownload !== true || canary.downloadAcknowledged !== true || canary.sourceFilenameLeak !== false) throw new Error("canary smoke did not pass");
+          const gate = await read("gate-results.json");
+          exact(gate, ["verified"], "canary gate");
+          if (gate.verified !== true) throw new Error("canary gate did not pass");
+          const policy = await read("policy-smoke.json");
+          exact(policy, ["schema", "passed", "execution", "reason", "upload", "queuesPaused"], "canary policy");
+          if (policy.passed !== true || policy.execution !== "local" || policy.reason !== "LOCAL_FALLBACK_REQUIRED" || policy.upload !== false || policy.queuesPaused !== true) throw new Error("canary public policy is not local");
+          const attestation = await read("worker-version.json");
+          exact(attestation, ["schema", "version", "verifiedAt", "workerModuleSha256", "generatedConfigSha256", "releaseReportSha256", "activeVersionId", "previousActive", "versions"], "canary attestation");
+          const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+          const sha = /^[0-9a-f]{64}$/;
+          if (attestation.schema !== "hereisit-worker-version-attestations@1" || attestation.version !== 1 || !uuid.test(attestation.activeVersionId) || !sha.test(attestation.workerModuleSha256) || !sha.test(attestation.generatedConfigSha256) || !sha.test(attestation.releaseReportSha256) || attestation.versions?.length !== 6 || attestation.versions.at(-1)?.versionId !== attestation.activeVersionId || attestation.versions.at(-1)?.state !== "active" || attestation.versions.at(-1)?.publicAdmissionPercent !== 0) throw new Error("canary attestation is invalid");
+          NODE
+          mkdir -p .artifacts/admission .artifacts/build/api-worker-bundle .artifacts/runtime .wrangler/generated
+          cp .artifacts/canary/source-sha.txt .artifacts/admission/source-sha.txt
+          cp .artifacts/canary/cloudflare-image-digest.txt .artifacts/admission/cloudflare-image-digest.txt
+          for name in transition-attestation gate-result policy-result public-smoke-result recovery-result; do
+            printf '%s\n' '{"schema":"hereisit-processing-production-admission-pending@1","passed":false}' > ".artifacts/admission/$name.json"
+          done
+          chmod 0600 .artifacts/admission/*.json
+          SOURCE_SHA256="$(sha256sum .artifacts/admission/source-sha.txt | cut -d' ' -f1)"
+          {
+            echo "ENGINE_IMAGE=$ENGINE_IMAGE"
+            echo "SOURCE_SHA256=$SOURCE_SHA256"
+          } >> "$GITHUB_ENV"
+      - name: Install locked dependencies and rebuild release inputs
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          git diff --exit-code
+          LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
+            --input docs/deployment/processing-staging-cost-input.json \
+            --schema docs/deployment/live-cost-model.schema.json \
+            --output .artifacts/runtime/live-cost-model.json)"
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN" pnpm --filter @hereisit/web build
+          PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
+            'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
+          [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PROVIDER_USAGE_SCHEMA_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          {
+            echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
+            echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
+          } >> "$GITHUB_ENV"
+      - name: Validate sealed production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          PRODUCTION_ANALYTICS_READ_TOKEN: ${{ secrets.PRODUCTION_ANALYTICS_READ_TOKEN }}
+          PRODUCTION_LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          PRODUCTION_ABUSE_HMAC_SECRET_CURRENT: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_CURRENT }}
+          PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS: ${{ secrets.PRODUCTION_ABUSE_HMAC_SECRET_PREVIOUS }}
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
+          PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
+        run: node scripts/verify-processing-deployment-environment.mjs --environment production
+      - name: Discover production resources and reconstruct the exact rollout pair
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node scripts/ensure-cloudflare-processing-resources.mjs \
+            --phase provision --account-id "$CLOUDFLARE_ACCOUNT_ID" --environment production \
+            --location apac --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" --database-name "$D1_NAME" \
+            --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" \
+            --output .artifacts/runtime/resources-production.json
+          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field logpush.jobId)"
+          pnpm exec wrangler containers list --json > .artifacts/runtime/container-inventory.json
+          PRODUCTION_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
+            --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME")"
+          pnpm exec wrangler containers info "$PRODUCTION_CONTAINER_APPLICATION_ID" > .artifacts/runtime/container-application.json
+          node scripts/resolve-cloudflare-container-application.mjs \
+            --mode verify --input .artifacts/runtime/container-application.json \
+            --output .artifacts/runtime/container-provider-scope.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" --engine-image "$ENGINE_IMAGE" \
+            --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+
+          generate_config() {
+            local rollout_args
+            if [[ "$1" == current ]]; then
+              rollout_args=(--rollout-percent 0)
+            elif [[ "$1" == public ]]; then
+              rollout_args=(--rollout-percent 100)
+            else
+              return 1
+            fi
+            node scripts/generate-processing-wrangler.mjs \
+              --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+              --database-id "$PRODUCTION_D1_DATABASE_ID" --app-origin "$PRODUCTION_PAGES_ORIGIN" \
+              --bucket-name "$BUCKET_NAME" --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+              --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
+              --product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME" \
+              --cost-accounting-mode active --logpush-job-id "$PRODUCTION_LOGPUSH_JOB_ID" \
+              --container-application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" \
+              --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" --engine-image "$ENGINE_IMAGE" \
+              --account-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
+              --anonymous-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
+              --network-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
+              --account-pending-job-limit 10 --network-pending-job-limit 3 \
+              --maximum-queued-age-seconds 600 --max-live-median-output-ratio-bps 8500 \
+              --max-live-p95-weighted-units 150000000 --max-live-original-retained-rate-bps 7000 \
+              --max-live-cost-per-1000-microusd 500000 \
+              --max-projected-monthly-cost-microusd 5000000 \
+              --live-cost-model .artifacts/runtime/live-cost-model.json \
+              --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
+              --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
+              --release-report-sha256 "$SOURCE_SHA256" \
+              --session-rate-limit-namespace-id 22001 --network-rate-limit-namespace-id 22002 \
+              --job-read-rate-limit-namespace-id 22003 --result-download-rate-limit-namespace-id 22004 \
+              --policy-rate-limit-namespace-id 22005 --job-api-network-rate-limit-namespace-id 22006 \
+              --product-analytics-rate-limit-namespace-id 22007 \
+              --alert-destination-address "${{ vars.ALERT_DESTINATION_ADDRESS }}" \
+              --maintainer-session-hashes-json "$PRODUCTION_MAINTAINER_HASHES_JSON" \
+              "${rollout_args[@]}"
+          }
+
+          generate_config current
+          cp "$WRANGLER_CONFIG" .artifacts/runtime/current-wrangler.jsonc
+          pnpm exec wrangler deploy --config "$WRANGLER_CONFIG" --containers-rollout none \
+            --dry-run --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
+          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
+          node --input-type=module - <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFile } from "node:fs/promises";
+          const hash = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
+          const canary = JSON.parse(await readFile(".artifacts/canary/worker-version.json", "utf8"));
+          if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/admission/source-sha.txt") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
+          NODE
+          pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-before.json
+          CANARY_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/canary/worker-version.json","utf8")); process.stdout.write(value.activeVersionId)')"
+          node scripts/verify-processing-admission-state.mjs \
+            --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
+            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/preflight.json
+          generate_config public
+          cp "$WRANGLER_CONFIG" .artifacts/runtime/public-wrangler.jsonc
+          {
+            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
+            echo "CANARY_VERSION_ID=$CANARY_VERSION_ID"
+          } >> "$GITHUB_ENV"
+      - name: Arm fail-closed mutation recovery
+        id: mutation
+        run: echo "attempted=true" >> "$GITHUB_OUTPUT"
+      - name: Pause and verify both queues before mutation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Deploy and attest the public Worker version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          : > .artifacts/runtime/public-deploy.ndjson
+          WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/public-deploy.ndjson \
+            pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \
+              --no-bundle --containers-rollout none
+          pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-after.json
+          node scripts/verify-worker-version-chain.mjs \
+            --mode finalize-admission \
+            --before .artifacts/runtime/versions-before.json \
+            --after .artifacts/runtime/versions-after.json \
+            --deployment-output .artifacts/runtime/public-deploy.ndjson \
+            --current-attestation .artifacts/canary/worker-version.json \
+            --worker-module "$WORKER_MODULE" \
+            --current-config .artifacts/runtime/current-wrangler.jsonc \
+            --next-config .artifacts/runtime/public-wrangler.jsonc \
+            --release-report .artifacts/admission/source-sha.txt \
+            --output .artifacts/runtime/transition-attestation.json
+          cp .artifacts/runtime/transition-attestation.json .artifacts/admission/transition-attestation.json
+          node scripts/apply-worker-version-attestations.mjs \
+            --attestation .artifacts/runtime/transition-attestation.json \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID"
+          PUBLIC_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/runtime/transition-attestation.json","utf8")); process.stdout.write(value.activeVersionId)')"
+          node scripts/verify-processing-admission-state.mjs \
+            --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
+            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/post-attestation.json
+          echo "PUBLIC_VERSION_ID=$PUBLIC_VERSION_ID" >> "$GITHUB_ENV"
+      - name: Verify anonymous public policy before delivery
+        run: |
+          node --input-type=module - <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { setTimeout as delay } from "node:timers/promises";
+          let passed = false;
+          for (let attempt = 1; attempt <= 60; attempt += 1) {
+            const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+              method: "POST",
+              headers: { "content-type": "application/json", origin: process.env.PRODUCTION_PAGES_ORIGIN },
+              body: JSON.stringify({ contract: "tool-job@1", toolContract: "image.optimize@1", anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27" }),
+            });
+            const body = await response.json();
+            passed = response.status === 200 && body.maintainer === false && body.execution === "server" && body.reason === null && body.disclosure?.upload === true;
+            if (passed) break;
+            if (attempt < 60) await delay(2_000);
+          }
+          if (!passed) throw new Error("production public policy did not converge");
+          await writeFile(".artifacts/runtime/policy-result.json", `${JSON.stringify({ schema: "hereisit-processing-production-public-policy-smoke@1", passed: true, maintainer: false, execution: "server", reason: null, upload: true })}\n`, { flag: "wx", mode: 0o600 });
+          NODE
+          cp .artifacts/runtime/policy-result.json .artifacts/admission/policy-result.json
+      - name: Install browser smoke runtime while queues remain paused
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Resume only primary delivery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run anonymous public production smoke
+        run: |
+          node --input-type=module - "$PRODUCTION_PAGES_ORIGIN" .artifacts/runtime/public-smoke-result.json <<'NODE'
+          import { runProcessingPublicSmokeCli } from "./scripts/smoke-image-compress-server.mjs";
+          try {
+            await runProcessingPublicSmokeCli({ argv: ["--page-origin", process.argv[2], "--output", process.argv[3]] });
+          } catch {
+            process.stderr.write("processing production public smoke failed\n");
+            process.exitCode = 1;
+          }
+          NODE
+          cp .artifacts/runtime/public-smoke-result.json .artifacts/admission/public-smoke-result.json
+      - name: Verify final operational state and seal success evidence
+        env:
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-processing-admission-state.mjs \
+            --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
+            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/final-state.json
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          printf '%s\n' '{"schema":"hereisit-processing-production-admission-gate@1","verified":true,"projectedMonthlyCostCeilingMicrousd":5000000,"liveCostPer1000CeilingMicrousd":500000}' > .artifacts/admission/gate-result.json
+          printf '%s\n' '{"schema":"hereisit-processing-production-admission-recovery@1","attempted":false,"queuePaused":false,"circuitOpened":false,"versionRestored":false,"localPolicy":false}' > .artifacts/admission/recovery-result.json
+          chmod 0600 .artifacts/admission/gate-result.json .artifacts/admission/recovery-result.json
+      - name: Attempt every fail-closed recovery layer
+        if: failure() && steps.mutation.outputs.attempted == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set +e
+          umask 077
+          QUEUE_RECOVERY=0
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_RECOVERY=$?
+          pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_RECOVERY=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
+          CIRCUIT_RECOVERY=0
+          node scripts/verify-processing-admission-state.mjs \
+            --mode disable --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "${PUBLIC_VERSION_ID:-$CANARY_VERSION_ID}" \
+            --expected-release-report-sha256 "$SOURCE_SHA256" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
+          VERSION_RECOVERY=0
+          pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
+          POLICY_RECOVERY=0
+          node --input-type=module - <<'NODE' || POLICY_RECOVERY=$?
+          const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: process.env.PRODUCTION_PAGES_ORIGIN },
+            body: JSON.stringify({ contract: "tool-job@1", toolContract: "image.optimize@1", anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27" }),
+          });
+          const body = await response.json();
+          if (response.status !== 200 || body.execution !== "local" || body.disclosure?.upload !== false) process.exit(1);
+          NODE
+          node --input-type=module - "$QUEUE_RECOVERY" "$CIRCUIT_RECOVERY" "$VERSION_RECOVERY" "$POLICY_RECOVERY" <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          const values = process.argv.slice(2).map(Number);
+          await writeFile(".artifacts/admission/recovery-result.json", `${JSON.stringify({ schema: "hereisit-processing-production-admission-recovery@1", attempted: true, queuePaused: values[0] === 0, circuitOpened: values[1] === 0, versionRestored: values[2] === 0, localPolicy: values[3] === 0 })}\n`, { mode: 0o600 });
+          NODE
+          test "$QUEUE_RECOVERY" -eq 0
+          test "$CIRCUIT_RECOVERY" -eq 0
+          test "$VERSION_RECOVERY" -eq 0
+          test "$POLICY_RECOVERY" -eq 0
+          exit 1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: processing-production-admission-${{ github.event.workflow_run.head_sha }}
+          path: |
+            .artifacts/admission/source-sha.txt
+            .artifacts/admission/cloudflare-image-digest.txt
+            .artifacts/admission/transition-attestation.json
+            .artifacts/admission/gate-result.json
+            .artifacts/admission/policy-result.json
+            .artifacts/admission/public-smoke-result.json
+            .artifacts/admission/recovery-result.json
+          compression-level: 0
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
+  disable:
+    name: Disable public processing and leave delivery paused
+    if: >-
+      github.repository == 'liorium/hereisit' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.operation == 'disable' &&
+      github.ref == 'refs/heads/main'
+    environment: processing-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install locked dependencies and find the active admission evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          pnpm install --frozen-lockfile
+          git diff --exit-code
+          read -r ADMISSION_RUN_ID ADMISSION_HEAD_SHA < <(
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/processing-production-admission.yml/runs?event=workflow_run&status=success&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.id) \(.head_sha)"'
+          )
+          [[ "$ADMISSION_RUN_ID" =~ ^[0-9]+$ && "$ADMISSION_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p .artifacts/current .artifacts/runtime
+          gh run download "$ADMISSION_RUN_ID" --name "processing-production-admission-$ADMISSION_HEAD_SHA" --dir .artifacts/current
+          test "$(cat .artifacts/current/source-sha.txt)" = "$ADMISSION_HEAD_SHA"
+          ACTIVE_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/current/transition-attestation.json","utf8")); if(value.schema!=="hereisit-worker-admission-transition@1"||value.publicAdmissionPercent!==100)process.exit(1); process.stdout.write(value.activeVersionId)')"
+          RELEASE_REPORT_SHA256="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/current/transition-attestation.json","utf8")); process.stdout.write(value.releaseReportSha256)')"
+          {
+            echo "ACTIVE_VERSION_ID=$ACTIVE_VERSION_ID"
+            echo "RELEASE_REPORT_SHA256=$RELEASE_REPORT_SHA256"
+          } >> "$GITHUB_ENV"
+      - name: Pause both queues and open the authoritative circuit
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          pnpm exec wrangler queues pause-delivery "$DLQ_NAME"
+          node scripts/ensure-cloudflare-processing-resources.mjs \
+            --phase provision --account-id "$CLOUDFLARE_ACCOUNT_ID" --environment production \
+            --location apac --bucket-name "$BUCKET_NAME" --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --database-name "$D1_NAME" --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" \
+            --output .artifacts/runtime/resources-production.json
+          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          node scripts/verify-processing-admission-state.mjs \
+            --mode disable --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --expected-version-id "$ACTIVE_VERSION_ID" --expected-release-report-sha256 "$RELEASE_REPORT_SHA256" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node --input-type=module - <<'NODE'
+          const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: process.env.PRODUCTION_PAGES_ORIGIN },
+            body: JSON.stringify({ contract: "tool-job@1", toolContract: "image.optimize@1", anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27" }),
+          });
+          const body = await response.json();
+          if (response.status !== 200 || body.execution !== "local" || body.disclosure?.upload !== false) process.exit(1);
+          NODE

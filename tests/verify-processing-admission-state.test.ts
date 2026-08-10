@@ -175,6 +175,29 @@ describe("processing public admission state", () => {
     expect(bodies[1].params).toEqual([]);
   });
 
+  it("keeps the circuit disable successful across an in-flight version transition", async () => {
+    const currentVersionId = "00000000-0000-0000-0000-000000000008";
+    const disabled = {
+      ...readyRow(),
+      circuitOpen: 1,
+      circuitReason: "OPERATOR_DISABLED",
+      activeVersionId: currentVersionId,
+    };
+    let calls = 0;
+    await expect(
+      disableProcessingAdmissionInD1({
+        accountId,
+        databaseId,
+        apiToken: "d1-token",
+        expectedVersionId: activeVersionId,
+        expectedReleaseReportSha256: releaseReportSha256,
+        now: Date.parse("2026-08-10T00:10:00.000Z"),
+        fetchImpl: async () =>
+          calls++ === 0 ? response([], { changes: 1 }) : response([disabled]),
+      }),
+    ).resolves.toEqual({ disabled: true, circuitOpen: true });
+  });
+
   it("accepts only strict verify and disable CLI forms with an environment token", async () => {
     const outputs: string[] = [];
     const common = [

@@ -208,8 +208,13 @@ export async function disableProcessingAdmissionInD1(input) {
     fetchImpl: values.fetchImpl,
   });
   const row = requireSingleStateRow(await readStateRows(values));
-  verifyExpectedRelease(row, values.expectedVersionId, values.expectedReleaseReportSha256);
-  if (row.circuitOpen !== 1) throw new Error("processing admission circuit did not open");
+  if (
+    row.circuitOpen !== 1 ||
+    row.activeAttestationCount !== 1 ||
+    row.publicAdmissionAllowed !== 1
+  ) {
+    throw new Error("processing admission circuit did not open over a valid active release");
+  }
   return { disabled: true, circuitOpen: true };
 }
 
