@@ -28,6 +28,36 @@ function response() {
 }
 
 describe("remote result download", () => {
+  it("keeps the Blob URL alive long enough for the browser to accept the download", async () => {
+    vi.useFakeTimers();
+    const revokeObjectURL = vi.fn();
+    const handle = createRemoteDownloadHandle({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken: createClientJobCredentials().jobToken,
+      descriptor,
+      fetch: vi.fn(async (url: string | URL | Request) =>
+        new URL(String(url)).pathname.endsWith("/result")
+          ? response()
+          : new Response(null, { status: 204 }),
+      ),
+      createObjectURL: () => "blob:result",
+      revokeObjectURL,
+      clickAnchor: vi.fn(),
+      confirmDownloadHandoff: async () => true,
+    });
+
+    try {
+      await handle.download({ filename: "photo-hereisit.jpg" });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(revokeObjectURL).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("downloads directly without share or navigation and acknowledges after proven handoff", async () => {
     const calls: string[] = [];
     const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
