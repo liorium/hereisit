@@ -283,6 +283,18 @@ describe("runner protocol and resource supervisor", () => {
     expect(finalizeRunnerStatus(request, unsupportedStatus, null)).toEqual(unsupportedStatus);
   });
 
+  it("preserves a concrete runner failure when the final measurement failed", () => {
+    expect(
+      finalizeRunnerStatus(request, unsupportedStatus, observation({ exceeded: "measurement" })),
+    ).toEqual(unsupportedStatus);
+  });
+
+  it("prioritizes a real resource breach over a runner failure", () => {
+    expect(
+      finalizeRunnerStatus(request, unsupportedStatus, observation({ exceeded: "memory" })),
+    ).toMatchObject({ state: "failed", sequence: 9, error: { code: "ENGINE_OOM" } });
+  });
+
   it("fails closed when peak memory was not measured", () => {
     expect(
       finalizeRunnerStatus(request, succeededStatus, {

@@ -159,7 +159,8 @@ export function finalizeRunnerStatus(
     observation === null ||
     !Number.isFinite(observation.peakMemoryBytes) ||
     observation.peakMemoryBytes <= 0;
-  if (unmeasured && status.state !== "succeeded") return status;
+  const measurementFailed = observation?.exceeded?.exceeded === "measurement";
+  if ((unmeasured || measurementFailed) && status.state !== "succeeded") return status;
   if (unmeasured || observation.exceeded !== null) {
     return resourceFailureStatus(
       request,
