@@ -1,4 +1,5 @@
 import {
+  IMAGE_OPTIMIZE_MAX_DIMENSION,
   IMAGE_OPTIMIZE_MAX_FILE_BYTES,
   IMAGE_OPTIMIZE_MAX_FILES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
@@ -150,6 +151,46 @@ function safeMessage(value: unknown): value is string {
   );
 }
 
+function publicMessage(code: ImageOptimizeWorkerError["code"]): string {
+  switch (code) {
+    case "INVALID_SPEC":
+      return "이미지 요청이 올바르지 않습니다.";
+    case "UNSUPPORTED_INPUT":
+    case "ANIMATED_INPUT":
+      return "지원하지 않는 이미지입니다.";
+    case "CORRUPT_INPUT":
+    case "DECODE_FAILED":
+      return "이미지를 확인할 수 없습니다.";
+    case "DIMENSION_LIMIT":
+      return "이미지는 4천만 픽셀을 초과할 수 없습니다.";
+    case "MEMORY_LIMIT":
+      return "파일은 30MB 이하만 처리할 수 있습니다.";
+    case "ENCODE_FAILED":
+      return "이미지를 처리할 수 없습니다.";
+    case "NO_SIZE_REDUCTION":
+      return "이미지 크기를 줄일 수 없습니다.";
+    case "CANCELLED":
+      return "작업을 중단했습니다.";
+    case "WORKER_CRASH":
+      return "브라우저 작업기가 중단되었습니다.";
+  }
+}
+
+function ownValue(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
+}
+
+function candidateJobId(value: unknown): string | undefined {
+  try {
+    const jobId = ownValue(value, "jobId");
+    return isSafeId(jobId) ? jobId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseError(value: unknown): ImageOptimizeWorkerError | undefined {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["code", "message", "retryable"]))
     return undefined;
@@ -226,9 +267,11 @@ function parseLosslessResult(value: unknown): ImageOptimizeLosslessResult | unde
     typeof width !== "number" ||
     !Number.isSafeInteger(width) ||
     width < 1 ||
+    width > IMAGE_OPTIMIZE_MAX_DIMENSION ||
     typeof height !== "number" ||
     !Number.isSafeInteger(height) ||
     height < 1 ||
+    height > IMAGE_OPTIMIZE_MAX_DIMENSION ||
     width * height > IMAGE_OPTIMIZE_MAX_PIXELS ||
     !Array.isArray(value.warnings) ||
     value.warnings.length !== 0
@@ -512,6 +555,7 @@ function runBatch<Result>(
         try {
           if (settled || cancelled || currentIndex === undefined || currentJobId === undefined)
             return;
+          if (candidateJobId(message.data) !== currentJobId) return;
           const event = parseEvent(message.data);
           if (event === undefined) return failWorker(WORKER_FAILURE_ERROR);
           if (event.jobId !== currentJobId) return;
@@ -589,7 +633,7 @@ export function inspectImageOptimizeFiles(
       return { itemId, status: "fulfilled", value: event.result };
     },
     rejected(itemId, error) {
-      return { itemId, status: "rejected", message: error.message };
+      return { itemId, status: "rejected", message: publicMessage(error.code) };
     },
     cancelled(itemId) {
       return { itemId, status: "cancelled" };
@@ -614,7 +658,7 @@ export function runLosslessImageOptimizeBatch(
     rejected(itemId, error) {
       return error.code === "CANCELLED"
         ? { itemId, status: "cancelled" }
-        : { itemId, status: "rejected", message: error.message };
+        : { itemId, status: "rejected", message: publicMessage(error.code) };
     },
     cancelled(itemId) {
       return { itemId, status: "cancelled" };

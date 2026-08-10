@@ -7,6 +7,7 @@ import {
   stripPngMetadata,
 } from "@hereisit/image-tool";
 import {
+  IMAGE_OPTIMIZE_MAX_DIMENSION,
   IMAGE_OPTIMIZE_MAX_FILE_BYTES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
   type ImageOptimizeInspection,
@@ -263,7 +264,11 @@ async function run(request: Exclude<ReturnType<typeof parseRequest>, undefined>)
       post({ protocol: 1, type: "inspected", jobId: job.jobId, result: inspected });
       return;
     }
-    if (inspected.width * inspected.height > IMAGE_OPTIMIZE_MAX_PIXELS) {
+    if (
+      inspected.width > IMAGE_OPTIMIZE_MAX_DIMENSION ||
+      inspected.height > IMAGE_OPTIMIZE_MAX_DIMENSION ||
+      inspected.width * inspected.height > IMAGE_OPTIMIZE_MAX_PIXELS
+    ) {
       failed(job.jobId, "DIMENSION_LIMIT", "이미지는 4천만 픽셀을 초과할 수 없습니다.", false);
       return;
     }

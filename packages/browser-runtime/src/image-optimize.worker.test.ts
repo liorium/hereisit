@@ -122,6 +122,37 @@ describe("image optimize Worker", () => {
     ]);
   });
 
+  it("maps a real file larger than 30MiB to the memory limit without reading it", async () => {
+    const scope = await loadWorker();
+    const oversized = file(new Uint8Array(30 * 1024 * 1024 + 1), "large.png");
+    const read = vi.spyOn(oversized, "arrayBuffer");
+
+    scope.dispatch(request("inspect", oversized));
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    expect(terminal(scope)[0]).toMatchObject({ type: "failed", error: { code: "MEMORY_LIMIT" } });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("rejects hostile file buffers or read failures without exposing private details", async () => {
+    const scope = await loadWorker();
+    const wrongLength = file();
+    const readFailure = file();
+    vi.spyOn(wrongLength, "arrayBuffer").mockResolvedValueOnce(new ArrayBuffer(2));
+    vi.spyOn(readFailure, "arrayBuffer").mockRejectedValueOnce(new Error("PRIVATE_READ_DETAIL"));
+
+    scope.dispatch({ ...request("inspect", wrongLength), jobId: "wrong-length" });
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    scope.dispatch({ ...request("inspect", readFailure), jobId: "read-failure" });
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(2));
+    expect(terminal(scope)).toMatchObject([
+      { type: "failed", error: { code: "CORRUPT_INPUT" } },
+      { type: "failed", error: { code: "CORRUPT_INPUT" } },
+    ]);
+    expect(JSON.stringify(terminal(scope))).not.toContain("PRIVATE_READ_DETAIL");
+  });
+
   it("strips eligible PNG bytes and transfers only the successful output", async () => {
     const scope = await loadWorker();
     const output = Uint8Array.of(9, 8).buffer;
@@ -135,6 +166,41 @@ describe("image optimize Worker", () => {
       result: { mime: "image/png", byteLength: 2, width: 1, height: 1, warnings: [] },
     });
     expect(scope.posts.at(-1)?.transfer).toEqual([output]);
+  });
+
+  it("inspects and strips an eligible JPEG before transferring the result", async () => {
+    const scope = await loadWorker();
+    const output = Uint8Array.of(8, 7, 6).buffer;
+    fileFormatMocks.inspect.mockReturnValue({
+      mime: "image/jpeg",
+      width: 2,
+      height: 1,
+      animated: false,
+    });
+    fileFormatMocks.stripJpeg.mockReturnValueOnce(output);
+
+    scope.dispatch(request("lossless", file(Uint8Array.of(1, 2, 3), "photo.jpg", "image/jpeg")));
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    expect(fileFormatMocks.stripJpeg).toHaveBeenCalledOnce();
+    expect(terminal(scope)[0]).toMatchObject({
+      type: "complete",
+      result: { mime: "image/jpeg", byteLength: 3, width: 2, height: 1 },
+    });
+    expect(scope.posts.at(-1)?.transfer).toEqual([output]);
+  });
+
+  it("bounds metadata-strip exceptions without exposing private details", async () => {
+    const scope = await loadWorker();
+    fileFormatMocks.stripPng.mockImplementationOnce(() => {
+      throw new Error("PRIVATE_STRIP_DETAIL");
+    });
+
+    scope.dispatch(request("lossless"));
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    expect(terminal(scope)[0]).toMatchObject({ type: "failed", error: { code: "CORRUPT_INPUT" } });
+    expect(JSON.stringify(terminal(scope))).not.toContain("PRIVATE_STRIP_DETAIL");
   });
 
   it("keeps WebP and metadata-sensitive JPEG or PNG work on the server", async () => {
@@ -207,6 +273,23 @@ describe("image optimize Worker", () => {
     ]);
   });
 
+  it("rejects lossless dimensions above the per-axis limit while inspection returns them", async () => {
+    const scope = await loadWorker();
+    fileFormatMocks.inspect
+      .mockReturnValueOnce({ mime: "image/png", width: 32_769, height: 1, animated: false })
+      .mockReturnValueOnce({ mime: "image/png", width: 32_769, height: 1, animated: false });
+
+    scope.dispatch({ ...request("inspect"), jobId: "inspect" });
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+    scope.dispatch({ ...request("lossless"), jobId: "lossless" });
+
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(2));
+    expect(terminal(scope)).toMatchObject([
+      { type: "inspected", result: { width: 32_769 } },
+      { type: "failed", error: { code: "DIMENSION_LIMIT" } },
+    ]);
+  });
+
   it("rejects hostile file reads, concurrent jobs, and a cancelled read without late completion", async () => {
     const blocked = deferred<ArrayBuffer>();
     const source = file();
@@ -226,6 +309,25 @@ describe("image optimize Worker", () => {
     expect(
       terminal(scope).some((event) => event.type === "inspected" && event.jobId === "slow"),
     ).toBe(false);
+  });
+
+  it("releases cancelled ownership so the next request can run", async () => {
+    const blocked = deferred<ArrayBuffer>();
+    const source = file();
+    vi.spyOn(source, "arrayBuffer").mockReturnValueOnce(blocked.promise);
+    const scope = await loadWorker();
+
+    scope.dispatch({ ...request("inspect", source), jobId: "slow" });
+    scope.dispatch({ protocol: 1, type: "cancel", jobId: "slow" });
+    blocked.resolve(Uint8Array.of(1, 2, 3).buffer);
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(1));
+
+    scope.dispatch({ ...request("inspect"), jobId: "next" });
+    await vi.waitFor(() => expect(terminal(scope)).toHaveLength(2));
+    expect(terminal(scope)).toMatchObject([
+      { type: "failed", jobId: "slow", error: { code: "CANCELLED" } },
+      { type: "inspected", jobId: "next" },
+    ]);
   });
 
   it("bounds parser failures without exposing private exception text", async () => {

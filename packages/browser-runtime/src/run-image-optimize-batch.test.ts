@@ -36,6 +36,14 @@ class ControlledWorker {
   terminate(): void {
     this.terminateCount += 1;
   }
+
+  crash(): void {
+    this.onerror?.();
+  }
+
+  messageError(): void {
+    this.onmessageerror?.();
+  }
 }
 
 function request(
@@ -65,6 +73,7 @@ function installRuntime(): void {
 afterEach(() => {
   ControlledWorker.created = [];
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("image optimize Worker batches", () => {
@@ -85,6 +94,8 @@ describe("image optimize Worker batches", () => {
       type: "inspect",
       input: { name: "first.png", mimeHint: "image/png", byteLength: 3, file: first },
     });
+    expect(Reflect.ownKeys(firstRequest)).toEqual(["protocol", "type", "jobId", "input"]);
+    expect(Reflect.ownKeys(firstRequest.input)).toEqual(["name", "mimeHint", "byteLength", "file"]);
     expect(firstRead).not.toHaveBeenCalled();
     expect(secondRead).not.toHaveBeenCalled();
     worker.emit({
@@ -109,6 +120,29 @@ describe("image optimize Worker batches", () => {
     expect(ControlledWorker.created).toHaveLength(1);
     expect(firstRead).not.toHaveBeenCalled();
     expect(secondRead).not.toHaveBeenCalled();
+  });
+
+  it("accepts the positive 20-item batch bound sequentially", async () => {
+    installRuntime();
+    const items = Array.from({ length: 20 }, (_, index) => ({
+      itemId: `item-${index}`,
+      file: file(`item-${index}.png`, Uint8Array.of(index)),
+    }));
+    const handle = inspectImageOptimizeFiles(items);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+
+    for (let index = 0; index < items.length; index += 1) {
+      const posted = request(worker, index);
+      worker.emit({
+        protocol: 1,
+        type: "inspected",
+        jobId: posted.jobId,
+        result: { mime: "image/png", width: 1, height: 1, animated: false },
+      });
+    }
+
+    await expect(handle.result).resolves.toHaveLength(20);
+    expect(ControlledWorker.created).toHaveLength(1);
   });
 
   it("preserves lossless progress and validates an ordinary transferred result", async () => {
@@ -167,6 +201,86 @@ describe("image optimize Worker batches", () => {
     expect(() =>
       worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: hostileResult }),
     ).not.toThrow();
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+  });
+
+  it("ignores malformed stale events before parsing and keeps the current item running", async () => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+    const stale = { protocol: 1, type: "complete", jobId: "stale", result: {} };
+    Object.defineProperty(stale.result, "bytes", {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_STALE_DETAIL");
+      },
+    });
+
+    expect(() => worker.emit(stale)).not.toThrow();
+    worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: result() });
+
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
+  });
+
+  it.each([
+    "crash",
+    "messageError",
+  ] as const)("settles the batch when the Worker signals %s", async (signal) => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+
+    worker[signal]();
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+  });
+
+  it("settles the active item when the 180-second watchdog expires", async () => {
+    vi.useFakeTimers();
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+
+    await vi.advanceTimersByTimeAsync(180_000);
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+    expect(worker.terminateCount).toBe(1);
+  });
+
+  it("maps Worker error messages to fixed public Korean text", async () => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+
+    worker.emit({
+      protocol: 1,
+      type: "failed",
+      jobId: posted.jobId,
+      error: { code: "CORRUPT_INPUT", message: "PRIVATE_WORKER_ERROR", retryable: false },
+    });
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "이미지를 확인할 수 없습니다." },
+    ]);
+  });
+
+  it("rejects a lossless result that exceeds the per-axis dimension limit", async () => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+    const oversized = { ...result(), width: 32_769 };
+
+    worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: oversized });
+
     await expect(handle.result).resolves.toMatchObject([
       { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
     ]);
