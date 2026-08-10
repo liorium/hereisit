@@ -448,6 +448,82 @@ export async function finalizeWorkerVersionChainFiles({
   return { attestation, batch: createWorkerVersionAttestationBatch(attestation) };
 }
 
+export async function finalizeWorkerAdmissionFiles({
+  beforeFile,
+  afterFile,
+  deploymentOutputFile,
+  currentAttestationFile,
+  workerModuleFile,
+  currentConfigFile,
+  nextConfigFile,
+  releaseReportFile,
+  outputFile,
+  verifiedAt,
+}) {
+  if (typeof outputFile !== "string" || outputFile.length === 0) {
+    throw new TypeError("Worker admission attestation output file is required");
+  }
+  const attestation = verifyWorkerAdmissionTransition({
+    before: parseJsonText(
+      await readBoundedUtf8File(beforeFile, 1024 * 1024, "admission before snapshot"),
+      "admission before snapshot",
+    ),
+    after: parseJsonText(
+      await readBoundedUtf8File(afterFile, 1024 * 1024, "admission after snapshot"),
+      "admission after snapshot",
+    ),
+    deployment: readWranglerOutput({
+      text: await readBoundedUtf8File(
+        deploymentOutputFile,
+        1024 * 1024,
+        "admission Wrangler output",
+      ),
+      event: "deploy",
+    }),
+    currentAttestation: parseJsonText(
+      await readBoundedUtf8File(currentAttestationFile, 64 * 1024, "current Worker attestation"),
+      "current Worker attestation",
+    ),
+    workerModule: await readBoundedUtf8File(
+      workerModuleFile,
+      artifactFileLimits.workerModule,
+      "Worker module",
+    ),
+    currentConfig: await readBoundedUtf8File(
+      currentConfigFile,
+      artifactFileLimits.generatedConfig,
+      "current generated config",
+    ),
+    nextConfig: await readBoundedUtf8File(
+      nextConfigFile,
+      artifactFileLimits.generatedConfig,
+      "next generated config",
+    ),
+    releaseReport: await readBoundedUtf8File(
+      releaseReportFile,
+      artifactFileLimits.releaseReport,
+      "release report",
+    ),
+    fromPublicAdmissionPercent: 0,
+    publicAdmissionPercent: 100,
+    verifiedAt,
+  });
+  try {
+    await writeCanonicalJsonAtomic(outputFile, attestation, {
+      refuseOverwrite: true,
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(
+        "Worker admission attestation output already exists; overwrite is prohibited",
+      );
+    }
+    throw new Error("Worker admission attestation output could not be written");
+  }
+  return { attestation, batch: createWorkerAdmissionAttestationBatch(attestation) };
+}
+
 function validateWorkerVersionAttestation(value) {
   const attestation = assertObject(value, "Worker version attestation");
   assertExactKeys(
@@ -617,12 +693,150 @@ export function createWorkerVersionAttestationBatch(attestationValue) {
   };
 }
 
+function validateWorkerAdmissionAttestation(value) {
+  const attestation = assertObject(value, "Worker admission attestation");
+  assertExactKeys(
+    attestation,
+    [
+      "schema",
+      "version",
+      "verifiedAt",
+      "fromVersionId",
+      "activeVersionId",
+      "fromPublicAdmissionPercent",
+      "publicAdmissionPercent",
+      "workerModuleSha256",
+      "previousConfigSha256",
+      "generatedConfigSha256",
+      "releaseReportSha256",
+      "versions",
+    ],
+    "Worker admission attestation",
+  );
+  if (
+    attestation.schema !== "hereisit-worker-admission-transition@1" ||
+    attestation.version !== 1
+  ) {
+    throw new TypeError("Worker admission attestation schema is invalid");
+  }
+  assertCanonicalTimestamp(attestation.verifiedAt, "Worker admission verification time");
+  for (const [label, valueHash] of [
+    ["Worker module", attestation.workerModuleSha256],
+    ["previous config", attestation.previousConfigSha256],
+    ["generated config", attestation.generatedConfigSha256],
+    ["release report", attestation.releaseReportSha256],
+  ]) {
+    assertSha256(valueHash, `${label} hash`);
+  }
+  for (const [label, valueId] of [
+    ["previous", attestation.fromVersionId],
+    ["active", attestation.activeVersionId],
+  ]) {
+    if (typeof valueId !== "string" || !versionIdPattern.test(valueId)) {
+      throw new TypeError(`Worker admission ${label} version ID is invalid`);
+    }
+  }
+  if (
+    attestation.fromVersionId === attestation.activeVersionId ||
+    attestation.fromPublicAdmissionPercent !== 0 ||
+    attestation.publicAdmissionPercent !== 100
+  ) {
+    throw new TypeError("Worker admission transition must be zero-to-100 across two versions");
+  }
+  if (!Array.isArray(attestation.versions) || attestation.versions.length !== 1) {
+    throw new TypeError("Worker admission attestation must contain exactly one new version");
+  }
+  const version = assertObject(attestation.versions[0], "Worker admission version");
+  assertExactKeys(
+    version,
+    ["versionId", "state", "publicAdmissionPercent"],
+    "Worker admission version",
+  );
+  if (
+    version.versionId !== attestation.activeVersionId ||
+    version.state !== "active" ||
+    version.publicAdmissionPercent !== 100
+  ) {
+    throw new TypeError("Worker admission active version is invalid");
+  }
+  return attestation;
+}
+
+export function createWorkerAdmissionAttestationBatch(attestationValue) {
+  const attestation = validateWorkerAdmissionAttestation(attestationValue);
+  const observedAt = Date.parse(attestation.verifiedAt);
+  const stateIds = [attestation.fromVersionId, attestation.activeVersionId];
+  return {
+    version: 1,
+    statements: [
+      {
+        sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE version_id = ?",
+        params: ["retired", observedAt, attestation.fromVersionId],
+      },
+      {
+        sql: upsertAttestationSql,
+        params: [
+          attestation.activeVersionId,
+          attestation.workerModuleSha256,
+          attestation.generatedConfigSha256,
+          attestation.releaseReportSha256,
+          "active",
+          1,
+          observedAt,
+          null,
+        ],
+      },
+    ],
+    verification: [
+      {
+        sql: `SELECT version_id AS versionId, kind, public_admission_allowed AS publicAdmissionAllowed, retired_at AS retiredAt FROM worker_version_attestations WHERE version_id IN (${stateIds.map(() => "?").join(", ")}) ORDER BY version_id`,
+        params: stateIds,
+        expected: [
+          {
+            versionId: attestation.fromVersionId,
+            kind: "retired",
+            publicAdmissionAllowed: 0,
+            retiredAt: observedAt,
+          },
+          {
+            versionId: attestation.activeVersionId,
+            kind: "active",
+            publicAdmissionAllowed: 1,
+            retiredAt: null,
+          },
+        ].sort((left, right) => left.versionId.localeCompare(right.versionId)),
+      },
+      {
+        sql: "SELECT version_id AS versionId, worker_module_sha256 AS workerModuleSha256, generated_config_sha256 AS generatedConfigSha256, release_report_sha256 AS releaseReportSha256 FROM worker_version_attestations WHERE version_id IN (?) ORDER BY version_id",
+        params: [attestation.activeVersionId],
+        expected: [
+          {
+            versionId: attestation.activeVersionId,
+            workerModuleSha256: attestation.workerModuleSha256,
+            generatedConfigSha256: attestation.generatedConfigSha256,
+            releaseReportSha256: attestation.releaseReportSha256,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function assertCliArguments(args, allowed, required) {
   if (Object.keys(args).some((key) => !allowed.has(key))) {
     throw new TypeError("unknown Worker version chain argument");
   }
   for (const name of required) {
     if (args[name] === undefined) throw new TypeError(`--${name} is required`);
+  }
+}
+
+function assertCliArgumentOrder(argv, expected) {
+  if (
+    argv.length !== expected.length * 2 ||
+    expected.some((name, index) => argv[index * 2] !== `--${name}`)
+  ) {
+    throw new TypeError("Worker admission arguments are out of order");
   }
 }
 
@@ -673,7 +887,37 @@ export async function runWorkerVersionChainCli(argv, { now = () => new Date() } 
       verifiedAt: now().toISOString(),
     });
   }
-  throw new TypeError("Worker version chain --mode must be capture-bootstrap or finalize");
+  if (args.mode === "finalize-admission") {
+    const required = [
+      "mode",
+      "before",
+      "after",
+      "deployment-output",
+      "current-attestation",
+      "worker-module",
+      "current-config",
+      "next-config",
+      "release-report",
+      "output",
+    ];
+    assertCliArguments(args, new Set(required), required);
+    assertCliArgumentOrder(argv, required);
+    return finalizeWorkerAdmissionFiles({
+      beforeFile: resolve(args.before),
+      afterFile: resolve(args.after),
+      deploymentOutputFile: resolve(args["deployment-output"]),
+      currentAttestationFile: resolve(args["current-attestation"]),
+      workerModuleFile: resolve(args["worker-module"]),
+      currentConfigFile: resolve(args["current-config"]),
+      nextConfigFile: resolve(args["next-config"]),
+      releaseReportFile: resolve(args["release-report"]),
+      outputFile: resolve(args.output),
+      verifiedAt: now().toISOString(),
+    });
+  }
+  throw new TypeError(
+    "Worker version chain --mode must be capture-bootstrap, finalize, or finalize-admission",
+  );
 }
 
 if (
@@ -768,5 +1012,98 @@ export function verifyWorkerVersionChain(inputValue) {
       })),
       { versionId: final.id, state: "active", publicAdmissionPercent: 0 },
     ],
+  };
+}
+
+function parseAdmissionConfig(text, label) {
+  if (typeof text !== "string" || text.length === 0) {
+    throw new TypeError(`${label} generated config bytes are required`);
+  }
+  const config = assertObject(parseJsonText(text, `${label} generated config`), `${label} config`);
+  const variables = assertObject(config.vars, `${label} config variables`);
+  return { config, variables };
+}
+
+function verifyAdmissionConfigPair(currentText, nextText, fromPercent, toPercent) {
+  const current = parseAdmissionConfig(currentText, "current");
+  const next = parseAdmissionConfig(nextText, "next");
+  const key = "IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT";
+  if (current.variables[key] !== String(fromPercent) || next.variables[key] !== String(toPercent)) {
+    throw new RangeError("Worker admission rollout transition does not match");
+  }
+  current.variables[key] = "<rollout>";
+  next.variables[key] = "<rollout>";
+  if (sha256Canonical(current.config) !== sha256Canonical(next.config)) {
+    throw new TypeError("Worker admission config changed outside rollout");
+  }
+}
+
+export function verifyWorkerAdmissionTransition(inputValue) {
+  const input = assertObject(inputValue, "Worker admission transition input");
+  if (input.fromPublicAdmissionPercent !== 0 || input.publicAdmissionPercent !== 100) {
+    throw new RangeError("Worker admission supports only a zero-to-100 transition");
+  }
+
+  const verifiedAt = assertCanonicalTimestamp(input.verifiedAt, "admission verification time");
+  const before = validateWorkerVersionSnapshot(input.before, "admission before");
+  const after = validateWorkerVersionSnapshot(input.after, "admission after");
+  const [active] = verifyTransition(before, after, 1, "admission", "upload");
+  if (deploymentVersionId(input.deployment, "admission") !== active.id) {
+    throw new TypeError("admission deployment Version Metadata ID does not match");
+  }
+  if (Date.parse(verifiedAt) < Date.parse(active.metadata.created_on)) {
+    throw new TypeError("Worker admission attestation predates the deployment");
+  }
+
+  const currentAttestation = validateWorkerVersionAttestation(input.currentAttestation);
+  const currentActive = currentAttestation.versions.at(-1);
+  if (
+    currentAttestation.activeVersionId !== before.at(-1)?.id ||
+    currentActive.versionId !== currentAttestation.activeVersionId ||
+    currentActive.publicAdmissionPercent !== 0
+  ) {
+    throw new TypeError("Worker admission predecessor is not the active rollout-zero version");
+  }
+
+  verifyAdmissionConfigPair(
+    input.currentConfig,
+    input.nextConfig,
+    input.fromPublicAdmissionPercent,
+    input.publicAdmissionPercent,
+  );
+  const workerModuleSha256 = sha256Bytes(input.workerModule);
+  const previousConfigSha256 = sha256Bytes(input.currentConfig);
+  const generatedConfigSha256 = sha256Bytes(input.nextConfig);
+  const releaseReportSha256 = sha256Bytes(input.releaseReport);
+  if (
+    currentAttestation.workerModuleSha256 !== workerModuleSha256 ||
+    currentAttestation.generatedConfigSha256 !== previousConfigSha256 ||
+    currentAttestation.releaseReportSha256 !== releaseReportSha256
+  ) {
+    throw new TypeError("Worker admission artifacts do not match the canary attestation");
+  }
+  for (const [label, configText] of [
+    ["current", input.currentConfig],
+    ["next", input.nextConfig],
+  ]) {
+    const { variables } = parseAdmissionConfig(configText, label);
+    if (variables.RELEASE_REPORT_SHA256 !== releaseReportSha256) {
+      throw new TypeError(`${label} config release report hash does not match`);
+    }
+  }
+
+  return {
+    schema: "hereisit-worker-admission-transition@1",
+    version: 1,
+    verifiedAt,
+    fromVersionId: currentAttestation.activeVersionId,
+    activeVersionId: active.id,
+    fromPublicAdmissionPercent: 0,
+    publicAdmissionPercent: 100,
+    workerModuleSha256,
+    previousConfigSha256,
+    generatedConfigSha256,
+    releaseReportSha256,
+    versions: [{ versionId: active.id, state: "active", publicAdmissionPercent: 100 }],
   };
 }
