@@ -1,7 +1,11 @@
 "use client";
 
 import { supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
-import { inspectImageHeader, suggestSameFormatOptimizedName } from "@hereisit/image-tool";
+import {
+  inspectImageOptimizeFiles,
+  supportsBrowserImageOptimizeRuntime,
+} from "@hereisit/browser-runtime/image-optimize";
+import { suggestSameFormatOptimizedName } from "@hereisit/image-tool";
 import {
   getProcessingPolicy,
   type RemoteDownloadHandle,
@@ -120,7 +124,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const [items, setItems] = useState<readonly WorkItem[]>([]);
   const [preset, setPreset] = useState<Preset>("recommended");
   const [message, setMessage] = useState("처리 방식을 확인하고 있어요.");
-  const [runtimeSupported, setRuntimeSupported] = useState(false);
+  const [imageRuntimeSupported, setImageRuntimeSupported] = useState(false);
+  const [inspectionRuntimeSupported, setInspectionRuntimeSupported] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -129,6 +134,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     remoteArchiveByteBudget({ deviceMemoryGiB: null, coarsePointer: true }),
   );
   const batchRef = useRef<ReturnType<typeof runRemoteImageOptimizeBatch> | null>(null);
+  const inspectionRef = useRef<ReturnType<typeof inspectImageOptimizeFiles> | null>(null);
+  const selectionGenerationRef = useRef(0);
   const processingControllerRef = useRef<AbortController | null>(null);
   const itemsRef = useRef<readonly WorkItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -138,7 +145,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
 
   useEffect(() => {
-    setRuntimeSupported(supportsBrowserImageRuntime());
+    setImageRuntimeSupported(supportsBrowserImageRuntime());
+    setInspectionRuntimeSupported(supportsBrowserImageOptimizeRuntime());
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     setArchiveByteBudget(
       remoteArchiveByteBudget({
@@ -202,6 +210,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   useEffect(
     () => () => {
       batchRef.current?.cancel();
+      inspectionRef.current?.cancel();
       processingControllerRef.current?.abort();
       productRunRef.current?.cancelled();
       for (const item of itemsRef.current) {
@@ -214,47 +223,69 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
 
   const chooseFiles = useCallback(async (files: FileList | readonly File[] | null) => {
     if (files === null) return;
+    const generation = ++selectionGenerationRef.current;
+    inspectionRef.current?.cancel();
+    inspectionRef.current = null;
     setDragging(false);
     hasFileSelectionRef.current = true;
     const supplied = Array.from(files);
     const selected = supplied.slice(0, MAX_FILES);
-    const next: WorkItem[] = [];
+    const candidates: Array<{ id: string; file: File }> = [];
     let heicCount = 0;
     let unsupportedCount = Math.max(0, supplied.length - selected.length);
-    for (const [index, file] of selected.entries()) {
-      setMessage(`${index + 1}/${selected.length} 이미지 확인 중`);
+    for (const file of selected) {
       if (file.size < 1 || file.size > MAX_FILE_BYTES) {
         unsupportedCount += 1;
         continue;
       }
-      try {
-        const inspected = inspectImageHeader(await file.arrayBuffer());
-        if (inspected.mime === "image/heic") {
-          heicCount += 1;
-          continue;
-        }
-        if (
-          inspected.animated ||
-          inspected.width * inspected.height > 40_000_000 ||
-          !ACCEPTED.has(inspected.mime as ImageOptimizeMime)
-        ) {
-          unsupportedCount += 1;
-          continue;
-        }
-        next.push({
-          id: crypto.randomUUID(),
-          file,
-          mime: inspected.mime as ImageOptimizeMime,
-          width: inspected.width,
-          height: inspected.height,
-          status: "ready",
-          phase: null,
-          fraction: null,
-          message: "처리할 준비가 됐어요.",
-        });
-      } catch {
+      candidates.push({ id: crypto.randomUUID(), file });
+    }
+    const inspection = inspectImageOptimizeFiles(
+      candidates.map(({ id, file }) => ({ itemId: id, file })),
+      {
+        onProgress: (completed, total) => {
+          if (selectionGenerationRef.current === generation)
+            setMessage(`${completed}/${total} 이미지 확인 중`);
+        },
+      },
+    );
+    inspectionRef.current = inspection;
+    const inspectedResults = await inspection.result;
+    if (selectionGenerationRef.current !== generation || inspectionRef.current !== inspection) {
+      return;
+    }
+    inspectionRef.current = null;
+    const next: WorkItem[] = [];
+    for (const inspectedResult of inspectedResults) {
+      const source = candidates.find((candidate) => candidate.id === inspectedResult.itemId);
+      if (source === undefined || inspectedResult.status !== "fulfilled") {
         unsupportedCount += 1;
+        continue;
       }
+      const inspected = inspectedResult.value;
+      if (inspected.mime === "image/heic") {
+        heicCount += 1;
+        continue;
+      }
+      if (
+        inspected.animated ||
+        inspected.width * inspected.height > 40_000_000 ||
+        !ACCEPTED.has(inspected.mime as ImageOptimizeMime)
+      ) {
+        unsupportedCount += 1;
+        continue;
+      }
+      next.push({
+        id: source.id,
+        file: source.file,
+        mime: inspected.mime as ImageOptimizeMime,
+        width: inspected.width,
+        height: inspected.height,
+        status: "ready",
+        phase: null,
+        fraction: null,
+        message: "처리할 준비가 됐어요.",
+      });
     }
     const previousItems = itemsRef.current;
     itemsRef.current = next;
@@ -280,7 +311,9 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   }, []);
 
   const executionReady =
-    policy.state === "server" || (policy.state === "local" && runtimeSupported);
+    policy.state === "server"
+      ? inspectionRuntimeSupported
+      : policy.state === "local" && inspectionRuntimeSupported;
   const busy = processing || archiving || remoteDeliveryBusy;
 
   usePendingToolFiles({
@@ -314,33 +347,36 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     spec: ImageOptimizeSpecV1,
     signal: AbortSignal,
   ) => {
-    const results: LocalImageOptimizeResult[] = [];
-    for (const item of sourceItems) {
-      if (signal.aborted) break;
-      setItems((current) =>
-        updateItem(current, item.id, {
-          status: "processing",
-          phase: "inspecting",
-          fraction: null,
-          message: "내 기기에서 처리하고 있어요.",
-        }),
-      );
-      const result = await runLocalImageOptimizeFallback(
-        { itemId: item.id, file: item.file },
-        spec,
-        {
-          signal,
-          onEvent: (event) =>
-            setItems((current) =>
-              updateItem(current, item.id, {
-                phase: event.phase,
-                fraction: event.fraction,
-                message: phaseLabel(event.phase),
-              }),
-            ),
-        },
-      );
-      results.push(result);
+    setItems((current) =>
+      sourceItems.reduce(
+        (updated, item) =>
+          updateItem(updated, item.id, {
+            status: "processing",
+            phase: "inspecting",
+            fraction: null,
+            message: "내 기기에서 처리하고 있어요.",
+          }),
+        current,
+      ),
+    );
+    const results = await runLocalImageOptimizeFallback(
+      sourceItems.map(({ id, file, mime }) => ({ itemId: id, file, mime })),
+      spec,
+      {
+        signal,
+        onEvent: (event) =>
+          setItems((current) =>
+            updateItem(current, event.itemId, {
+              phase: event.phase,
+              fraction: event.fraction,
+              message: phaseLabel(event.phase),
+            }),
+          ),
+      },
+    );
+    for (const result of results) {
+      const item = sourceItems.find((source) => source.id === result.itemId);
+      if (item === undefined) continue;
       if (result.status === "fulfilled") {
         setItems((current) =>
           updateItem(current, item.id, {
@@ -765,7 +801,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     (statusMessage === "처리 방식을 확인하고 있어요." ||
       statusMessage === "서버 처리 정책을 확인했어요." ||
       (policy.state !== "checking" && statusMessage === policy.text));
-  const runDisabled = actionableCount === 0 || policy.state === "checking" || remoteDeliveryBusy;
+  const runDisabled =
+    actionableCount === 0 ||
+    policy.state === "checking" ||
+    remoteDeliveryBusy ||
+    (policy.state === "local" &&
+      (preset === "lossless" ? !inspectionRuntimeSupported : !imageRuntimeSupported));
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     void chooseFiles(input.files).finally(() => {

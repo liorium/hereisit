@@ -110,13 +110,49 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
     };
 
     class ControlledImageWorker {
+      private readonly workerName: string | undefined;
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
       onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
       onerror: ((event: ErrorEvent) => void) | null = null;
 
+      constructor(_scriptURL: string | URL, options?: WorkerOptions) {
+        this.workerName = options?.name;
+      }
+
       postMessage(message: unknown): void {
-        const request = message as Partial<RunRequest>;
+        const request = message as {
+          type?: string;
+          jobId?: unknown;
+          input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
+        };
+        if (this.workerName === "hereisit-image-optimize-worker" && request.type === "inspect") {
+          const input = request.input;
+          if (
+            typeof request.jobId !== "string" ||
+            input === undefined ||
+            Object.keys(input).length !== 4 ||
+            typeof input.name !== "string" ||
+            typeof input.mimeHint !== "string" ||
+            !Number.isSafeInteger(input.byteLength) ||
+            !(input.file instanceof File) ||
+            input.file.name !== input.name ||
+            input.file.type !== input.mimeHint ||
+            input.file.size !== input.byteLength
+          ) {
+            throw new TypeError("Unexpected image optimize Worker request.");
+          }
+          queueMicrotask(() => {
+            this.emit({
+              protocol: 1,
+              type: "inspected",
+              jobId: request.jobId,
+              result: { mime: "image/png", width: 1, height: 1, animated: false },
+            });
+          });
+          return;
+        }
         if (
+          this.workerName !== "hereisit-image-worker" ||
           request.type !== "run" ||
           typeof request.jobId !== "string" ||
           request.input === undefined ||
@@ -217,13 +253,49 @@ async function installInterleavedCompletionWorker(page: Page): Promise<void> {
     };
 
     class ControlledImageWorker {
+      private readonly workerName: string | undefined;
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
       onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
       onerror: ((event: ErrorEvent) => void) | null = null;
 
+      constructor(_scriptURL: string | URL, options?: WorkerOptions) {
+        this.workerName = options?.name;
+      }
+
       postMessage(message: unknown): void {
-        const request = message as Partial<RunRequest>;
+        const request = message as {
+          type?: string;
+          jobId?: unknown;
+          input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
+        };
+        if (this.workerName === "hereisit-image-optimize-worker" && request.type === "inspect") {
+          const input = request.input;
+          if (
+            typeof request.jobId !== "string" ||
+            input === undefined ||
+            Object.keys(input).length !== 4 ||
+            typeof input.name !== "string" ||
+            typeof input.mimeHint !== "string" ||
+            !Number.isSafeInteger(input.byteLength) ||
+            !(input.file instanceof File) ||
+            input.file.name !== input.name ||
+            input.file.type !== input.mimeHint ||
+            input.file.size !== input.byteLength
+          ) {
+            throw new TypeError("Unexpected image optimize Worker request.");
+          }
+          queueMicrotask(() => {
+            this.emit({
+              protocol: 1,
+              type: "inspected",
+              jobId: request.jobId,
+              result: { mime: "image/png", width: 1, height: 1, animated: false },
+            });
+          });
+          return;
+        }
         if (
+          this.workerName !== "hereisit-image-worker" ||
           request.type !== "run" ||
           typeof request.jobId !== "string" ||
           request.input === undefined ||
@@ -652,19 +724,78 @@ test("keeps populated setup, processing, and result actions visible at narrow wi
 
 test("reports each file inspection while validating a large selection", async ({ page }) => {
   await page.addInitScript(() => {
-    const nativeArrayBuffer = Blob.prototype.arrayBuffer;
+    const NativeWorker = window.Worker;
     let release: (() => void) | undefined;
     (
       window as Window & { __hereisitReleaseFileInspection?: () => void }
     ).__hereisitReleaseFileInspection = () => release?.();
-    Blob.prototype.arrayBuffer = async function controlledArrayBuffer() {
-      if (this instanceof File && this.name === "second.png") {
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-      }
-      return nativeArrayBuffer.call(this);
+    File.prototype.arrayBuffer = async function uiRealmArrayBufferTripwire() {
+      throw new Error("The UI realm must not read image files.");
     };
+    class DelayedInspectionWorker {
+      private readonly native: Worker | undefined;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        if (options?.name !== "hereisit-image-optimize-worker") {
+          this.native = new NativeWorker(scriptURL, options);
+          this.native.onmessage = (event) => this.onmessage?.(event);
+          this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+          this.native.onerror = (event) => this.onerror?.(event);
+        }
+      }
+
+      postMessage(message: unknown, transfer?: Transferable[]): void {
+        if (this.native !== undefined) {
+          if (transfer === undefined) this.native.postMessage(message);
+          else this.native.postMessage(message, transfer);
+          return;
+        }
+        const request = message as {
+          protocol?: unknown;
+          type?: unknown;
+          jobId?: unknown;
+          input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
+        };
+        const input = request.input;
+        if (
+          request.protocol !== 1 ||
+          request.type !== "inspect" ||
+          typeof request.jobId !== "string" ||
+          input === undefined ||
+          Object.keys(input).length !== 4 ||
+          typeof input.name !== "string" ||
+          typeof input.mimeHint !== "string" ||
+          !Number.isSafeInteger(input.byteLength) ||
+          !(input.file instanceof File) ||
+          input.file.name !== input.name ||
+          input.file.type !== input.mimeHint ||
+          input.file.size !== input.byteLength
+        ) {
+          throw new TypeError("Unexpected image optimize inspection request.");
+        }
+        const inspected = () =>
+          this.onmessage?.({
+            data: {
+              protocol: 1,
+              type: "inspected",
+              jobId: request.jobId,
+              result: { mime: "image/png", width: 1, height: 1, animated: false },
+            },
+          } as MessageEvent<unknown>);
+        if (input.name === "second.png") {
+          release = inspected;
+        } else {
+          queueMicrotask(inspected);
+        }
+      }
+      terminate(): void {
+        this.native?.terminate();
+      }
+    }
+    Object.defineProperty(window, "Worker", { configurable: true, value: DelayedInspectionWorker });
   });
   await page.goto("/image/compress");
   await page.locator("input[type=file]").setInputFiles([
@@ -672,7 +803,7 @@ test("reports each file inspection while validating a large selection", async ({
     { name: "second.png", mimeType: "image/png", buffer: onePixelPng },
   ]);
 
-  await expect(page.getByTestId("image-workbench-status")).toHaveText("2/2 이미지 확인 중");
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("1/2 이미지 확인 중");
   await page.evaluate(() =>
     (
       window as Window & { __hereisitReleaseFileInspection?: () => void }
