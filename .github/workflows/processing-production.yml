@@ -129,6 +129,10 @@ jobs:
 
           const sessionId = randomUUID();
           const sessionHash = createHash("sha256").update(sessionId).digest("hex");
+          const networkRateLimitNamespaceId = `${process.env.GITHUB_RUN_ID}${process.env.GITHUB_RUN_ATTEMPT}`;
+          if (!/^[1-9][0-9]*$/.test(networkRateLimitNamespaceId)) {
+            throw new TypeError("production canary network rate limit namespace is invalid");
+          }
           const configuredHashes = JSON.parse(process.env.PRODUCTION_MAINTAINER_HASHES_JSON);
           if (
             !Array.isArray(configuredHashes) ||
@@ -142,7 +146,8 @@ jobs:
           appendFileSync(
             process.env.GITHUB_ENV,
             `PRODUCTION_CANARY_SESSION_ID=${sessionId}\n` +
-              `PRODUCTION_CANARY_MAINTAINER_HASHES_JSON=${hashes}\n`,
+              `PRODUCTION_CANARY_MAINTAINER_HASHES_JSON=${hashes}\n` +
+              `PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID=${networkRateLimitNamespaceId}\n`,
           );
           NODE
       - name: Build the Worker and canary cost model
@@ -239,7 +244,7 @@ jobs:
               --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
               --release-report-sha256 "$SOURCE_SHA256" \
               --session-rate-limit-namespace-id 22001 \
-              --network-rate-limit-namespace-id 22002 \
+              --network-rate-limit-namespace-id "$PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID" \
               --job-read-rate-limit-namespace-id 22003 \
               --result-download-rate-limit-namespace-id 22004 \
               --policy-rate-limit-namespace-id 22005 \
