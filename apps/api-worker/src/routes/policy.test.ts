@@ -660,7 +660,7 @@ describe("exact routing and CORS", () => {
       "authorization, content-type, x-download-lease",
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
-      "content-length, content-type, etag, retry-after, x-download-lease",
+      "content-length, content-type, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope",
     );
     expect(response.headers.get("vary")).toBe("Origin");
   });
