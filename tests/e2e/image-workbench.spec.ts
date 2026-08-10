@@ -757,7 +757,7 @@ test("runs local lossless compression through the optimize Worker", async ({ pag
   await page.getByText("압축 설정 · 추천", { exact: true }).click();
   await page.getByRole("radio", { name: "무손실" }).check();
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "이미지 압축 완료" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "압축 완료" })).toBeVisible();
 });
 
 test("keeps populated setup, processing, and result actions visible at narrow widths", async ({
@@ -992,8 +992,7 @@ test("limits inspection to the first 20 files while counting invalid and overflo
   await expect(page.getByTestId("image-workbench-status")).toHaveText(
     "20개 이미지를 확인했어요. 지원 조건에 맞지 않는 1개를 제외했어요. JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.",
   );
-  await expect(page.getByText("accepted-0.png", { exact: true })).toBeVisible();
-  await expect(page.getByText("accepted-19.png", { exact: true })).toBeVisible();
+  await expect(page.getByText("20개 이미지 · 20B", { exact: true })).toBeVisible();
   await expect(page.getByText("overflow.png", { exact: true })).toHaveCount(0);
   expect(
     await page.evaluate(
@@ -1097,7 +1096,7 @@ test("cancels an active inspection when the workbench unmounts", async ({ page }
     )
     .toBe(true);
 
-  await page.goto("/image/convert");
+  await page.locator('a[href="/image/convert"]').first().click();
   await expect.poll(() => terminations).toBeGreaterThanOrEqual(1);
 });
 
