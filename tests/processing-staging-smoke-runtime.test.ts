@@ -65,4 +65,26 @@ describe("processing staging smoke readiness", () => {
     expect(result).toBe("ready");
     expect(attempts).toBe(2);
   });
+
+  it("retries a transient upstream rate limit", async () => {
+    let attempts = 0;
+    let waits = 0;
+    const result = await runProcessingStagingBrowserSmoke(
+      {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("processing staging smoke failed [job-create-upstream-rate-limit]");
+        }
+        return "ready";
+      },
+      async () => {
+        waits += 1;
+      },
+    );
+
+    expect(result).toBe("ready");
+    expect(attempts).toBe(2);
+    expect(waits).toBe(1);
+  });
 });
