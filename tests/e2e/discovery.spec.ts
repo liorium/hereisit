@@ -973,28 +973,8 @@ test("shows the ordinary selector after a handed-off destination reload", async 
   await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
 });
 
-test("asks for reselect when a controlled clock expires the pending handoff", async ({ page }) => {
+test("inspects a pending image handoff without OffscreenCanvas", async ({ page }) => {
   await page.addInitScript(() => {
-    const trackedWindow = window as Window & {
-      __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
-      __hereisitEnableImageRuntime?: () => void;
-    };
-    const nativeNow = performance.now.bind(performance);
-    const nativeOffscreenCanvas = globalThis.OffscreenCanvas;
-    let offset = 0;
-    trackedWindow.__hereisitAdvanceHandoffClock = (milliseconds) => {
-      offset += milliseconds;
-    };
-    trackedWindow.__hereisitEnableImageRuntime = () => {
-      Object.defineProperty(globalThis, "OffscreenCanvas", {
-        configurable: true,
-        value: nativeOffscreenCanvas ?? class TestOffscreenCanvas {},
-      });
-    };
-    Object.defineProperty(performance, "now", {
-      configurable: true,
-      value: () => nativeNow() + offset,
-    });
     Object.defineProperty(globalThis, "OffscreenCanvas", {
       configurable: true,
       value: undefined,
@@ -1009,29 +989,12 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
-  await page.getByRole("link", { name: "워크플로", exact: true }).click();
-  await expect(page).toHaveURL(/\/workflows\/?$/);
-  await page.evaluate(() => {
-    const trackedWindow = window as Window & {
-      __hereisitAdvanceHandoffClock?: (milliseconds: number) => void;
-      __hereisitEnableImageRuntime?: () => void;
-    };
-    trackedWindow.__hereisitAdvanceHandoffClock?.(60_000);
-    trackedWindow.__hereisitEnableImageRuntime?.();
-  });
-  await page.getByRole("button", { name: "검색", exact: true }).click();
-  const search = page.getByTestId("desktop-search");
-  await search.getByRole("combobox", { name: "도구 검색" }).fill("이미지 용량 줄이기");
-  await search.getByRole("option", { name: /이미지 용량 줄이기/ }).click();
-
-  await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByTestId("image-workbench-status")).toHaveText("파일을 다시 선택해 주세요");
-  await expect(page.getByText(/expires-locally\.png/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await expect(page.getByText(/expires-locally\.png · 68B/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeDisabled();
 });
 
-test("asks for reselect when a pending handoff reaches a different tool", async ({ page }) => {
+test("does not leave a consumed image handoff for a different tool", async ({ page }) => {
   await page.addInitScript(() => {
     const trackedWindow = window as Window & { __hereisitEnableImageRuntime?: () => void };
     const nativeOffscreenCanvas = globalThis.OffscreenCanvas;
@@ -1055,7 +1018,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
@@ -1069,9 +1032,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
   await search.getByRole("option", { name: /PDF 합치기/ }).click();
 
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
-  await expect(
-    page.getByText("파일을 다시 선택해 주세요", { exact: true }).filter({ visible: true }),
-  ).toBeVisible();
+  await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/target-mismatch\.png/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "합칠 PDF 선택" })).toBeEnabled();
 });

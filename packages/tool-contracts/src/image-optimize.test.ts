@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type {
+  ImageOptimizeInspection,
+  ImageOptimizeWorkerEvent,
+  ImageOptimizeWorkerRequest,
+} from "./image-optimize";
 import {
   IMAGE_OPTIMIZE_CONTRACT_ID,
   IMAGE_OPTIMIZE_MAX_DIMENSION,
@@ -94,6 +99,28 @@ function createRequest(overrides: Record<string, unknown> = {}) {
 }
 
 describe("image.optimize@1", () => {
+  it("publishes the protocol-1 Worker discriminants", () => {
+    expectTypeOf<Extract<ImageOptimizeWorkerRequest, { type: "inspect" }>>().toMatchTypeOf<{
+      protocol: 1;
+      type: "inspect";
+      jobId: string;
+    }>();
+    expectTypeOf<Extract<ImageOptimizeWorkerEvent, { type: "progress" }>>().toMatchTypeOf<{
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+      phase: "inspecting" | "optimizing" | "verifying";
+      fraction: null;
+    }>();
+    expectTypeOf<ImageOptimizeInspection>().toMatchTypeOf<{
+      mime: "image/jpeg" | "image/png" | "image/webp" | "image/heic";
+      width: number;
+      height: number;
+      animated: boolean;
+    }>();
+  });
+
   it("accepts a same-format smart request without a filename", () => {
     const parsed = imageOptimizeCreateRequestSchema.parse(createRequest());
 

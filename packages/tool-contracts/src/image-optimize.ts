@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ToolErrorPayload, WorkerFileInput } from "./index";
 import {
   createToolJobCreateResponseSchema,
   createToolJobStatusEnvelopeSchema,
@@ -11,6 +12,45 @@ export const IMAGE_OPTIMIZE_MAX_FILE_BYTES = 30 * 1024 * 1024;
 export const IMAGE_OPTIMIZE_MAX_PIXELS = 40_000_000;
 export const IMAGE_OPTIMIZE_MAX_DIMENSION = 32_768;
 export const IMAGE_OPTIMIZE_MAX_FILES = 20;
+
+export type ImageOptimizeWorkerFileInput = WorkerFileInput;
+
+export interface ImageOptimizeInspection {
+  mime: "image/jpeg" | "image/png" | "image/webp" | "image/heic";
+  width: number;
+  height: number;
+  animated: boolean;
+}
+
+export interface ImageOptimizeLosslessResult {
+  bytes: ArrayBuffer;
+  byteLength: number;
+  mime: "image/jpeg" | "image/png";
+  width: number;
+  height: number;
+  warnings: [];
+}
+
+export type ImageOptimizeWorkerError = ToolErrorPayload;
+
+export type ImageOptimizeWorkerRequest =
+  | { protocol: 1; type: "inspect"; jobId: string; input: ImageOptimizeWorkerFileInput }
+  | { protocol: 1; type: "lossless"; jobId: string; input: ImageOptimizeWorkerFileInput }
+  | { protocol: 1; type: "cancel"; jobId: string };
+
+export type ImageOptimizeWorkerEvent =
+  | { protocol: 1; type: "inspected"; jobId: string; result: ImageOptimizeInspection }
+  | {
+      protocol: 1;
+      type: "progress";
+      jobId: string;
+      sequence: number;
+      phase: "inspecting" | "optimizing" | "verifying";
+      fraction: null;
+    }
+  | { protocol: 1; type: "complete"; jobId: string; result: ImageOptimizeLosslessResult }
+  | { protocol: 1; type: "unsupported"; jobId: string; reason: "LOSSLESS_SERVER_REQUIRED" }
+  | { protocol: 1; type: "failed"; jobId: string; error: ImageOptimizeWorkerError };
 
 export const imageOptimizeMimeSchema = z.enum(["image/jpeg", "image/png", "image/webp"]);
 
