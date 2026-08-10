@@ -14,6 +14,7 @@ import {
 import { captureCgroupBaseline, createLinuxResourceSampler } from "./job/resource-monitor";
 import { resolveRunnerModuleUrl } from "./job/runner-path";
 import {
+  finalizeRunnerStatus,
   parseRunnerRecord,
   resourceFailureStatus,
   startResourceSupervisor,
@@ -165,21 +166,28 @@ async function startServer(): Promise<void> {
         sample: () => sampler.sample(),
         onProcessGroup: register,
         acceptObservation: async (observation) => {
-          if (runnerReportedTerminal) return false;
           if (observation.exceeded?.exceeded !== "measurement") return true;
+          if (runnerReportedTerminal) return false;
           return processGroupAlive(runnerPgid);
         },
       });
       const completion = Promise.race([
-        terminalCompletion.catch(async (error) => {
-          await terminate();
-          throw error;
-        }),
+        terminalCompletion
+          .then(async (status) => {
+            const observation = await supervisor.stop();
+            return finalizeRunnerStatus(input.request, status, observation);
+          })
+          .catch(async (error) => {
+            await supervisor.stop();
+            await terminate();
+            throw error;
+          }),
         supervisor.completion.then(async (observation) => {
+          await supervisor.stop();
           await terminate();
           return resourceFailureStatus(input.request, observation, runnerSequence + 1);
         }),
-      ]).finally(() => supervisor.stop());
+      ]);
       return { runnerPgid, completion };
     },
   };

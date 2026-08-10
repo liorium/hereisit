@@ -92,7 +92,6 @@ jobs:
         with:
           version: v0.34.1
           driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
-          install: true
       - name: Build the engine, Worker, web, and cost model
         run: |
           set -euo pipefail
@@ -443,7 +442,7 @@ jobs:
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$STAGING_PAGES_ORIGIN" \
             --output .artifacts/deployment/smoke-result.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: processing-staging-deployment-${{ github.event.workflow_run.head_sha }}
           path: |

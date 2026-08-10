@@ -15,9 +15,17 @@ const require = createRequire(import.meta.url);
 const sharp = require("../apps/image-engine/node_modules/sharp");
 
 const strategicTags = Object.freeze(["korean-text", "ui", "code", "logo", "flat-graphic"]);
+const warmJpegWebpP95LimitMs = 3000;
+const standardPngP95LimitMs = 8000;
+const ordinaryPeakMemoryLimitBytes = 512 * 1024 * 1024;
 
 function check(failures, passed, code) {
   if (!passed) failures.push(code);
+}
+
+function percentile95(values) {
+  const ordered = values.toSorted((left, right) => left - right);
+  return ordered[Math.ceil(ordered.length * 0.95) - 1] ?? Number.POSITIVE_INFINITY;
 }
 
 export function evaluateImageQualityReport(rawReport) {
@@ -40,9 +48,9 @@ export function evaluateImageQualityReport(rawReport) {
   );
   check(failures, aggregate.falseNoSizeReductionPassRate >= 0.9, "FALSE_NO_SIZE_REDUCTION");
   check(failures, aggregate.comparableMedianBaselineRatio <= 1.05, "COMPETITOR_MEDIAN_SIZE");
-  check(failures, aggregate.warmJpegWebpP95Ms <= 3000, "WARM_JPEG_WEBP_P95");
-  check(failures, aggregate.standardPngP95Ms <= 8000, "STANDARD_PNG_P95");
-  check(failures, aggregate.ordinaryPeakMemoryBytes <= 512 * 1024 * 1024, "PEAK_MEMORY");
+  check(failures, aggregate.warmJpegWebpP95Ms <= warmJpegWebpP95LimitMs, "WARM_JPEG_WEBP_P95");
+  check(failures, aggregate.standardPngP95Ms <= standardPngP95LimitMs, "STANDARD_PNG_P95");
+  check(failures, aggregate.ordinaryPeakMemoryBytes <= ordinaryPeakMemoryLimitBytes, "PEAK_MEMORY");
   check(failures, aggregate.cancellationP95Ms <= 1000, "CANCELLATION_P95");
   check(failures, aggregate.policyP95Ms <= 500, "POLICY_P95");
   check(failures, aggregate.localFeedbackP95Ms <= 100, "LOCAL_FEEDBACK_P95");
@@ -267,6 +275,31 @@ export function evaluatePrImageQualityReport(rawReport) {
     failures.push("PR_SUCCESS_RATE");
   if (records.some((record) => !record.alphaChecksPassed && record.outcome !== "rejected"))
     failures.push("PR_ALPHA_CHECK");
+  const successful = records.filter((record) => record.outcome !== "rejected");
+  const validMeasurements = successful.every(
+    (record) =>
+      Number.isFinite(record.processingMs) &&
+      record.processingMs >= 0 &&
+      Number.isFinite(record.peakMemoryBytes) &&
+      record.peakMemoryBytes > 0,
+  );
+  if (!validMeasurements) failures.push("PR_INVALID_MEASUREMENT");
+  else {
+    const jpegWebp = successful.filter(
+      (record) => record.inputMime === "image/jpeg" || record.inputMime === "image/webp",
+    );
+    const png = successful.filter((record) => record.inputMime === "image/png");
+    if (percentile95(jpegWebp.map((record) => record.processingMs)) > warmJpegWebpP95LimitMs) {
+      failures.push("PR_WARM_JPEG_WEBP_P95");
+    }
+    if (percentile95(png.map((record) => record.processingMs)) > standardPngP95LimitMs) {
+      failures.push("PR_STANDARD_PNG_P95");
+    }
+    if (
+      Math.max(...successful.map((record) => record.peakMemoryBytes)) > ordinaryPeakMemoryLimitBytes
+    )
+      failures.push("PR_PEAK_MEMORY");
+  }
   return { passed: failures.length === 0, failures };
 }
 

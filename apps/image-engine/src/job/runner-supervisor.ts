@@ -44,6 +44,9 @@ export function startResourceSupervisor(input: {
   const clear = input.clear ?? ((handle) => clearInterval(handle as NodeJS.Timeout));
   let settled = false;
   let sampling = false;
+  let stopped = false;
+  let currentSample: Promise<void> = Promise.resolve();
+  let latestObservation: LinuxResourceObservation | null = null;
   let consecutiveMeasurementFailures = 0;
   let resolveCompletion!: (observation: LinuxResourceObservation) => void;
   const completion = new Promise<LinuxResourceObservation>((resolve) => {
@@ -52,7 +55,7 @@ export function startResourceSupervisor(input: {
   const tick = () => {
     if (settled || sampling) return;
     sampling = true;
-    void input
+    currentSample = input
       .sample()
       .then(async (observation) => {
         if ((await input.acceptObservation?.(observation)) === false) return;
@@ -62,6 +65,7 @@ export function startResourceSupervisor(input: {
         } else {
           consecutiveMeasurementFailures = 0;
         }
+        latestObservation = observation;
         for (const pgid of observation.processGroups) input.onProcessGroup(pgid);
         if (observation.exceeded !== null && !settled) {
           settled = true;
@@ -69,38 +73,37 @@ export function startResourceSupervisor(input: {
         }
       })
       .catch(async () => {
-        if (
-          (await input.acceptObservation?.({
-            exceeded: { exceeded: "measurement" },
-            sample: { measurementFailed: true },
-            memoryByteMilliseconds: 0,
-            peakMemoryBytes: 0,
-            processGroups: [],
-          })) === false
-        )
-          return;
-        consecutiveMeasurementFailures += 1;
-        if (consecutiveMeasurementFailures < 2) return;
-        if (settled) return;
-        settled = true;
-        resolveCompletion({
+        const observation: LinuxResourceObservation = {
           exceeded: { exceeded: "measurement" },
           sample: { measurementFailed: true },
           memoryByteMilliseconds: 0,
           peakMemoryBytes: 0,
           processGroups: [],
-        });
+        };
+        if ((await input.acceptObservation?.(observation)) === false) return;
+        consecutiveMeasurementFailures += 1;
+        if (consecutiveMeasurementFailures < 2) return;
+        if (settled) return;
+        latestObservation = observation;
+        settled = true;
+        resolveCompletion(observation);
       })
       .finally(() => {
         sampling = false;
       });
   };
   const handle = schedule(tick, 250);
+  tick();
   return {
     completion,
-    stop(): void {
-      settled = true;
-      clear(handle);
+    async stop(): Promise<LinuxResourceObservation | null> {
+      if (!stopped) {
+        stopped = true;
+        settled = true;
+        clear(handle);
+      }
+      await currentSample;
+      return latestObservation;
     },
   };
 }
@@ -142,6 +145,53 @@ export function resourceFailureStatus(
     error: {
       code,
       retryable: code === "ENGINE_OOM" && request.resourceClass === "image-standard-v1",
+    },
+  };
+}
+
+export function finalizeRunnerStatus(
+  request: EngineCreateJobRequest,
+  status: EngineJobStatus,
+  observation: LinuxResourceObservation | null,
+): EngineJobStatus {
+  if (!("measurements" in status)) throw new TypeError("runner terminal status is required");
+  if (
+    observation !== null &&
+    observation.exceeded !== null &&
+    observation.exceeded.exceeded !== "measurement"
+  ) {
+    return resourceFailureStatus(request, observation, status.sequence + 1);
+  }
+  const unmeasured =
+    observation === null ||
+    !Number.isFinite(observation.peakMemoryBytes) ||
+    observation.peakMemoryBytes <= 0;
+  const measurementFailed = observation?.exceeded?.exceeded === "measurement";
+  if ((unmeasured || measurementFailed) && status.state !== "succeeded") return status;
+  if (unmeasured || observation.exceeded !== null) {
+    return resourceFailureStatus(
+      request,
+      observation ?? {
+        exceeded: { exceeded: "measurement" },
+        sample: { measurementFailed: true },
+        memoryByteMilliseconds: 0,
+        peakMemoryBytes: 0,
+        processGroups: [],
+      },
+      status.sequence + 1,
+    );
+  }
+  return {
+    ...status,
+    measurements: {
+      ...status.measurements,
+      cpuMs: rounded(observation.sample.cpuMs),
+      memoryByteMilliseconds: rounded(observation.memoryByteMilliseconds),
+      peakMemoryBytes: rounded(observation.peakMemoryBytes),
+      processingMs: Math.max(
+        status.measurements.processingMs,
+        rounded(observation.sample.elapsedMs),
+      ),
     },
   };
 }
