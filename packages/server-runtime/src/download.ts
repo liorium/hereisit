@@ -259,7 +259,7 @@ export function createRemoteDownloadHandle(
       try {
         (input.clickAnchor ?? defaultClickAnchor)({ href, download: downloadInput.filename });
       } finally {
-        (input.scheduleRevoke ?? ((callback) => setTimeout(callback, 0)))(() =>
+        (input.scheduleRevoke ?? ((callback) => setTimeout(callback, 1_000)))(() =>
           revokeObjectURL(href),
         );
       }
