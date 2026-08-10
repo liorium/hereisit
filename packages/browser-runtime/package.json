@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./image": "./src/run-image-batch.ts",
+    "./image-optimize": "./src/run-image-optimize-batch.ts",
     "./image-watermark": "./src/run-image-watermark-batch.ts",
     "./pdf": "./src/run-pdf-job.ts",
     "./pdf-inspection": "./src/run-pdf-inspection-job.ts",

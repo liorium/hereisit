@@ -1,0 +1,219 @@
+import type {
+  ImageOptimizeLosslessResult,
+  ImageOptimizeWorkerRequest,
+} from "@hereisit/tool-contracts/image-optimize";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  inspectImageOptimizeFiles,
+  runLosslessImageOptimizeBatch,
+  supportsBrowserImageOptimizeRuntime,
+} from "./run-image-optimize-batch";
+
+function file(name: string, bytes = Uint8Array.of(1, 2, 3)): File {
+  return new File([bytes], name, { type: "image/png" });
+}
+
+class ControlledWorker {
+  static created: ControlledWorker[] = [];
+  readonly posts: ImageOptimizeWorkerRequest[] = [];
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessageerror: (() => void) | null = null;
+  terminateCount = 0;
+
+  constructor() {
+    ControlledWorker.created.push(this);
+  }
+
+  postMessage(request: ImageOptimizeWorkerRequest): void {
+    this.posts.push(request);
+  }
+
+  emit(event: unknown): void {
+    this.onmessage?.({ data: event } as MessageEvent<unknown>);
+  }
+
+  terminate(): void {
+    this.terminateCount += 1;
+  }
+}
+
+function request(
+  worker: ControlledWorker,
+  index = 0,
+): Exclude<ImageOptimizeWorkerRequest, { type: "cancel" }> {
+  const posted = worker.posts.filter((entry) => entry.type !== "cancel")[index];
+  if (posted === undefined) throw new Error("Expected a job request.");
+  return posted;
+}
+
+function result(byteLength = 3): ImageOptimizeLosslessResult {
+  return {
+    bytes: new ArrayBuffer(byteLength),
+    byteLength,
+    mime: "image/png",
+    width: 1,
+    height: 1,
+    warnings: [],
+  };
+}
+
+function installRuntime(): void {
+  vi.stubGlobal("Worker", ControlledWorker);
+}
+
+afterEach(() => {
+  ControlledWorker.created = [];
+  vi.unstubAllGlobals();
+});
+
+describe("image optimize Worker batches", () => {
+  it("uses one Worker, preserves inspection order, and leaves source reads in the Worker", async () => {
+    installRuntime();
+    const first = file("first.png");
+    const second = file("second.png");
+    const firstRead = vi.spyOn(first, "arrayBuffer");
+    const secondRead = vi.spyOn(second, "arrayBuffer");
+    const handle = inspectImageOptimizeFiles([
+      { itemId: "first", file: first },
+      { itemId: "second", file: second },
+    ]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const firstRequest = request(worker);
+
+    expect(firstRequest).toMatchObject({
+      type: "inspect",
+      input: { name: "first.png", mimeHint: "image/png", byteLength: 3, file: first },
+    });
+    expect(firstRead).not.toHaveBeenCalled();
+    expect(secondRead).not.toHaveBeenCalled();
+    worker.emit({
+      protocol: 1,
+      type: "inspected",
+      jobId: firstRequest.jobId,
+      result: { mime: "image/png", width: 1, height: 1, animated: false },
+    });
+    const secondRequest = request(worker, 1);
+    expect(secondRequest.input.file).toBe(second);
+    worker.emit({
+      protocol: 1,
+      type: "inspected",
+      jobId: secondRequest.jobId,
+      result: { mime: "image/png", width: 2, height: 1, animated: false },
+    });
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "first", status: "fulfilled", value: { width: 1 } },
+      { itemId: "second", status: "fulfilled", value: { width: 2 } },
+    ]);
+    expect(ControlledWorker.created).toHaveLength(1);
+    expect(firstRead).not.toHaveBeenCalled();
+    expect(secondRead).not.toHaveBeenCalled();
+  });
+
+  it("preserves lossless progress and validates an ordinary transferred result", async () => {
+    installRuntime();
+    const events: unknown[] = [];
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }], {
+      onEvent: (event) => events.push(event),
+    });
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: posted.jobId,
+      sequence: 0,
+      phase: "optimizing",
+      fraction: null,
+    });
+    worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: result() });
+
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
+    expect(events).toContainEqual({
+      type: "item-progress",
+      itemId: "one",
+      phase: "optimizing",
+      fraction: null,
+    });
+  });
+
+  it("rejects a Worker result that exceeds its source envelope", async () => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+
+    worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: result(4) });
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+  });
+
+  it("contains hostile Worker events and settles the active item", async () => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+    const hostileResult = { ...result() };
+    Object.defineProperty(hostileResult, "byteLength", {
+      enumerable: true,
+      get() {
+        throw new Error("PRIVATE_WORKER_DETAIL");
+      },
+    });
+
+    expect(() =>
+      worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: hostileResult }),
+    ).not.toThrow();
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+  });
+
+  it("rejects oversized items and batches before creating a Worker", async () => {
+    installRuntime();
+    const oversized = new File([new Uint8Array(30 * 1024 * 1024 + 1)], "large.png", {
+      type: "image/png",
+    });
+    const items = Array.from({ length: 21 }, (_, index) => ({
+      itemId: `${index}`,
+      file: oversized,
+    }));
+    const handle = runLosslessImageOptimizeBatch(items);
+
+    await expect(handle.result).resolves.toHaveLength(21);
+    expect(ControlledWorker.created).toEqual([]);
+  });
+
+  it("isolates observers and settles every pending item exactly once on cancellation", async () => {
+    installRuntime();
+    const events: unknown[] = [];
+    const handle = runLosslessImageOptimizeBatch(
+      [
+        { itemId: "first", file: file("first.png") },
+        { itemId: "second", file: file("second.png") },
+      ],
+      {
+        onEvent: (event) => {
+          events.push(event);
+          throw new Error("observer failure");
+        },
+      },
+    );
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    handle.cancel();
+
+    await expect(handle.result).resolves.toEqual([
+      { itemId: "first", status: "cancelled" },
+      { itemId: "second", status: "cancelled" },
+    ]);
+    expect(worker.terminateCount).toBe(1);
+    expect(events).toHaveLength(4);
+  });
+
+  it("reports false when the native Worker runtime is unavailable", () => {
+    expect(supportsBrowserImageOptimizeRuntime()).toBe(false);
+  });
+});
