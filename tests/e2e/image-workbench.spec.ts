@@ -924,6 +924,127 @@ test("reports each file inspection while validating a large selection", async ({
   await expect(page.getByTestId("image-workbench-status")).toHaveText("1개 이미지를 확인했어요.");
 });
 
+test("limits inspection to the first 20 files while counting invalid and overflow files", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const inspectedNames: string[] = [];
+    class InspectionWorker {
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      constructor(_scriptURL: string | URL, options?: WorkerOptions) {
+        if (options?.name !== "hereisit-image-optimize-worker")
+          throw new Error("Unexpected common image Worker.");
+      }
+
+      postMessage(message: unknown): void {
+        const request = message as {
+          protocol?: unknown;
+          type?: unknown;
+          jobId?: unknown;
+          input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
+        };
+        const input = request.input;
+        if (
+          request.protocol !== 1 ||
+          request.type !== "inspect" ||
+          typeof request.jobId !== "string" ||
+          input === undefined ||
+          Object.keys(input).length !== 4 ||
+          typeof input.name !== "string" ||
+          typeof input.mimeHint !== "string" ||
+          !Number.isSafeInteger(input.byteLength) ||
+          !(input.file instanceof File) ||
+          input.file.name !== input.name ||
+          input.file.type !== input.mimeHint ||
+          input.file.size !== input.byteLength
+        ) {
+          throw new TypeError("Unexpected image optimize inspection request.");
+        }
+        inspectedNames.push(input.name);
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: {
+              protocol: 1,
+              type: "inspected",
+              jobId: request.jobId,
+              result: { mime: "image/png", width: 1, height: 1, animated: false },
+            },
+          } as MessageEvent<unknown>),
+        );
+      }
+
+      terminate(): void {}
+    }
+    Object.defineProperty(window, "Worker", { configurable: true, value: InspectionWorker });
+    (
+      window as Window & { __hereisitInspectedNames?: () => readonly string[] }
+    ).__hereisitInspectedNames = () => inspectedNames;
+  });
+  await page.goto("/image/compress");
+  await page.getByRole("button", { name: "이미지 선택" }).evaluate((picker) => {
+    const transfer = new DataTransfer();
+    for (let index = 0; index < 20; index += 1) {
+      transfer.items.add(
+        new File([Uint8Array.of(index)], `accepted-${index}.png`, { type: "image/png" }),
+      );
+    }
+    transfer.items.add(new File([Uint8Array.of(1)], "overflow.png", { type: "image/png" }));
+    picker.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+
+  await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    "20개 이미지를 확인했어요. 지원 조건에 맞지 않는 1개를 제외했어요. JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.",
+  );
+  await expect(page.getByText("accepted-0.png", { exact: true })).toBeVisible();
+  await expect(page.getByText("accepted-19.png", { exact: true })).toBeVisible();
+  await expect(page.getByText("overflow.png", { exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as Window & { __hereisitInspectedNames?: () => readonly string[] }
+        ).__hereisitInspectedNames?.() ?? [],
+    ),
+  ).toEqual(Array.from({ length: 20 }, (_, index) => `accepted-${index}.png`));
+
+  await page.getByRole("button", { name: "이미지 다시 선택" }).evaluate((picker) => {
+    const transfer = new DataTransfer();
+    for (let index = 0; index < 18; index += 1) {
+      transfer.items.add(
+        new File([Uint8Array.of(index)], `valid-${index}.png`, { type: "image/png" }),
+      );
+    }
+    transfer.items.add(new File([], "empty.png", { type: "image/png" }));
+    const tooLarge = new File([Uint8Array.of(1)], "large.png", { type: "image/png" });
+    Object.defineProperty(tooLarge, "size", { value: 30 * 1024 * 1024 + 1 });
+    transfer.items.add(tooLarge);
+    picker.dispatchEvent(
+      new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+  await expect(page.getByTestId("image-workbench-status")).toHaveText(
+    "18개 이미지를 확인했어요. 지원 조건에 맞지 않는 2개를 제외했어요. JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.",
+  );
+  await expect(page.getByText("empty.png", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("large.png", { exact: true })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as Window & { __hereisitInspectedNames?: () => readonly string[] }
+        ).__hereisitInspectedNames?.() ?? [],
+    ),
+  ).toEqual([
+    ...Array.from({ length: 20 }, (_, index) => `accepted-${index}.png`),
+    ...Array.from({ length: 18 }, (_, index) => `valid-${index}.png`),
+  ]);
+});
+
 test("cancels an active inspection when the workbench unmounts", async ({ page }) => {
   await page.addInitScript(() => {
     const NativeWorker = window.Worker;

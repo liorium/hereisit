@@ -387,4 +387,29 @@ describe("local image optimize fallback", () => {
     await expect(pending).resolves.toEqual([{ status: "cancelled", itemId: "source" }]);
     expect(cancel).toHaveBeenCalledTimes(1);
   });
+
+  it("cancels the active lossless batch exactly once when aborted", async () => {
+    const source = item("source");
+    const controller = new AbortController();
+    let resolve!: (value: readonly LocalImageOptimizeResult[]) => void;
+    const cancel = vi.fn();
+    const runLossless = vi.fn(() =>
+      handle(
+        new Promise((done) => {
+          resolve = done;
+        }),
+        cancel,
+      ),
+    );
+    const pending = runLocalImageOptimizeFallback([source], losslessSpec, {
+      signal: controller.signal,
+      runLossless,
+    });
+
+    controller.abort();
+    controller.abort();
+    resolve([{ status: "cancelled", itemId: source.itemId }]);
+    await expect(pending).resolves.toEqual([{ status: "cancelled", itemId: source.itemId }]);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });

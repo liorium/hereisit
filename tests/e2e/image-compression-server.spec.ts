@@ -1122,6 +1122,74 @@ test.describe("configured processing server", () => {
     expect(jobCalls).toEqual([]);
   });
 
+  test("rejects smart work after refreshed policy switches from server to local without starting a common Worker", async ({
+    page,
+  }) => {
+    let policyCalls = 0;
+    await page.addInitScript(() => {
+      const NativeWorker = window.Worker;
+      let commonWorkerStarts = 0;
+      class TrackingWorker {
+        private readonly native: Worker;
+        onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+        onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+
+        constructor(scriptURL: string | URL, options?: WorkerOptions) {
+          if (options?.name === "hereisit-image-worker") commonWorkerStarts += 1;
+          this.native = new NativeWorker(scriptURL, options);
+          this.native.onmessage = (event) => this.onmessage?.(event);
+          this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+          this.native.onerror = (event) => this.onerror?.(event);
+        }
+
+        postMessage(message: unknown, transfer?: Transferable[]): void {
+          if (transfer === undefined) this.native.postMessage(message);
+          else this.native.postMessage(message, transfer);
+        }
+
+        terminate(): void {
+          this.native.terminate();
+        }
+      }
+      Object.defineProperty(window, "OffscreenCanvas", { configurable: true, value: undefined });
+      Object.defineProperty(window, "Worker", { configurable: true, value: TrackingWorker });
+      (
+        window as Window & { __hereisitCommonWorkerStarts?: () => number }
+      ).__hereisitCommonWorkerStarts = () => commonWorkerStarts;
+    });
+    await page.route("**/v1/policy", async (route) => {
+      policyCalls += 1;
+      await route.fulfill({
+        status: 200,
+        json: policyCalls === 1 ? serverPolicy() : localPolicy("LOCAL_FALLBACK_REQUIRED"),
+      });
+    });
+    await page.goto("/image/compress");
+    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "refreshed-local.png",
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+
+    await expect(page.locator('[data-policy="local"]')).toHaveText(
+      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    );
+    await expect(
+      page.getByText("이 브라우저는 로컬 이미지 처리를 지원하지 않습니다."),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            window as Window & { __hereisitCommonWorkerStarts?: () => number }
+          ).__hereisitCommonWorkerStarts?.() ?? -1,
+      ),
+    ).toBe(0);
+  });
+
   test("falls back locally when job creation reaches the shared-network quota fence", async ({
     page,
   }) => {
