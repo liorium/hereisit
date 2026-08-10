@@ -46,8 +46,20 @@ const safeFailures = new Set([
   `${stableFailure} [maintainer-source-leak]`,
   `${stableFailure} [maintainer-input-options]`,
   `${stableFailure} [maintainer-input-put]`,
+  `${stableFailure} [maintainer-input-length]`,
   `${stableFailure} [maintainer-download-ack-count]`,
   `${stableFailure} [maintainer-download-ack-status]`,
+  `${stableFailure} [public-server-context]`,
+  `${stableFailure} [public-server-navigation]`,
+  `${stableFailure} [public-server-ui]`,
+  `${stableFailure} [public-server-console]`,
+  `${stableFailure} [public-server-page-error]`,
+  `${stableFailure} [public-server-source-leak]`,
+  `${stableFailure} [public-server-input-options]`,
+  `${stableFailure} [public-server-input-put]`,
+  `${stableFailure} [public-server-input-length]`,
+  `${stableFailure} [public-server-download-ack-count]`,
+  `${stableFailure} [public-server-download-ack-status]`,
 ]);
 
 async function runSmokeStage(stage, action) {
@@ -222,25 +234,22 @@ async function assertNonMaintainerLocal(browser, pageOrigin, timeoutMs) {
   }
 }
 
-async function assertMaintainerServer(
+async function assertServerJob(
   browser,
   pageOrigin,
-  maintainerSessionId,
-  sourcePath,
-  timeoutMs,
+  { sessionId, expectedMaintainer, stagePrefix, sourcePath, timeoutMs },
 ) {
-  const context = await runSmokeStage("maintainer-context", () =>
+  const contextStage = `${stagePrefix}-context`;
+  const context = await runSmokeStage(contextStage, () =>
     browser.newContext({ acceptDownloads: true }),
   );
-  await runSmokeStage("maintainer-context", () =>
-    injectSession(context, pageOrigin, maintainerSessionId),
-  );
-  const page = await runSmokeStage("maintainer-context", () => context.newPage());
-  await runSmokeStage("maintainer-context", () =>
+  await runSmokeStage(contextStage, () => injectSession(context, pageOrigin, sessionId));
+  const page = await runSmokeStage(contextStage, () => context.newPage());
+  await runSmokeStage(contextStage, () =>
     page.route(WEB_ANALYTICS_COLLECTION_URL, (route) => route.fulfill({ status: 204 })),
   );
-  const cdp = await runSmokeStage("maintainer-context", () => context.newCDPSession(page));
-  await runSmokeStage("maintainer-context", () => cdp.send("Network.enable"));
+  const cdp = await runSmokeStage(contextStage, () => context.newCDPSession(page));
+  await runSmokeStage(contextStage, () => cdp.send("Network.enable"));
   const state = {
     consoleError: false,
     pageError: false,
@@ -252,7 +261,10 @@ async function assertMaintainerServer(
     invalidPolicy: false,
     policies: [],
     policyReads: [],
+    workerRequests: 0,
+    inputPutExactLength: false,
   };
+  let expectedInputBytes = 0;
   assertQuietPage(page, state);
   observePolicies(page, state);
   cdp.on("Network.requestWillBeSent", ({ request: { method, url } }) => {
@@ -263,7 +275,12 @@ async function assertMaintainerServer(
     const url = request.url();
     const path = new URL(url).pathname;
     if (url.includes(privateSourceName)) state.sourceFilenameLeak = true;
-    if (inputPathPattern.test(path) && request.method() === "PUT") state.inputPuts += 1;
+    if (path.startsWith("/v1/jobs")) state.workerRequests += 1;
+    if (inputPathPattern.test(path) && request.method() === "PUT") {
+      state.inputPuts += 1;
+      state.inputPutExactLength =
+        request.headers()["content-length"] === String(expectedInputBytes);
+    }
     if (downloadedPathPattern.test(path) && request.method() === "POST") {
       state.downloadAcknowledgements += 1;
     }
@@ -279,17 +296,22 @@ async function assertMaintainerServer(
     }
   });
   try {
-    await runSmokeStage("maintainer-navigation", () =>
+    await runSmokeStage(`${stagePrefix}-navigation`, () =>
       page.goto(`${pageOrigin}/image/compress`, {
         waitUntil: "networkidle",
         timeout: timeoutMs,
       }),
     );
-    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
-    await runSmokeStage("maintainer-ui", () =>
+    await assertPolicies(state, {
+      maintainer: expectedMaintainer,
+      execution: "server",
+      reason: null,
+    });
+    await runSmokeStage(`${stagePrefix}-ui`, () =>
       page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs }),
     );
     const source = await readFile(sourcePath);
+    expectedInputBytes = source.byteLength;
     await runSmokeStage("file-selection", () =>
       page.locator('input[type="file"]').setInputFiles({
         name: privateSourceName,
@@ -308,7 +330,11 @@ async function assertMaintainerServer(
     );
     const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
     await runSmokeStage("job-completion", () => downloadButton.waitFor({ timeout: timeoutMs }));
-    await assertPolicies(state, { maintainer: true, execution: "server", reason: null });
+    await assertPolicies(state, {
+      maintainer: expectedMaintainer,
+      execution: "server",
+      reason: null,
+    });
     const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
     const acknowledgementPromise = page.waitForResponse(
       (response) =>
@@ -328,17 +354,25 @@ async function assertMaintainerServer(
     for await (const chunk of stream) downloadBytes += chunk.byteLength;
     if (downloadBytes < 1) throw new Error(stableFailure);
     await page.waitForTimeout(250);
-    if (state.consoleError) throw new Error(`${stableFailure} [maintainer-console]`);
-    if (state.pageError) throw new Error(`${stableFailure} [maintainer-page-error]`);
-    if (state.sourceFilenameLeak) throw new Error(`${stableFailure} [maintainer-source-leak]`);
-    if (state.inputOptions !== 1) throw new Error(`${stableFailure} [maintainer-input-options]`);
-    if (state.inputPuts !== 1) throw new Error(`${stableFailure} [maintainer-input-put]`);
+    if (state.consoleError) throw new Error(`${stableFailure} [${stagePrefix}-console]`);
+    if (state.pageError) throw new Error(`${stableFailure} [${stagePrefix}-page-error]`);
+    if (state.sourceFilenameLeak) {
+      throw new Error(`${stableFailure} [${stagePrefix}-source-leak]`);
+    }
+    if (state.inputOptions !== 1) {
+      throw new Error(`${stableFailure} [${stagePrefix}-input-options]`);
+    }
+    if (state.inputPuts !== 1) throw new Error(`${stableFailure} [${stagePrefix}-input-put]`);
+    if (!state.inputPutExactLength) {
+      throw new Error(`${stableFailure} [${stagePrefix}-input-length]`);
+    }
     if (state.downloadAcknowledgements !== 1) {
-      throw new Error(`${stableFailure} [maintainer-download-ack-count]`);
+      throw new Error(`${stableFailure} [${stagePrefix}-download-ack-count]`);
     }
     if (!state.downloadAcknowledged) {
-      throw new Error(`${stableFailure} [maintainer-download-ack-status]`);
+      throw new Error(`${stableFailure} [${stagePrefix}-download-ack-status]`);
     }
+    return { workerRequests: state.workerRequests };
   } finally {
     await context.close().catch(() => undefined);
   }
@@ -363,11 +397,26 @@ function authenticatedSmokeResult(pageOrigin) {
   };
 }
 
+function publicSmokeResult() {
+  return {
+    schema: "hereisit-processing-production-public-smoke@1",
+    version: 1,
+    passed: true,
+    rolloutPercent: 100,
+    nonMaintainerServer: true,
+    directDownload: true,
+    downloadAcknowledged: true,
+    exactLengthUpload: true,
+    sourceFilenameLeak: false,
+  };
+}
+
 async function performImageCompressServerSmoke({
   pageOrigin,
   sourcePath = resolve("tests/image-corpus/public/photo-ordinary-jpeg.jpg"),
   timeoutMs = 120_000,
   maintainerSessionId,
+  publicAdmission = false,
 }) {
   const origin = pageOrigin;
   const browser = await runSmokeStage("browser-launch", () => chromium.launch({ headless: true }));
@@ -380,52 +429,33 @@ async function performImageCompressServerSmoke({
         throw new TypeError(stableFailure);
       }
       await assertNonMaintainerLocal(browser, origin, timeoutMs);
-      await assertMaintainerServer(browser, origin, maintainerSessionId, sourcePath, timeoutMs);
+      await assertServerJob(browser, origin, {
+        sessionId: maintainerSessionId,
+        expectedMaintainer: true,
+        stagePrefix: "maintainer",
+        sourcePath,
+        timeoutMs,
+      });
       return authenticatedSmokeResult(origin);
     }
 
-    const context = await browser.newContext({ acceptDownloads: true });
-    const page = await context.newPage();
-    const network = [];
-    let sourceFilenameLeak = false;
-    page.on("request", (request) => {
-      network.push(`${request.method()} ${request.url()}`);
-      if (request.url().includes(privateSourceName)) sourceFilenameLeak = true;
-    });
-    page.on("console", (message) => {
-      if (message.text().includes(privateSourceName)) sourceFilenameLeak = true;
-    });
-    try {
-      await page.goto(`${origin}/image/compress`, { waitUntil: "networkidle", timeout: timeoutMs });
-      await page.locator('[data-policy="server"]').waitFor({ timeout: timeoutMs });
-      const source = await readFile(sourcePath);
-      await page.locator('input[type="file"]').setInputFiles({
-        name: privateSourceName,
-        mimeType: "image/jpeg",
-        buffer: source,
-      });
-      await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-      const downloadButton = page.getByRole("button", { name: "결과 다운로드 ↓" });
-      await downloadButton.waitFor({ timeout: timeoutMs });
-      const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
-      await downloadButton.click();
-      const download = await downloadPromise;
-      if (download.suggestedFilename() !== expectedDownloadName) throw new Error(stableFailure);
-      const stream = await download.createReadStream();
-      if (stream === null) throw new Error(stableFailure);
-      let bytes = 0;
-      for await (const chunk of stream) bytes += chunk.byteLength;
-      if (bytes < 1 || sourceFilenameLeak) throw new Error(stableFailure);
-      const jobRequests = network.filter((value) => value.includes("/v1/jobs"));
-      if (!jobRequests.some((value) => value.startsWith("PUT "))) throw new Error(stableFailure);
-      return {
-        directDownload: true,
-        workerRequests: jobRequests.length,
-        sourceFilenameLeak: false,
-      };
-    } finally {
-      await context.close();
+    if (publicAdmission && origin !== PROCESSING_PRODUCTION_ORIGIN) {
+      throw new TypeError(stableFailure);
     }
+    const summary = await assertServerJob(browser, origin, {
+      sessionId: PUBLIC_BUCKET_ZERO_SESSION_ID,
+      expectedMaintainer: false,
+      stagePrefix: "public-server",
+      sourcePath,
+      timeoutMs,
+    });
+    return publicAdmission
+      ? publicSmokeResult()
+      : {
+          directDownload: true,
+          workerRequests: summary.workerRequests,
+          sourceFilenameLeak: false,
+        };
   } finally {
     await browser.close().catch(() => undefined);
   }
@@ -494,6 +524,51 @@ export async function runProcessingStagingSmokeCli({ argv, environment }) {
       throw new Error(error.message);
     }
     throw new Error(stableFailure);
+  }
+}
+
+function parsePublicSmokeCli(argv) {
+  try {
+    const args = parseCliArguments(argv);
+    if (
+      argv.join("\0") !==
+        `--page-origin\0${PROCESSING_PRODUCTION_ORIGIN}\0--output\0${args.output ?? ""}` ||
+      Object.keys(args).sort().join() !== "output,page-origin" ||
+      typeof args.output !== "string" ||
+      args.output.length === 0
+    ) {
+      throw new TypeError(stableFailure);
+    }
+    return { outputPath: args.output };
+  } catch {
+    throw new TypeError("processing production public smoke configuration is invalid");
+  }
+}
+
+export async function runProcessingPublicSmokeCli({ argv }) {
+  const input = parsePublicSmokeCli(argv);
+  try {
+    await lstat(input.outputPath).then(
+      () => Promise.reject(new Error(stableFailure)),
+      (error) => {
+        if (error?.code !== "ENOENT") throw new Error(stableFailure);
+      },
+    );
+    const result = await smokeImageCompressServer({
+      pageOrigin: PROCESSING_PRODUCTION_ORIGIN,
+      publicAdmission: true,
+    });
+    if (canonicalJson(result) !== canonicalJson(publicSmokeResult())) {
+      throw new Error(stableFailure);
+    }
+    await writeCanonicalJsonAtomic(input.outputPath, result, {
+      refuseOverwrite: true,
+      mode: 0o600,
+    });
+    return result;
+  } catch (error) {
+    if (error instanceof Error && safeFailures.has(error.message)) throw error;
+    throw new Error("processing production public smoke failed");
   }
 }
 

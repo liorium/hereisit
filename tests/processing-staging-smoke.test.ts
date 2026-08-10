@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import * as smokeModule from "../scripts/smoke-image-compress-server.mjs";
 import {
+  runProcessingPublicSmokeCli,
   runProcessingStagingSmokeCli,
   smokeImageCompressServer,
 } from "../scripts/smoke-image-compress-server.mjs";
@@ -65,7 +66,21 @@ function productionSmokeResult() {
   };
 }
 
-function browserThatStopsAtJobSubmit() {
+function publicSmokeResult() {
+  return {
+    schema: "hereisit-processing-production-public-smoke@1",
+    version: 1,
+    passed: true,
+    rolloutPercent: 100,
+    nonMaintainerServer: true,
+    directDownload: true,
+    downloadAcknowledged: true,
+    exactLengthUpload: true,
+    sourceFilenameLeak: false,
+  };
+}
+
+function browserThatStopsAtJobSubmit(publicServer = false) {
   let contextCount = 0;
   return {
     newContext: async () => {
@@ -87,8 +102,8 @@ function browserThatStopsAtJobSubmit() {
                 ? { maintainer: true, execution: "server", reason: null }
                 : {
                     maintainer: false,
-                    execution: "local",
-                    reason: "LOCAL_FALLBACK_REQUIRED",
+                    execution: publicServer ? "server" : "local",
+                    reason: publicServer ? null : "LOCAL_FALLBACK_REQUIRED",
                   },
           };
           for (const listener of listeners.get("response") ?? []) listener(response);
@@ -139,6 +154,27 @@ describe("authenticated processing staging smoke", () => {
     ).rejects.toThrow("processing staging smoke failed [job-submit]");
   });
 
+  it("requires a non-maintainer server policy before a public job", async () => {
+    browserSmoke.mockImplementation((input, implementation) => implementation(input));
+    browserLaunch.mockResolvedValue(browserThatStopsAtJobSubmit(false));
+
+    await expect(
+      smokeImageCompressServer({
+        pageOrigin: PROCESSING_PRODUCTION_ORIGIN,
+        publicAdmission: true,
+      }),
+    ).rejects.toThrow("processing staging smoke failed [public-policy]");
+
+    browserLaunch.mockResolvedValue(browserThatStopsAtJobSubmit(true));
+
+    await expect(
+      smokeImageCompressServer({
+        pageOrigin: PROCESSING_PRODUCTION_ORIGIN,
+        publicAdmission: true,
+      }),
+    ).rejects.toThrow("processing staging smoke failed [job-submit]");
+  });
+
   it("uses CDP for preflight and a public deterministic rollout-zero session", async () => {
     const digest = createHash("sha256").update(publicBucketZeroSessionId).digest();
     expect(digest.readUInt32BE(0) % 100).toBe(0);
@@ -156,13 +192,11 @@ describe("authenticated processing staging smoke", () => {
     );
     expect(source.match(/page\.route\(WEB_ANALYTICS_COLLECTION_URL/gu)).toHaveLength(2);
     expect(source.match(/route\.fulfill\(\{ status: 204 \}\)/gu)).toHaveLength(2);
-    expect(source).toContain("maintainer: true");
+    expect(source).toContain("expectedMaintainer: true");
+    expect(source).toContain("expectedMaintainer: false");
     expect(source).toContain('execution: "server"');
     expect(source).toContain("reason: null");
-    expect(source.indexOf("await assertPolicies(state, { maintainer: true")).toBeLessThan(
-      source.indexOf("await page.locator('[data-policy=\"server\"]')"),
-    );
-    expect(source.match(/await assertPolicies\(state, \{ maintainer: true/gu)).toHaveLength(2);
+    expect(source.match(/maintainer: expectedMaintainer/gu)).toHaveLength(2);
     expect(source).toContain('getByText("압축 설정 · 추천", { exact: true }).click()');
     expect(source).toContain('getByRole("radio", { name: /최소 용량/ }).check()');
   });
@@ -178,7 +212,7 @@ describe("authenticated processing staging smoke", () => {
       readFile("scripts/smoke-image-compress-server.mjs", "utf8"),
       readFile("apps/web/src/components/image-compress-workbench.tsx", "utf8"),
     ]);
-    expect(smokeSource.match(/name: "용량 줄이기", exact: true/gu)).toHaveLength(2);
+    expect(smokeSource.match(/name: "용량 줄이기", exact: true/gu)).toHaveLength(1);
     expect(smokeSource).not.toContain("이미지 1개 압축하기");
     expect(componentSource).toContain("용량 줄이기");
   });
@@ -250,9 +284,43 @@ describe("authenticated processing staging smoke", () => {
     expect((await stat(output)).mode & 0o777).toBe(0o600);
   });
 
+  it("runs the fixed production public smoke without a maintainer environment", async () => {
+    const output = await outputPath();
+    browserSmoke.mockResolvedValue(publicSmokeResult());
+
+    const result = await runProcessingPublicSmokeCli({
+      argv: ["--page-origin", PROCESSING_PRODUCTION_ORIGIN, "--output", output],
+    });
+
+    expect(browserSmoke).toHaveBeenCalledWith(
+      { pageOrigin: PROCESSING_PRODUCTION_ORIGIN, publicAdmission: true },
+      expect.any(Function),
+    );
+    expect(result).toEqual(publicSmokeResult());
+    expect(await readFile(output, "utf8")).toBe(canonicalJson(publicSmokeResult()));
+    expect((await stat(output)).mode & 0o777).toBe(0o600);
+    for (const argv of [
+      ["--page-origin", PROCESSING_STAGING_ORIGIN, "--output", "result.json"],
+      ["--output", "result.json", "--page-origin", PROCESSING_PRODUCTION_ORIGIN],
+      [
+        "--page-origin",
+        PROCESSING_PRODUCTION_ORIGIN,
+        "--output",
+        "result.json",
+        "--session",
+        sessionId,
+      ],
+    ]) {
+      await expect(runProcessingPublicSmokeCli({ argv })).rejects.toThrow(
+        /public smoke configuration/i,
+      );
+    }
+  });
+
   it("keeps the module surface narrow and rejects non-HTTP origins before browser launch", async () => {
     expect(Object.keys(smokeModule).sort()).toEqual([
       "projectSmokeRequest",
+      "runProcessingPublicSmokeCli",
       "runProcessingStagingSmokeCli",
       "smokeImageCompressServer",
       "summarizeSmokeRequests",
