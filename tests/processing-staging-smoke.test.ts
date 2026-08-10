@@ -209,6 +209,18 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("response.status() === 204");
   });
 
+  it("checks server uploads before separating browser download and acknowledgement failures", async () => {
+    const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
+    const uploadCheck = source.indexOf("if (state.inputOptions !== 1)");
+    const downloadWait = source.indexOf('page.waitForEvent("download"');
+
+    expect(uploadCheck).toBeGreaterThan(-1);
+    expect(downloadWait).toBeGreaterThan(uploadCheck);
+    expect(source).toContain("Promise.allSettled([downloadPromise, acknowledgementPromise])");
+    expect(source).toContain("[browser-download]");
+    expect(source).toContain("[download-ack]");
+  });
+
   it("does not expose a production result-minting dependency parameter", async () => {
     const source = await readFile("scripts/smoke-image-compress-server.mjs", "utf8");
     expect(source).not.toMatch(/runProcessingStagingSmokeCli\([\s\S]*?smoke\s*=/u);

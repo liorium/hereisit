@@ -41,6 +41,8 @@ const safeFailures = new Set([
   `${stableFailure} [job-submit]`,
   `${stableFailure} [job-completion]`,
   `${stableFailure} [download-handoff]`,
+  `${stableFailure} [browser-download]`,
+  `${stableFailure} [download-ack]`,
   `${stableFailure} [maintainer-console]`,
   `${stableFailure} [maintainer-page-error]`,
   `${stableFailure} [maintainer-source-leak]`,
@@ -336,6 +338,13 @@ async function assertServerJob(
       execution: "server",
       reason: null,
     });
+    if (state.inputOptions !== 1) {
+      throw new Error(`${stableFailure} [${stagePrefix}-input-options]`);
+    }
+    if (state.inputPuts !== 1) throw new Error(`${stableFailure} [${stagePrefix}-input-put]`);
+    if (!state.inputPutAccepted) {
+      throw new Error(`${stableFailure} [${stagePrefix}-input-length]`);
+    }
     const downloadPromise = page.waitForEvent("download", { timeout: timeoutMs });
     const acknowledgementPromise = page.waitForResponse(
       (response) =>
@@ -344,10 +353,20 @@ async function assertServerJob(
         response.ok(),
       { timeout: timeoutMs },
     );
-    const [download] = await runSmokeStage("download-handoff", async () => {
-      await downloadButton.click();
-      return Promise.all([downloadPromise, acknowledgementPromise]);
-    });
+    const [downloadResult, acknowledgementResult] = await runSmokeStage(
+      "download-handoff",
+      async () => {
+        await downloadButton.click();
+        return Promise.allSettled([downloadPromise, acknowledgementPromise]);
+      },
+    );
+    if (downloadResult.status !== "fulfilled") {
+      throw new Error(`${stableFailure} [browser-download]`);
+    }
+    if (acknowledgementResult.status !== "fulfilled") {
+      throw new Error(`${stableFailure} [download-ack]`);
+    }
+    const download = downloadResult.value;
     if (download.suggestedFilename() !== expectedDownloadName) throw new Error(stableFailure);
     const stream = await download.createReadStream();
     if (stream === null) throw new Error(stableFailure);
@@ -359,13 +378,6 @@ async function assertServerJob(
     if (state.pageError) throw new Error(`${stableFailure} [${stagePrefix}-page-error]`);
     if (state.sourceFilenameLeak) {
       throw new Error(`${stableFailure} [${stagePrefix}-source-leak]`);
-    }
-    if (state.inputOptions !== 1) {
-      throw new Error(`${stableFailure} [${stagePrefix}-input-options]`);
-    }
-    if (state.inputPuts !== 1) throw new Error(`${stableFailure} [${stagePrefix}-input-put]`);
-    if (!state.inputPutAccepted) {
-      throw new Error(`${stableFailure} [${stagePrefix}-input-length]`);
     }
     if (state.downloadAcknowledgements !== 1) {
       throw new Error(`${stableFailure} [${stagePrefix}-download-ack-count]`);
