@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Re-measure the current production image engine and make the reduced quality gate enforce the existing processing-time and memory limits it already records.
+**Goal:** Re-measure the current production image engine, publish its real successful-job resource measurements, and make the reduced quality gate enforce the existing processing-time and memory limits.
 
 **Architecture:** Reuse the existing owned corpus, native engine image, metric binaries, manual GitHub workflow, and release thresholds. Establish an exact-SHA baseline first, add only deterministic PR checks that the current report can prove, then rerun the benchmark on the final merged SHA; codec behavior changes only if the measurements expose a reproducible failure.
 
@@ -17,13 +17,18 @@
 - Reuse the release limits verbatim: JPEG/WebP p95 at most 3,000 ms, PNG p95 at most 8,000 ms, and ordinary peak memory at most 512 MiB.
 - Do not invent human-review or authorized-competitor data and do not weaken the full release evaluator.
 - Do not tune encoder settings unless a current-head benchmark reproduces a failed existing limit.
+- A successful engine job must contain a positive measured peak memory value; a missing resource observation fails closed instead of publishing zero as a real measurement.
 - Retain benchmark artifacts only while this task is active. Remove task worktrees, containers, images, downloaded reports, and task-only Docker cache after final verification.
 
 ## File Map
 
 - `scripts/verify-image-quality.mjs` — validate reduced benchmark measurements and enforce the existing p95 time and peak-memory limits.
 - `tests/image-quality-gates.test.ts` — prove passing boundaries, independent failures, invalid measurements, and unsuccessful-sample exclusion.
-- `.github/workflows/image-quality-benchmark.yml` — reused without modification to build and benchmark the exact selected Git revision.
+- `apps/image-engine/src/job/runner-supervisor.ts` — immediately sample resources and merge accepted Linux observations into terminal job measurements.
+- `apps/image-engine/src/job/runner-supervisor.test.ts` — prove immediate sampling, successful measurement publication, and fail-closed missing observations.
+- `apps/image-engine/src/server.ts` — retain the latest valid observation and finalize the runner terminal status with it.
+- `.github/workflows/image-quality-benchmark.yml` — build and benchmark the exact selected Git revision without the removed Buildx `install` input.
+- `.github/workflows/processing-staging.yml` — remove the same ignored Buildx input from the engine deployment path.
 - `tests/image-corpus/manifest.json` and `tests/image-corpus/public/**` — reused without modification as the licensed deterministic input set.
 - `.artifacts/image-benchmark-pr.json` — ephemeral GitHub artifact, downloaded under `/tmp` for inspection and never committed.
 
@@ -114,7 +119,92 @@ NODE
 
 Expected: `passed: true`; engine image digest is `sha256:<64 hex>` and source-lock, corpus, and live-cost-model hashes are each 64 lowercase hex characters. Stop before code changes if the existing gate or any approved limit fails; reproduce the failing record and fix only that root cause.
 
-### Task 2: Enforce existing time and memory limits in the reduced gate
+### Task 2: Publish successful-job CPU and memory observations
+
+**Files:**
+- Modify: `apps/image-engine/src/job/runner-supervisor.ts`
+- Modify: `apps/image-engine/src/job/runner-supervisor.test.ts`
+- Modify: `apps/image-engine/src/server.ts`
+
+**Interfaces:**
+- Consumes: runner terminal `EngineJobStatus` and the latest accepted `LinuxResourceObservation`.
+- Produces: `finalizeRunnerStatus(request, status, observation)` with observed CPU, memory-time, peak memory, and elapsed time while preserving processed bytes, pixels, candidates, result, and inspection.
+
+- [ ] **Step 1: Add focused failing supervisor tests**
+
+Add one test proving `startResourceSupervisor()` calls its sampler immediately without waiting for the first 250ms interval. Add table-driven tests for a wished-for `finalizeRunnerStatus()`:
+
+```ts
+expect(
+  finalizeRunnerStatus(request, succeededStatus, observation(null)),
+).toMatchObject({
+  state: "succeeded",
+  measurements: {
+    processedInputBytes: 3,
+    processedPixels: 4_096,
+    testedCandidates: 2,
+    cpuMs: 4,
+    memoryByteMilliseconds: 5_000,
+    peakMemoryBytes: 20,
+    processingMs: 250,
+  },
+});
+
+expect(finalizeRunnerStatus(request, succeededStatus, null)).toMatchObject({
+  state: "failed",
+  sequence: succeededStatus.sequence + 1,
+  error: { code: "ENGINE_CRASH", retryable: false },
+});
+```
+
+The first test must fail if observed values are not merged; the second must fail if an unmeasured success can escape as zero-valued telemetry.
+
+- [ ] **Step 2: Run focused tests and record RED**
+
+Run:
+
+```bash
+pnpm exec vitest run apps/image-engine/src/job/runner-supervisor.test.ts
+```
+
+Expected: immediate-sampling and finalization tests fail because the current supervisor waits 250ms and no finalizer exists.
+
+- [ ] **Step 3: Implement the minimum finalization path**
+
+Call the supervisor's existing `tick()` once immediately after registering its interval. Add `finalizeRunnerStatus()` beside `resourceFailureStatus()`:
+
+- `null` or a non-null `observation.exceeded` returns `resourceFailureStatus()` after the runner's terminal sequence;
+- a valid observation preserves runner-owned counts and result fields;
+- it replaces only `cpuMs`, `memoryByteMilliseconds`, and `peakMemoryBytes` with rounded observed values;
+- `processingMs` becomes the larger of runner processing time and observed elapsed time.
+
+In `server.ts`, retain only the latest observation whose `exceeded` value is `null`, including a sample that began before the runner emitted its terminal line. Pass the terminal status through `finalizeRunnerStatus()` before resolving completion. Do not add logs.
+
+- [ ] **Step 4: Run focused GREEN and engine checks**
+
+Run:
+
+```bash
+pnpm exec vitest run \
+  apps/image-engine/src/job/runner-supervisor.test.ts \
+  apps/image-engine/src/job/resource-monitor.test.ts \
+  apps/image-engine/src/job/job-controller.test.ts
+pnpm --filter @hereisit/image-engine typecheck
+pnpm lint
+git diff --check
+```
+
+Expected: all checks pass; mutation of the merge back to zero fails the finalization test and removal of immediate `tick()` fails the immediate-sampling test.
+
+- [ ] **Step 5: Commit the engine measurement fix**
+
+```bash
+git add apps/image-engine/src/job/runner-supervisor.ts \
+  apps/image-engine/src/job/runner-supervisor.test.ts apps/image-engine/src/server.ts
+git commit -m "fix: publish image engine resource measurements"
+```
+
+### Task 3: Enforce existing time and memory limits in the reduced gate
 
 **Files:**
 - Modify: `scripts/verify-image-quality.mjs`
@@ -220,7 +310,7 @@ git add scripts/verify-image-quality.mjs tests/image-quality-gates.test.ts
 git commit -m "test: enforce image benchmark resource limits"
 ```
 
-### Task 3: Verify the branch and benchmark the changed gate
+### Task 4: Verify the branch and benchmark the changed gate
 
 **Files:**
 - Verify: all committed Task 2 files
@@ -242,6 +332,8 @@ Expected: audit, lint, 11 package typechecks, all Vitest suites, Worker integrat
 
 - [ ] **Step 2: Push the isolated branch and dispatch its benchmark**
 
+Before pushing, delete the obsolete `install: true` input from the pinned `docker/setup-buildx-action` steps in both `.github/workflows/image-quality-benchmark.yml` and `.github/workflows/processing-staging.yml`. The pinned v4 action declares no `install` input and defaults `use: true`, so this deletion preserves the selected builder while removing the warning. Commit the two-line deletion as `ci: remove obsolete Buildx inputs`.
+
 Run:
 
 ```bash
@@ -261,7 +353,7 @@ Create a PR containing the design, plan, tests, and minimal verifier change. Wai
 
 For a failure, inspect the first failing boundary, reproduce it with the smallest focused test, record RED, fix the shared root cause, rerun focused checks plus `pnpm verify`, push once, and rewatch. Do not change codec settings to silence a verifier failure.
 
-### Task 4: Merge, prove the final SHA, and clean up
+### Task 5: Merge, prove the final SHA, and clean up
 
 **Files:**
 - No additional product files expected.
