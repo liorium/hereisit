@@ -27,7 +27,7 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     environment: processing-production
-    runs-on: ubuntu-24.04
+    runs-on: macos-15-intel
     timeout-minutes: 60
     env:
       EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -95,7 +95,7 @@ jobs:
           cp .artifacts/staging/cloudflare-image-digest.txt \
             .artifacts/deployment/cloudflare-image-digest.txt
           printf '%s\n' "$STAGING_RUN_ID" > .artifacts/deployment/staging-run-id.txt
-          SOURCE_SHA256="$(sha256sum .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
+          SOURCE_SHA256="$(shasum -a 256 .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
           {
             echo "ENGINE_IMAGE=$ENGINE_IMAGE"
             echo "SOURCE_SHA256=$SOURCE_SHA256"
@@ -470,7 +470,7 @@ jobs:
       - name: Verify deployment gate artifacts
         run: |
           set -euo pipefail
-          ATTESTATION_SHA256="$(sha256sum .artifacts/runtime/worker-version-attestations.json | cut -d' ' -f1)"
+          ATTESTATION_SHA256="$(shasum -a 256 .artifacts/runtime/worker-version-attestations.json | cut -d' ' -f1)"
           CONFIG_SHA256="$(node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const value = JSON.parse(readFileSync(process.argv[1], "utf8"));
@@ -484,7 +484,7 @@ jobs:
             --config-sha256 "$CONFIG_SHA256" \
             > .artifacts/deployment/gate-results.json
       - name: Install browser smoke runtime while queues remain paused
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
       - name: Arm primary queue failure cleanup
         id: resume-attempt
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
