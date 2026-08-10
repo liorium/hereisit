@@ -1,4 +1,5 @@
 import { runImageBatch } from "@hereisit/browser-runtime/image";
+import type { LocalImageOptimizeRuntimeEvent } from "@hereisit/browser-runtime/image-optimize";
 import { runLosslessImageOptimizeBatch } from "@hereisit/browser-runtime/image-optimize";
 import type {
   BatchImageItem,
@@ -57,6 +58,14 @@ type ProgressEvent = {
   readonly fraction: number | null;
 };
 
+export type LocalImageOptimizeEvent =
+  | ProgressEvent
+  | {
+      readonly type: "item-complete";
+      readonly itemId: string;
+      readonly result: LocalImageOptimizeResult;
+    };
+
 export interface LocalImageOptimizeBatchHandle {
   readonly result: Promise<readonly LocalImageOptimizeResult[]>;
   cancel(): void;
@@ -69,23 +78,28 @@ interface SmartImageBatchHandle {
 
 export interface LocalFallbackOptions {
   readonly signal?: AbortSignal;
-  readonly onEvent?: (event: ProgressEvent) => void;
+  readonly smartSupported?: boolean;
+  readonly onEvent?: (event: LocalImageOptimizeEvent) => void;
   readonly runSmart?: (
     items: readonly BatchImageItem[],
     options: { readonly concurrency: 1; readonly onEvent: (event: BatchRuntimeEvent) => void },
   ) => SmartImageBatchHandle;
   readonly runLossless?: (
     items: readonly { itemId: string; file: File }[],
-    options: { readonly onEvent: (event: ProgressEvent) => void },
+    options: { readonly onEvent: (event: LocalImageOptimizeRuntimeEvent) => void },
   ) => LocalImageOptimizeBatchHandle;
 }
 
-function emit(options: LocalFallbackOptions, event: ProgressEvent): void {
+function emit(options: LocalFallbackOptions, event: LocalImageOptimizeEvent): void {
   try {
     options.onEvent?.(event);
   } catch {
     // UI observers cannot own processing.
   }
+}
+
+function complete(options: LocalFallbackOptions, result: LocalImageOptimizeResult): void {
+  emit(options, { type: "item-complete", itemId: result.itemId, result });
 }
 
 function smartPipelineSpec(optimize: ImageOptimizeSpecV1): ImagePipelineSpecV2 {
@@ -179,13 +193,26 @@ export async function runLocalImageOptimizeFallback(
       items.map(({ itemId, file }) => ({ itemId, file })),
       {
         onEvent: (event) => {
-          if (event.type === "item-progress") emit(options, event);
+          if (event.type === "item-progress" || event.type === "item-complete")
+            emit(options, event);
         },
       },
     );
     const removeAbortListener = onceCancel(handle, options.signal);
-    const result = await handle.result;
-    removeAbortListener();
+    try {
+      return await handle.result;
+    } finally {
+      removeAbortListener();
+    }
+  }
+
+  if (options.smartSupported === false) {
+    const result = items.map<LocalImageOptimizeResult>((item) => ({
+      status: "rejected",
+      itemId: item.itemId,
+      message: "이 브라우저는 로컬 이미지 처리를 지원하지 않습니다.",
+    }));
+    for (const item of result) complete(options, item);
     return result;
   }
 
@@ -198,16 +225,23 @@ export async function runLocalImageOptimizeFallback(
       onEvent: (event) => {
         const progress = smartProgress(event);
         if (progress !== undefined) emit(options, progress);
+        if (event.type === "item-complete") {
+          const source = items.find((item) => item.itemId === event.itemId);
+          if (source !== undefined) complete(options, smartResult(event.result, source));
+        }
       },
     },
   );
   const removeAbortListener = onceCancel(handle, options.signal);
-  const result = await handle.result;
-  removeAbortListener();
-  return items.map((source) =>
-    smartResult(
-      result.find((entry) => entry.itemId === source.itemId),
-      source,
-    ),
-  );
+  try {
+    const result = await handle.result;
+    return items.map((source) =>
+      smartResult(
+        result.find((entry) => entry.itemId === source.itemId),
+        source,
+      ),
+    );
+  } finally {
+    removeAbortListener();
+  }
 }

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type LocalFallbackOptions,
   type LocalImageOptimizeBatchHandle,
+  type LocalImageOptimizeResult,
   runLocalImageOptimizeFallback,
 } from "./local-image-optimize-fallback";
 
@@ -214,6 +215,148 @@ describe("local image optimize fallback", () => {
       fraction: null,
     });
     expect(source.file.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("forwards mapped smart item completion before the batch resolves", async () => {
+    const source = item("source");
+    const onEvent = vi.fn();
+    let resolve!: (value: readonly BatchItemResult[]) => void;
+    const runSmart = vi.fn<NonNullable<LocalFallbackOptions["runSmart"]>>((_items, options) => {
+      options.onEvent({
+        type: "item-complete",
+        itemId: source.itemId,
+        result: {
+          status: "fulfilled",
+          itemId: source.itemId,
+          value: {
+            mime: "image/jpeg",
+            bytes: new ArrayBuffer(1),
+            byteLength: 1,
+            width: 1,
+            height: 1,
+            warnings: [],
+            suggestedName: "source.jpg",
+            timing: {
+              inspectMs: 0,
+              decodeMs: 0,
+              transformMs: 0,
+              encodeMs: 0,
+              totalMs: 0,
+              encodeAttempts: 1,
+            },
+          },
+        },
+      });
+      return smartHandle(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+    });
+
+    const pending = runLocalImageOptimizeFallback(
+      [source],
+      { ...losslessSpec, mode: "smart" },
+      { onEvent, runSmart },
+    );
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "item-complete",
+        itemId: source.itemId,
+        result: expect.objectContaining({ status: "fulfilled", itemId: source.itemId }),
+      }),
+    );
+    resolve([]);
+    await pending;
+  });
+
+  it("forwards lossless item completion before the batch resolves", async () => {
+    const source = item("source");
+    const onEvent = vi.fn();
+    let resolve!: (value: readonly LocalImageOptimizeResult[]) => void;
+    const runLossless = vi.fn((_items, options) => {
+      options.onEvent?.({
+        type: "item-complete",
+        itemId: source.itemId,
+        result: {
+          status: "unsupported",
+          itemId: source.itemId,
+          reason: "LOSSLESS_SERVER_REQUIRED",
+        },
+      } as never);
+      return handle(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+    });
+
+    const pending = runLocalImageOptimizeFallback([source], losslessSpec, { onEvent, runLossless });
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "item-complete",
+      itemId: source.itemId,
+      result: { status: "unsupported", itemId: source.itemId, reason: "LOSSLESS_SERVER_REQUIRED" },
+    });
+    resolve([]);
+    await pending;
+  });
+
+  it("rejects smart work without starting the common Worker when its runtime is unavailable", async () => {
+    const source = item("source");
+    const runSmart = vi.fn<NonNullable<LocalFallbackOptions["runSmart"]>>();
+
+    await expect(
+      runLocalImageOptimizeFallback(
+        [source],
+        { ...losslessSpec, mode: "smart" },
+        { smartSupported: false, runSmart },
+      ),
+    ).resolves.toEqual([
+      {
+        status: "rejected",
+        itemId: source.itemId,
+        message: "이 브라우저는 로컬 이미지 처리를 지원하지 않습니다.",
+      },
+    ]);
+    expect(runSmart).not.toHaveBeenCalled();
+  });
+
+  it("removes the smart abort listener when the batch rejects", async () => {
+    const source = item("source");
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const runSmart = vi.fn<NonNullable<LocalFallbackOptions["runSmart"]>>(() =>
+      smartHandle(Promise.reject(new Error("worker failed")), cancel),
+    );
+
+    await expect(
+      runLocalImageOptimizeFallback(
+        [source],
+        { ...losslessSpec, mode: "smart" },
+        {
+          signal: controller.signal,
+          runSmart,
+        },
+      ),
+    ).rejects.toThrow("worker failed");
+    controller.abort();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("removes the lossless abort listener when the batch rejects", async () => {
+    const source = item("source");
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const runLossless = vi.fn(() => handle(Promise.reject(new Error("worker failed")), cancel));
+
+    await expect(
+      runLocalImageOptimizeFallback([source], losslessSpec, {
+        signal: controller.signal,
+        runLossless,
+      }),
+    ).rejects.toThrow("worker failed");
+    controller.abort();
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it("cancels the active smart batch exactly once when aborted", async () => {

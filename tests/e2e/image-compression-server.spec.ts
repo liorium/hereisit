@@ -1126,6 +1126,38 @@ test.describe("configured processing server", () => {
     page,
   }) => {
     let uploadCalls = 0;
+    await page.addInitScript(() => {
+      const NativeWorker = window.Worker;
+      let commonWorkerStarts = 0;
+      class TrackingWorker {
+        private readonly native: Worker;
+        onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+        onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+
+        constructor(scriptURL: string | URL, options?: WorkerOptions) {
+          if (options?.name === "hereisit-image-worker") commonWorkerStarts += 1;
+          this.native = new NativeWorker(scriptURL, options);
+          this.native.onmessage = (event) => this.onmessage?.(event);
+          this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+          this.native.onerror = (event) => this.onerror?.(event);
+        }
+
+        postMessage(message: unknown, transfer?: Transferable[]): void {
+          if (transfer === undefined) this.native.postMessage(message);
+          else this.native.postMessage(message, transfer);
+        }
+
+        terminate(): void {
+          this.native.terminate();
+        }
+      }
+      Object.defineProperty(window, "OffscreenCanvas", { configurable: true, value: undefined });
+      Object.defineProperty(window, "Worker", { configurable: true, value: TrackingWorker });
+      (
+        window as Window & { __hereisitCommonWorkerStarts?: () => number }
+      ).__hereisitCommonWorkerStarts = () => commonWorkerStarts;
+    });
     await page.route("**/v1/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
@@ -1158,11 +1190,20 @@ test.describe("configured processing server", () => {
       buffer: onePixelPng,
     });
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
-    await expect(page.getByRole("button", { name: /원본 다운로드|결과 다운로드/ })).toBeVisible();
-    await page.getByRole("button", { name: "다른 이미지 압축" }).click();
+    await expect(
+      page.getByText("이 브라우저는 로컬 이미지 처리를 지원하지 않습니다."),
+    ).toBeVisible();
     await expect(page.locator('[data-policy="local"]')).toHaveText(
       "파일은 업로드하지 않고 이 기기에서 처리해요.",
     );
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            window as Window & { __hereisitCommonWorkerStarts?: () => number }
+          ).__hereisitCommonWorkerStarts?.() ?? -1,
+      ),
+    ).toBe(0);
     expect(uploadCalls).toBe(0);
   });
 });

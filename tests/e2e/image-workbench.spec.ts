@@ -121,13 +121,18 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
 
       postMessage(message: unknown): void {
         const request = message as {
+          protocol?: unknown;
           type?: string;
           jobId?: unknown;
           input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
         };
-        if (this.workerName === "hereisit-image-optimize-worker" && request.type === "inspect") {
+        if (
+          this.workerName === "hereisit-image-optimize-worker" &&
+          (request.type === "inspect" || request.type === "lossless")
+        ) {
           const input = request.input;
           if (
+            request.protocol !== 1 ||
             typeof request.jobId !== "string" ||
             input === undefined ||
             Object.keys(input).length !== 4 ||
@@ -142,6 +147,31 @@ async function installHeldTransformingWorker(page: Page): Promise<void> {
             throw new TypeError("Unexpected image optimize Worker request.");
           }
           queueMicrotask(() => {
+            if (request.type === "lossless") {
+              const bytes = new ArrayBuffer(input.byteLength);
+              this.emit({
+                protocol: 1,
+                type: "progress",
+                jobId: request.jobId,
+                sequence: 0,
+                phase: "optimizing",
+                fraction: null,
+              });
+              this.emit({
+                protocol: 1,
+                type: "complete",
+                jobId: request.jobId,
+                result: {
+                  bytes,
+                  byteLength: bytes.byteLength,
+                  mime: "image/png",
+                  width: 1,
+                  height: 1,
+                  warnings: [],
+                },
+              });
+              return;
+            }
             this.emit({
               protocol: 1,
               type: "inspected",
@@ -264,13 +294,18 @@ async function installInterleavedCompletionWorker(page: Page): Promise<void> {
 
       postMessage(message: unknown): void {
         const request = message as {
+          protocol?: unknown;
           type?: string;
           jobId?: unknown;
           input?: { name?: unknown; mimeHint?: unknown; byteLength?: unknown; file?: unknown };
         };
-        if (this.workerName === "hereisit-image-optimize-worker" && request.type === "inspect") {
+        if (
+          this.workerName === "hereisit-image-optimize-worker" &&
+          (request.type === "inspect" || request.type === "lossless")
+        ) {
           const input = request.input;
           if (
+            request.protocol !== 1 ||
             typeof request.jobId !== "string" ||
             input === undefined ||
             Object.keys(input).length !== 4 ||
@@ -285,6 +320,31 @@ async function installInterleavedCompletionWorker(page: Page): Promise<void> {
             throw new TypeError("Unexpected image optimize Worker request.");
           }
           queueMicrotask(() => {
+            if (request.type === "lossless") {
+              const bytes = new ArrayBuffer(input.byteLength);
+              this.emit({
+                protocol: 1,
+                type: "progress",
+                jobId: request.jobId,
+                sequence: 0,
+                phase: "optimizing",
+                fraction: null,
+              });
+              this.emit({
+                protocol: 1,
+                type: "complete",
+                jobId: request.jobId,
+                result: {
+                  bytes,
+                  byteLength: bytes.byteLength,
+                  mime: "image/png",
+                  width: 1,
+                  height: 1,
+                  warnings: [],
+                },
+              });
+              return;
+            }
             this.emit({
               protocol: 1,
               type: "inspected",
@@ -684,6 +744,21 @@ test("uses compression progress copy during local source-preserving work", async
   );
 });
 
+test("runs local lossless compression through the optimize Worker", async ({ page }) => {
+  await installHeldTransformingWorker(page);
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "lossless.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+
+  await page.getByText("압축 설정 · 추천", { exact: true }).click();
+  await page.getByRole("radio", { name: "무손실" }).check();
+  await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "이미지 압축 완료" })).toBeVisible();
+});
+
 test("keeps populated setup, processing, and result actions visible at narrow widths", async ({
   page,
 }) => {
@@ -762,7 +837,7 @@ test("reports each file inspection while validating a large selection", async ({
         const input = request.input;
         if (
           request.protocol !== 1 ||
-          request.type !== "inspect" ||
+          (request.type !== "inspect" && request.type !== "lossless") ||
           typeof request.jobId !== "string" ||
           input === undefined ||
           Object.keys(input).length !== 4 ||
@@ -775,6 +850,37 @@ test("reports each file inspection while validating a large selection", async ({
           input.file.size !== input.byteLength
         ) {
           throw new TypeError("Unexpected image optimize inspection request.");
+        }
+        if (request.type === "lossless") {
+          const bytes = new ArrayBuffer(input.byteLength);
+          queueMicrotask(() => {
+            this.onmessage?.({
+              data: {
+                protocol: 1,
+                type: "progress",
+                jobId: request.jobId,
+                sequence: 0,
+                phase: "optimizing",
+                fraction: null,
+              },
+            } as MessageEvent<unknown>);
+            this.onmessage?.({
+              data: {
+                protocol: 1,
+                type: "complete",
+                jobId: request.jobId,
+                result: {
+                  bytes,
+                  byteLength: bytes.byteLength,
+                  mime: "image/png",
+                  width: 1,
+                  height: 1,
+                  warnings: [],
+                },
+              },
+            } as MessageEvent<unknown>);
+          });
+          return;
         }
         const inspected = () =>
           this.onmessage?.({
@@ -804,12 +910,82 @@ test("reports each file inspection while validating a large selection", async ({
   ]);
 
   await expect(page.getByTestId("image-workbench-status")).toHaveText("1/2 이미지 확인 중");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "replacement.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("1개 이미지를 확인했어요.");
   await page.evaluate(() =>
     (
       window as Window & { __hereisitReleaseFileInspection?: () => void }
     ).__hereisitReleaseFileInspection?.(),
   );
-  await expect(page.getByTestId("image-workbench-status")).toHaveText("2개 이미지를 확인했어요.");
+  await expect(page.getByTestId("image-workbench-status")).toHaveText("1개 이미지를 확인했어요.");
+});
+
+test("cancels an active inspection when the workbench unmounts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    const countKey = "hereisit-image-inspection-terminations";
+    if (sessionStorage.getItem(countKey) === null) sessionStorage.setItem(countKey, "0");
+    class HeldInspectionWorker {
+      private readonly native: Worker;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        this.native = new NativeWorker(scriptURL, options);
+        this.native.onmessage = (event) => {
+          if (
+            options?.name === "hereisit-image-optimize-worker" &&
+            (event.data as { type?: unknown } | null)?.type === "inspected"
+          ) {
+            (window as Window & { __hereisitInspectionHeld?: boolean }).__hereisitInspectionHeld =
+              true;
+            return;
+          }
+          this.onmessage?.(event);
+        };
+        this.native.onmessageerror = (event) => this.onmessageerror?.(event);
+        this.native.onerror = (event) => this.onerror?.(event);
+      }
+
+      postMessage(message: unknown, transfer?: Transferable[]): void {
+        if (transfer === undefined) this.native.postMessage(message);
+        else this.native.postMessage(message, transfer);
+      }
+
+      terminate(): void {
+        sessionStorage.setItem(countKey, String(Number(sessionStorage.getItem(countKey)) + 1));
+        this.native.terminate();
+      }
+    }
+    Object.defineProperty(window, "Worker", { configurable: true, value: HeldInspectionWorker });
+  });
+  await page.goto("/image/compress");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "held.png",
+    mimeType: "image/png",
+    buffer: onePixelPng,
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as Window & { __hereisitInspectionHeld?: boolean }).__hereisitInspectionHeld ===
+          true,
+      ),
+    )
+    .toBe(true);
+
+  await page.goto("/image/convert");
+  expect(
+    await page.evaluate(() =>
+      Number(sessionStorage.getItem("hereisit-image-inspection-terminations")),
+    ),
+  ).toBeGreaterThanOrEqual(1);
 });
 
 test("explains why HEIC cannot be compressed while preserving its format", async ({ page }) => {

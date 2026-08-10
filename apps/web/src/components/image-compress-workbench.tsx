@@ -210,7 +210,9 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   useEffect(
     () => () => {
       batchRef.current?.cancel();
+      selectionGenerationRef.current += 1;
       inspectionRef.current?.cancel();
+      inspectionRef.current = null;
       processingControllerRef.current?.abort();
       productRunRef.current?.cancelled();
       for (const item of itemsRef.current) {
@@ -310,10 +312,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     setMessage([prefix, ...rejected].join(" "));
   }, []);
 
-  const executionReady =
-    policy.state === "server"
-      ? inspectionRuntimeSupported
-      : policy.state === "local" && inspectionRuntimeSupported;
+  const executionReady = policy.state !== "checking" && inspectionRuntimeSupported;
   const busy = processing || archiving || remoteDeliveryBusy;
 
   usePendingToolFiles({
@@ -347,36 +346,12 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     spec: ImageOptimizeSpecV1,
     signal: AbortSignal,
   ) => {
-    setItems((current) =>
-      sourceItems.reduce(
-        (updated, item) =>
-          updateItem(updated, item.id, {
-            status: "processing",
-            phase: "inspecting",
-            fraction: null,
-            message: "내 기기에서 처리하고 있어요.",
-          }),
-        current,
-      ),
-    );
-    const results = await runLocalImageOptimizeFallback(
-      sourceItems.map(({ id, file, mime }) => ({ itemId: id, file, mime })),
-      spec,
-      {
-        signal,
-        onEvent: (event) =>
-          setItems((current) =>
-            updateItem(current, event.itemId, {
-              phase: event.phase,
-              fraction: event.fraction,
-              message: phaseLabel(event.phase),
-            }),
-          ),
-      },
-    );
-    for (const result of results) {
+    const appliedResults = new Set<string>();
+    const applyResult = (result: LocalImageOptimizeResult) => {
+      if (appliedResults.has(result.itemId)) return;
+      appliedResults.add(result.itemId);
       const item = sourceItems.find((source) => source.id === result.itemId);
-      if (item === undefined) continue;
+      if (item === undefined) return;
       if (result.status === "fulfilled") {
         setItems((current) =>
           updateItem(current, item.id, {
@@ -412,7 +387,41 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           }),
         );
       }
-    }
+    };
+    setItems((current) =>
+      sourceItems.reduce(
+        (updated, item) =>
+          updateItem(updated, item.id, {
+            status: "processing",
+            phase: "inspecting",
+            fraction: null,
+            message: "내 기기에서 처리하고 있어요.",
+          }),
+        current,
+      ),
+    );
+    const results = await runLocalImageOptimizeFallback(
+      sourceItems.map(({ id, file, mime }) => ({ itemId: id, file, mime })),
+      spec,
+      {
+        signal,
+        smartSupported: imageRuntimeSupported,
+        onEvent: (event) => {
+          if (event.type === "item-complete") {
+            applyResult(event.result);
+            return;
+          }
+          setItems((current) =>
+            updateItem(current, event.itemId, {
+              phase: event.phase,
+              fraction: event.fraction,
+              message: phaseLabel(event.phase),
+            }),
+          );
+        },
+      },
+    );
+    for (const result of results) applyResult(result);
     return results;
   };
 
