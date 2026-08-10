@@ -262,9 +262,17 @@ SET circuit_open = 1,
     opened_at = CASE WHEN circuit_open = 1 THEN opened_at ELSE ? END,
     last_evaluated_at = ?
 WHERE id = 1
+  AND EXISTS (
+    SELECT 1 FROM worker_version_attestations
+    WHERE kind = 'active'
+      AND version_id = ?
+      AND release_report_sha256 = ?
+      AND public_admission_allowed = 1
+  )
 ```
 
-Immediately re-read the strict state row and require `circuitOpen = 1`. Tests prove that the query is parameterized,
+Read and match the expected release before the write, then immediately re-read the strict state row and require the
+same release with `circuitOpen = 1`. Tests prove that a stale request changes nothing, the query is parameterized,
 served by primary D1, idempotent for an already-open circuit, never resets a reason, and never prints response bodies
 or credentials.
 
@@ -279,10 +287,11 @@ The CLI accepts only:
 --expected-release-report-sha256 <64 hex>
 ```
 
-Add exact `--mode verify` and `--mode disable` forms. Both read the D1 token only from
+Add exact `--mode verify`, `--mode disable`, and `--mode disable-current` forms. All read the D1 token only from
 `CLOUDFLARE_D1_API_TOKEN`, print one canonical sanitized JSON object, and collapse network/provider failures without
-printing the token or response body. Disable additionally requires a canonical `--now` timestamp supplied by the
-workflow and prints only `{ disabled: true, circuitOpen: true }`.
+printing the token or response body. Both disable forms additionally require a canonical `--now` timestamp supplied
+by the workflow and print only `{ disabled: true, circuitOpen: true }`; `disable-current` derives the expected release
+from primary D1 and then performs the same conditional write.
 
 - [ ] **Step 6: Verify Task 2 and commit**
 
@@ -483,7 +492,7 @@ set +e
 pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
 QUEUE_RECOVERY=$?
 node scripts/verify-processing-admission-state.mjs \
-  --mode disable --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+  --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
   --database-id "$PRODUCTION_D1_DATABASE_ID" --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 CIRCUIT_RECOVERY=$?
 pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes
@@ -510,14 +519,17 @@ test "$VERSION_RECOVERY" -eq 0
 exit 1
 ```
 
-Use independent steps or an equivalent trap so Queue pause, circuit opening, and provider-version restoration cannot
-skip one another. The circuit is the authoritative immediate disable even if provider restoration fails. Preserve the
-original workflow failure after recovery evidence is written.
+Use an `always()` step for both failure and cancellation, with no promotion job-wide timeout, and independently run
+Queue pause, circuit opening, and provider-version restoration so one cannot skip another. The circuit is the
+authoritative immediate disable even if provider restoration fails. Preserve the original workflow failure after
+recovery evidence is written.
 
-The same workflow's protected `workflow_dispatch` exposes one choice only, `disable`. It pauses both Queues, opens the
-existing D1 circuit, verifies local/upload-false policy, and leaves both Queues paused. It refuses a dispatch from a
-non-main ref. The next ordinary production release installs an attested rollout-zero canary before any later public
-promotion; manual disable does not reset the circuit automatically.
+The same workflow's protected `workflow_dispatch` exposes one choice only, `disable`. It discovers the uniquely named
+production D1 through Wrangler, reads its current active attestation, conditionally opens the existing D1 circuit,
+then independently attempts to pause and verify both Queues and verifies local/upload-false policy. It does not depend on an
+expiring admission artifact and refuses a dispatch from a non-main ref. The next ordinary production release installs
+an attested rollout-zero canary before any later public promotion; manual disable does not reset the circuit
+automatically.
 
 - [ ] **Step 6: Update deployment documentation**
 

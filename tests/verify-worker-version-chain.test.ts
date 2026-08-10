@@ -119,6 +119,8 @@ function admissionInput() {
     before: [versions.final],
     after: [versions.final, versions.public],
     deployment: { version_id: ids.public },
+    beforeDeployment: { versions: [{ version_id: ids.final, percentage: 100 }] },
+    afterDeployment: { versions: [{ version_id: ids.public, percentage: 100 }] },
     currentAttestation: {
       ...verifyWorkerVersionChain({
         ...validInput(),
@@ -185,6 +187,21 @@ describe("Worker version chain verifier", () => {
       }),
     ],
     ["a deployment/version mismatch", () => ({ deployment: { version_id: ids.bootstrap } })],
+    [
+      "an inactive canary version",
+      () => ({ beforeDeployment: { versions: [{ version_id: ids.bootstrap, percentage: 100 }] } }),
+    ],
+    [
+      "a partial public deployment",
+      () => ({
+        afterDeployment: {
+          versions: [
+            { version_id: ids.final, percentage: 5 },
+            { version_id: ids.public, percentage: 95 },
+          ],
+        },
+      }),
+    ],
     ["changed Worker bytes", () => ({ workerModule: "export default { changed: true };\n" })],
     ["changed release bytes", () => ({ releaseReport: "{}\n" })],
     [
@@ -690,6 +707,8 @@ describe("Worker version chain verifier", () => {
         "before",
         "after",
         "deployment",
+        "beforeDeployment",
+        "afterDeployment",
         "attestation",
         "workerModule",
         "currentConfig",
@@ -702,6 +721,8 @@ describe("Worker version chain verifier", () => {
       await Promise.all([
         writeFile(paths.before, JSON.stringify(input.before), "utf8"),
         writeFile(paths.after, JSON.stringify(input.after), "utf8"),
+        writeFile(paths.beforeDeployment, JSON.stringify(input.beforeDeployment), "utf8"),
+        writeFile(paths.afterDeployment, JSON.stringify(input.afterDeployment), "utf8"),
         writeFile(
           paths.deployment,
           `${JSON.stringify({
@@ -727,6 +748,10 @@ describe("Worker version chain verifier", () => {
         paths.after,
         "--deployment-output",
         paths.deployment,
+        "--before-deployment",
+        paths.beforeDeployment,
+        "--after-deployment",
+        paths.afterDeployment,
         "--current-attestation",
         paths.attestation,
         "--worker-module",

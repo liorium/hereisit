@@ -452,6 +452,8 @@ export async function finalizeWorkerAdmissionFiles({
   beforeFile,
   afterFile,
   deploymentOutputFile,
+  beforeDeploymentFile,
+  afterDeploymentFile,
   currentAttestationFile,
   workerModuleFile,
   currentConfigFile,
@@ -480,6 +482,14 @@ export async function finalizeWorkerAdmissionFiles({
       ),
       event: "deploy",
     }),
+    beforeDeployment: parseJsonText(
+      await readBoundedUtf8File(beforeDeploymentFile, 64 * 1024, "admission deployment before"),
+      "admission deployment before",
+    ),
+    afterDeployment: parseJsonText(
+      await readBoundedUtf8File(afterDeploymentFile, 64 * 1024, "admission deployment after"),
+      "admission deployment after",
+    ),
     currentAttestation: parseJsonText(
       await readBoundedUtf8File(currentAttestationFile, 64 * 1024, "current Worker attestation"),
       "current Worker attestation",
@@ -893,6 +903,8 @@ export async function runWorkerVersionChainCli(argv, { now = () => new Date() } 
       "before",
       "after",
       "deployment-output",
+      "before-deployment",
+      "after-deployment",
       "current-attestation",
       "worker-module",
       "current-config",
@@ -906,6 +918,8 @@ export async function runWorkerVersionChainCli(argv, { now = () => new Date() } 
       beforeFile: resolve(args.before),
       afterFile: resolve(args.after),
       deploymentOutputFile: resolve(args["deployment-output"]),
+      beforeDeploymentFile: resolve(args["before-deployment"]),
+      afterDeploymentFile: resolve(args["after-deployment"]),
       currentAttestationFile: resolve(args["current-attestation"]),
       workerModuleFile: resolve(args["worker-module"]),
       currentConfigFile: resolve(args["current-config"]),
@@ -939,6 +953,21 @@ function deploymentVersionId(value, label) {
     throw new TypeError(`${label} deployment Version Metadata ID is missing or invalid`);
   }
   return deployment.version_id;
+}
+
+export function verifyActiveWorkerDeployment(value, expectedVersionId, label = "Worker") {
+  if (typeof expectedVersionId !== "string" || !versionIdPattern.test(expectedVersionId)) {
+    throw new TypeError(`${label} expected active version ID is invalid`);
+  }
+  const deployment = assertObject(value, `${label} active deployment`);
+  if (
+    !Array.isArray(deployment.versions) ||
+    deployment.versions.length !== 1 ||
+    deployment.versions[0]?.version_id !== expectedVersionId ||
+    deployment.versions[0]?.percentage !== 100
+  ) {
+    throw new TypeError(`${label} active deployment does not serve the expected version at 100%`);
+  }
 }
 
 export function verifyWorkerVersionChain(inputValue) {
@@ -1064,6 +1093,12 @@ export function verifyWorkerAdmissionTransition(inputValue) {
   ) {
     throw new TypeError("Worker admission predecessor is not the active rollout-zero version");
   }
+  verifyActiveWorkerDeployment(
+    input.beforeDeployment,
+    currentAttestation.activeVersionId,
+    "canary",
+  );
+  verifyActiveWorkerDeployment(input.afterDeployment, active.id, "public");
 
   verifyAdmissionConfigPair(
     input.currentConfig,

@@ -68,12 +68,13 @@ sanitized 산출물을 보관한다.
 
 두 동작은 기존 프로덕션 배포와 같은 `processing-production` 직렬화 그룹과 보호 환경을 사용한다.
 임의 비율, 엔진 선택, 가격 또는 한도 입력은 받지 않는다. 승격은 트리거한 canary 실행의 정확한
-run ID, head SHA와 산출물만 사용하고 비활성화는 현재 배포 상태를 다시 읽어 stale 요청을 거부한다.
+run ID, head SHA와 산출물만 사용한다. 비활성화는 보관 기한이 있는 산출물에 의존하지 않고 현재 D1
+active 증명을 읽은 뒤 동일 증명에 조건부로 회로를 열어 stale 요청을 거부한다.
 
 승격 workflow는 코드를 새로 선택하거나 엔진을 다시 빌드하지 않는다. 정확한 SHA를 checkout하고
 잠긴 의존성으로 Worker bundle과 비용 모델을 재현한 뒤 canary 증명에 기록된 hash와 비교한다. 기존
-Cloudflare 리소스를 조회해 계정, Worker, D1, R2, Queue, Logpush와 immutable 엔진 digest가 canary
-산출물 및 실제 배포와 일치하는지 확인한다.
+canary가 검증한 리소스 manifest와 Cloudflare의 현재 Worker 배치·Container 상태를 읽어 계정, Worker,
+D1, R2, Queue, Logpush와 immutable 엔진 digest가 산출물 및 실제 배포와 일치하는지 확인한다.
 
 ### Worker 버전 증명
 
@@ -92,7 +93,8 @@ Cloudflare 리소스를 조회해 계정, Worker, D1, R2, Queue, Logpush와 immu
 비상 비활성화는 기존 D1 회로차단기를 사용한다. 환경의 검토된 `100%` 값은 유지되지만 정책과 작업
 생성은 회로 상태를 다시 확인하므로 유효 공개율은 즉시 `0%`가 된다. 배포 중 실패한 경우에는 회로
 열기, 공개 전 canary Worker 버전 복원과 Queue 정지를 서로 독립적으로 시도해 항상 fail closed로
-끝낸다.
+끝낸다. 복구 단계는 일반 실패와 사용자 취소 모두에서 실행하며, 승격 job 전체 timeout이 복구를
+강제 종료하지 않도록 두지 않는다.
 
 ## 승격 데이터 흐름
 

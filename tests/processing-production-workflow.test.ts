@@ -118,6 +118,7 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
       ".artifacts/deployment/canary-smoke.json",
+      ".artifacts/deployment/resources-production.json",
     ]);
   });
 

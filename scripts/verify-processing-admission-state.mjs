@@ -34,16 +34,16 @@ SET circuit_open = 1,
     reason = CASE WHEN circuit_open = 1 THEN reason ELSE 'OPERATOR_DISABLED' END,
     opened_at = CASE WHEN circuit_open = 1 THEN opened_at ELSE ? END,
     last_evaluated_at = ?
-WHERE id = 1`;
+WHERE id = 1
+  AND EXISTS (
+    SELECT 1 FROM worker_version_attestations
+    WHERE kind = 'active'
+      AND version_id = ?
+      AND release_report_sha256 = ?
+      AND public_admission_allowed = 1
+  )`;
 
-function validateCoordinates({
-  accountId,
-  databaseId,
-  apiToken,
-  expectedVersionId,
-  expectedReleaseReportSha256,
-  fetchImpl,
-}) {
+function validateCoordinates({ accountId, databaseId, apiToken, fetchImpl }) {
   if (typeof accountId !== "string" || !accountIdPattern.test(accountId)) {
     throw new TypeError("Cloudflare account ID is invalid");
   }
@@ -53,10 +53,6 @@ function validateCoordinates({
   if (typeof apiToken !== "string" || apiToken.length === 0) {
     throw new TypeError("Cloudflare D1 API token is required");
   }
-  if (typeof expectedVersionId !== "string" || !versionIdPattern.test(expectedVersionId)) {
-    throw new TypeError("expected active Worker version ID is invalid");
-  }
-  assertSha256(expectedReleaseReportSha256, "expected release report hash");
   if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
 }
 
@@ -130,15 +126,19 @@ function verifyExpectedRelease(row, expectedVersionId, expectedReleaseReportSha2
   }
 }
 
+function validateExpectedRelease(expectedVersionId, expectedReleaseReportSha256) {
+  if (typeof expectedVersionId !== "string" || !versionIdPattern.test(expectedVersionId)) {
+    throw new TypeError("expected active Worker version ID is invalid");
+  }
+  assertSha256(expectedReleaseReportSha256, "expected release report hash");
+}
+
 export function verifyProcessingAdmissionState({
   rows,
   expectedVersionId,
   expectedReleaseReportSha256,
 }) {
-  if (typeof expectedVersionId !== "string" || !versionIdPattern.test(expectedVersionId)) {
-    throw new TypeError("expected active Worker version ID is invalid");
-  }
-  assertSha256(expectedReleaseReportSha256, "expected release report hash");
+  validateExpectedRelease(expectedVersionId, expectedReleaseReportSha256);
   const row = requireSingleStateRow(rows);
   verifyExpectedRelease(row, expectedVersionId, expectedReleaseReportSha256);
   if (row.circuitOpen !== 0 || row.circuitReason !== null) {
@@ -200,22 +200,47 @@ export async function disableProcessingAdmissionInD1(input) {
   if (!Number.isSafeInteger(values.now) || values.now < 0) {
     throw new TypeError("processing admission disable time is invalid");
   }
-  await postD1Query({
+  validateExpectedRelease(values.expectedVersionId, values.expectedReleaseReportSha256);
+  verifyExpectedRelease(
+    requireSingleStateRow(await readStateRows(values)),
+    values.expectedVersionId,
+    values.expectedReleaseReportSha256,
+  );
+  const [update] = await postD1Query({
     url: d1Url(values.accountId, values.databaseId),
     apiToken: values.apiToken,
-    body: { sql: disableSql, params: [values.now, values.now] },
+    body: {
+      sql: disableSql,
+      params: [
+        values.now,
+        values.now,
+        values.expectedVersionId,
+        values.expectedReleaseReportSha256,
+      ],
+    },
     expectedCount: 1,
     fetchImpl: values.fetchImpl,
   });
   const row = requireSingleStateRow(await readStateRows(values));
-  if (
-    row.circuitOpen !== 1 ||
-    row.activeAttestationCount !== 1 ||
-    row.publicAdmissionAllowed !== 1
-  ) {
+  verifyExpectedRelease(row, values.expectedVersionId, values.expectedReleaseReportSha256);
+  if (update.meta.changes !== 1 || row.circuitOpen !== 1 || row.circuitReason === null) {
     throw new Error("processing admission circuit did not open over a valid active release");
   }
   return { disabled: true, circuitOpen: true };
+}
+
+export async function disableCurrentProcessingAdmissionInD1(input) {
+  const values = { fetchImpl: fetch, ...input };
+  validateCoordinates(values);
+  const row = requireSingleStateRow(await readStateRows(values));
+  if (row.activeAttestationCount !== 1 || row.publicAdmissionAllowed !== 1) {
+    throw new Error("processing admission current release is not admissible");
+  }
+  return disableProcessingAdmissionInD1({
+    ...values,
+    expectedVersionId: row.activeVersionId,
+    expectedReleaseReportSha256: row.releaseReportSha256,
+  });
 }
 
 export async function runProcessingAdmissionStateCli(
@@ -223,18 +248,18 @@ export async function runProcessingAdmissionStateCli(
   { env = process.env, fetchImpl = fetch, stdout = process.stdout } = {},
 ) {
   const args = parseCliArguments(argv);
-  const common = [
-    "mode",
-    "account-id",
-    "database-id",
-    "expected-version-id",
-    "expected-release-report-sha256",
-  ];
-  const expected = args.mode === "disable" ? [...common, "now"] : common;
-  assertExactKeys(args, expected, "processing admission arguments");
-  if (args.mode !== "verify" && args.mode !== "disable") {
-    throw new TypeError("processing admission --mode must be verify or disable");
+  if (!["verify", "disable", "disable-current"].includes(args.mode)) {
+    throw new TypeError("processing admission --mode must be verify, disable, or disable-current");
   }
+  const base = ["mode", "account-id", "database-id"];
+  const expectedRelease = ["expected-version-id", "expected-release-report-sha256"];
+  const expected =
+    args.mode === "verify"
+      ? [...base, ...expectedRelease]
+      : args.mode === "disable"
+        ? [...base, ...expectedRelease, "now"]
+        : [...base, "now"];
+  assertExactKeys(args, expected, "processing admission arguments");
   if (!env.CLOUDFLARE_D1_API_TOKEN) {
     throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
   }
@@ -249,10 +274,15 @@ export async function runProcessingAdmissionStateCli(
   const result =
     args.mode === "verify"
       ? await readProcessingAdmissionStateFromD1(input)
-      : await disableProcessingAdmissionInD1({
-          ...input,
-          now: parseCanonicalTimestamp(args.now),
-        });
+      : args.mode === "disable"
+        ? await disableProcessingAdmissionInD1({ ...input, now: parseCanonicalTimestamp(args.now) })
+        : await disableCurrentProcessingAdmissionInD1({
+            accountId: input.accountId,
+            databaseId: input.databaseId,
+            apiToken: input.apiToken,
+            fetchImpl,
+            now: parseCanonicalTimestamp(args.now),
+          });
   stdout.write(canonicalJson(result));
   return result;
 }

@@ -50,7 +50,6 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     environment: processing-production
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
     env:
       EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       PRODUCTION_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -159,24 +158,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
-          LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
-          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
-          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
           PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: |
           set -euo pipefail
           umask 077
-          node scripts/ensure-cloudflare-processing-resources.mjs \
-            --phase provision --account-id "$CLOUDFLARE_ACCOUNT_ID" --environment production \
-            --location apac --bucket-name "$BUCKET_NAME" \
-            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
-            --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
-            --worker-script-name "$WORKER_SCRIPT_NAME" --database-name "$D1_NAME" \
-            --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" \
-            --output .artifacts/runtime/resources-production.json
-          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
-          PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field logpush.jobId)"
+          test "$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/canary/resources-production.json --field accountId)" = "$CLOUDFLARE_ACCOUNT_ID"
+          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/canary/resources-production.json --field d1.databaseId)"
+          PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/canary/resources-production.json --field logpush.jobId)"
           pnpm exec wrangler containers list --json > .artifacts/runtime/container-inventory.json
           PRODUCTION_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
             --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
@@ -241,7 +229,13 @@ jobs:
           if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/admission/source-sha.txt") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
           NODE
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-before.json
+          pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-before.json
           CANARY_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/canary/worker-version.json","utf8")); process.stdout.write(value.activeVersionId)')"
+          node --input-type=module - "$CANARY_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
+          NODE
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
@@ -274,11 +268,14 @@ jobs:
             pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \
               --no-bundle --containers-rollout none
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-after.json
+          pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-after.json
           node scripts/verify-worker-version-chain.mjs \
             --mode finalize-admission \
             --before .artifacts/runtime/versions-before.json \
             --after .artifacts/runtime/versions-after.json \
             --deployment-output .artifacts/runtime/public-deploy.ndjson \
+            --before-deployment .artifacts/runtime/deployment-before.json \
+            --after-deployment .artifacts/runtime/deployment-after.json \
             --current-attestation .artifacts/canary/worker-version.json \
             --worker-module "$WORKER_MODULE" \
             --current-config .artifacts/runtime/current-wrangler.jsonc \
@@ -354,24 +351,23 @@ jobs:
           printf '%s\n' '{"schema":"hereisit-processing-production-admission-recovery@1","attempted":false,"queuePaused":false,"circuitOpened":false,"versionRestored":false,"localPolicy":false}' > .artifacts/admission/recovery-result.json
           chmod 0600 .artifacts/admission/gate-result.json .artifacts/admission/recovery-result.json
       - name: Attempt every fail-closed recovery layer
-        if: failure() && steps.mutation.outputs.attempted == 'true'
+        if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
         run: |
           set +e
           umask 077
+          CIRCUIT_RECOVERY=0
+          node scripts/verify-processing-admission-state.mjs \
+            --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
           QUEUE_RECOVERY=0
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_RECOVERY=$?
           pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_RECOVERY=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
-          CIRCUIT_RECOVERY=0
-          node scripts/verify-processing-admission-state.mjs \
-            --mode disable --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "${PUBLIC_VERSION_ID:-$CANARY_VERSION_ID}" \
-            --expected-release-report-sha256 "$SOURCE_SHA256" \
-            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
           VERSION_RECOVERY=0
           pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
           POLICY_RECOVERY=0
@@ -435,54 +431,35 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - name: Install locked dependencies and find the active admission evidence
+      - name: Install locked dependencies and discover the current D1
         env:
-          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           umask 077
           pnpm install --frozen-lockfile
           git diff --exit-code
-          read -r ADMISSION_RUN_ID ADMISSION_HEAD_SHA < <(
-            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/processing-production-admission.yml/runs?event=workflow_run&status=success&branch=main&per_page=1" \
-              --jq '.workflow_runs[0] | "\(.id) \(.head_sha)"'
-          )
-          [[ "$ADMISSION_RUN_ID" =~ ^[0-9]+$ && "$ADMISSION_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
-          mkdir -p .artifacts/current .artifacts/runtime
-          gh run download "$ADMISSION_RUN_ID" --name "processing-production-admission-$ADMISSION_HEAD_SHA" --dir .artifacts/current
-          test "$(cat .artifacts/current/source-sha.txt)" = "$ADMISSION_HEAD_SHA"
-          ACTIVE_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/current/transition-attestation.json","utf8")); if(value.schema!=="hereisit-worker-admission-transition@1"||value.publicAdmissionPercent!==100)process.exit(1); process.stdout.write(value.activeVersionId)')"
-          RELEASE_REPORT_SHA256="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/current/transition-attestation.json","utf8")); process.stdout.write(value.releaseReportSha256)')"
-          {
-            echo "ACTIVE_VERSION_ID=$ACTIVE_VERSION_ID"
-            echo "RELEASE_REPORT_SHA256=$RELEASE_REPORT_SHA256"
-          } >> "$GITHUB_ENV"
-      - name: Pause both queues and open the authoritative circuit
+          mkdir -p .artifacts/runtime
+          pnpm exec wrangler d1 list --json > .artifacts/runtime/d1-list.json
+          PRODUCTION_D1_DATABASE_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const rows=JSON.parse(readFileSync(".artifacts/runtime/d1-list.json","utf8")); const matches=Array.isArray(rows)?rows.filter((row)=>row?.name===process.env.D1_NAME):[]; if(matches.length!==1||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(matches[0].uuid))process.exit(1); process.stdout.write(matches[0].uuid)')"
+          echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID" >> "$GITHUB_ENV"
+      - name: Open the authoritative circuit and pause both queues
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
-          LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
-          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
-          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
         run: |
-          set -euo pipefail
-          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
-          pnpm exec wrangler queues pause-delivery "$DLQ_NAME"
-          node scripts/ensure-cloudflare-processing-resources.mjs \
-            --phase provision --account-id "$CLOUDFLARE_ACCOUNT_ID" --environment production \
-            --location apac --bucket-name "$BUCKET_NAME" --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
-            --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --database-name "$D1_NAME" --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" \
-            --output .artifacts/runtime/resources-production.json
-          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          set +e
+          CIRCUIT_DISABLE=0
           node scripts/verify-processing-admission-state.mjs \
-            --mode disable --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
-            --expected-version-id "$ACTIVE_VERSION_ID" --expected-release-report-sha256 "$RELEASE_REPORT_SHA256" \
-            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node --input-type=module - <<'NODE'
+            --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || CIRCUIT_DISABLE=$?
+          QUEUE_DISABLE=0
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_DISABLE=$?
+          pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_DISABLE=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
+          POLICY_DISABLE=0
+          node --input-type=module - <<'NODE' || POLICY_DISABLE=$?
           const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
             method: "POST",
             headers: { "content-type": "application/json", origin: process.env.PRODUCTION_PAGES_ORIGIN },
@@ -491,3 +468,7 @@ jobs:
           const body = await response.json();
           if (response.status !== 200 || body.execution !== "local" || body.disclosure?.upload !== false) process.exit(1);
           NODE
+          set -e
+          test "$CIRCUIT_DISABLE" -eq 0
+          test "$QUEUE_DISABLE" -eq 0
+          test "$POLICY_DISABLE" -eq 0

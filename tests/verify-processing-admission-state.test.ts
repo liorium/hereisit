@@ -154,7 +154,9 @@ describe("processing public admission state", () => {
     const fetchImpl: typeof fetch = async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       bodies.push(body);
-      return bodies.length === 1 ? response([], { changes: 1 }) : response([disabled]);
+      return bodies.length === 1 || bodies.length === 3
+        ? response([bodies.length === 1 ? readyRow() : disabled])
+        : response([], { changes: 1 });
     };
     await expect(
       disableProcessingAdmissionInD1({
@@ -167,20 +169,21 @@ describe("processing public admission state", () => {
         fetchImpl,
       }),
     ).resolves.toEqual({ disabled: true, circuitOpen: true });
-    expect(bodies[0].params).toEqual([
+    expect(bodies[1].params).toEqual([
       Date.parse("2026-08-10T00:10:00.000Z"),
       Date.parse("2026-08-10T00:10:00.000Z"),
+      activeVersionId,
+      releaseReportSha256,
     ]);
-    expect(bodies[0].sql).toContain("CASE WHEN circuit_open = 1 THEN reason");
-    expect(bodies[1].params).toEqual([]);
+    expect(bodies[1].sql).toContain("CASE WHEN circuit_open = 1 THEN reason");
+    expect(bodies[1].sql).toContain("public_admission_allowed = 1");
+    expect(bodies[2].params).toEqual([]);
   });
 
-  it("keeps the circuit disable successful across an in-flight version transition", async () => {
+  it("rejects a stale disable request before changing the circuit", async () => {
     const currentVersionId = "00000000-0000-0000-0000-000000000008";
-    const disabled = {
+    const current = {
       ...readyRow(),
-      circuitOpen: 1,
-      circuitReason: "OPERATOR_DISABLED",
       activeVersionId: currentVersionId,
     };
     let calls = 0;
@@ -192,10 +195,13 @@ describe("processing public admission state", () => {
         expectedVersionId: activeVersionId,
         expectedReleaseReportSha256: releaseReportSha256,
         now: Date.parse("2026-08-10T00:10:00.000Z"),
-        fetchImpl: async () =>
-          calls++ === 0 ? response([], { changes: 1 }) : response([disabled]),
+        fetchImpl: async () => {
+          calls += 1;
+          return response([current]);
+        },
       }),
-    ).resolves.toEqual({ disabled: true, circuitOpen: true });
+    ).rejects.toThrow(/version/i);
+    expect(calls).toBe(1);
   });
 
   it("accepts only strict verify and disable CLI forms with an environment token", async () => {
@@ -223,10 +229,18 @@ describe("processing public admission state", () => {
         ["--mode", "disable", ...common, "--now", "2026-08-10T00:10:00.000Z"],
         {
           env: { CLOUDFLARE_D1_API_TOKEN: "d1-token" },
-          fetchImpl: async () =>
-            disableRequests++ === 0
+          fetchImpl: async () => {
+            disableRequests += 1;
+            return disableRequests === 2
               ? response([], { changes: 1 })
-              : response([{ ...readyRow(), circuitOpen: 1, circuitReason: "OPERATOR_DISABLED" }]),
+              : response([
+                  {
+                    ...readyRow(),
+                    circuitOpen: disableRequests === 1 ? 0 : 1,
+                    circuitReason: disableRequests === 1 ? null : "OPERATOR_DISABLED",
+                  },
+                ]);
+          },
           stdout: { write: (value: string) => outputs.push(value) },
         },
       ),
@@ -252,5 +266,37 @@ describe("processing public admission state", () => {
       }),
     ).rejects.toThrow(/canonical|timestamp/i);
     expect(noncanonicalRequests).toBe(0);
+
+    let currentRequests = 0;
+    await expect(
+      runProcessingAdmissionStateCli(
+        [
+          "--mode",
+          "disable-current",
+          "--account-id",
+          accountId,
+          "--database-id",
+          databaseId,
+          "--now",
+          "2026-08-10T00:10:00.000Z",
+        ],
+        {
+          env: { CLOUDFLARE_D1_API_TOKEN: "d1-token" },
+          fetchImpl: async () => {
+            currentRequests += 1;
+            return currentRequests === 3
+              ? response([], { changes: 1 })
+              : response([
+                  {
+                    ...readyRow(),
+                    circuitOpen: currentRequests < 4 ? 0 : 1,
+                    circuitReason: currentRequests < 4 ? null : "OPERATOR_DISABLED",
+                  },
+                ]);
+          },
+          stdout: { write: (value: string) => outputs.push(value) },
+        },
+      ),
+    ).resolves.toEqual({ disabled: true, circuitOpen: true });
   });
 });

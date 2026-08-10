@@ -27,6 +27,11 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain(
       `processing-production-canary-\${{ github.event.workflow_run.head_sha }}`,
     );
+    expect(workflow).toContain(".artifacts/canary/resources-production.json");
+    expect(workflow).toContain("wrangler deployments status");
+    expect(workflow).toContain("--before-deployment .artifacts/runtime/deployment-before.json");
+    expect(workflow).toContain("--after-deployment .artifacts/runtime/deployment-after.json");
+    expect(workflow).not.toContain("node scripts/ensure-cloudflare-processing-resources.mjs");
   });
 
   it("fixes public rollout, cost ceilings, quotas, and namespaces in source", () => {
@@ -56,7 +61,9 @@ describe("processing production admission workflow", () => {
 
   it("verifies, pauses, attests, resumes, and smokes in fail-closed order", () => {
     const bind = workflow.indexOf("Bind the exact successful production canary");
+    const activeDeployment = workflow.indexOf("verifyActiveWorkerDeployment");
     const state = workflow.indexOf("verify-processing-admission-state.mjs \\");
+    const arm = workflow.indexOf("Arm fail-closed mutation recovery");
     const pause = workflow.indexOf('queues pause-delivery "$QUEUE_NAME"');
     const deploy = workflow.indexOf('wrangler deploy "$WORKER_MODULE"');
     const finalize = workflow.indexOf("--mode finalize-admission");
@@ -66,8 +73,10 @@ describe("processing production admission workflow", () => {
     const smoke = workflow.indexOf("runProcessingPublicSmokeCli");
 
     expect(bind).toBeGreaterThanOrEqual(0);
-    expect(state).toBeGreaterThan(bind);
-    expect(pause).toBeGreaterThan(state);
+    expect(activeDeployment).toBeGreaterThan(bind);
+    expect(state).toBeGreaterThan(activeDeployment);
+    expect(arm).toBeGreaterThan(state);
+    expect(pause).toBeGreaterThan(arm);
     expect(deploy).toBeGreaterThan(pause);
     expect(finalize).toBeGreaterThan(deploy);
     expect(apply).toBeGreaterThan(finalize);
@@ -79,7 +88,12 @@ describe("processing production admission workflow", () => {
   });
 
   it("attempts all three recovery layers and verifies effective local policy", () => {
-    expect(workflow).toContain("if: failure() && steps.mutation.outputs.attempted == 'true'");
+    expect(workflow).toContain(
+      "if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())",
+    );
+    expect(
+      workflow.slice(workflow.indexOf("  promote:"), workflow.indexOf("  disable:")),
+    ).not.toContain("timeout-minutes:");
     expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
     expect(workflow).toContain("--mode disable");
     expect(workflow).toContain('versions deploy "$CANARY_VERSION_ID@100%"');
@@ -88,6 +102,25 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain("QUEUE_RECOVERY");
     expect(workflow).toContain("CIRCUIT_RECOVERY");
     expect(workflow).toContain("VERSION_RECOVERY");
+    const recovery = workflow.indexOf("Attempt every fail-closed recovery layer");
+    expect(workflow.indexOf("CIRCUIT_RECOVERY=0", recovery)).toBeLessThan(
+      workflow.indexOf("QUEUE_RECOVERY=0", recovery),
+    );
+  });
+
+  it("opens the manual circuit even when either Queue operation fails", () => {
+    const disableJob = workflow.indexOf("name: Disable public processing");
+    const circuit = workflow.indexOf("--mode disable-current", disableJob);
+    const primary = workflow.indexOf('queues pause-delivery "$QUEUE_NAME"', disableJob);
+    const dlq = workflow.indexOf('queues pause-delivery "$DLQ_NAME"', disableJob);
+    expect(circuit).toBeGreaterThan(disableJob);
+    expect(primary).toBeGreaterThan(circuit);
+    expect(dlq).toBeGreaterThan(primary);
+    expect(workflow.slice(disableJob)).toContain("set +e");
+    expect(workflow.slice(disableJob)).toContain("CIRCUIT_DISABLE");
+    expect(workflow.slice(disableJob)).toContain("QUEUE_DISABLE");
+    expect(workflow.slice(disableJob)).toContain('test "$CIRCUIT_DISABLE" -eq 0');
+    expect(workflow.slice(disableJob)).toContain('test "$QUEUE_DISABLE" -eq 0');
   });
 
   it("offers only protected main-ref disable and publishes sanitized evidence", () => {
@@ -95,6 +128,9 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain("options: [disable]");
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
     expect(workflow).toContain("retention-days: 7");
+    expect(workflow).toContain("wrangler d1 list --json");
+    expect(workflow).toContain("--mode disable-current");
+    expect(workflow).not.toContain("gh run download");
     const upload = workflow.indexOf("actions/upload-artifact@");
     const paths = [
       ...workflow.slice(upload).matchAll(/^\s+(.artifacts\/admission\/[^\s]+)$/gm),
