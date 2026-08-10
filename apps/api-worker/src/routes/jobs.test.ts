@@ -220,6 +220,7 @@ describe("POST /v1/jobs", () => {
     const response = await routeCreateJobRequest(createRequest(), runtime);
 
     expect(response.status).toBe(429);
+    expect(response.headers.get("x-hereisit-rate-limit-scope")).toBe("network");
     expect(readJson).not.toHaveBeenCalled();
     expect(repository.reserveAndCreate).not.toHaveBeenCalled();
   });
@@ -276,6 +277,7 @@ describe("POST /v1/jobs", () => {
     const response = await routeCreateJobRequest(createRequest(), runtime);
 
     expect(response.status).toBe(429);
+    expect(response.headers.get("x-hereisit-rate-limit-scope")).toBe("session");
     expect(runtime.repository.reserveAndCreate).not.toHaveBeenCalled();
   });
 

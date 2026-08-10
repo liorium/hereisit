@@ -41,7 +41,9 @@ const safeFailures = new Set([
   `${stableFailure} [job-submit]`,
   `${stableFailure} [job-completion]`,
   `${stableFailure} [job-create-network]`,
-  `${stableFailure} [job-create-429]`,
+  `${stableFailure} [job-create-network-rate-limit]`,
+  `${stableFailure} [job-create-session-rate-limit]`,
+  `${stableFailure} [job-create-unknown-rate-limit]`,
   `${stableFailure} [job-create-503]`,
   `${stableFailure} [job-create-missing]`,
   `${stableFailure} [download-handoff]`,
@@ -264,6 +266,7 @@ async function assertServerJob(
     inputPuts: 0,
     jobCreateNetworkFailures: 0,
     jobCreateStatuses: [],
+    jobCreateRateLimitScopes: [],
     downloadAcknowledgements: 0,
     downloadAcknowledged: false,
     invalidPolicy: false,
@@ -297,6 +300,9 @@ async function assertServerJob(
     const request = response.request();
     if (new URL(response.url()).pathname === "/v1/jobs" && request.method() === "POST") {
       state.jobCreateStatuses.push(response.status());
+      if (response.status() === 429) {
+        state.jobCreateRateLimitScopes.push(response.headers()["x-hereisit-rate-limit-scope"]);
+      }
     }
     if (
       inputPathPattern.test(new URL(response.url()).pathname) &&
@@ -357,7 +363,16 @@ async function assertServerJob(
         throw new Error(`${stableFailure} [job-create-network]`);
       }
       const createStatus = state.jobCreateStatuses.at(-1);
-      if (createStatus === 429) throw new Error(`${stableFailure} [job-create-429]`);
+      if (createStatus === 429) {
+        const scope = state.jobCreateRateLimitScopes.at(-1);
+        if (scope === "network") {
+          throw new Error(`${stableFailure} [job-create-network-rate-limit]`);
+        }
+        if (scope === "session") {
+          throw new Error(`${stableFailure} [job-create-session-rate-limit]`);
+        }
+        throw new Error(`${stableFailure} [job-create-unknown-rate-limit]`);
+      }
       if (createStatus === 503) throw new Error(`${stableFailure} [job-create-503]`);
       if (createStatus === undefined) throw new Error(`${stableFailure} [job-create-missing]`);
     }
