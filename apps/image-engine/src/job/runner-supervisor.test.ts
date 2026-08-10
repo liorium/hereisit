@@ -295,6 +295,15 @@ describe("runner protocol and resource supervisor", () => {
     ).toMatchObject({ state: "failed", sequence: 9, error: { code: "ENGINE_OOM" } });
   });
 
+  it("prioritizes a non-memory breach even when peak memory is zero", () => {
+    expect(
+      finalizeRunnerStatus(request, unsupportedStatus, {
+        ...observation({ exceeded: "cpu" }),
+        peakMemoryBytes: 0,
+      }),
+    ).toMatchObject({ state: "failed", sequence: 9, error: { code: "ENGINE_TIMEOUT" } });
+  });
+
   it("fails closed when peak memory was not measured", () => {
     expect(
       finalizeRunnerStatus(request, succeededStatus, {
