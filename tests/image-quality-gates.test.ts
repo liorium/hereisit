@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   evaluateImageQualityReport,
+  evaluatePrImageQualityReport,
   validateCorpusManifest,
   verifyCorpusFiles,
 } from "../scripts/verify-image-quality.mjs";
@@ -149,5 +150,114 @@ describe("image release quality gates", () => {
       const bytes = await readFile(resolve(root, entry.relativePath));
       expect(createHash("sha256").update(bytes).digest("hex"), entry.id).toBe(entry.sha256);
     }
+  });
+});
+
+function prRecord(inputMime: string, corpusId: string): Record<string, unknown> {
+  return {
+    corpusId,
+    inputMime,
+    outputMime: null,
+    sizeBand: "tiny",
+    alpha: false,
+    contentClass: "photo",
+    strategicTags: [],
+    outcome: "original-retained",
+    errorCode: null,
+    engineBuildId: "engine-1",
+    codecBuildId: "none",
+    mode: "smart",
+    preset: "balanced",
+    inputBytes: 100,
+    outputBytes: null,
+    effectiveDeliveredBytes: 100,
+    queueMs: 0,
+    coldStart: false,
+    timeToFirstFeedbackMs: 1,
+    processingMs: 100,
+    peakMemoryBytes: 1024,
+    weightedUnits: 1,
+    ssimulacra2: null,
+    butteraugli: null,
+    normalizedPixelMatch: null,
+    losslessVerification: null,
+    alphaChecksPassed: true,
+    reproducedFalseNoSizeReductionCase: true,
+    cancellationObservedMs: null,
+    inputDeletionLagMs: 1,
+    resultDeletionLagMs: 1,
+    costUsd: { compute: 0, storage: 0, operations: 0, total: 0 },
+  };
+}
+
+function prReport() {
+  return {
+    version: 1,
+    scope: "pr",
+    identity: {
+      engineImageDigest: `sha256:${"a".repeat(64)}`,
+      sourceLockSha256: "b".repeat(64),
+      corpusManifestSha256: "c".repeat(64),
+      liveCostModelSha256: "d".repeat(64),
+      metricBuildIds: {
+        ssimulacra2: "libjxl-0.11.2-332feb17",
+        butteraugli: "libjxl-0.11.2-332feb17",
+      },
+    },
+    configuration: { variants: [{ mode: "smart", preset: "balanced" }], corpusEntries: 12 },
+    records: ["image/jpeg", "image/png", "image/webp"].flatMap((inputMime, mimeIndex) =>
+      Array.from({ length: 4 }, (_, index) => prRecord(inputMime, `${mimeIndex}-${index}`)),
+    ),
+    summary: { attempted: 12, succeeded: 12, originalRetained: 12, totalCostUsd: 0 },
+  };
+}
+
+function prFailures(index: number, overrides: Record<string, unknown>): string[] {
+  const report = prReport();
+  report.records[index] = { ...report.records[index], ...overrides };
+  return evaluatePrImageQualityReport(report).failures;
+}
+
+describe("reduced image quality benchmark gates", () => {
+  it("accepts the existing processing and memory limits at their boundaries", () => {
+    const report = prReport();
+    report.records[0] = {
+      ...report.records[0],
+      processingMs: 3000,
+      peakMemoryBytes: 512 * 1024 * 1024,
+    };
+    report.records[4] = { ...report.records[4], processingMs: 8000 };
+    expect(evaluatePrImageQualityReport(report)).toEqual({ passed: true, failures: [] });
+  });
+
+  it.each([
+    [0, { processingMs: 3001 }, "PR_WARM_JPEG_WEBP_P95"],
+    [4, { processingMs: 8001 }, "PR_STANDARD_PNG_P95"],
+    [0, { peakMemoryBytes: 512 * 1024 * 1024 + 1 }, "PR_PEAK_MEMORY"],
+  ] as const)("rejects an exceeded measured limit", (index, overrides, failure) => {
+    expect(prFailures(index, overrides)).toContain(failure);
+  });
+
+  it.each([
+    ["processingMs", Number.NaN],
+    ["processingMs", -1],
+    ["peakMemoryBytes", 0],
+    ["peakMemoryBytes", Number.NaN],
+  ])("rejects invalid successful-job %s", (field, value) => {
+    expect(prFailures(0, { [field]: value })).toContain("PR_INVALID_MEASUREMENT");
+  });
+
+  it("excludes rejected work from performance measurements", () => {
+    const report = prReport();
+    report.records[0] = {
+      ...report.records[0],
+      outcome: "rejected",
+      errorCode: "UNSUPPORTED_INPUT",
+      effectiveDeliveredBytes: null,
+      alphaChecksPassed: false,
+      processingMs: 60_000,
+      peakMemoryBytes: 1024 ** 3,
+    };
+    expect(evaluatePrImageQualityReport(report)).toEqual({ passed: true, failures: [] });
   });
 });
