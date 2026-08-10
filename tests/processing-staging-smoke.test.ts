@@ -229,9 +229,12 @@ describe("authenticated processing staging smoke", () => {
     );
 
     expect(serverJobSource).toContain("jobCreateStatuses: []");
+    expect(serverJobSource).toContain("jobCreateRateLimitScopes: []");
     expect(serverJobSource).toContain("jobCreateNetworkFailures: 0");
     expect(source).toContain("[job-create-network]");
-    expect(source).toContain("[job-create-429]");
+    expect(source).toContain("[job-create-network-rate-limit]");
+    expect(source).toContain("[job-create-session-rate-limit]");
+    expect(source).toContain("[job-create-unknown-rate-limit]");
     expect(source).toContain("[job-create-503]");
     expect(source).toContain("[job-create-missing]");
   });

@@ -96,14 +96,16 @@ function processingDisabledResponse(
   );
 }
 
-function rateLimitedResponse(): Response {
-  return toolErrorResponse(
+function rateLimitedResponse(scope: "network" | "session"): Response {
+  const response = toolErrorResponse(
     429,
     "RATE_LIMITED",
     "잠시 후 다시 시도해 주세요.",
     true,
     RATE_LIMIT_RETRY_AFTER_SECONDS,
   );
+  response.headers.set("x-hereisit-rate-limit-scope", scope);
+  return response;
 }
 
 function quotaResponse(): Response {
@@ -282,7 +284,7 @@ export async function routeCreateJobRequest(
 
   try {
     if (!(await runtime.networkRateLimiter.limit({ key: networkBuckets.writeHash })).success) {
-      return rateLimitedResponse();
+      return rateLimitedResponse("network");
     }
   } catch {
     return processingDisabledResponse("SERVER_PROCESSING_DISABLED");
@@ -306,7 +308,7 @@ export async function routeCreateJobRequest(
   ]);
   try {
     if (!(await runtime.sessionRateLimiter.limit({ key: sessionHash })).success) {
-      return rateLimitedResponse();
+      return rateLimitedResponse("session");
     }
   } catch {
     return processingDisabledResponse("SERVER_PROCESSING_DISABLED");
