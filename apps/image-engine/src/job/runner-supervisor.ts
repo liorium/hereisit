@@ -96,6 +96,7 @@ export function startResourceSupervisor(input: {
       });
   };
   const handle = schedule(tick, 250);
+  tick();
   return {
     completion,
     stop(): void {
@@ -142,6 +143,40 @@ export function resourceFailureStatus(
     error: {
       code,
       retryable: code === "ENGINE_OOM" && request.resourceClass === "image-standard-v1",
+    },
+  };
+}
+
+export function finalizeRunnerStatus(
+  request: EngineCreateJobRequest,
+  status: EngineJobStatus,
+  observation: LinuxResourceObservation | null,
+): EngineJobStatus {
+  if (!("measurements" in status)) throw new TypeError("runner terminal status is required");
+  if (observation === null || observation.exceeded !== null) {
+    return resourceFailureStatus(
+      request,
+      observation ?? {
+        exceeded: { exceeded: "measurement" },
+        sample: { measurementFailed: true },
+        memoryByteMilliseconds: 0,
+        peakMemoryBytes: 0,
+        processGroups: [],
+      },
+      status.sequence + 1,
+    );
+  }
+  return {
+    ...status,
+    measurements: {
+      ...status.measurements,
+      cpuMs: rounded(observation.sample.cpuMs),
+      memoryByteMilliseconds: rounded(observation.memoryByteMilliseconds),
+      peakMemoryBytes: rounded(observation.peakMemoryBytes),
+      processingMs: Math.max(
+        status.measurements.processingMs,
+        rounded(observation.sample.elapsedMs),
+      ),
     },
   };
 }
