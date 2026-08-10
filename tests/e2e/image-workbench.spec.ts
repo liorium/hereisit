@@ -753,6 +753,7 @@ test("runs local lossless compression through the optimize Worker", async ({ pag
     buffer: onePixelPng,
   });
 
+  await expect(page.getByText(/lossless\.png ·/)).toBeVisible();
   await page.getByText("압축 설정 · 추천", { exact: true }).click();
   await page.getByRole("radio", { name: "무손실" }).check();
   await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
@@ -1037,10 +1038,12 @@ test("limits inspection to the first 20 files while counting invalid and overflo
 });
 
 test("cancels an active inspection when the workbench unmounts", async ({ page }) => {
+  let terminations = 0;
+  await page.exposeBinding("__hereisitRecordInspectionTermination", () => {
+    terminations += 1;
+  });
   await page.addInitScript(() => {
     const NativeWorker = window.Worker;
-    const countKey = "hereisit-image-inspection-terminations";
-    if (sessionStorage.getItem(countKey) === null) sessionStorage.setItem(countKey, "0");
     class HeldInspectionWorker {
       private readonly native: Worker;
       onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
@@ -1070,7 +1073,9 @@ test("cancels an active inspection when the workbench unmounts", async ({ page }
       }
 
       terminate(): void {
-        sessionStorage.setItem(countKey, String(Number(sessionStorage.getItem(countKey)) + 1));
+        void (
+          window as Window & { __hereisitRecordInspectionTermination?: () => Promise<void> }
+        ).__hereisitRecordInspectionTermination?.();
         this.native.terminate();
       }
     }
@@ -1093,11 +1098,7 @@ test("cancels an active inspection when the workbench unmounts", async ({ page }
     .toBe(true);
 
   await page.goto("/image/convert");
-  expect(
-    await page.evaluate(() =>
-      Number(sessionStorage.getItem("hereisit-image-inspection-terminations")),
-    ),
-  ).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => terminations).toBeGreaterThanOrEqual(1);
 });
 
 test("explains why HEIC cannot be compressed while preserving its format", async ({ page }) => {

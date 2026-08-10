@@ -1009,7 +1009,7 @@ test("asks for reselect when a controlled clock expires the pending handoff", as
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
@@ -1055,7 +1055,7 @@ test("asks for reselect when a pending handoff reaches a different tool", async 
 
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await page.getByRole("link", { name: "워크플로", exact: true }).click();
   await expect(page).toHaveURL(/\/workflows\/?$/);
   await page.evaluate(() => {
