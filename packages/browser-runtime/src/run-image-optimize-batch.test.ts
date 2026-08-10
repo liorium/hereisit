@@ -172,6 +172,68 @@ describe("image optimize Worker batches", () => {
     });
   });
 
+  it("preserves multiple monotonic progress events in order", async () => {
+    installRuntime();
+    const phases: string[] = [];
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }], {
+      onEvent: (event) => {
+        if (event.type === "item-progress") phases.push(event.phase);
+      },
+    });
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: posted.jobId,
+      sequence: 0,
+      phase: "inspecting",
+      fraction: null,
+    });
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: posted.jobId,
+      sequence: 1,
+      phase: "optimizing",
+      fraction: null,
+    });
+    worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: result() });
+
+    await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
+    expect(phases).toEqual(["inspecting", "optimizing"]);
+  });
+
+  it.each([
+    0, -1,
+  ])("rejects duplicate or regressive progress sequence %i", async (secondSequence) => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const posted = request(worker);
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: posted.jobId,
+      sequence: 0,
+      phase: "inspecting",
+      fraction: null,
+    });
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: posted.jobId,
+      sequence: secondSequence,
+      phase: "optimizing",
+      fraction: null,
+    });
+
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
+  });
+
   it("rejects a Worker result that exceeds its source envelope", async () => {
     installRuntime();
     const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
@@ -223,6 +285,33 @@ describe("image optimize Worker batches", () => {
     worker.emit({ protocol: 1, type: "complete", jobId: posted.jobId, result: result() });
 
     await expect(handle.result).resolves.toMatchObject([{ itemId: "one", status: "fulfilled" }]);
+  });
+
+  it.each([
+    "missing",
+    "accessor",
+    "unsafe",
+  ] as const)("fails the active item immediately for a %s Worker job ID", async (kind) => {
+    installRuntime();
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "one", file: file("one.png") }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+    const event: Record<string, unknown> = { protocol: 1, type: "complete", result: result() };
+    if (kind === "accessor") {
+      Object.defineProperty(event, "jobId", {
+        enumerable: true,
+        get() {
+          throw new Error("PRIVATE_JOB_ID");
+        },
+      });
+    } else if (kind === "unsafe") {
+      event.jobId = "\u0000unsafe";
+    }
+
+    expect(() => worker.emit(event)).not.toThrow();
+    expect(worker.terminateCount).toBe(1);
+    await expect(handle.result).resolves.toMatchObject([
+      { itemId: "one", status: "rejected", message: "브라우저 작업기가 중단되었습니다." },
+    ]);
   });
 
   it.each([
@@ -299,6 +388,20 @@ describe("image optimize Worker batches", () => {
 
     await expect(handle.result).resolves.toHaveLength(21);
     expect(ControlledWorker.created).toEqual([]);
+  });
+
+  it("rejects a real per-item file above 30MiB within the 20-item batch bound", async () => {
+    installRuntime();
+    const oversized = new File([new Uint8Array(30 * 1024 * 1024 + 1)], "large.png", {
+      type: "image/png",
+    });
+    const handle = runLosslessImageOptimizeBatch([{ itemId: "large", file: oversized }]);
+    const worker = ControlledWorker.created[0] as ControlledWorker;
+
+    await expect(handle.result).resolves.toEqual([
+      { itemId: "large", status: "rejected", message: "파일은 30MB 이하만 처리할 수 있습니다." },
+    ]);
+    expect(worker.posts).toEqual([]);
   });
 
   it("isolates observers and settles every pending item exactly once on cancellation", async () => {

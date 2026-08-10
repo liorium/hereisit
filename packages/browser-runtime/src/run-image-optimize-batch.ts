@@ -555,7 +555,9 @@ function runBatch<Result>(
         try {
           if (settled || cancelled || currentIndex === undefined || currentJobId === undefined)
             return;
-          if (candidateJobId(message.data) !== currentJobId) return;
+          const eventJobId = candidateJobId(message.data);
+          if (eventJobId === undefined) return failWorker(WORKER_FAILURE_ERROR);
+          if (eventJobId !== currentJobId) return;
           const event = parseEvent(message.data);
           if (event === undefined) return failWorker(WORKER_FAILURE_ERROR);
           if (event.jobId !== currentJobId) return;
