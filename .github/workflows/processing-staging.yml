@@ -92,7 +92,6 @@ jobs:
         with:
           version: v0.34.1
           driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
-          install: true
       - name: Build the engine, Worker, web, and cost model
         run: |
           set -euo pipefail
