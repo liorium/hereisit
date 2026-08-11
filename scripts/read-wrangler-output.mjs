@@ -144,9 +144,10 @@ export function readWranglerField(record, field, expectedTarget) {
   }
   if (field === "target") {
     const expectedUrl = assertHttps(expectedTarget, "expected Worker target");
+    const renderedExpectedTarget = `${expectedUrl.hostname} (custom domain)`;
     if (
       expectedUrl.origin !== expectedTarget ||
-      record.targets.filter((target) => target === expectedTarget).length !== 1
+      record.targets.filter((target) => target === renderedExpectedTarget).length !== 1
     ) {
       throw new TypeError("Worker deploy must contain the exact expected target once");
     }
