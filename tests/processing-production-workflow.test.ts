@@ -101,6 +101,8 @@ describe("processing production workflow", () => {
     expect(workflow).not.toContain("hereisit-processing-production.liorium.workers.dev");
     expect(workflow.match(/--app-origin "\$PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
     expect(workflow.match(/--app-origin "\$LEGACY_PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
+    expect(workflow).toContain('--field target --expected-target "$PRODUCTION_API_ORIGIN"');
+    expect(workflow).not.toContain("--field targets.0");
     expect(workflow).toContain("wrangler pages deploy apps/web/out");
     expect(workflow).toContain("--branch main");
     expect(workflow).toContain('--stable-url "$LEGACY_PRODUCTION_PAGES_ORIGIN"');

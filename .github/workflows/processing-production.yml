@@ -353,7 +353,8 @@ jobs:
             > .artifacts/runtime/versions-after-final.json
           sleep 10
           DEPLOYED_API_ORIGIN="$(node scripts/read-wrangler-output.mjs \
-            --file .artifacts/runtime/final-deploy.ndjson --event deploy --field targets.0)"
+            --file .artifacts/runtime/final-deploy.ndjson --event deploy \
+            --field target --expected-target "$PRODUCTION_API_ORIGIN")"
           test "$DEPLOYED_API_ORIGIN" = "$PRODUCTION_API_ORIGIN"
           node scripts/verify-worker-version-chain.mjs \
             --mode finalize \
