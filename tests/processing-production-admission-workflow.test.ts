@@ -37,6 +37,18 @@ describe("processing production admission workflow", () => {
     expect(workflow).not.toContain("node scripts/ensure-cloudflare-processing-resources.mjs");
   });
 
+  it("rebuilds and validates the Worker exactly like the production canary", () => {
+    expect(workflow).toContain("pnpm --filter @hereisit/api-worker exec wrangler deploy \\");
+    expect(workflow).toContain("--config wrangler.local.jsonc \\");
+    expect(workflow).toContain(
+      'pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \\',
+    );
+    expect(workflow).toContain("--no-bundle --containers-rollout none --dry-run");
+    expect(
+      workflow.match(/cp \.artifacts\/build\/api-worker-bundle\/index\.js "\$WORKER_MODULE"/gu),
+    ).toHaveLength(1);
+  });
+
   it("fixes public rollout, cost ceilings, quotas, and namespaces in source", () => {
     expect(workflow).toContain(`ALERT_DESTINATION_ADDRESS: \${{ vars.ALERT_DESTINATION_ADDRESS }}`);
     expect(workflow).toContain('CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "5000000000"');
@@ -85,7 +97,7 @@ describe("processing production admission workflow", () => {
     const state = workflow.indexOf("verify-processing-admission-state.mjs \\");
     const arm = workflow.indexOf("Arm fail-closed mutation recovery");
     const pause = workflow.indexOf('queues pause-delivery "$QUEUE_NAME"');
-    const deploy = workflow.indexOf('wrangler deploy "$WORKER_MODULE"');
+    const deploy = workflow.indexOf('wrangler deploy "$WORKER_MODULE"', pause);
     const finalize = workflow.indexOf("--mode finalize-admission");
     const apply = workflow.indexOf("apply-worker-version-attestations.mjs");
     const policy = workflow.indexOf("hereisit-processing-production-public-policy-smoke@1");

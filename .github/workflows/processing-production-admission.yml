@@ -131,6 +131,12 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           git diff --exit-code
+          pnpm --filter @hereisit/api-worker exec wrangler deploy \
+            --config wrangler.local.jsonc \
+            --containers-rollout none \
+            --dry-run \
+            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
+          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
           LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
             --input docs/deployment/processing-staging-cost-input.json \
             --schema docs/deployment/live-cost-model.schema.json \
@@ -226,9 +232,8 @@ jobs:
 
           generate_config current
           cp "$WRANGLER_CONFIG" .artifacts/runtime/current-wrangler.jsonc
-          pnpm exec wrangler deploy --config "$WRANGLER_CONFIG" --containers-rollout none \
-            --dry-run --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
-          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
+          pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \
+            --no-bundle --containers-rollout none --dry-run
           node --input-type=module - <<'NODE'
           import { createHash } from "node:crypto";
           import { readFile } from "node:fs/promises";
