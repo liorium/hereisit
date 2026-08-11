@@ -332,7 +332,7 @@ jobs:
             --environment production \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --worker-script-name "$WORKER_SCRIPT_NAME")"
-          for attempt in {1..30}; do
+          for attempt in {1..90}; do
             if pnpm exec wrangler containers info "$PRODUCTION_CONTAINER_APPLICATION_ID" \
                 > .artifacts/runtime/container-application.json \
                 2> .artifacts/runtime/container-application-verify.stderr &&
@@ -349,7 +349,7 @@ jobs:
                 2>> .artifacts/runtime/container-application-verify.stderr; then
               break
             fi
-            if (( attempt == 30 )); then
+            if (( attempt == 90 )); then
               cat .artifacts/runtime/container-application-verify.stderr >&2
               exit 1
             fi
