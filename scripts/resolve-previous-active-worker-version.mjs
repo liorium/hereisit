@@ -16,7 +16,7 @@ const migrationName = "0002_worker_version_attestations.sql";
 const stateSql =
   "SELECT COUNT(*) AS rowCount, COALESCE(SUM(CASE WHEN kind = 'active' THEN 1 ELSE 0 END), 0) AS activeCount, MAX(CASE WHEN kind = 'active' THEN version_id END) AS versionId, MAX(CASE WHEN kind = 'active' THEN public_admission_allowed END) AS publicAdmissionAllowed, MAX(CASE WHEN kind = 'active' THEN retired_at END) AS retiredAt FROM worker_version_attestations";
 
-export function resolvePreviousActiveWorkerVersion({ rows, deployment }) {
+export function resolveAttestedActiveWorkerVersion({ rows }) {
   if (!Array.isArray(rows) || rows.length !== 1) {
     throw new TypeError("Worker attestation state query must return exactly one row");
   }
@@ -54,15 +54,26 @@ export function resolvePreviousActiveWorkerVersion({ rows, deployment }) {
       "Worker attestation state must contain exactly one admissible active version",
     );
   }
-  verifyActiveWorkerDeployment(deployment, row.versionId, "pre-deploy Worker");
   return row.versionId;
 }
 
-export async function resolvePreviousActiveWorkerVersionFromD1({
+export function resolvePreviousActiveWorkerVersion({ rows, deployment }) {
+  const versionId = resolveAttestedActiveWorkerVersion({ rows });
+  if (versionId === "none") {
+    const active = assertObject(deployment, "first Worker deployment state");
+    if (!Array.isArray(active.versions) || active.versions.length !== 0) {
+      throw new TypeError("first Worker deployment must not have an active Worker");
+    }
+  } else {
+    verifyActiveWorkerDeployment(deployment, versionId, "pre-deploy Worker");
+  }
+  return versionId;
+}
+
+async function readAttestedActiveWorkerVersion({
   accountId,
   databaseId,
   apiToken,
-  deployment,
   fetchImpl = fetch,
 }) {
   if (typeof accountId !== "string" || !accountIdPattern.test(accountId)) {
@@ -83,7 +94,17 @@ export async function resolvePreviousActiveWorkerVersionFromD1({
     expectedCount: 1,
     fetchImpl,
   });
-  return resolvePreviousActiveWorkerVersion({ rows: result.results, deployment });
+  return result.results;
+}
+
+async function resolveAttestedActiveWorkerVersionFromD1(input) {
+  const rows = await readAttestedActiveWorkerVersion(input);
+  return resolveAttestedActiveWorkerVersion({ rows });
+}
+
+export async function resolvePreviousActiveWorkerVersionFromD1({ deployment, ...input }) {
+  const rows = await readAttestedActiveWorkerVersion(input);
+  return resolvePreviousActiveWorkerVersion({ rows, deployment });
 }
 
 export async function runPreviousActiveWorkerVersionCli(
@@ -91,10 +112,25 @@ export async function runPreviousActiveWorkerVersionCli(
   { env = process.env, fetchImpl = fetch, stdout = process.stdout } = {},
 ) {
   const args = parseCliArguments(argv);
-  assertExactKeys(args, ["account-id", "database-id", "deployment"], "previous active arguments");
   if (!env.CLOUDFLARE_D1_API_TOKEN) {
     throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
   }
+  if (args["attestation-only"] === "true") {
+    assertExactKeys(
+      args,
+      ["account-id", "database-id", "attestation-only"],
+      "previous active arguments",
+    );
+    const value = await resolveAttestedActiveWorkerVersionFromD1({
+      accountId: args["account-id"],
+      databaseId: args["database-id"],
+      apiToken: env.CLOUDFLARE_D1_API_TOKEN,
+      fetchImpl,
+    });
+    stdout.write(`${value}\n`);
+    return value;
+  }
+  assertExactKeys(args, ["account-id", "database-id", "deployment"], "previous active arguments");
   const bytes = await readBoundedRegularFile(
     resolve(args.deployment),
     1024 * 1024,

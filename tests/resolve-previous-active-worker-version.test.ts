@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   migrationName,
+  resolveAttestedActiveWorkerVersion,
   resolvePreviousActiveWorkerVersion,
   resolvePreviousActiveWorkerVersionFromD1,
+  runPreviousActiveWorkerVersionCli,
   stateSql,
 } from "../scripts/resolve-previous-active-worker-version.mjs";
 
@@ -19,6 +21,34 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe("previous active Worker version resolution", () => {
+  it("resolves the authoritative D1 version before deployment reconciliation", async () => {
+    const results = [[{ name: migrationName }], [row()]];
+    let output = "";
+    const fetchImpl = async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          errors: [],
+          messages: [],
+          result: [{ success: true, results: results.shift(), meta: { served_by_primary: true } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    await expect(
+      runPreviousActiveWorkerVersionCli(
+        ["--account-id", "a".repeat(32), "--database-id", activeId, "--attestation-only", "true"],
+        {
+          env: { CLOUDFLARE_D1_API_TOKEN: "deployment-token" },
+          fetchImpl,
+          stdout: { write: (value: string) => (output += value) },
+        },
+      ),
+    ).resolves.toBe(activeId);
+    expect(output).toBe(`${activeId}\n`);
+    expect(resolveAttestedActiveWorkerVersion({ rows: [row()] })).toBe(activeId);
+  });
+
   it("checks the migration then resolves primary D1 state against the pre-deploy snapshot", async () => {
     const bodies: unknown[] = [];
     const results = [[{ name: migrationName }], [row()]];
@@ -93,6 +123,15 @@ describe("previous active Worker version resolution", () => {
         deployment: { versions: [] },
       }),
     ).toBe("none");
+  });
+
+  it("rejects an unattested live Worker before a first deployment", () => {
+    expect(() =>
+      resolvePreviousActiveWorkerVersion({
+        rows: [row({ rowCount: 0, activeCount: 0, versionId: null, publicAdmissionAllowed: null })],
+        deployment: { versions: [{ version_id: activeId, percentage: 100 }] },
+      }),
+    ).toThrow(/first|deployment|active/i);
   });
 
   it("returns an admissible active version served at 100% even outside the recent-version window", () => {
