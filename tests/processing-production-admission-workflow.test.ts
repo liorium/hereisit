@@ -35,6 +35,7 @@ describe("processing production admission workflow", () => {
   });
 
   it("fixes public rollout, cost ceilings, quotas, and namespaces in source", () => {
+    expect(workflow).toContain(`ALERT_DESTINATION_ADDRESS: \${{ vars.ALERT_DESTINATION_ADDRESS }}`);
     for (const value of [
       "--rollout-percent 100",
       "--max-projected-monthly-cost-microusd 5000000",

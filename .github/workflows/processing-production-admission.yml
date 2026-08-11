@@ -24,6 +24,7 @@ env:
   NODE_VERSION: "24"
   PNPM_VERSION: "11.11.0"
   CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+  ALERT_DESTINATION_ADDRESS: ${{ vars.ALERT_DESTINATION_ADDRESS }}
   WORKER_SCRIPT_NAME: hereisit-processing-production
   D1_NAME: hereisit-processing-production
   BUCKET_NAME: hereisit-processing-production
