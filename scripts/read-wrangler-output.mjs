@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { parseCliArguments } from "./image-lab-common.mjs";
 
 const allowedFields = {
-  deploy: new Set(["version_id", "worker_name", "worker_tag", "targets", "targets.0"]),
+  deploy: new Set(["version_id", "worker_name", "worker_tag", "targets", "targets.0", "target"]),
   "pages-deploy": new Set(["pages_project", "deployment_id", "url"]),
 };
 
@@ -136,11 +136,21 @@ export function readWranglerOutput({ text, event, expectedPagesProject, expected
   return record;
 }
 
-export function readWranglerField(record, field) {
+export function readWranglerField(record, field, expectedTarget) {
   const event = record?.type;
   const fields = allowedFields[event];
   if (fields === undefined || typeof field !== "string" || !fields.has(field)) {
     throw new TypeError("Wrangler field is not allowlisted");
+  }
+  if (field === "target") {
+    const expectedUrl = assertHttps(expectedTarget, "expected Worker target");
+    if (
+      expectedUrl.origin !== expectedTarget ||
+      record.targets.filter((target) => target === expectedTarget).length !== 1
+    ) {
+      throw new TypeError("Worker deploy must contain the exact expected target once");
+    }
+    return expectedTarget;
   }
   const value = field === "targets.0" ? record.targets?.[0] : record[field];
   if (!["string", "number", "boolean"].includes(typeof value)) {
@@ -151,12 +161,22 @@ export function readWranglerField(record, field) {
 
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
-  const allowed = new Set(["file", "event", "field", "expected-pages-project", "expected-branch"]);
+  const allowed = new Set([
+    "file",
+    "event",
+    "field",
+    "expected-pages-project",
+    "expected-branch",
+    "expected-target",
+  ]);
   if (Object.keys(args).some((key) => !allowed.has(key))) {
     throw new TypeError("unknown Wrangler reader argument");
   }
   if (args.file === undefined || args.event === undefined || args.field === undefined) {
     throw new TypeError("--file, --event, and --field are required");
+  }
+  if ((args.field === "target") !== (args["expected-target"] !== undefined)) {
+    throw new TypeError("--field target and --expected-target must be provided together");
   }
   const record = readWranglerOutput({
     text: await readFile(resolve(args.file), "utf8"),
@@ -164,7 +184,9 @@ async function main() {
     expectedPagesProject: args["expected-pages-project"],
     expectedBranch: args["expected-branch"],
   });
-  process.stdout.write(`${String(readWranglerField(record, args.field))}\n`);
+  process.stdout.write(
+    `${String(readWranglerField(record, args.field, args["expected-target"]))}\n`,
+  );
 }
 
 if (

@@ -52,6 +52,28 @@ describe("Wrangler NDJSON reader", () => {
     expect(() => readWranglerField(record, "targets")).toThrow(/scalar/i);
   });
 
+  it("selects one exact Worker target without depending on target order", () => {
+    const customTarget = "https://api.hereisit.app";
+    const record = readWranglerOutput({
+      text: ndjson({
+        ...worker,
+        targets: [worker.targets[0], customTarget, ...worker.targets.slice(1)],
+      }),
+      event: "deploy",
+    });
+
+    expect(readWranglerField(record, "target", customTarget)).toBe(customTarget);
+    expect(() => readWranglerField(record, "target", "https://missing.example")).toThrow(/target/i);
+    expect(() =>
+      readWranglerField(
+        { ...record, targets: [...record.targets, customTarget] },
+        "target",
+        customTarget,
+      ),
+    ).toThrow(/target/i);
+    expect(() => readWranglerField(record, "target", "http://api.hereisit.app")).toThrow(/HTTPS/i);
+  });
+
   it("selects the primary Pages record and cross-checks its detailed record", () => {
     const record = readWranglerOutput({
       text: ndjson(pagesDetailed, pages),
