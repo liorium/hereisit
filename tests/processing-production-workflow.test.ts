@@ -50,6 +50,36 @@ describe("processing production workflow", () => {
     expect(finalAttestation).toBeGreaterThan(clockBoundary);
   });
 
+  it("reconciles and restores the D1-attested Worker around canary mutation", () => {
+    const attested = workflow.indexOf("--attestation-only");
+    const reconcile = workflow.indexOf('versions deploy "$ATTESTED_ACTIVE_VERSION_ID@100%"');
+    const deploymentSnapshot = workflow.indexOf("> .artifacts/runtime/deployment-before.json");
+    const strictResolution = workflow.indexOf(
+      'PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs',
+    );
+    const arm = workflow.indexOf('echo "attempted=true" >> "$GITHUB_OUTPUT"');
+    const bootstrap = workflow.indexOf(".artifacts/runtime/bootstrap-deploy.ndjson");
+    const cleanup = workflow.indexOf("Restore the D1-attested Worker after failed canary mutation");
+
+    expect(attested).toBeGreaterThanOrEqual(0);
+    expect(reconcile).toBeGreaterThan(attested);
+    expect(deploymentSnapshot).toBeGreaterThan(reconcile);
+    expect(strictResolution).toBeGreaterThan(deploymentSnapshot);
+    expect(arm).toBeGreaterThan(strictResolution);
+    expect(bootstrap).toBeGreaterThan(arm);
+    expect(cleanup).toBeGreaterThan(bootstrap);
+    expect(workflow).toContain(
+      "if: always() && steps.worker-mutation.outputs.attempted == 'true' && (failure() || cancelled())",
+    );
+    expect(workflow).toContain(
+      'RESTORE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs',
+    );
+    expect(workflow).toContain('versions deploy "$RESTORE_VERSION_ID@100%"');
+    expect(workflow).toContain(
+      'verifyActiveWorkerDeployment(deployment, process.argv[2], "restored Worker")',
+    );
+  });
+
   it("keeps production isolated and admits only the maintainer canary", () => {
     for (const value of [
       "hereisit-processing-production",

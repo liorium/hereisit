@@ -173,6 +173,7 @@ jobs:
             echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
           } >> "$GITHUB_ENV"
       - name: Provision isolated resources and deploy the bootstrap Worker
+        id: worker-mutation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
@@ -257,6 +258,34 @@ jobs:
             --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none --dry-run
           pnpm exec wrangler d1 migrations apply "$D1_NAME" \
             --config "$WRANGLER_CONFIG" --remote
+          ATTESTED_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --attestation-only true)"
+          if ! pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/deployment-unreconciled.json \
+            2> .artifacts/runtime/deployment-unreconciled.stderr; then
+            if grep -Fq '[code: 10007]' .artifacts/runtime/deployment-unreconciled.stderr; then
+              printf '{"versions":[]}\n' > .artifacts/runtime/deployment-unreconciled.json
+            else
+              cat .artifacts/runtime/deployment-unreconciled.stderr >&2
+              exit 1
+            fi
+          fi
+          rm -f .artifacts/runtime/deployment-unreconciled.stderr
+          if [[ "$ATTESTED_ACTIVE_VERSION_ID" != none ]] &&
+            ! node --input-type=module - "$ATTESTED_ACTIVE_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          const deployment = JSON.parse(
+            await readFile(".artifacts/runtime/deployment-unreconciled.json", "utf8"),
+          );
+          verifyActiveWorkerDeployment(deployment, process.argv[2], "attested Worker");
+          NODE
+          then
+            pnpm exec wrangler versions deploy "$ATTESTED_ACTIVE_VERSION_ID@100%" \
+              --config "$WRANGLER_CONFIG" --yes
+          fi
           if ! pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
             > .artifacts/runtime/versions-before.json \
             2> .artifacts/runtime/versions-before.stderr; then
@@ -283,6 +312,12 @@ jobs:
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" \
             --deployment .artifacts/runtime/deployment-before.json)"
+          test "$PREVIOUS_ACTIVE_VERSION_ID" = "$ATTESTED_ACTIVE_VERSION_ID"
+          {
+            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
+            echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
+          } >> "$GITHUB_ENV"
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
           : > .artifacts/runtime/bootstrap-deploy.ndjson
           WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/bootstrap-deploy.ndjson \
             pnpm exec wrangler deploy "$WORKER_MODULE" \
@@ -328,10 +363,6 @@ jobs:
             --config "$WRANGLER_CONFIG" \
             --release-report .artifacts/deployment/source-sha.txt \
             --output .artifacts/runtime/bootstrap-witness.json
-          {
-            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
-            echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
-          } >> "$GITHUB_ENV"
       - name: Install secrets and finalize the active Worker version
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -502,6 +533,34 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 1
+      - name: Restore the D1-attested Worker after failed canary mutation
+        if: always() && steps.worker-mutation.outputs.attempted == 'true' && (failure() || cancelled())
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
+            --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          RESTORE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --attestation-only true)"
+          if [[ "$RESTORE_VERSION_ID" == none ]]; then
+            exit 0
+          fi
+          pnpm exec wrangler versions deploy "$RESTORE_VERSION_ID@100%" \
+            --config "$WRANGLER_CONFIG" --yes
+          pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/deployment-restored.json
+          node --input-type=module - "$RESTORE_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          const deployment = JSON.parse(
+            await readFile(".artifacts/runtime/deployment-restored.json", "utf8"),
+          );
+          verifyActiveWorkerDeployment(deployment, process.argv[2], "restored Worker");
+          NODE
 
   smoke:
     name: Run production canary from a clean browser runner
