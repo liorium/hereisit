@@ -119,16 +119,13 @@ jobs:
           PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
           PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: node scripts/verify-processing-deployment-environment.mjs --environment production
-      - name: Create isolated canary session
+      - name: Bind isolated canary rate-limit namespace
         env:
           PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: |
           node --input-type=module - <<'NODE'
-          import { createHash, randomUUID } from "node:crypto";
           import { appendFileSync } from "node:fs";
 
-          const sessionId = randomUUID();
-          const sessionHash = createHash("sha256").update(sessionId).digest("hex");
           const networkRateLimitNamespaceId = `${process.env.GITHUB_RUN_ID}${process.env.GITHUB_RUN_ATTEMPT}`;
           if (!/^[1-9][0-9]*$/.test(networkRateLimitNamespaceId)) {
             throw new TypeError("production canary network rate limit namespace is invalid");
@@ -140,13 +137,11 @@ jobs:
           ) {
             throw new TypeError("production maintainer hashes are invalid");
           }
-          const hashes = JSON.stringify([...new Set([...configuredHashes, sessionHash])].sort());
-          console.log(`::add-mask::${sessionId}`);
+          const hashes = JSON.stringify([...new Set(configuredHashes)].sort());
           console.log(`::add-mask::${hashes}`);
           appendFileSync(
             process.env.GITHUB_ENV,
-            `PRODUCTION_CANARY_SESSION_ID=${sessionId}\n` +
-              `PRODUCTION_CANARY_MAINTAINER_HASHES_JSON=${hashes}\n` +
+            `PRODUCTION_CANARY_MAINTAINER_HASHES_JSON=${hashes}\n` +
               `PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID=${networkRateLimitNamespaceId}\n`,
           );
           NODE
@@ -484,8 +479,58 @@ jobs:
             --config "$WRANGLER_CONFIG" \
             --config-sha256 "$CONFIG_SHA256" \
             > .artifacts/deployment/gate-results.json
-      - name: Install browser smoke runtime while queues remain paused
-        run: pnpm exec playwright install chromium
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: processing-production-canary-preflight-${{ github.event.workflow_run.head_sha }}
+          path: .artifacts/deployment
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  smoke:
+    name: Run production canary from a clean browser runner
+    needs: deploy
+    environment: processing-production
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    env:
+      EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      QUEUE_NAME: hereisit-image-jobs-production
+      DLQ_NAME: hereisit-image-jobs-dlq-production
+      PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: processing-production-canary-preflight-${{ github.event.workflow_run.head_sha }}
+          path: .artifacts/deployment
+      - name: Bind the exact production canary preflight
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test "$(cat .artifacts/deployment/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
+          test -f .artifacts/deployment/worker-version.json
+          test -f .artifacts/deployment/gate-results.json
+          test -f .artifacts/deployment/policy-smoke.json
+      - name: Install the isolated browser smoke runtime
+        run: |
+          pnpm install --frozen-lockfile
+          git diff --exit-code
+          pnpm exec playwright install chromium
       - name: Arm primary queue failure cleanup
         id: resume-attempt
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
@@ -503,9 +548,10 @@ jobs:
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - name: Run authenticated production canary smoke
+        env:
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
         run: |
-          PRODUCTION_MAINTAINER_SESSION_ID="$PRODUCTION_CANARY_SESSION_ID" \
-            node scripts/smoke-image-compress-server.mjs \
+          node scripts/smoke-image-compress-server.mjs \
             --page-origin "$PRODUCTION_PAGES_ORIGIN" \
             --output .artifacts/deployment/canary-smoke.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

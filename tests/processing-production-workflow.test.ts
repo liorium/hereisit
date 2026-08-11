@@ -26,7 +26,12 @@ describe("processing production workflow", () => {
   });
 
   it("uses the isolated macOS runner network for the production canary", () => {
-    expect(workflow).toContain("runs-on: macos-15-intel");
+    expect(workflow.match(/runs-on: macos-15-intel/g)).toHaveLength(2);
+    expect(workflow).toContain("name: Run production canary from a clean browser runner");
+    expect(workflow).toContain("needs: deploy");
+    expect(workflow).toContain(
+      `processing-production-canary-preflight-\${{ github.event.workflow_run.head_sha }}`,
+    );
     expect(workflow).toContain("pnpm exec playwright install chromium");
     expect(workflow).not.toContain("playwright install --with-deps");
     expect(workflow).not.toContain("sha256sum");
@@ -70,8 +75,8 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("local maintainer_hashes='[]'");
     expect(workflow).toContain('if [[ "$1" == active ]]');
     expect(workflow).toContain('daily_limit="$CANARY_DAILY_WEIGHTED_UNIT_LIMIT"');
-    expect(workflow).toContain("Create isolated canary session");
-    expect(workflow).toContain("randomUUID()");
+    expect(workflow).toContain("Bind isolated canary rate-limit namespace");
+    expect(workflow).not.toContain("randomUUID()");
     expect(workflow).toContain("::add-mask::");
     expect(workflow).toContain("PRODUCTION_CANARY_MAINTAINER_HASHES_JSON");
     expect(workflow).toContain("PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID");
@@ -79,7 +84,9 @@ describe("processing production workflow", () => {
     expect(workflow).toContain(
       '--network-rate-limit-namespace-id "$PRODUCTION_CANARY_NETWORK_RATE_LIMIT_NAMESPACE_ID"',
     );
-    expect(workflow).toContain('PRODUCTION_MAINTAINER_SESSION_ID="$PRODUCTION_CANARY_SESSION_ID"');
+    expect(workflow).toContain(
+      `PRODUCTION_MAINTAINER_SESSION_ID: \${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}`,
+    );
     expect(workflow).toContain('--maintainer-session-hashes-json "$maintainer_hashes"');
     expect(workflow).toContain('--queue "$QUEUE_NAME" --expected paused');
     expect(workflow).toContain('--queue "$DLQ_NAME" --expected paused');
@@ -119,7 +126,8 @@ describe("processing production workflow", () => {
     const gate = workflow.indexOf("node scripts/verify-deployment-gate-artifacts.mjs");
     const resume = workflow.indexOf('queues resume-delivery "$QUEUE_NAME"');
     const canarySmoke = workflow.indexOf("--output .artifacts/deployment/canary-smoke.json");
-    const upload = workflow.indexOf("actions/upload-artifact@");
+    const preflightUpload = workflow.indexOf("actions/upload-artifact@");
+    const upload = workflow.lastIndexOf("actions/upload-artifact@");
 
     expect(provision).toBeGreaterThanOrEqual(0);
     expect(migrations).toBeGreaterThan(provision);
@@ -132,6 +140,8 @@ describe("processing production workflow", () => {
     expect(gate).toBeGreaterThan(pages);
     expect(resume).toBeGreaterThan(gate);
     expect(canarySmoke).toBeGreaterThan(resume);
+    expect(preflightUpload).toBeGreaterThan(gate);
+    expect(resume).toBeGreaterThan(preflightUpload);
     expect(upload).toBeGreaterThan(canarySmoke);
     expect(workflow).toContain(
       `processing-production-canary-\${{ github.event.workflow_run.head_sha }}`,
