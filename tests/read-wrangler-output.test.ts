@@ -54,10 +54,11 @@ describe("Wrangler NDJSON reader", () => {
 
   it("selects one exact Worker target without depending on target order", () => {
     const customTarget = "https://api.hereisit.app";
+    const renderedCustomTarget = "api.hereisit.app (custom domain)";
     const record = readWranglerOutput({
       text: ndjson({
         ...worker,
-        targets: [worker.targets[0], customTarget, ...worker.targets.slice(1)],
+        targets: [worker.targets[0], renderedCustomTarget, ...worker.targets.slice(1)],
       }),
       event: "deploy",
     });
@@ -66,7 +67,7 @@ describe("Wrangler NDJSON reader", () => {
     expect(() => readWranglerField(record, "target", "https://missing.example")).toThrow(/target/i);
     expect(() =>
       readWranglerField(
-        { ...record, targets: [...record.targets, customTarget] },
+        { ...record, targets: [...record.targets, renderedCustomTarget] },
         "target",
         customTarget,
       ),
