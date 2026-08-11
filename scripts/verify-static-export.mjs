@@ -25,7 +25,7 @@ const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
 const PDF_TO_IMAGES_WORKER_MARKER = "hereisit-pdf-to-images-worker";
 const PDF_COMPRESS_SCANNED_WORKER_MARKER = "hereisit-pdf-compress-scanned-worker";
 const PDFJS_MARKER = "pdf.worker.min.mjs";
-const DEPLOYED_ORIGIN = "https://hereisit.pages.dev";
+const DEPLOYED_ORIGIN = "https://hereisit.app";
 const REMOTE_URL_PATTERN = /https?:\/\/[^"'`\s<>()\\]+/gi;
 const PDFJS_REMOTE_ASSET_PATTERN =
   /(?:pdfjs(?:-dist)?|pdf\.js|pdf\.worker(?:\.min)?\.mjs|\/cmaps\/|\/standard_fonts\/)/i;
@@ -235,20 +235,20 @@ for (const [index, tool] of toolPages.entries()) {
   assert.ok(toolHtml, `Missing exported HTML for ${tool.path}`);
   assert.ok(toolHtml.includes(`<title>${tool.title} | HereIsIt</title>`));
   assert.ok(toolHtml.includes(tool.description));
-  assert.ok(toolHtml.includes(`rel="canonical" href="https://hereisit.pages.dev${tool.path}"`));
-  assert.ok(sitemap.includes(`<loc>https://hereisit.pages.dev${tool.path}</loc>`));
+  assert.ok(toolHtml.includes(`rel="canonical" href="https://hereisit.app${tool.path}"`));
+  assert.ok(sitemap.includes(`<loc>https://hereisit.app${tool.path}</loc>`));
 }
 
 for (const [index, page] of discoveryPages.entries()) {
   const pageHtml = discoveryHtmlPages[index];
   assert.ok(pageHtml, `Missing exported HTML for ${page.path}`);
   assert.ok(
-    pageHtml.includes(`rel="canonical" href="https://hereisit.pages.dev${page.path}"`),
+    pageHtml.includes(`rel="canonical" href="https://hereisit.app${page.path}"`),
     `${page.path} must have one fixed canonical URL.`,
   );
   if (page.indexable) {
     assert.ok(
-      sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      sitemap.includes(`<loc>https://hereisit.app${page.path}</loc>`),
       `${page.path} must be present in the sitemap.`,
     );
   } else {
@@ -257,25 +257,25 @@ for (const [index, page] of discoveryPages.entries()) {
       `${page.path} must be noindex,follow.`,
     );
     assert.ok(
-      !sitemap.includes(`<loc>https://hereisit.pages.dev${page.path}</loc>`),
+      !sitemap.includes(`<loc>https://hereisit.app${page.path}</loc>`),
       `${page.path} must stay out of the sitemap.`,
     );
   }
 }
 assert.match(
   sitemap,
-  /<loc>https:\/\/hereisit\.pages\.dev\/tools<\/loc>\s*<changefreq>weekly<\/changefreq>\s*<priority>0\.8<\/priority>/,
+  /<loc>https:\/\/hereisit\.app\/tools<\/loc>\s*<changefreq>weekly<\/changefreq>\s*<priority>0\.8<\/priority>/,
 );
 
 for (const plannedRoute of plannedRouteFiles) {
   await assert.rejects(access(path.join(outputRoot, plannedRoute.file)), { code: "ENOENT" });
   assert.ok(
-    !sitemap.includes(`<loc>https://hereisit.pages.dev${plannedRoute.path}</loc>`),
+    !sitemap.includes(`<loc>https://hereisit.app${plannedRoute.path}</loc>`),
     `${plannedRoute.path} must not be published before it is available.`,
   );
 }
 
-assert.match(robots, /Sitemap: https:\/\/hereisit\.pages\.dev\/sitemap\.xml/);
+assert.match(robots, /Sitemap: https:\/\/hereisit\.app\/sitemap\.xml/);
 
 const exportedHtml = [html, ...discoveryHtmlPages, ...toolHtmlPages].join("\n");
 const assetPaths = Array.from(

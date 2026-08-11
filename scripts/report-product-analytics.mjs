@@ -133,8 +133,7 @@ export function buildWebAnalyticsRequest(accountId, environment, days, now = new
       accountTag: accountId,
       start: new Date(now.valueOf() - days * 86_400_000).toISOString(),
       end: now.toISOString(),
-      host:
-        environment === "staging" ? "processing-staging.hereisit.pages.dev" : "hereisit.pages.dev",
+      host: environment === "staging" ? "processing-staging.hereisit.pages.dev" : "hereisit.app",
     },
   };
 }

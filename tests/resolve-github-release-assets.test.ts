@@ -124,7 +124,7 @@ async function createFixture({ wrongStagingTree = false } = {}) {
       production: {
         archiveSha256: productionWeb.archiveSha256,
         treeSha256: productionWeb.treeSha256,
-        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+        processingApiOrigin: "https://api.hereisit.app",
       },
     },
     security: { trivyDbDigest: `sha256:${"a".repeat(64)}` },
@@ -153,7 +153,7 @@ async function createFixture({ wrongStagingTree = false } = {}) {
           sizeBytes: productionWeb.bytes.byteLength,
           archiveSha256: productionWeb.archiveSha256,
           treeSha256: productionWeb.treeSha256,
-          processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+          processingApiOrigin: "https://api.hereisit.app",
         },
       },
       security: securityAssets(files),

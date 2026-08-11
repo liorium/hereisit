@@ -21,7 +21,7 @@ vi.mock("../scripts/support/processing-staging-smoke-runtime.mjs", () => ({
 vi.mock("@playwright/test", () => ({ chromium: { launch: browserLaunch } }));
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
-const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
+const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.app";
 const sessionId = "123e4567-e89b-42d3-a456-426614174000";
 const publicBucketZeroSessionId = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";
 const temporaryRoots: string[] = [];

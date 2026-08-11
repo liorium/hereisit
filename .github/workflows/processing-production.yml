@@ -44,8 +44,9 @@ jobs:
       DLQ_NAME: hereisit-image-jobs-dlq-production
       WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
       WORKER_MODULE: .artifacts/build/api-worker.mjs
-      PRODUCTION_API_ORIGIN: https://hereisit-processing-production.liorium.workers.dev
-      PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+      PRODUCTION_API_ORIGIN: https://api.hereisit.app
+      PRODUCTION_PAGES_ORIGIN: https://hereisit.app
+      LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
       CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -213,6 +214,7 @@ jobs:
               --account-id "$CLOUDFLARE_ACCOUNT_ID" \
               --database-id "$PRODUCTION_D1_DATABASE_ID" \
               --app-origin "$PRODUCTION_PAGES_ORIGIN" \
+              --app-origin "$LEGACY_PRODUCTION_PAGES_ORIGIN" \
               --bucket-name "$BUCKET_NAME" \
               --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
               --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
@@ -462,7 +464,7 @@ jobs:
             --pages-output .artifacts/runtime/pages-deploy.ndjson \
             --project hereisit \
             --branch main \
-            --stable-url "$PRODUCTION_PAGES_ORIGIN"
+            --stable-url "$LEGACY_PRODUCTION_PAGES_ORIGIN"
       - name: Verify deployment gate artifacts
         run: |
           set -euo pipefail
@@ -499,7 +501,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       QUEUE_NAME: hereisit-image-jobs-production
       DLQ_NAME: hereisit-image-jobs-dlq-production
-      PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+      PRODUCTION_PAGES_ORIGIN: https://hereisit.app
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

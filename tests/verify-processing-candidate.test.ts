@@ -303,7 +303,10 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   const webIdentity = (environment: "staging" | "production", value: typeof staging) => ({
     archiveSha256: value.archiveSha256,
     treeSha256: value.treeSha256,
-    processingApiOrigin: `https://hereisit-processing-${environment}.example.workers.dev`,
+    processingApiOrigin:
+      environment === "production"
+        ? "https://api.hereisit.app"
+        : "https://hereisit-processing-staging.example.workers.dev",
   });
   const stagingIdentity = webIdentity("staging", staging);
   const productionIdentity = webIdentity("production", production);

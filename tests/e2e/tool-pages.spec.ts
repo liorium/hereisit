@@ -155,7 +155,7 @@ test("publishes every image route with unique metadata", async ({ page }) => {
     );
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",
-      `https://hereisit.pages.dev${tool.path}`,
+      `https://hereisit.app${tool.path}`,
     );
   }
 });
@@ -184,7 +184,7 @@ test("publishes and links the privacy disclosure", async ({ page, request }) => 
 
   await expect(page.getByRole("heading", { level: 1, name: "개인정보 보호" })).toBeVisible();
   expect(await (await request.get("/sitemap.xml")).text()).toContain(
-    "https://hereisit.pages.dev/privacy",
+    "https://hereisit.app/privacy",
   );
 });
 
@@ -209,7 +209,7 @@ test("publishes the scanned PDF compression tool", async ({ page }) => {
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://hereisit.pages.dev/pdf/compress",
+    "https://hereisit.app/pdf/compress",
   );
 });
 
@@ -252,8 +252,6 @@ test("publishes every available catalog route from the complete tools page", asy
     expect(response.headers()["content-type"]).toContain("text/html");
     const html = await response.text();
     expect(html).toContain(`<h1>${tool.name}</h1>`);
-    expect(html).toContain(
-      `<link rel="canonical" href="https://hereisit.pages.dev${tool.route}"/>`,
-    );
+    expect(html).toContain(`<link rel="canonical" href="https://hereisit.app${tool.route}"/>`);
   }
 });

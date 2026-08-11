@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 
-const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
+const DEFAULT_BASE_URL = "https://hereisit.app";
 const ROUTE_PATHS = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/pdf/organize"];
 const EXPECTED_CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'";

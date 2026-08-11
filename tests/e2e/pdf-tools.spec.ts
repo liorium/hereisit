@@ -647,7 +647,7 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
       );
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
         "href",
-        "https://hereisit.pages.dev/pdf/compress",
+        "https://hereisit.app/pdf/compress",
       );
     }
   }

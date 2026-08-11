@@ -213,11 +213,19 @@ function normalizeOrigins(origins, environment) {
   });
   if (new Set(normalized).size !== normalized.length)
     throw new TypeError("appOrigins must be unique");
-  if (environment === "staging" && normalized.includes("https://hereisit.pages.dev")) {
+  const productionOrigins = ["https://hereisit.app", "https://hereisit.pages.dev"];
+  if (
+    environment === "staging" &&
+    normalized.some((origin) => productionOrigins.includes(origin))
+  ) {
     throw new TypeError("staging must not admit the production origin");
   }
-  if (environment === "production" && normalized.some((origin) => origin.includes("staging"))) {
-    throw new TypeError("production must not admit a staging origin");
+  if (
+    environment === "production" &&
+    (normalized.length !== productionOrigins.length ||
+      normalized.some((origin, index) => origin !== productionOrigins[index]))
+  ) {
+    throw new TypeError("production origins must match the approved exact origins");
   }
   return normalized;
 }
@@ -376,6 +384,9 @@ export function generateProcessingWrangler(input) {
     compatibility_date: "2026-07-16",
     compatibility_flags: ["nodejs_compat"],
     workers_dev: true,
+    ...(environment === "production"
+      ? { routes: [{ pattern: "api.hereisit.app", custom_domain: true }] }
+      : {}),
     logpush: true,
     triggers: { crons: ["*/5 * * * *"] },
     d1_databases: [

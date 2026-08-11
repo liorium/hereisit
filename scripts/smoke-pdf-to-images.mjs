@@ -9,7 +9,7 @@ import {
   installAvailableWebShareTripwire,
 } from "./support/result-download.mjs";
 
-const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
+const DEFAULT_BASE_URL = "https://hereisit.app";
 const ROUTE_PATH = "/pdf/to-image";
 const REQUIRED_ASSET_PATHS = [
   "/pdfjs/6.2.108/pdf.worker.min.mjs",

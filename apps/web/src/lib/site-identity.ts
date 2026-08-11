@@ -1,5 +1,5 @@
 export const SITE_NAME = "HereIsIt";
-export const SITE_URL = "https://hereisit.pages.dev";
+export const SITE_URL = "https://hereisit.app";
 
 export const HOME_TITLE = "HereIsIt — 필요한 도구, 여기 있어요";
 export const HOME_DESCRIPTION =

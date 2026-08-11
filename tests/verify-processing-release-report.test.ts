@@ -248,7 +248,7 @@ async function fixture() {
     releaseId,
     gitSha,
     stagingProcessingApiOrigin: "https://hereisit-processing-staging.example.workers.dev",
-    productionProcessingApiOrigin: "https://hereisit-processing-production.example.workers.dev",
+    productionProcessingApiOrigin: "https://api.hereisit.app",
     stagingWebTreeSha256: staging.treeSha256,
     productionWebTreeSha256: production.treeSha256,
     trivyDbDigest,

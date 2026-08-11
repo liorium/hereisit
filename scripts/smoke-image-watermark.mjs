@@ -7,7 +7,7 @@ import {
   installAvailableWebShareTripwire,
 } from "./support/result-download.mjs";
 
-const DEFAULT_BASE_URL = "https://hereisit.pages.dev";
+const DEFAULT_BASE_URL = "https://hereisit.app";
 const ROUTE_PATH = "/image/watermark";
 
 function normalizeBaseUrl(value) {

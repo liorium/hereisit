@@ -35,8 +35,9 @@ env:
   DLQ_NAME: hereisit-image-jobs-dlq-production
   WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
   WORKER_MODULE: .artifacts/build/api-worker.mjs
-  PRODUCTION_API_ORIGIN: https://hereisit-processing-production.liorium.workers.dev
-  PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
+  PRODUCTION_API_ORIGIN: https://api.hereisit.app
+  PRODUCTION_PAGES_ORIGIN: https://hereisit.app
+  LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
   CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
 
 jobs:
@@ -190,6 +191,7 @@ jobs:
             node scripts/generate-processing-wrangler.mjs \
               --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" \
               --database-id "$PRODUCTION_D1_DATABASE_ID" --app-origin "$PRODUCTION_PAGES_ORIGIN" \
+              --app-origin "$LEGACY_PRODUCTION_PAGES_ORIGIN" \
               --bucket-name "$BUCKET_NAME" --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
               --usage-analytics-dataset-name "$USAGE_ANALYTICS_DATASET_NAME" \
               --product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME" \

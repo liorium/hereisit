@@ -38,15 +38,18 @@ function assertPattern(value, pattern, label) {
 function assertProcessingApiOrigin(value, environment, label) {
   if (typeof value !== "string") throw new TypeError(`${label} is invalid`);
   const url = new URL(value);
-  const hostnamePattern = new RegExp(
-    `^hereisit-processing-${environment}\\.${workersSubdomainLabel}\\.workers\\.dev$`,
-  );
+  const hostnameMatches =
+    environment === "production"
+      ? url.hostname === "api.hereisit.app"
+      : new RegExp(`^hereisit-processing-staging\\.${workersSubdomainLabel}\\.workers\\.dev$`).test(
+          url.hostname,
+        );
   if (
     url.protocol !== "https:" ||
     url.origin !== value ||
     url.username ||
     url.password ||
-    !hostnamePattern.test(url.hostname)
+    !hostnameMatches
   ) {
     throw new TypeError(`${label} must be an HTTPS origin`);
   }
