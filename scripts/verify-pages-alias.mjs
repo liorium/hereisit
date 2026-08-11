@@ -144,7 +144,7 @@ export async function inspectPagesAlias({
   uniqueUrl,
   stableUrl,
   apiOrigin = cloudflareApiOrigin,
-  timeoutMs = 30_000,
+  timeoutMs = 120_000,
   pollIntervalMs = 500,
 }) {
   if (typeof accountId !== "string" || !accountPattern.test(accountId)) {
