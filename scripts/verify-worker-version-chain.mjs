@@ -1083,6 +1083,27 @@ function verifyAdmissionConfigPair(currentText, nextText, fromPercent, toPercent
   }
   current.variables[key] = "<rollout>";
   next.variables[key] = "<rollout>";
+  for (const [label, parsed, expected] of [
+    ["current", current, null],
+    ["next", next, "22002"],
+  ]) {
+    if (!Array.isArray(parsed.config.ratelimits)) {
+      throw new TypeError(`${label} config rate limits are invalid`);
+    }
+    const matches = parsed.config.ratelimits.filter(
+      (entry) => entry?.name === "NETWORK_JOB_RATE_LIMITER",
+    );
+    if (matches.length !== 1 || !/^[1-9][0-9]*$/.test(matches[0].namespace_id)) {
+      throw new TypeError(`${label} config network rate limit is invalid`);
+    }
+    if (
+      (expected === null && matches[0].namespace_id === "22002") ||
+      (expected !== null && matches[0].namespace_id !== expected)
+    ) {
+      throw new TypeError("Worker admission network rate limit transition is invalid");
+    }
+    matches[0].namespace_id = "<network>";
+  }
   if (sha256Canonical(current.config) !== sha256Canonical(next.config)) {
     throw new TypeError("Worker admission config changed outside rollout");
   }

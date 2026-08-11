@@ -106,6 +106,13 @@ function processingConfig(releaseReport: string, rollout: "0" | "100") {
       WEB_ORIGIN: "https://hereisit.app",
     },
     d1_databases: [{ binding: "DB", database_id: ids.prior }],
+    ratelimits: [
+      {
+        name: "NETWORK_JOB_RATE_LIMITER",
+        namespace_id: rollout === "0" ? "315180694861" : "22002",
+        simple: { limit: 10, period: 60 },
+      },
+    ],
   })}\n`;
 }
 
@@ -213,6 +220,24 @@ describe("Worker version chain verifier", () => {
         nextConfig: admissionInput().nextConfig.replace(
           '"MAX_PROJECTED_MONTHLY_COST_MICROUSD":"5000000"',
           '"MAX_PROJECTED_MONTHLY_COST_MICROUSD":"5000001"',
+        ),
+      }),
+    ],
+    [
+      "a public network limiter outside the fixed namespace",
+      () => ({
+        nextConfig: admissionInput().nextConfig.replace(
+          '"namespace_id":"22002"',
+          '"namespace_id":"22003"',
+        ),
+      }),
+    ],
+    [
+      "a canary using the public network limiter namespace",
+      () => ({
+        currentConfig: admissionInput().currentConfig.replace(
+          '"namespace_id":"315180694861"',
+          '"namespace_id":"22002"',
         ),
       }),
     ],
