@@ -1,6 +1,10 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { inspectPagesAlias, verifyPagesAlias } from "../scripts/verify-pages-alias.mjs";
+import {
+  inspectPagesAlias,
+  verifyPagesAlias,
+  verifyPagesCanonicalDeployment,
+} from "../scripts/verify-pages-alias.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const project = "hereisit";
@@ -36,6 +40,27 @@ function deployment(aliases: string[] | null = [stableUrl]) {
     project_name: project,
     short_id: "aaaaaaaa",
     url: uniqueUrl,
+  };
+}
+
+function productionProject({
+  id = deploymentId,
+  environment = "production",
+  name = project,
+  productionBranch = "main",
+  canonical = true,
+} = {}) {
+  return {
+    canonical_deployment: canonical
+      ? {
+          ...deployment([]),
+          id,
+          deployment_trigger: { metadata: { branch: "main" }, type: "ad_hoc" },
+          environment,
+        }
+      : null,
+    name,
+    production_branch: productionBranch,
   };
 }
 
@@ -94,6 +119,52 @@ describe("Pages stable alias verifier", () => {
       url: `/client/v4/accounts/${accountId}/pages/projects/${project}/deployments/${deploymentId}`,
       authorization: "Bearer test-token",
     });
+  });
+
+  it("polls the canonical deployment for the production domain", async () => {
+    const productionStableUrl = `https://${project}.pages.dev`;
+    const api = await startApi([
+      productionProject({ id: "ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb" }),
+      productionProject(),
+    ]);
+
+    await expect(
+      inspectPagesAlias({
+        accountId,
+        apiToken: "test-token",
+        project,
+        branch: "main",
+        deploymentId,
+        uniqueUrl,
+        stableUrl: productionStableUrl,
+        apiOrigin: api.apiOrigin,
+        timeoutMs: 500,
+        pollIntervalMs: 1,
+      }),
+    ).resolves.toEqual({ deploymentId, stableUrl: productionStableUrl, verified: true });
+    expect(api.requests).toHaveLength(2);
+    expect(api.requests[0]).toEqual({
+      url: `/client/v4/accounts/${accountId}/pages/projects/${project}`,
+      authorization: "Bearer test-token",
+    });
+  });
+
+  it.each([
+    ["project", productionProject({ name: "other" })],
+    ["production branch", productionProject({ productionBranch: "other" })],
+    ["missing canonical deployment", productionProject({ canonical: false })],
+    ["non-production canonical deployment", productionProject({ environment: "preview" })],
+  ])("rejects a mismatched production %s", (_label, document) => {
+    expect(() =>
+      verifyPagesCanonicalDeployment({
+        document: envelope(document),
+        project,
+        branch: "main",
+        deploymentId,
+        uniqueUrl,
+        stableUrl: `https://${project}.pages.dev`,
+      }),
+    ).toThrow();
   });
 
   it("validates the deployment, project, branch, unique URL, and alias together", () => {
