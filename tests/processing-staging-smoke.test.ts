@@ -161,6 +161,11 @@ describe("authenticated processing staging smoke", () => {
         body: { contract: "tool-job@1", error: { code: "RATE_LIMITED" } },
       }),
     ).toBe("application-unscoped");
+    expect(
+      classifyJobCreateRateLimit({
+        body: { contract: "tool-job@1", error: { code: "QUOTA_EXCEEDED" } },
+      }),
+    ).toBe("quota");
     expect(classifyJobCreateRateLimit({ body: "upstream response" })).toBe("upstream");
   });
 
@@ -256,6 +261,7 @@ describe("authenticated processing staging smoke", () => {
     expect(source).toContain("[job-create-network]");
     expect(source).toContain("[job-create-network-rate-limit]");
     expect(source).toContain("[job-create-session-rate-limit]");
+    expect(source).toContain("[job-create-quota]");
     expect(source).toContain("[job-create-unknown-rate-limit]");
     expect(source).toContain("[job-create-503]");
     expect(source).toContain("[job-create-missing]");

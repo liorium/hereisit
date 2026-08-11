@@ -99,7 +99,7 @@ describe("processing production workflow", () => {
     ]) {
       expect(workflow).toContain(flag);
     }
-    expect(workflow).toContain('CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"');
+    expect(workflow).toContain('CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "5000000000"');
     expect(workflow).toContain("local daily_limit=0");
     expect(workflow).toContain("Verify public production policy remains local");
     expect(workflow).not.toContain("workflow_dispatch:");
