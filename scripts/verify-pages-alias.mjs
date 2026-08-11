@@ -69,7 +69,55 @@ function validateEnvelope(document) {
   return envelope;
 }
 
+function validateDeployment(value, { project, branch, deploymentId, uniqueUrl }) {
+  assertName(project, "Pages project");
+  assertName(branch, "Pages branch");
+  assertDeploymentId(deploymentId);
+  assertHttpsOrigin(uniqueUrl, "Pages unique URL");
+  const deployment = assertObject(value, "Pages deployment");
+  assertDeploymentId(deployment.id);
+  if (deployment.id !== deploymentId) throw new TypeError("Pages deployment ID does not match");
+  if (deployment.project_name !== project) throw new TypeError("Pages project does not match");
+  if (deployment.url !== uniqueUrl) throw new TypeError("Pages unique URL does not match");
+  const trigger = assertObject(deployment.deployment_trigger, "Pages deployment trigger");
+  const metadata = assertObject(trigger.metadata, "Pages deployment trigger metadata");
+  if (metadata.branch !== branch) throw new TypeError("Pages branch does not match");
+  const stage = assertObject(deployment.latest_stage, "Pages deployment latest stage");
+  if (stage.status !== "success") throw new Error("Pages deployment stage is not successful");
+  return deployment;
+}
+
 export function verifyPagesAlias({
+  document,
+  project,
+  branch,
+  deploymentId,
+  uniqueUrl,
+  stableUrl,
+}) {
+  assertHttpsOrigin(stableUrl, "Pages stable URL");
+  if (uniqueUrl === stableUrl) throw new TypeError("Pages unique and stable URLs must differ");
+  const deployment = validateDeployment(validateEnvelope(document).result, {
+    project,
+    branch,
+    deploymentId,
+    uniqueUrl,
+  });
+  if (deployment.aliases === null) {
+    if (deployment.environment !== "production" || stableUrl !== `https://${project}.pages.dev`) {
+      throw new TypeError("Pages production domain does not match");
+    }
+  } else {
+    if (!Array.isArray(deployment.aliases)) throw new TypeError("Pages aliases must be an array");
+    const aliases = deployment.aliases.map((alias) => assertHttpsOrigin(alias, "Pages alias"));
+    if (new Set(aliases).size !== aliases.length)
+      throw new TypeError("Pages aliases must be unique");
+    if (!aliases.includes(stableUrl)) throw new PagesAliasPendingError();
+  }
+  return { deploymentId, stableUrl, verified: true };
+}
+
+export function verifyPagesCanonicalDeployment({
   document,
   project,
   branch,
@@ -81,27 +129,21 @@ export function verifyPagesAlias({
   assertName(branch, "Pages branch");
   assertDeploymentId(deploymentId);
   assertHttpsOrigin(uniqueUrl, "Pages unique URL");
-  assertHttpsOrigin(stableUrl, "Pages stable URL");
-  if (uniqueUrl === stableUrl) throw new TypeError("Pages unique and stable URLs must differ");
-  const deployment = assertObject(validateEnvelope(document).result, "Pages deployment");
-  if (deployment.id !== deploymentId) throw new TypeError("Pages deployment ID does not match");
-  if (deployment.project_name !== project) throw new TypeError("Pages project does not match");
-  if (deployment.url !== uniqueUrl) throw new TypeError("Pages unique URL does not match");
-  const trigger = assertObject(deployment.deployment_trigger, "Pages deployment trigger");
-  const metadata = assertObject(trigger.metadata, "Pages deployment trigger metadata");
-  if (metadata.branch !== branch) throw new TypeError("Pages branch does not match");
-  const stage = assertObject(deployment.latest_stage, "Pages deployment latest stage");
-  if (stage.status !== "success") throw new Error("Pages deployment stage is not successful");
-  if (deployment.aliases === null) {
-    if (deployment.environment !== "production" || stableUrl !== `https://${project}.pages.dev`) {
-      throw new TypeError("Pages production domain does not match");
-    }
-  } else {
-    if (!Array.isArray(deployment.aliases)) throw new TypeError("Pages aliases must be an array");
-    const aliases = deployment.aliases.map((alias) => assertHttpsOrigin(alias, "Pages alias"));
-    if (new Set(aliases).size !== aliases.length)
-      throw new TypeError("Pages aliases must be unique");
-    if (!aliases.includes(stableUrl)) throw new PagesAliasPendingError();
+  if (assertHttpsOrigin(stableUrl, "Pages stable URL") !== `https://${project}.pages.dev`) {
+    throw new TypeError("Pages production domain does not match");
+  }
+  const pagesProject = assertObject(validateEnvelope(document).result, "Pages project");
+  if (pagesProject.name !== project) throw new TypeError("Pages project does not match");
+  if (pagesProject.production_branch !== branch) {
+    throw new TypeError("Pages production branch does not match");
+  }
+  if (pagesProject.canonical_deployment === null) throw new PagesAliasPendingError();
+  const deployment = assertObject(pagesProject.canonical_deployment, "Pages canonical deployment");
+  assertDeploymentId(deployment.id);
+  if (deployment.id !== deploymentId) throw new PagesAliasPendingError();
+  validateDeployment(deployment, { project, branch, deploymentId, uniqueUrl });
+  if (deployment.environment !== "production") {
+    throw new TypeError("Pages canonical deployment is not production");
   }
   return { deploymentId, stableUrl, verified: true };
 }
@@ -168,7 +210,11 @@ export async function inspectPagesAlias({
     throw new RangeError("Pages alias polling interval is invalid");
   }
   const origin = validateApiOrigin(apiOrigin);
-  const endpoint = `${origin}/client/v4/accounts/${accountId}/pages/projects/${project}/deployments/${deploymentId}`;
+  const productionDomain = `https://${project}.pages.dev`;
+  const endpoint =
+    stableUrl === productionDomain
+      ? `${origin}/client/v4/accounts/${accountId}/pages/projects/${project}`
+      : `${origin}/client/v4/accounts/${accountId}/pages/projects/${project}/deployments/${deploymentId}`;
   const deadline = Date.now() + timeoutMs;
   while (true) {
     const response = await fetch(endpoint, {
@@ -176,7 +222,9 @@ export async function inspectPagesAlias({
       signal: AbortSignal.timeout(10_000),
     });
     try {
-      return verifyPagesAlias({
+      const verify =
+        stableUrl === productionDomain ? verifyPagesCanonicalDeployment : verifyPagesAlias;
+      return verify({
         document: await readApiJson(response),
         project,
         branch,
