@@ -66,8 +66,11 @@ function migratedDatabase() {
 }
 
 describe("staging cost-accounting epoch rotation", () => {
-  it("rotates once for a new attested release and verifies the persisted fail-closed state", async () => {
+  it("rotates once from a recovered operator-disabled release", async () => {
     const database = migratedDatabase();
+    database.exec(
+      "UPDATE rollout_control SET circuit_open = 1, reason = 'OPERATOR_DISABLED', opened_at = 1",
+    );
     const calls: unknown[] = [];
     const fetchImpl = async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
