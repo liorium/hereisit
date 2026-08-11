@@ -25,6 +25,13 @@ describe("processing production workflow", () => {
     );
   });
 
+  it("uses the isolated macOS runner network for the production canary", () => {
+    expect(workflow).toContain("runs-on: macos-15-intel");
+    expect(workflow).toContain("pnpm exec playwright install chromium");
+    expect(workflow).not.toContain("playwright install --with-deps");
+    expect(workflow).not.toContain("sha256sum");
+  });
+
   it("keeps production isolated and admits only the maintainer canary", () => {
     for (const value of [
       "hereisit-processing-production",
