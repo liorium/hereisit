@@ -566,7 +566,7 @@ jobs:
     name: Run production canary from a clean browser runner
     needs: deploy
     environment: processing-production
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
