@@ -39,16 +39,24 @@ describe("processing production workflow", () => {
   });
 
   it("lets the provider clock settle before final version attestation", () => {
-    const finalSnapshot = workflow.indexOf("> .artifacts/runtime/versions-after-final.json");
-    const clockBoundary = workflow.indexOf("sleep 10", finalSnapshot);
+    const finalDeploy = workflow.indexOf(
+      "WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/final-deploy.ndjson",
+    );
+    const finalSnapshot = workflow.indexOf(
+      "> .artifacts/runtime/versions-after-final.json",
+      finalDeploy,
+    );
+    const clockBoundary = workflow.indexOf("sleep 10", finalDeploy);
     const finalAttestation = workflow.indexOf(
       "node scripts/verify-worker-version-chain.mjs \\",
       finalSnapshot,
     );
 
+    expect(finalDeploy).toBeGreaterThanOrEqual(0);
     expect(finalSnapshot).toBeGreaterThanOrEqual(0);
-    expect(clockBoundary).toBeGreaterThan(finalSnapshot);
-    expect(finalAttestation).toBeGreaterThan(clockBoundary);
+    expect(clockBoundary).toBeGreaterThan(finalDeploy);
+    expect(finalSnapshot).toBeGreaterThan(clockBoundary);
+    expect(finalAttestation).toBeGreaterThan(finalSnapshot);
   });
 
   it("reconciles and restores the D1-attested Worker around canary mutation", () => {
