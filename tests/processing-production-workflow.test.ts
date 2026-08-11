@@ -25,10 +25,11 @@ describe("processing production workflow", () => {
     );
   });
 
-  it("uses the isolated macOS runner network for the production canary", () => {
-    expect(workflow.match(/runs-on: macos-15-intel/g)).toHaveLength(2);
+  it("uses a separate Ubuntu network for the production browser canary", () => {
+    expect(workflow.match(/runs-on: macos-15-intel/g)).toHaveLength(1);
     expect(workflow).toContain("name: Run production canary from a clean browser runner");
     expect(workflow).toContain("needs: deploy");
+    expect(workflow).toContain("runs-on: ubuntu-24.04");
     expect(workflow).toContain(
       `processing-production-canary-preflight-\${{ github.event.workflow_run.head_sha }}`,
     );
