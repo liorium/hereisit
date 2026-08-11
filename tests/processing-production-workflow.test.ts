@@ -147,6 +147,8 @@ describe("processing production workflow", () => {
     expect(workflow).toContain('--stable-url "$LEGACY_PRODUCTION_PAGES_ORIGIN"');
     expect(workflow).toContain("for (let attempt = 1; attempt <= 60; attempt += 1)");
     expect(workflow).toContain("if (attempt < 60) await delay(2_000)");
+    expect(workflow).toContain("for attempt in {1..90}; do");
+    expect(workflow).toContain("if (( attempt == 90 )); then");
     expect(workflow).toContain(
       `LOGPUSH_STATUS_TOKEN: \${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}`,
     );

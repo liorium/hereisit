@@ -251,6 +251,34 @@ jobs:
             --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none --dry-run
           pnpm exec wrangler d1 migrations apply "$D1_NAME" \
             --config "$WRANGLER_CONFIG" --remote
+          ATTESTED_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$STAGING_D1_DATABASE_ID" \
+            --attestation-only true)"
+          if ! pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/deployment-unreconciled.json \
+            2> .artifacts/runtime/deployment-unreconciled.stderr; then
+            if grep -Fq '[code: 10007]' .artifacts/runtime/deployment-unreconciled.stderr; then
+              printf '{"versions":[]}\n' > .artifacts/runtime/deployment-unreconciled.json
+            else
+              cat .artifacts/runtime/deployment-unreconciled.stderr >&2
+              exit 1
+            fi
+          fi
+          rm -f .artifacts/runtime/deployment-unreconciled.stderr
+          if [[ "$ATTESTED_ACTIVE_VERSION_ID" != none ]] &&
+            ! node --input-type=module - "$ATTESTED_ACTIVE_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          const deployment = JSON.parse(
+            await readFile(".artifacts/runtime/deployment-unreconciled.json", "utf8"),
+          );
+          verifyActiveWorkerDeployment(deployment, process.argv[2], "attested Worker");
+          NODE
+          then
+            pnpm exec wrangler versions deploy "$ATTESTED_ACTIVE_VERSION_ID@100%" \
+              --config "$WRANGLER_CONFIG" --yes
+          fi
           if ! pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json \
             > .artifacts/runtime/versions-before.json \
             2> .artifacts/runtime/versions-before.stderr; then
@@ -277,6 +305,7 @@ jobs:
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$STAGING_D1_DATABASE_ID" \
             --deployment .artifacts/runtime/deployment-before.json)"
+          test "$PREVIOUS_ACTIVE_VERSION_ID" = "$ATTESTED_ACTIVE_VERSION_ID"
           : > .artifacts/runtime/bootstrap-deploy.ndjson
           WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/bootstrap-deploy.ndjson \
             pnpm exec wrangler deploy "$WORKER_MODULE" \
@@ -291,7 +320,7 @@ jobs:
             --environment staging \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --worker-script-name "$WORKER_SCRIPT_NAME")"
-          for attempt in {1..30}; do
+          for attempt in {1..90}; do
             if pnpm exec wrangler containers info "$STAGING_CONTAINER_APPLICATION_ID" \
                 > .artifacts/runtime/container-application.json \
                 2> .artifacts/runtime/container-application-verify.stderr &&
@@ -308,7 +337,7 @@ jobs:
                 2>> .artifacts/runtime/container-application-verify.stderr; then
               break
             fi
-            if (( attempt == 30 )); then
+            if (( attempt == 90 )); then
               cat .artifacts/runtime/container-application-verify.stderr >&2
               exit 1
             fi

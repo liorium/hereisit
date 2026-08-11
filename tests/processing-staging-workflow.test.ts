@@ -184,6 +184,23 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain("printf '[]\\n' > .artifacts/runtime/versions-before.json");
   });
 
+  it("reconciles a failed bootstrap attempt to the D1-attested Worker before retrying", () => {
+    const deploy = jobBody("deploy");
+    const attested = deploy.indexOf("--attestation-only");
+    const reconcile = deploy.indexOf('versions deploy "$ATTESTED_ACTIVE_VERSION_ID@100%"');
+    const deploymentSnapshot = deploy.indexOf("> .artifacts/runtime/deployment-before.json");
+    const strictResolution = deploy.indexOf(
+      'PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs',
+    );
+    const bootstrap = deploy.indexOf(".artifacts/runtime/bootstrap-deploy.ndjson");
+
+    expect(attested).toBeGreaterThanOrEqual(0);
+    expect(reconcile).toBeGreaterThan(attested);
+    expect(deploymentSnapshot).toBeGreaterThan(reconcile);
+    expect(strictResolution).toBeGreaterThan(deploymentSnapshot);
+    expect(bootstrap).toBeGreaterThan(strictResolution);
+  });
+
   it("discovers the exact Container app and verifies its current configuration", () => {
     const deploy = jobBody("deploy");
     const discover = deploy.indexOf("--mode discover");
@@ -193,8 +210,8 @@ describe("processing staging workflow", () => {
     expect(discover).toBeGreaterThanOrEqual(0);
     expect(info).toBeGreaterThan(discover);
     expect(verify).toBeGreaterThan(info);
-    expect(deploy).toContain("for attempt in {1..30}; do");
-    expect(deploy).toContain("if (( attempt == 30 )); then");
+    expect(deploy).toContain("for attempt in {1..90}; do");
+    expect(deploy).toContain("if (( attempt == 90 )); then");
     expect(deploy).toContain("sleep 10");
     expect(deploy).toContain('--application-id "$STAGING_CONTAINER_APPLICATION_ID"');
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
