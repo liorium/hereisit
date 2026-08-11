@@ -104,7 +104,7 @@ function processingConfig(releaseReport: string, rollout: "0" | "100") {
       MAX_PROJECTED_MONTHLY_COST_MICROUSD: "5000000",
       MAX_LIVE_COST_PER_1000_MICROUSD: "500000",
       MAINTAINER_SESSION_HASHES: "[]",
-      WEB_ORIGIN: "https://hereisit.pages.dev",
+      WEB_ORIGIN: "https://hereisit.app",
     },
     d1_databases: [{ binding: "DB", database_id: ids.prior }],
   })}\n`;

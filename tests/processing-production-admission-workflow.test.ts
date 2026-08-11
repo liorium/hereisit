@@ -60,6 +60,15 @@ describe("processing production admission workflow", () => {
     expect(workflow).not.toMatch(/cost.*\$\{\{\s*inputs\./u);
   });
 
+  it("uses only the custom production endpoints and exact legacy browser allowlist", () => {
+    expect(workflow).toContain("PRODUCTION_API_ORIGIN: https://api.hereisit.app");
+    expect(workflow).toContain("PRODUCTION_PAGES_ORIGIN: https://hereisit.app");
+    expect(workflow).toContain("LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev");
+    expect(workflow).not.toContain("hereisit-processing-production.liorium.workers.dev");
+    expect(workflow.match(/--app-origin "\$PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
+    expect(workflow.match(/--app-origin "\$LEGACY_PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
+  });
+
   it("verifies, pauses, attests, resumes, and smokes in fail-closed order", () => {
     const bind = workflow.indexOf("Bind the exact successful production canary");
     const activeDeployment = workflow.indexOf("verifyActiveWorkerDeployment");

@@ -6,7 +6,7 @@ import { canonicalJson, parseCliArguments, writeCanonicalJsonAtomic } from "./im
 import { runProcessingStagingBrowserSmoke } from "./support/processing-staging-smoke-runtime.mjs";
 
 const PROCESSING_STAGING_ORIGIN = "https://processing-staging.hereisit.pages.dev";
-const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.pages.dev";
+const PROCESSING_PRODUCTION_ORIGIN = "https://hereisit.app";
 const WEB_ANALYTICS_COLLECTION_URL = "https://cloudflareinsights.com/cdn-cgi/rum";
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
 const PUBLIC_BUCKET_ZERO_SESSION_ID = "eb8f99c7-54e5-48f0-9233-218cc5b7ffef";

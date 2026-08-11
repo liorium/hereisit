@@ -68,7 +68,7 @@ function candidate() {
       production: {
         archiveSha256: "3".repeat(64),
         treeSha256: "4".repeat(64),
-        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+        processingApiOrigin: "https://api.hereisit.app",
       },
     },
     security: { trivyDbDigest: `sha256:${"e".repeat(64)}` },
@@ -97,7 +97,7 @@ function candidate() {
           sizeBytes: 106,
           archiveSha256: "3".repeat(64),
           treeSha256: "4".repeat(64),
-          processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+          processingApiOrigin: "https://api.hereisit.app",
         },
       },
       security: securityAssets(),
@@ -138,7 +138,7 @@ describe("processing candidate reader", () => {
       "1".repeat(64),
     );
     expect(readProcessingCandidateField(manifest, "web.production.processingApiOrigin")).toBe(
-      "https://hereisit-processing-production.liorium.workers.dev",
+      "https://api.hereisit.app",
     );
   });
 

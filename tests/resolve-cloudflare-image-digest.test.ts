@@ -52,7 +52,7 @@ function finalizedCandidate() {
   const production = {
     archiveSha256: "3".repeat(64),
     treeSha256: "4".repeat(64),
-    processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+    processingApiOrigin: "https://api.hereisit.app",
   };
   const payload = {
     schema: "hereisit-processing-candidate@1",

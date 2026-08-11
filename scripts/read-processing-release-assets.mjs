@@ -143,10 +143,13 @@ function validateSecurityAssets(value, context) {
 
 function validateProcessingApiOrigin(value, environment) {
   const url = assertExactHttpsOrigin(value, `${environment} processing API origin`);
-  const pattern = new RegExp(
-    `^hereisit-processing-${environment}\\.${workersSubdomainLabel}\\.workers\\.dev$`,
-  );
-  if (!pattern.test(url.hostname)) {
+  const hostnameMatches =
+    environment === "production"
+      ? url.hostname === "api.hereisit.app"
+      : new RegExp(`^hereisit-processing-staging\\.${workersSubdomainLabel}\\.workers\\.dev$`).test(
+          url.hostname,
+        );
+  if (!hostnameMatches) {
     throw new TypeError(`${environment} processing API origin does not match the Worker script`);
   }
   return value;

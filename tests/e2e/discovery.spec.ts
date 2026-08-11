@@ -69,7 +69,7 @@ test("restores the complete tools catalog state from a shareable URL", async ({ 
   await expect(page.locator('link[rel="canonical"]')).toHaveCount(1);
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://hereisit.pages.dev/tools",
+    "https://hereisit.app/tools",
   );
 });
 
@@ -320,7 +320,7 @@ test("shows newest-first personal tools and updates favorites with ID-only stora
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://hereisit.pages.dev/my-tools",
+    "https://hereisit.app/my-tools",
   );
 });
 
@@ -377,7 +377,7 @@ test("presents workflows as honest preparation-only examples", async ({ page }) 
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
     "href",
-    "https://hereisit.pages.dev/workflows",
+    "https://hereisit.app/workflows",
   );
 });
 
@@ -385,7 +385,7 @@ test("publishes only the indexable discovery route in the sitemap", async ({ req
   const response = await request.get("/sitemap.xml");
   expect(response.ok()).toBe(true);
   const sitemap = await response.text();
-  expect(sitemap).toContain("<loc>https://hereisit.pages.dev/tools</loc>");
+  expect(sitemap).toContain("<loc>https://hereisit.app/tools</loc>");
   expect(sitemap).not.toContain("/my-tools");
   expect(sitemap).not.toContain("/workflows");
   expect(sitemap).not.toContain("/media/video-compress");

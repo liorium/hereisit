@@ -95,9 +95,15 @@ describe("processing production workflow", () => {
     expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
     expect(workflow).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
     expect(workflow).toContain('NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN"');
+    expect(workflow).toContain("PRODUCTION_API_ORIGIN: https://api.hereisit.app");
+    expect(workflow.match(/PRODUCTION_PAGES_ORIGIN: https:\/\/hereisit\.app/g)).toHaveLength(2);
+    expect(workflow).toContain("LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev");
+    expect(workflow).not.toContain("hereisit-processing-production.liorium.workers.dev");
+    expect(workflow.match(/--app-origin "\$PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
+    expect(workflow.match(/--app-origin "\$LEGACY_PRODUCTION_PAGES_ORIGIN"/g)).toHaveLength(1);
     expect(workflow).toContain("wrangler pages deploy apps/web/out");
     expect(workflow).toContain("--branch main");
-    expect(workflow).toContain('--stable-url "$PRODUCTION_PAGES_ORIGIN"');
+    expect(workflow).toContain('--stable-url "$LEGACY_PRODUCTION_PAGES_ORIGIN"');
     expect(workflow).toContain("for (let attempt = 1; attempt <= 60; attempt += 1)");
     expect(workflow).toContain("if (attempt < 60) await delay(2_000)");
     expect(workflow).toContain(

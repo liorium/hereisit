@@ -211,6 +211,10 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 
 ## Release proof
 
+The official production web origin is `https://hereisit.app`, and production server processing uses
+`https://api.hereisit.app`. The legacy Pages and `workers.dev` origins remain temporary compatibility
+and recovery endpoints; new production web builds do not use the legacy API origin.
+
 After serving `apps/web/out` through the local Pages runtime, four tracked browser smokes prove scalable
 navigation, image watermarking, and both PDF raster paths without uploading fixtures:
 

@@ -77,7 +77,7 @@ function validInput(environment: "staging" | "production" = "staging") {
             "http://localhost:4173",
             "https://processing-staging.hereisit.pages.dev",
           ]
-        : ["https://hereisit.pages.dev"],
+        : ["https://hereisit.app", "https://hereisit.pages.dev"],
     bucketName: `hereisit-processing-${suffix}`,
     usageLogBucketName: `hereisit-processing-usage-${suffix}`,
     usageAnalyticsDatasetName: `hereisit_processing_usage_${suffix}`,
@@ -339,12 +339,48 @@ describe("processing Wrangler generator", () => {
 
     const config = generateProcessingWrangler(input);
     expect(config.workers_dev).toBe(true);
+    expect(config.routes).toEqual([{ pattern: "api.hereisit.app", custom_domain: true }]);
+    expect(config.vars.APP_ORIGINS).toBe('["https://hereisit.app","https://hereisit.pages.dev"]');
     expect(config.vars).toMatchObject({
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: "0",
       ANONYMOUS_DAILY_WEIGHTED_UNIT_LIMIT: "0",
       NETWORK_DAILY_WEIGHTED_UNIT_LIMIT: "0",
       IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "0",
     });
+  });
+
+  it("keeps staging off production domains and production off redirect or staging origins", () => {
+    expect(generateProcessingWrangler(validInput()).routes).toBeUndefined();
+    for (const productionOrigin of ["https://hereisit.app", "https://hereisit.pages.dev"]) {
+      expect(() =>
+        generateProcessingWrangler({
+          ...validInput(),
+          appOrigins: [...validInput().appOrigins, productionOrigin],
+        }),
+      ).toThrow(/staging|production origin/i);
+    }
+    for (const invalidProductionOrigin of [
+      "https://www.hereisit.app",
+      "https://processing-staging.hereisit.pages.dev",
+    ]) {
+      expect(() =>
+        generateProcessingWrangler({
+          ...validInput("production"),
+          appOrigins: ["https://hereisit.app", invalidProductionOrigin],
+        }),
+      ).toThrow(/production|origin/i);
+    }
+    for (const incompleteOrForeignOrigins of [
+      ["https://hereisit.app"],
+      ["https://hereisit.app", "https://example.com"],
+    ]) {
+      expect(() =>
+        generateProcessingWrangler({
+          ...validInput("production"),
+          appOrigins: incompleteOrForeignOrigins,
+        }),
+      ).toThrow(/production origins/i);
+    }
   });
 
   it("permits a rollout-zero bootstrap before Cloudflare assigns the Container application ID", () => {

@@ -102,7 +102,7 @@ function candidateDocument() {
       production: {
         archiveSha256: "3".repeat(64),
         treeSha256: "4".repeat(64),
-        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+        processingApiOrigin: "https://api.hereisit.app",
       },
     },
     security: { trivyDbDigest: `sha256:${"9".repeat(64)}` },
@@ -147,7 +147,7 @@ function candidateDocument() {
           sizeBytes: 1107,
           archiveSha256: "3".repeat(64),
           treeSha256: "4".repeat(64),
-          processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+          processingApiOrigin: "https://api.hereisit.app",
         },
       },
       security: securityAssets(),
@@ -202,7 +202,7 @@ function releaseManifest(candidateBytes: Uint8Array) {
         ...asset(107, "web-production.tar", "3".repeat(64)),
         archiveSha256: "3".repeat(64),
         treeSha256: "4".repeat(64),
-        processingApiOrigin: "https://hereisit-processing-production.liorium.workers.dev",
+        processingApiOrigin: "https://api.hereisit.app",
       },
     },
     evidence: {
@@ -255,7 +255,7 @@ describe("processing release asset reader", () => {
         candidateRoot,
         "web.production.processingApiOrigin",
       ),
-    ).toBe("https://hereisit-processing-production.liorium.workers.dev");
+    ).toBe("https://api.hereisit.app");
     expect(
       await readProcessingReleaseAssetField(
         manifest,

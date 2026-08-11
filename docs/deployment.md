@@ -8,6 +8,10 @@ destructive, while structure-preserving general PDF compression is not provided.
 self-hosted PDF.js 6.2.108 parser Worker, CMap, and standard-font files, with no CDN, WASM, upload, or
 server fallback.
 
+The official production web origin is `https://hereisit.app`; `https://www.hereisit.app` redirects to
+the apex, and `https://api.hereisit.app` is the production processing API. The legacy Pages and
+`workers.dev` origins remain available only for migration compatibility and recovery.
+
 The compressor's fixed presets are balanced 150DPI/JPEG quality 72/white and minimum 96DPI/JPEG quality
 55/white. It accepts one 1-byte–50MiB PDF with 1–100 pages and offers a result only when the final PDF is
 at most `sourceBytes - max(1, ceil(sourceBytes / 100))`. It plans CropBox/rotation/UserUnit-aware visible
@@ -51,7 +55,7 @@ node scripts/smoke-pdf-compress.mjs http://127.0.0.1:3000
 node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
-Without an argument, each command targets https://hereisit.pages.dev. The navigation smoke checks six
+Without an argument, each command targets https://hereisit.app. The navigation smoke checks six
 release routes, exact security headers, catalog/header/search behavior, representative detail shells, and
 read-only same-origin traffic. The image-watermark smoke creates a local 320×180 PNG, verifies the default
 text settings and security headers, proves that processing starts no download or upload, then explicitly
@@ -163,15 +167,16 @@ GitHub Actions deploy workflow, or server runtime is required.
 - Browser network activity contains no external upload or write request.
 - A pull request receives its own preview URL and deployment status check.
 
-After these pass, add a custom domain from the Pages project Custom domains screen if desired.
-Cloudflare provisions the TLS certificate automatically after DNS validation.
+The Pages project must list `hereisit.app` as an active custom domain before a production release. The
+production Worker must likewise retain the active `api.hereisit.app` custom domain; do not replace either
+with a proxy or disable the legacy compatibility origins in the same release.
 
 For a production release, run all four tracked smokes only after the current GitHub CI and Cloudflare
 Pages production deployment have succeeded for the exact merge SHA:
 
 ~~~bash
-node scripts/smoke-navigation.mjs https://hereisit.pages.dev
-node scripts/smoke-image-watermark.mjs https://hereisit.pages.dev
-node scripts/smoke-pdf-compress.mjs https://hereisit.pages.dev
-node scripts/smoke-pdf-to-images.mjs https://hereisit.pages.dev
+node scripts/smoke-navigation.mjs https://hereisit.app
+node scripts/smoke-image-watermark.mjs https://hereisit.app
+node scripts/smoke-pdf-compress.mjs https://hereisit.app
+node scripts/smoke-pdf-to-images.mjs https://hereisit.app
 ~~~

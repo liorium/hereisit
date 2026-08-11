@@ -71,6 +71,9 @@ describe("aggregate product analytics report", () => {
       end: "2026-08-06T12:00:00.000Z",
       host: "processing-staging.hereisit.pages.dev",
     });
+    expect(buildWebAnalyticsRequest(accountId, "production", 7, now).variables.host).toBe(
+      "hereisit.app",
+    );
   });
 
   it("returns only bounded aggregate estimates and funnel ratios", async () => {

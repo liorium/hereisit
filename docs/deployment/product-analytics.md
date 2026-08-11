@@ -49,7 +49,7 @@ Playwright를 실행하지 않는다. 실패 시 개인정보 안전 CI artifact
 Cloudflare에서 **Workers & Pages → hereisit → Metrics → Web Analytics → Enable**을 선택한다. 수동 beacon
 코드는 붙이지 않는다. 다음 Pages 배포부터 Cloudflare가 자동으로 주입한다.
 
-`*.pages.dev` 배포의 beacon은 `https://cloudflareinsights.com/cdn-cgi/rum`으로 전송되므로 생성 CSP의
+Pages 배포의 beacon은 `https://cloudflareinsights.com/cdn-cgi/rum`으로 전송되므로 생성 CSP의
 `connect-src`에는 이 정확한 수집 origin만 허용한다.
 
 스테이징은 기존 GitHub 배포 경로의 `processing-staging` 브랜치를 사용한다.
@@ -63,7 +63,7 @@ curl -fsS https://processing-staging.hereisit.pages.dev/ | rg -F 'https://static
 운영 호스트에서 확인하고, 허용된 네 이벤트와 고정된 집계 차원만 점검한다.
 
 ```bash
-curl -fsS https://hereisit.pages.dev/privacy >/dev/null
-curl -fsS https://hereisit.pages.dev/ | rg -F 'https://static.cloudflareinsights.com/beacon.min.js'
+curl -fsS https://hereisit.app/privacy >/dev/null
+curl -fsS https://hereisit.app/ | rg -F 'https://static.cloudflareinsights.com/beacon.min.js'
 pnpm analytics:report -- --environment production --days 1
 ```

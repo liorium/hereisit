@@ -260,7 +260,7 @@ async function createCandidateFixture() {
   const productionIdentity = {
     archiveSha256: production.archiveSha256,
     treeSha256: production.treeSha256,
-    processingApiOrigin: "https://hereisit-processing-production.example.workers.dev",
+    processingApiOrigin: "https://api.hereisit.app",
   };
   const payload = {
     schema: "hereisit-processing-candidate@1",
