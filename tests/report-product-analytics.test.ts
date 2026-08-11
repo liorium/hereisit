@@ -175,6 +175,81 @@ describe("aggregate product analytics report", () => {
     );
   });
 
+  it("accepts Cloudflare count strings and unavailable Web Vitals", async () => {
+    const web = webResponse();
+    const quantiles = web.data.viewer.accounts[0]?.vitals[0]?.quantiles;
+    if (quantiles === undefined) throw new Error("invalid test fixture");
+    quantiles.largestContentfulPaintP75 = -1;
+    quantiles.interactionToNextPaintP75 = -1;
+    quantiles.cumulativeLayoutShiftP75 = -1;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          data: [
+            {
+              tool_id: "image.compress",
+              event: "processing-succeeded",
+              duration: "lt-1s",
+              failure: "",
+              event_count: "6",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json(web));
+
+    const report = await createProductAnalyticsReport({
+      accountId,
+      token,
+      environment: "production",
+      days: 1,
+      now,
+      fetcher,
+    });
+
+    expect(report.product.event_counts).toEqual([
+      {
+        tool_id: "image.compress",
+        event: "processing-succeeded",
+        duration: "lt-1s",
+        failure: "",
+        count: 6,
+      },
+    ]);
+    expect(report.web.web_vitals_p75).toEqual({ lcp_ms: null, inp_ms: null, cls: null });
+  });
+
+  it("rejects noncanonical Cloudflare count strings", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        json({
+          data: [
+            {
+              tool_id: "image.compress",
+              event: "processing-succeeded",
+              duration: "lt-1s",
+              failure: "",
+              event_count: "6e1",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(json(webResponse()));
+
+    await expect(
+      createProductAnalyticsReport({
+        accountId,
+        token,
+        environment: "production",
+        days: 1,
+        now,
+        fetcher,
+      }),
+    ).rejects.toThrow(/^Cloudflare analytics response is invalid$/);
+  });
+
   it("keeps provider failures and oversized responses out of diagnostics", async () => {
     const providerBody = `provider leaked ${token}`;
     const failed = vi

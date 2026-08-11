@@ -99,6 +99,13 @@ function finiteNumber(value, minimum = 0) {
   return value;
 }
 
+function eventCount(value) {
+  const count =
+    typeof value === "string" && /^(?:0|[1-9]\d{0,15})$/.test(value) ? Number(value) : value;
+  if (!Number.isSafeInteger(count)) throw new TypeError("invalid response");
+  return finiteNumber(count);
+}
+
 function boundedString(value) {
   if (typeof value !== "string" || value.length > 2048) throw new TypeError("invalid response");
   return value;
@@ -200,14 +207,13 @@ function parseProductRows(value) {
     const event = boundedString(row.event);
     const duration = boundedString(row.duration);
     const failure = boundedString(row.failure);
-    const count = finiteNumber(row.event_count);
+    const count = eventCount(row.event_count);
     if (
       !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(toolId) ||
       toolId.length > 64 ||
       !EVENT_NAMES.has(event) ||
       !DURATIONS.has(duration) ||
-      !FAILURES.has(failure) ||
-      !Number.isSafeInteger(count)
+      !FAILURES.has(failure)
     ) {
       throw new TypeError("invalid response");
     }
@@ -292,7 +298,9 @@ function parseWebAnalytics(value) {
   const quantiles =
     vitalValue === undefined ? null : assertRecord(assertRecord(vitalValue).quantiles);
   const metric = (metricValue, divisor = 1) =>
-    metricValue === null || metricValue === undefined ? null : finiteNumber(metricValue) / divisor;
+    metricValue === null || metricValue === undefined || metricValue === -1
+      ? null
+      : finiteNumber(metricValue) / divisor;
   return {
     estimates: true,
     sample_interval: sampleInterval,

@@ -23,7 +23,7 @@ Web Analytics 사이트 설정은 Cloudflare 대시보드에서 확인하며 배
 ```bash
 test -n "$CLOUDFLARE_ACCOUNT_ID"
 test -n "$CLOUDFLARE_ANALYTICS_READ_TOKEN"
-pnpm analytics:report -- --environment production --days 7
+pnpm analytics:report --environment production --days 7
 ```
 
 `--environment`는 `staging` 또는 `production`, `--days`는 `1`부터 `90`까지다. 명령은
@@ -65,5 +65,5 @@ curl -fsS https://processing-staging.hereisit.pages.dev/ | rg -F 'https://static
 ```bash
 curl -fsS https://hereisit.app/privacy >/dev/null
 curl -fsS https://hereisit.app/ | rg -F 'https://static.cloudflareinsights.com/beacon.min.js'
-pnpm analytics:report -- --environment production --days 1
+pnpm analytics:report --environment production --days 1
 ```
