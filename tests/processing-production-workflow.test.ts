@@ -32,6 +32,19 @@ describe("processing production workflow", () => {
     expect(workflow).not.toContain("sha256sum");
   });
 
+  it("lets the provider clock settle before final version attestation", () => {
+    const finalSnapshot = workflow.indexOf("> .artifacts/runtime/versions-after-final.json");
+    const clockBoundary = workflow.indexOf("sleep 10", finalSnapshot);
+    const finalAttestation = workflow.indexOf(
+      "node scripts/verify-worker-version-chain.mjs \\",
+      finalSnapshot,
+    );
+
+    expect(finalSnapshot).toBeGreaterThanOrEqual(0);
+    expect(clockBoundary).toBeGreaterThan(finalSnapshot);
+    expect(finalAttestation).toBeGreaterThan(clockBoundary);
+  });
+
   it("keeps production isolated and admits only the maintainer canary", () => {
     for (const value of [
       "hereisit-processing-production",
