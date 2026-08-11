@@ -38,7 +38,7 @@ env:
   PRODUCTION_API_ORIGIN: https://api.hereisit.app
   PRODUCTION_PAGES_ORIGIN: https://hereisit.app
   LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
-  CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
+  CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "5000000000"
 
 jobs:
   promote:

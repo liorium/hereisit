@@ -47,7 +47,7 @@ jobs:
       PRODUCTION_API_ORIGIN: https://api.hereisit.app
       PRODUCTION_PAGES_ORIGIN: https://hereisit.app
       LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev
-      CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "2502994560"
+      CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "5000000000"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

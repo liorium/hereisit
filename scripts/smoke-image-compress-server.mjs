@@ -44,6 +44,7 @@ const safeFailures = new Set([
   `${stableFailure} [job-create-network-rate-limit]`,
   `${stableFailure} [job-create-session-rate-limit]`,
   `${stableFailure} [job-create-application-unscoped-rate-limit]`,
+  `${stableFailure} [job-create-quota]`,
   `${stableFailure} [job-create-upstream-rate-limit]`,
   `${stableFailure} [job-create-unknown-rate-limit]`,
   `${stableFailure} [job-create-503]`,
@@ -103,16 +104,16 @@ export function summarizeSmokeRequests(requests) {
 
 export function classifyJobCreateRateLimit({ scope, body }) {
   if (scope === "network" || scope === "session") return scope;
-  if (
+  const errorCode =
     body !== null &&
     typeof body === "object" &&
     body.contract === "tool-job@1" &&
     body.error !== null &&
-    typeof body.error === "object" &&
-    body.error.code === "RATE_LIMITED"
-  ) {
-    return "application-unscoped";
-  }
+    typeof body.error === "object"
+      ? body.error.code
+      : null;
+  if (errorCode === "RATE_LIMITED") return "application-unscoped";
+  if (errorCode === "QUOTA_EXCEEDED") return "quota";
   return "upstream";
 }
 
@@ -408,6 +409,9 @@ async function assertServerJob(
         }
         if (classification === "application-unscoped") {
           throw new Error(`${stableFailure} [job-create-application-unscoped-rate-limit]`);
+        }
+        if (classification === "quota") {
+          throw new Error(`${stableFailure} [job-create-quota]`);
         }
         if (classification === "upstream") {
           throw new Error(`${stableFailure} [job-create-upstream-rate-limit]`);
