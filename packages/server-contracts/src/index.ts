@@ -1,16 +1,27 @@
-import type { ImageOptimizeSpecV1, ImageOptimizeWarningCode } from "@hereisit/tool-contracts";
+import type {
+  ImageOptimizeSpecV1,
+  ImageOptimizeWarningCode,
+  PdfOptimizeResultDescriptor,
+  PdfOptimizeSpecV1,
+} from "@hereisit/tool-contracts";
 import {
   IMAGE_OPTIMIZE_MAX_FILE_BYTES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
   imageOptimizeMimeSchema,
   imageOptimizeSpecV1Schema,
   imageOptimizeWarningCodeSchema,
+  PDF_OPTIMIZE_MAX_FILE_BYTES,
+  PDF_OPTIMIZE_MAX_PAGES,
+  pdfOptimizeMimeSchema,
+  pdfOptimizeResultDescriptorSchema,
+  pdfOptimizeSpecV1Schema,
 } from "@hereisit/tool-contracts";
 import { z } from "zod";
 
 export type ImageResourceClass = "image-standard-v1" | "image-large-v1";
 export type ImageJobAttempt = 1 | 2 | 3;
 export const IMAGE_ENGINE_MAX_TESTED_CANDIDATES = 3 as const;
+export const PDF_ENGINE_MAX_TESTED_CANDIDATES = 2 as const;
 
 export type ImageContentClass =
   | "photo"
@@ -33,7 +44,7 @@ export interface ImageJobMessage {
   queueGeneration: number;
 }
 
-export interface EngineCreateJobRequest {
+export interface ImageEngineCreateJobRequest {
   protocol: 1;
   jobId: string;
   attempt: ImageJobAttempt;
@@ -102,7 +113,7 @@ export type EngineResult =
       warnings: readonly ["ORIGINAL_RETAINED_UNMODIFIED", ...ImageOptimizeWarningCode[]];
     };
 
-export type EngineJobStatus =
+export type ImageEngineJobStatus =
   | {
       protocol: 1;
       jobId: string;
@@ -233,7 +244,32 @@ export const imageJobMessageSchema = z
   })
   .strict();
 
-export const engineCreateJobRequestSchema = z
+export const pdfResourceClassSchema = z.literal("pdf-standard-v1");
+
+export const pdfJobMessageSchema = z
+  .object({
+    jobId: uuidSchema,
+    contractId: z.literal("pdf.optimize@1"),
+    specHash: specHashSchema,
+    inputKey: inputObjectKeySchema,
+    inputEtag: safeEtagSchema,
+    outputKey: outputObjectKeySchema,
+    resourceClass: pdfResourceClassSchema,
+    attempt: imageJobAttemptSchema,
+    queueEpoch: uuidSchema,
+    queueGeneration: nonNegativeSafeIntegerSchema,
+  })
+  .strict();
+
+export type PdfJobMessage = z.infer<typeof pdfJobMessageSchema>;
+export type ServerJobMessage = ImageJobMessage | PdfJobMessage;
+
+export const serverJobMessageSchema = z.discriminatedUnion("contractId", [
+  imageJobMessageSchema,
+  pdfJobMessageSchema,
+]);
+
+export const imageEngineCreateJobRequestSchema = z
   .object({
     protocol: z.literal(1),
     jobId: uuidSchema,
@@ -252,6 +288,56 @@ export const engineCreateJobRequestSchema = z
     resourceClass: imageResourceClassSchema,
   })
   .strict();
+
+export const engineCreatePdfJobRequestSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    attempt: imageJobAttemptSchema,
+    tool: z.literal("pdf.optimize"),
+    toolVersion: z.literal(1),
+    spec: pdfOptimizeSpecV1Schema,
+    specHash: specHashSchema,
+    input: z
+      .object({
+        byteLength: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_FILE_BYTES),
+        etag: safeEtagSchema,
+        mimeHint: pdfOptimizeMimeSchema,
+        pageCount: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES),
+      })
+      .strict(),
+    resourceClass: pdfResourceClassSchema,
+  })
+  .strict();
+
+export interface EngineCreatePdfJobRequest {
+  protocol: 1;
+  jobId: string;
+  attempt: ImageJobAttempt;
+  tool: "pdf.optimize";
+  toolVersion: 1;
+  spec: PdfOptimizeSpecV1;
+  specHash: string;
+  input: {
+    byteLength: number;
+    etag: string;
+    mimeHint: "application/pdf";
+    pageCount: number;
+  };
+  resourceClass: "pdf-standard-v1";
+}
+
+export const serverEngineCreateJobRequestSchema = z.discriminatedUnion("tool", [
+  imageEngineCreateJobRequestSchema,
+  engineCreatePdfJobRequestSchema,
+]);
+
+export const anyEngineCreateJobRequestSchema = serverEngineCreateJobRequestSchema;
+export const engineCreateJobRequestSchema = imageEngineCreateJobRequestSchema;
+
+export type ServerEngineCreateJobRequest = ImageEngineCreateJobRequest | EngineCreatePdfJobRequest;
+export type AnyEngineCreateJobRequest = ServerEngineCreateJobRequest;
+export type EngineCreateJobRequest = ImageEngineCreateJobRequest;
 
 export const engineMeasurementsSchema = z
   .object({
@@ -403,7 +489,7 @@ const cancelledEngineJobStatusSchema = z
   })
   .strict();
 
-export const engineJobStatusSchema = z
+export const imageEngineJobStatusSchema = z
   .discriminatedUnion("state", [
     inactiveEngineJobStatusSchema,
     runningEngineJobStatusSchema,
@@ -435,3 +521,226 @@ export const engineJobStatusSchema = z
       });
     }
   });
+
+export type PdfEnginePhase = "validating" | "optimizing" | "verifying" | "preparing-output";
+
+export interface PdfEngineMeasurements {
+  processedInputBytes: number;
+  cpuMs: number;
+  memoryByteMilliseconds: number;
+  peakMemoryBytes: number;
+  testedCandidates: number;
+  processingMs: number;
+}
+
+export interface PdfEngineInspectionSummary {
+  verifiedInputMime: "application/pdf";
+  verifiedPageCount: number;
+  encrypted: false;
+}
+
+export type PdfEngineResult = PdfOptimizeResultDescriptor;
+
+export type PdfEngineJobStatus =
+  | {
+      protocol: 1;
+      jobId: string;
+      state: "created" | "uploading" | "ready";
+      phase: null;
+      fraction: null;
+      sequence: number;
+    }
+  | {
+      protocol: 1;
+      jobId: string;
+      state: "running";
+      phase: PdfEnginePhase;
+      fraction: number | null;
+      sequence: number;
+    }
+  | {
+      protocol: 1;
+      jobId: string;
+      state: "succeeded";
+      phase: "preparing-output";
+      fraction: 1;
+      sequence: number;
+      result: PdfEngineResult;
+      inspection: PdfEngineInspectionSummary;
+      measurements: PdfEngineMeasurements;
+    }
+  | {
+      protocol: 1;
+      jobId: string;
+      state: "failed";
+      phase: PdfEnginePhase | null;
+      fraction: number | null;
+      sequence: number;
+      measurements: PdfEngineMeasurements;
+      inspection: PdfEngineInspectionSummary | null;
+      error: {
+        code:
+          | "UNSUPPORTED_INPUT"
+          | "UNSUPPORTED_FEATURE"
+          | "INPUT_LIMIT_EXCEEDED"
+          | "RESOURCE_CLASS_UPGRADE"
+          | "ENGINE_TIMEOUT"
+          | "ENGINE_OOM"
+          | "ENGINE_CRASH"
+          | "VERIFICATION_FAILED";
+        retryable: boolean;
+        guidance?: "TRY_BALANCED_PRESET";
+      };
+    }
+  | {
+      protocol: 1;
+      jobId: string;
+      state: "cancelled";
+      phase: PdfEnginePhase | null;
+      fraction: number | null;
+      sequence: number;
+      measurements: PdfEngineMeasurements;
+      inspection: PdfEngineInspectionSummary | null;
+      error: {
+        code: "CANCELLED";
+        retryable: false;
+      };
+    };
+
+export const pdfEnginePhaseSchema = z.enum([
+  "validating",
+  "optimizing",
+  "verifying",
+  "preparing-output",
+]);
+
+export const pdfEngineMeasurementsSchema = z
+  .object({
+    processedInputBytes: nonNegativeSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_FILE_BYTES),
+    cpuMs: nonNegativeSafeIntegerSchema,
+    memoryByteMilliseconds: nonNegativeSafeIntegerSchema,
+    peakMemoryBytes: nonNegativeSafeIntegerSchema,
+    testedCandidates: nonNegativeSafeIntegerSchema.max(PDF_ENGINE_MAX_TESTED_CANDIDATES),
+    processingMs: nonNegativeSafeIntegerSchema,
+  })
+  .strict();
+
+export const pdfEngineInspectionSummarySchema = z
+  .object({
+    verifiedInputMime: pdfOptimizeMimeSchema,
+    verifiedPageCount: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES),
+    encrypted: z.literal(false),
+  })
+  .strict();
+
+const inactivePdfEngineJobStatusSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    state: z.enum(["created", "uploading", "ready"]),
+    phase: z.null(),
+    fraction: z.null(),
+    sequence: nonNegativeSafeIntegerSchema,
+  })
+  .strict();
+
+const runningPdfEngineJobStatusSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    state: z.literal("running"),
+    phase: pdfEnginePhaseSchema,
+    fraction: fractionSchema.nullable(),
+    sequence: nonNegativeSafeIntegerSchema,
+  })
+  .strict();
+
+const succeededPdfEngineJobStatusSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    state: z.literal("succeeded"),
+    phase: z.literal("preparing-output"),
+    fraction: z.literal(1),
+    sequence: nonNegativeSafeIntegerSchema,
+    result: pdfOptimizeResultDescriptorSchema,
+    inspection: pdfEngineInspectionSummarySchema,
+    measurements: pdfEngineMeasurementsSchema,
+  })
+  .strict()
+  .superRefine((status, context) => {
+    if (status.result.pageCount !== status.inspection.verifiedPageCount) {
+      context.addIssue({
+        code: "custom",
+        message: "Result and inspection page counts must match.",
+        path: ["result", "pageCount"],
+      });
+    }
+  });
+
+const pdfEngineFailureCodeSchema = z.enum([
+  "UNSUPPORTED_INPUT",
+  "UNSUPPORTED_FEATURE",
+  "INPUT_LIMIT_EXCEEDED",
+  "RESOURCE_CLASS_UPGRADE",
+  "ENGINE_TIMEOUT",
+  "ENGINE_OOM",
+  "ENGINE_CRASH",
+  "VERIFICATION_FAILED",
+]);
+
+const failedPdfEngineJobStatusSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    state: z.literal("failed"),
+    phase: pdfEnginePhaseSchema.nullable(),
+    fraction: fractionSchema.nullable(),
+    sequence: nonNegativeSafeIntegerSchema,
+    measurements: pdfEngineMeasurementsSchema,
+    inspection: pdfEngineInspectionSummarySchema.nullable(),
+    error: z
+      .object({
+        code: pdfEngineFailureCodeSchema,
+        retryable: z.boolean(),
+        guidance: z.literal("TRY_BALANCED_PRESET").optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const cancelledPdfEngineJobStatusSchema = z
+  .object({
+    protocol: z.literal(1),
+    jobId: uuidSchema,
+    state: z.literal("cancelled"),
+    phase: pdfEnginePhaseSchema.nullable(),
+    fraction: fractionSchema.nullable(),
+    sequence: nonNegativeSafeIntegerSchema,
+    measurements: pdfEngineMeasurementsSchema,
+    inspection: pdfEngineInspectionSummarySchema.nullable(),
+    error: z
+      .object({
+        code: z.literal("CANCELLED"),
+        retryable: z.literal(false),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const pdfEngineJobStatusSchema = z.discriminatedUnion("state", [
+  inactivePdfEngineJobStatusSchema,
+  runningPdfEngineJobStatusSchema,
+  succeededPdfEngineJobStatusSchema,
+  failedPdfEngineJobStatusSchema,
+  cancelledPdfEngineJobStatusSchema,
+]);
+
+export const serverEngineJobStatusSchema = z.union([
+  imageEngineJobStatusSchema,
+  pdfEngineJobStatusSchema,
+]);
+
+export type ServerEngineJobStatus = ImageEngineJobStatus | PdfEngineJobStatus;
+export type EngineJobStatus = ImageEngineJobStatus;
+export const engineJobStatusSchema = imageEngineJobStatusSchema;

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./image-optimize";
+export * from "./pdf-optimize";
 export * from "./product-usage";
 export * from "./tool-job";
 

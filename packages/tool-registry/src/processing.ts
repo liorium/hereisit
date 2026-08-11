@@ -4,6 +4,11 @@ import {
   IMAGE_OPTIMIZE_MAX_FILES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
 } from "@hereisit/tool-contracts/image-optimize";
+import {
+  PDF_OPTIMIZE_CONTRACT_ID,
+  PDF_OPTIMIZE_MAX_FILE_BYTES,
+  PDF_OPTIMIZE_MAX_PAGES,
+} from "@hereisit/tool-contracts/pdf-optimize";
 
 export interface ProcessingManifest {
   toolId: "image.compress";
@@ -57,3 +62,49 @@ export const imageCompressionProcessingManifest = Object.freeze({
   safeFallback: "browser.same-format",
   rolloutFlag: "image-compress-server",
 } as const satisfies ProcessingManifest);
+
+export interface PdfProcessingManifest {
+  toolId: "pdf.compress";
+  contractId: "pdf.optimize@1";
+  accepts: readonly ["application/pdf"];
+  emits: "application/pdf";
+  locations: readonly ["server-native", "browser"];
+  limits: {
+    maxFiles: 1;
+    maxBytesPerFile: 52_428_800;
+    maxPagesPerFile: 100;
+    maxConcurrentPerAnonymousSession: 1;
+  };
+  resourceClass: "pdf-standard-v1";
+  retention: ProcessingManifest["retention"];
+  verifier: "pdf.optimize@1";
+  safeFallback: "browser.pdf-compress-scanned";
+  rolloutFlag: "pdf-compress-server";
+}
+
+export const pdfCompressionProcessingManifest = Object.freeze({
+  toolId: "pdf.compress",
+  contractId: PDF_OPTIMIZE_CONTRACT_ID,
+  accepts: Object.freeze(["application/pdf"] as const),
+  emits: "application/pdf",
+  locations: Object.freeze(["server-native", "browser"] as const),
+  limits: Object.freeze({
+    maxFiles: 1,
+    maxBytesPerFile:
+      PDF_OPTIMIZE_MAX_FILE_BYTES as PdfProcessingManifest["limits"]["maxBytesPerFile"],
+    maxPagesPerFile: PDF_OPTIMIZE_MAX_PAGES,
+    maxConcurrentPerAnonymousSession: 1,
+  }),
+  resourceClass: "pdf-standard-v1",
+  retention: Object.freeze({
+    uploadDeadlineSeconds: 600,
+    resultDeadlineSeconds: 1800,
+    sweepSeconds: 300,
+    resultDeletionSloSeconds: 2100,
+    lifecycleExpirationDays: 1,
+    hardMaximum: false,
+  }),
+  verifier: PDF_OPTIMIZE_CONTRACT_ID,
+  safeFallback: "browser.pdf-compress-scanned",
+  rolloutFlag: "pdf-compress-server",
+} as const satisfies PdfProcessingManifest);
