@@ -22,6 +22,9 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain(`run-id: \${{ github.event.workflow_run.id }}`);
     expect(workflow).toContain(`ref: \${{ github.event.workflow_run.head_sha }}`);
     expect(workflow).toContain(
+      `PRODUCTION_RUN_ATTEMPT: \${{ github.event.workflow_run.run_attempt }}`,
+    );
+    expect(workflow).toContain(
       'test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
     );
     expect(workflow).toContain(
@@ -48,7 +51,6 @@ describe("processing production admission workflow", () => {
       "--network-pending-job-limit 3",
       "--maximum-queued-age-seconds 600",
       "--session-rate-limit-namespace-id 22001",
-      "--network-rate-limit-namespace-id 22002",
       "--job-read-rate-limit-namespace-id 22003",
       "--result-download-rate-limit-namespace-id 22004",
       "--policy-rate-limit-namespace-id 22005",
@@ -57,6 +59,13 @@ describe("processing production admission workflow", () => {
     ]) {
       expect(workflow).toContain(value);
     }
+    expect(workflow).toContain(
+      `network_rate_limit_namespace_id="\${PRODUCTION_RUN_ID}\${PRODUCTION_RUN_ATTEMPT}"`,
+    );
+    expect(workflow).toContain("network_rate_limit_namespace_id=22002");
+    expect(workflow).toContain(
+      '--network-rate-limit-namespace-id "$network_rate_limit_namespace_id"',
+    );
     expect(workflow).not.toMatch(/rollout.*\$\{\{\s*inputs\./u);
     expect(workflow).not.toMatch(/cost.*\$\{\{\s*inputs\./u);
   });

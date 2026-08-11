@@ -55,6 +55,7 @@ jobs:
     env:
       EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       PRODUCTION_RUN_ID: ${{ github.event.workflow_run.id }}
+      PRODUCTION_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -81,6 +82,7 @@ jobs:
           umask 077
           [[ "$EXPECTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PRODUCTION_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$PRODUCTION_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           test -z "$(git status --porcelain)"
           test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
@@ -180,11 +182,13 @@ jobs:
             --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
           generate_config() {
-            local rollout_args
+            local network_rate_limit_namespace_id rollout_args
             if [[ "$1" == current ]]; then
               rollout_args=(--rollout-percent 0)
+              network_rate_limit_namespace_id="${PRODUCTION_RUN_ID}${PRODUCTION_RUN_ATTEMPT}"
             elif [[ "$1" == public ]]; then
               rollout_args=(--rollout-percent 100)
+              network_rate_limit_namespace_id=22002
             else
               return 1
             fi
@@ -210,7 +214,8 @@ jobs:
               --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
               --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
               --release-report-sha256 "$SOURCE_SHA256" \
-              --session-rate-limit-namespace-id 22001 --network-rate-limit-namespace-id 22002 \
+              --session-rate-limit-namespace-id 22001 \
+              --network-rate-limit-namespace-id "$network_rate_limit_namespace_id" \
               --job-read-rate-limit-namespace-id 22003 --result-download-rate-limit-namespace-id 22004 \
               --policy-rate-limit-namespace-id 22005 --job-api-network-rate-limit-namespace-id 22006 \
               --product-analytics-rate-limit-namespace-id 22007 \
