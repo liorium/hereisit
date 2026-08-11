@@ -7,19 +7,6 @@ import {
 } from "../scripts/resolve-previous-active-worker-version.mjs";
 
 const activeId = "11111111-2222-3333-4444-555555555555";
-const version = {
-  id: activeId,
-  number: 1,
-  metadata: {
-    author_email: "",
-    author_id: "a".repeat(32),
-    created_on: "2026-07-22T00:00:00.000Z",
-    has_preview: false,
-    source: "wrangler",
-  },
-  annotations: { "workers/triggered_by": "upload" },
-};
-
 function row(overrides: Record<string, unknown> = {}) {
   return {
     rowCount: 1,
@@ -54,7 +41,7 @@ describe("previous active Worker version resolution", () => {
         accountId: "a".repeat(32),
         databaseId: activeId,
         apiToken: "deployment-token",
-        before: [version],
+        deployment: { versions: [{ version_id: activeId, percentage: 100 }] },
         fetchImpl,
       }),
     ).resolves.toBe(activeId);
@@ -93,7 +80,7 @@ describe("previous active Worker version resolution", () => {
         accountId: "a".repeat(32),
         databaseId: activeId,
         apiToken: "deployment-token",
-        before: [],
+        deployment: { versions: [] },
         fetchImpl,
       }),
     ).resolves.toBe("none");
@@ -103,13 +90,18 @@ describe("previous active Worker version resolution", () => {
     expect(
       resolvePreviousActiveWorkerVersion({
         rows: [row({ rowCount: 0, activeCount: 0, versionId: null, publicAdmissionAllowed: null })],
-        before: [],
+        deployment: { versions: [] },
       }),
     ).toBe("none");
   });
 
-  it("returns the sole admissible active version present before deployment", () => {
-    expect(resolvePreviousActiveWorkerVersion({ rows: [row()], before: [version] })).toBe(activeId);
+  it("returns an admissible active version served at 100% even outside the recent-version window", () => {
+    expect(
+      resolvePreviousActiveWorkerVersion({
+        rows: [row()],
+        deployment: { versions: [{ version_id: activeId, percentage: 100 }] },
+      }),
+    ).toBe(activeId);
   });
 
   it.each([
@@ -119,14 +111,22 @@ describe("previous active Worker version resolution", () => {
     ["malformed active ID", row({ versionId: "not-a-uuid" })],
   ])("rejects %s", (_label, state) => {
     expect(() =>
-      resolvePreviousActiveWorkerVersion({ rows: [state], before: [version] }),
+      resolvePreviousActiveWorkerVersion({
+        rows: [state],
+        deployment: { versions: [{ version_id: activeId, percentage: 100 }] },
+      }),
     ).toThrow();
   });
 
-  it("rejects an active version absent from the pre-deploy snapshot", () => {
-    expect(() => resolvePreviousActiveWorkerVersion({ rows: [row()], before: [] })).toThrow(
-      /absent.*snapshot/i,
-    );
+  it("rejects an attested active version absent from the live deployment", () => {
+    expect(() =>
+      resolvePreviousActiveWorkerVersion({
+        rows: [row()],
+        deployment: {
+          versions: [{ version_id: "66666666-7777-8888-9999-aaaaaaaaaaaa", percentage: 100 }],
+        },
+      }),
+    ).toThrow(/deployment|active/i);
   });
 
   it("rejects inconsistent empty state fields", () => {
@@ -141,7 +141,7 @@ describe("previous active Worker version resolution", () => {
             retiredAt: 1,
           }),
         ],
-        before: [],
+        deployment: { versions: [] },
       }),
     ).toThrow(/empty.*inconsistent/i);
   });

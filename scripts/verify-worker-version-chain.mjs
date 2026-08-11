@@ -344,6 +344,7 @@ export async function finalizeWorkerVersionChainFiles({
   releaseReportFile,
   outputFile,
   previousActiveVersionId,
+  previousActiveDeploymentFile,
   verifiedAt,
 }) {
   if (typeof outputFile !== "string" || outputFile.length === 0) {
@@ -404,6 +405,14 @@ export async function finalizeWorkerVersionChainFiles({
     generatedConfigSha256: witness.generatedConfigSha256,
     releaseReportSha256: witness.releaseReportSha256,
   };
+  const previousActiveDeployment = parseJsonText(
+    await readBoundedUtf8File(
+      previousActiveDeploymentFile,
+      256 * 1024,
+      "previous active deployment",
+    ),
+    "previous active deployment",
+  );
   const attestation = verifyWorkerVersionChain({
     snapshots,
     bootstrapDeployment,
@@ -411,6 +420,7 @@ export async function finalizeWorkerVersionChainFiles({
     bootstrapHashes,
     finalHashes,
     previousActiveVersionId,
+    previousActiveDeployment,
     publicAdmissionPercent: 0,
     verifiedAt,
   });
@@ -878,6 +888,7 @@ export async function runWorkerVersionChainCli(argv, { now = () => new Date() } 
       "release-report",
       "output",
       "previous-active-version-id",
+      "before-deployment",
     ];
     assertCliArguments(args, new Set(required), required);
     return finalizeWorkerVersionChainFiles({
@@ -894,6 +905,7 @@ export async function runWorkerVersionChainCli(argv, { now = () => new Date() } 
       outputFile: resolve(args.output),
       previousActiveVersionId:
         args["previous-active-version-id"] === "none" ? null : args["previous-active-version-id"],
+      previousActiveDeploymentFile: resolve(args["before-deployment"]),
       verifiedAt: now().toISOString(),
     });
   }
@@ -1003,9 +1015,16 @@ export function verifyWorkerVersionChain(inputValue) {
     throw new TypeError("Worker module, generated config, or release hash was mutable");
   }
 
-  let previous;
+  let previousVersionId;
   if (input.previousActiveVersionId === null) {
-    previous = undefined;
+    const deployment = assertObject(
+      input.previousActiveDeployment,
+      "first Worker deployment state",
+    );
+    if (!Array.isArray(deployment.versions) || deployment.versions.length !== 0) {
+      throw new TypeError("first Worker deployment must not claim a previous active deployment");
+    }
+    previousVersionId = undefined;
   } else {
     if (
       typeof input.previousActiveVersionId !== "string" ||
@@ -1013,10 +1032,12 @@ export function verifyWorkerVersionChain(inputValue) {
     ) {
       throw new TypeError("previous active Worker version ID is invalid");
     }
-    previous = before.find((version) => version.id === input.previousActiveVersionId);
-    if (previous === undefined) {
-      throw new TypeError("previous active Worker version is absent from the before snapshot");
-    }
+    verifyActiveWorkerDeployment(
+      input.previousActiveDeployment,
+      input.previousActiveVersionId,
+      "previous Worker",
+    );
+    previousVersionId = input.previousActiveVersionId;
   }
   return {
     schema: "hereisit-worker-version-attestations@1",
@@ -1025,10 +1046,10 @@ export function verifyWorkerVersionChain(inputValue) {
     ...finalHashes,
     activeVersionId: final.id,
     previousActive:
-      previous === undefined
+      previousVersionId === undefined
         ? null
         : {
-            versionId: previous.id,
+            versionId: previousVersionId,
             state: "retiring",
             retireAfter: new Date(Date.parse(verifiedAt) + 10 * 60_000).toISOString(),
           },

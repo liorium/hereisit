@@ -261,10 +261,21 @@ jobs:
             fi
           fi
           rm -f .artifacts/runtime/versions-before.stderr
+          if ! pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json \
+            > .artifacts/runtime/deployment-before.json \
+            2> .artifacts/runtime/deployment-before.stderr; then
+            if grep -Fq '[code: 10007]' .artifacts/runtime/deployment-before.stderr; then
+              printf '{"versions":[]}\n' > .artifacts/runtime/deployment-before.json
+            else
+              cat .artifacts/runtime/deployment-before.stderr >&2
+              exit 1
+            fi
+          fi
+          rm -f .artifacts/runtime/deployment-before.stderr
           PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$STAGING_D1_DATABASE_ID" \
-            --before .artifacts/runtime/versions-before.json)"
+            --deployment .artifacts/runtime/deployment-before.json)"
           : > .artifacts/runtime/bootstrap-deploy.ndjson
           WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/bootstrap-deploy.ndjson \
             pnpm exec wrangler deploy "$WORKER_MODULE" \
@@ -360,7 +371,8 @@ jobs:
             --config "$WRANGLER_CONFIG" \
             --release-report .artifacts/deployment/source-sha.txt \
             --output .artifacts/runtime/worker-version-attestations.json \
-            --previous-active-version-id "$PREVIOUS_ACTIVE_VERSION_ID"
+            --previous-active-version-id "$PREVIOUS_ACTIVE_VERSION_ID" \
+            --before-deployment .artifacts/runtime/deployment-before.json
           cp .artifacts/runtime/worker-version-attestations.json \
             .artifacts/deployment/worker-version.json
           node scripts/apply-worker-version-attestations.mjs \

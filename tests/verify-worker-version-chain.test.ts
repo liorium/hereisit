@@ -62,10 +62,9 @@ const hashes = {
 function validInput() {
   return {
     snapshots: {
-      before: [versions.prior],
-      afterBootstrap: [versions.prior, versions.bootstrap],
+      before: [],
+      afterBootstrap: [versions.bootstrap],
       afterSecrets: [
-        versions.prior,
         versions.bootstrap,
         versions.secret1,
         versions.secret2,
@@ -73,7 +72,6 @@ function validInput() {
         versions.secret4,
       ],
       afterFinal: [
-        versions.prior,
         versions.bootstrap,
         versions.secret1,
         versions.secret2,
@@ -87,6 +85,7 @@ function validInput() {
     bootstrapHashes: hashes,
     finalHashes: hashes,
     previousActiveVersionId: ids.prior,
+    previousActiveDeployment: { versions: [{ version_id: ids.prior, percentage: 100 }] },
     publicAdmissionPercent: 0,
     verifiedAt: "2026-07-19T00:08:00.000Z",
   };
@@ -284,19 +283,44 @@ describe("Worker version chain verifier", () => {
 
   it("never infers a previous active deployment from the newest listed version", () => {
     expect(
-      verifyWorkerVersionChain({ ...validInput(), previousActiveVersionId: null }).previousActive,
+      verifyWorkerVersionChain({
+        ...validInput(),
+        previousActiveVersionId: null,
+        previousActiveDeployment: { versions: [] },
+      }).previousActive,
     ).toBeNull();
+  });
+
+  it("rejects a first-deployment claim while Cloudflare serves an active version", () => {
+    expect(() =>
+      verifyWorkerVersionChain({
+        ...validInput(),
+        previousActiveVersionId: null,
+        previousActiveDeployment: validInput().previousActiveDeployment,
+      }),
+    ).toThrow(/first|previous|deployment/i);
+  });
+
+  it("rejects an attested predecessor not served at 100% before deployment", () => {
+    expect(() =>
+      verifyWorkerVersionChain({
+        ...validInput(),
+        previousActiveDeployment: {
+          versions: [{ version_id: ids.bootstrap, percentage: 100 }],
+        },
+      }),
+    ).toThrow(/deployment|active/i);
   });
 
   it("rejects unexpected plaintext in a strict snapshot", () => {
     const input = validInput();
-    input.snapshots.afterFinal[6] = { ...versions.final, secret: "must-not-appear" };
+    input.snapshots.afterFinal[5] = { ...versions.final, secret: "must-not-appear" };
     expect(() => verifyWorkerVersionChain(input)).toThrow(/field|snapshot/i);
   });
 
   it("rejects a new version created outside Wrangler", () => {
     const input = validInput();
-    input.snapshots.afterFinal[6] = {
+    input.snapshots.afterFinal[5] = {
       ...versions.final,
       metadata: { ...versions.final.metadata, source: "api" },
     };
@@ -551,6 +575,7 @@ describe("Worker version chain verifier", () => {
         "workerModule",
         "config",
         "releaseReport",
+        "beforeDeployment",
         "witness",
         "output",
         "cliOutput",
@@ -584,6 +609,11 @@ describe("Worker version chain verifier", () => {
         writeFile(paths.workerModule, workerModule, "utf8"),
         writeFile(paths.config, generatedConfig, "utf8"),
         writeFile(paths.releaseReport, releaseReport, "utf8"),
+        writeFile(
+          paths.beforeDeployment,
+          JSON.stringify(validInput().previousActiveDeployment),
+          "utf8",
+        ),
       ]);
       await captureWorkerArtifactHashWitnessFile({
         workerModuleFile: paths.workerModule,
@@ -606,6 +636,7 @@ describe("Worker version chain verifier", () => {
         releaseReportFile: paths.releaseReport,
         outputFile: paths.output,
         previousActiveVersionId: ids.prior,
+        previousActiveDeploymentFile: paths.beforeDeployment,
         verifiedAt: "2026-07-19T00:08:00.000Z",
       });
 
@@ -640,6 +671,8 @@ describe("Worker version chain verifier", () => {
           paths.cliOutput,
           "--previous-active-version-id",
           ids.prior,
+          "--before-deployment",
+          paths.beforeDeployment,
         ],
         { now: () => new Date("2026-07-19T00:08:00.000Z") },
       );

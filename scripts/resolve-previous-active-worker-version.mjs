@@ -7,7 +7,7 @@ import {
   parseCliArguments,
   readBoundedRegularFile,
 } from "./image-lab-common.mjs";
-import { validateWorkerVersionSnapshot } from "./verify-worker-version-chain.mjs";
+import { verifyActiveWorkerDeployment } from "./verify-worker-version-chain.mjs";
 
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -16,7 +16,7 @@ const migrationName = "0002_worker_version_attestations.sql";
 const stateSql =
   "SELECT COUNT(*) AS rowCount, COALESCE(SUM(CASE WHEN kind = 'active' THEN 1 ELSE 0 END), 0) AS activeCount, MAX(CASE WHEN kind = 'active' THEN version_id END) AS versionId, MAX(CASE WHEN kind = 'active' THEN public_admission_allowed END) AS publicAdmissionAllowed, MAX(CASE WHEN kind = 'active' THEN retired_at END) AS retiredAt FROM worker_version_attestations";
 
-export function resolvePreviousActiveWorkerVersion({ rows, before }) {
+export function resolvePreviousActiveWorkerVersion({ rows, deployment }) {
   if (!Array.isArray(rows) || rows.length !== 1) {
     throw new TypeError("Worker attestation state query must return exactly one row");
   }
@@ -54,10 +54,7 @@ export function resolvePreviousActiveWorkerVersion({ rows, before }) {
       "Worker attestation state must contain exactly one admissible active version",
     );
   }
-  const versions = validateWorkerVersionSnapshot(before, "pre-deploy");
-  if (!versions.some((version) => version.id === row.versionId)) {
-    throw new TypeError("active Worker version is absent from the pre-deploy snapshot");
-  }
+  verifyActiveWorkerDeployment(deployment, row.versionId, "pre-deploy Worker");
   return row.versionId;
 }
 
@@ -65,7 +62,7 @@ export async function resolvePreviousActiveWorkerVersionFromD1({
   accountId,
   databaseId,
   apiToken,
-  before,
+  deployment,
   fetchImpl = fetch,
 }) {
   if (typeof accountId !== "string" || !accountIdPattern.test(accountId)) {
@@ -86,7 +83,7 @@ export async function resolvePreviousActiveWorkerVersionFromD1({
     expectedCount: 1,
     fetchImpl,
   });
-  return resolvePreviousActiveWorkerVersion({ rows: result.results, before });
+  return resolvePreviousActiveWorkerVersion({ rows: result.results, deployment });
 }
 
 export async function runPreviousActiveWorkerVersionCli(
@@ -94,26 +91,26 @@ export async function runPreviousActiveWorkerVersionCli(
   { env = process.env, fetchImpl = fetch, stdout = process.stdout } = {},
 ) {
   const args = parseCliArguments(argv);
-  assertExactKeys(args, ["account-id", "database-id", "before"], "previous active arguments");
+  assertExactKeys(args, ["account-id", "database-id", "deployment"], "previous active arguments");
   if (!env.CLOUDFLARE_D1_API_TOKEN) {
     throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
   }
   const bytes = await readBoundedRegularFile(
-    resolve(args.before),
+    resolve(args.deployment),
     1024 * 1024,
-    "pre-deploy Worker version snapshot",
+    "pre-deploy Worker deployment",
   );
-  let before;
+  let deployment;
   try {
-    before = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    deployment = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
-    throw new TypeError("pre-deploy Worker version snapshot JSON is invalid");
+    throw new TypeError("pre-deploy Worker deployment JSON is invalid");
   }
   const value = await resolvePreviousActiveWorkerVersionFromD1({
     accountId: args["account-id"],
     databaseId: args["database-id"],
     apiToken: env.CLOUDFLARE_D1_API_TOKEN,
-    before,
+    deployment,
     fetchImpl,
   });
   stdout.write(`${value}\n`);
