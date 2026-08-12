@@ -1,13 +1,14 @@
 import { mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import type { EngineCreatePdfJobRequest } from "@hereisit/server-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createQpdfJobBudget,
   listDescendantProcessGroups,
   measureProcessTreeUsage,
+  PdfEngineUnavailableError,
   PdfJobController,
   type QpdfProcessResult,
   qpdfEnvironment,
@@ -102,6 +103,27 @@ describe("detached qpdf process cleanup", () => {
     });
     expect(signals).toContainEqual([21, "SIGTERM"]);
     expect(signals).toContainEqual([21, "SIGKILL"]);
+  });
+
+  it("cleans the runner group when its parent exited and enumeration fails", async () => {
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const alive = new Set([20]);
+    await terminateProcessGroups({
+      runnerPgid: 20,
+      enumerate: async () => {
+        throw Object.assign(new Error("parent exited"), { code: "ENOENT" });
+      },
+      signal: async (pgid, value) => {
+        signals.push([pgid, value]);
+        if (value === "SIGKILL") alive.delete(pgid);
+      },
+      wait: async () => undefined,
+      alive: async (pgid) => alive.has(pgid),
+    });
+    expect(signals).toEqual([
+      [20, "SIGTERM"],
+      [20, "SIGKILL"],
+    ]);
   });
 
   it("sums RSS and CPU across the complete descendant tree", async () => {
@@ -350,6 +372,29 @@ describe("bounded PDF optimization", () => {
     });
   });
 
+  it.each([
+    "structural",
+    "image",
+  ] as const)("maps a nonzero %s transform with partial output to terminal engine failure", async (failedTransform) => {
+    const workspace = await fixture();
+    const base = runner({ structural: failedTransform === "image" ? 991 : 950 });
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      const result = await base(args, signal);
+      const output = args.at(-1) ?? "";
+      if (
+        (failedTransform === "structural" && output.endsWith("structural.pdf")) ||
+        (failedTransform === "image" && output.endsWith("optimized.pdf"))
+      )
+        return { ...result, kind: "invalid" as const };
+      return result;
+    });
+    await expect(runPdfOptimization({ request, workspace, runQpdf })).resolves.toMatchObject({
+      state: "failed",
+      error: { code: "ENGINE_CRASH" },
+    });
+    await expect(stat(workspace.output)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("maps invalid source inspection to unsupported input", async () => {
     const workspace = await fixture();
     const base = runner();
@@ -554,6 +599,65 @@ describe("PDF controller failure and concurrency boundaries", () => {
       replay: false,
       status: { state: "created" },
     });
+  });
+
+  it("cancels a never-ending PUT so deletion and same-ID recreation stay bounded", async () => {
+    const stream = new PassThrough();
+    stream.write(pdf(500));
+    const { controller, root } = await createController(async () => {
+      throw new Error("not run");
+    });
+    const upload = controller.upload(request.jobId, stream);
+    const uploadOutcome = upload.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const removal = controller.remove(request.jobId);
+    try {
+      await expect(
+        Promise.race([
+          removal.then(() => "removed"),
+          new Promise<string>((resolve) => setTimeout(() => resolve("timed-out"), 100)),
+        ]),
+      ).resolves.toBe("removed");
+    } finally {
+      stream.destroy();
+    }
+    await expect(uploadOutcome).resolves.toBeInstanceOf(Error);
+    await expect(controller.create(request)).resolves.toMatchObject({ replay: false });
+    await controller.upload(request.jobId, Readable.from([pdf(1000)]));
+    await expect(readFile(join(root, request.jobId, "input.bin"))).resolves.toEqual(pdf(1000));
+  });
+
+  it("poisons the engine after survivor cleanup failure so no new job overlaps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-poisoned-"));
+    roots.push(root);
+    const controller = new PdfJobController({
+      workspaceRoot: root,
+      runner: ({ request: current, workspace, signal }) =>
+        runPdfOptimization({
+          request: current,
+          workspace,
+          signal,
+          runQpdf: async () => ({
+            kind: "failed",
+            stdout: "",
+            diagnostic: Buffer.alloc(0),
+            cleanupFailed: true,
+          }),
+        }),
+    });
+    await controller.create(request);
+    await controller.upload(request.jobId, Readable.from([pdf(1000)]));
+    await controller.run(request.jobId);
+    await expect.poll(() => controller.get(request.jobId)).toMatchObject({ state: "failed" });
+    await expect(
+      controller.create({
+        ...request,
+        jobId: "223e4567-e89b-42d3-a456-426614174002",
+      }),
+    ).rejects.toBeInstanceOf(PdfEngineUnavailableError);
   });
 
   it.each([

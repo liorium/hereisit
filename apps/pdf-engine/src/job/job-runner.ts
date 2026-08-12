@@ -32,12 +32,14 @@ export type QpdfProcessResult =
       readonly stdout: string;
       readonly diagnostic: Buffer;
       readonly usage?: QpdfUsage;
+      readonly cleanupFailed?: boolean;
     }
   | {
       readonly kind: "failed" | "timeout" | "oom";
       readonly stdout: string;
       readonly diagnostic: Buffer;
       readonly usage?: QpdfUsage;
+      readonly cleanupFailed?: boolean;
     };
 export type QpdfRunner = (
   args: readonly string[],
@@ -191,8 +193,8 @@ export async function terminateProcessGroups(input: ProcessTerminationInput): Pr
   const enumerate = async () => {
     try {
       for (const pgid of await input.enumerate()) known.add(pgid);
-    } catch (error) {
-      if (await input.alive(input.runnerPgid)) throw error;
+    } catch {
+      // Continue with the runner and every group observed before enumeration failed.
     }
   };
   const signal = async (pgid: number, value: NodeJS.Signals) => {
@@ -213,7 +215,7 @@ export async function terminateProcessGroups(input: ProcessTerminationInput): Pr
   }
 }
 
-async function killGroup(pid: number): Promise<void> {
+async function killGroup(pid: number, registeredProcessGroups: readonly number[]): Promise<void> {
   const alive = async (pgid: number) => {
     try {
       process.kill(-pgid, 0);
@@ -224,6 +226,7 @@ async function killGroup(pid: number): Promise<void> {
   };
   await terminateProcessGroups({
     runnerPgid: pid,
+    registeredProcessGroups,
     enumerate: () => listDescendantProcessGroups(pid),
     signal: async (pgid, value) => {
       process.kill(-pgid, value);
@@ -342,7 +345,7 @@ export function createQpdfProcessRunner(options: {
       const stop = (reason: "timeout" | "oom" | "failed") => {
         if (forced !== null) return;
         forced = reason;
-        termination = settleProcessTermination(killGroup(pid));
+        termination = settleProcessTermination(killGroup(pid, [...processGroups]));
       };
       const timeout = setTimeout(() => stop("timeout"), available.wallMs);
       const sampler = setInterval(() => {
@@ -424,6 +427,7 @@ export function createQpdfProcessRunner(options: {
           stdout: Buffer.concat(stdout).toString("utf8"),
           diagnostic: Buffer.concat(diagnostics),
           usage: { cpuMs: observedCpuMs, peakRssBytes, memoryByteMilliseconds },
+          cleanupFailed: !cleaned,
         });
       });
     });
@@ -535,6 +539,7 @@ export async function runPdfOptimization(input: {
   let memoryByteMilliseconds = 0;
   const runQpdf: QpdfRunner = async (args, signal) => {
     const result = await input.runQpdf(args, signal);
+    if (result.cleanupFailed) throw new PdfProcessCleanupError();
     cpuMs += result.usage?.cpuMs ?? 0;
     peakMemoryBytes = Math.max(peakMemoryBytes, result.usage?.peakRssBytes ?? 0);
     memoryByteMilliseconds += result.usage?.memoryByteMilliseconds ?? 0;
@@ -616,7 +621,7 @@ export async function runPdfOptimization(input: {
       if (input.signal?.aborted) return terminalCleanup(cancelled());
       testedCandidates += 1;
       const execution = await runQpdf(candidate.args, input.signal);
-      const failure = processFailure(execution);
+      const failure = execution.kind === "invalid" ? "ENGINE_CRASH" : processFailure(execution);
       if (input.signal?.aborted) return terminalCleanup(cancelled());
       if (failure !== null)
         return terminalCleanup(failedStatus(input.request, failure, duration(), testedCandidates));
@@ -723,12 +728,14 @@ export async function runPdfOptimization(input: {
         processingMs: duration(),
       },
     });
-  } catch {
-    return terminalCleanup(
+  } catch (error) {
+    const status = await terminalCleanup(
       input.signal?.aborted
         ? cancelled()
         : failedStatus(input.request, "ENGINE_CRASH", duration(), testedCandidates),
     );
+    if (error instanceof PdfProcessCleanupError) throw error;
+    return status;
   }
 }
 
@@ -760,7 +767,7 @@ interface Job {
   status: PdfEngineJobStatus;
   inputSha256: string | null;
   abort: AbortController | null;
-  upload: Promise<string> | null;
+  upload: { readonly promise: Promise<string>; readonly cancel: () => void } | null;
   completion: Promise<void> | null;
   removal: Promise<void> | null;
 }
@@ -868,7 +875,7 @@ export class PdfJobController {
     if (job.status.state !== "created") throw new PdfJobConflictError();
     if (job.upload !== null) {
       const replay = await hashExactPdfInput(stream, job.request.input.byteLength);
-      const accepted = await job.upload;
+      const accepted = await job.upload.promise;
       if (replay !== accepted) throw new PdfJobConflictError();
       return;
     }
@@ -886,14 +893,16 @@ export class PdfJobController {
       await this.#persistence.writeJson(job.workspace.status, job.status);
       return hash;
     })();
-    job.upload = upload;
+    const pendingUpload = { promise: upload, cancel: () => stream.destroy() };
+    job.upload = pendingUpload;
     try {
       await upload;
     } finally {
-      if (job.upload === upload) job.upload = null;
+      if (job.upload === pendingUpload) job.upload = null;
     }
   }
   async run(jobId: string) {
+    if (!this.#accepting) throw new PdfEngineUnavailableError();
     const job = this.#jobs.get(jobId);
     if (job === undefined) throw new PdfJobNotFoundError();
     if (job.status.state === "running" || job.status.state === "succeeded") return;
@@ -932,7 +941,8 @@ export class PdfJobController {
         const parsed = validateTerminalRunnerStatus(jobId, job.status.sequence, status);
         await this.#persistence.writeJson(job.workspace.status, parsed);
         job.status = parsed;
-      } catch {
+      } catch (error) {
+        if (error instanceof PdfProcessCleanupError) this.#accepting = false;
         await this.#recordCrash(job);
       } finally {
         if (this.#active === jobId) this.#active = null;
@@ -981,7 +991,15 @@ export class PdfJobController {
     if (job.removal !== null) return job.removal;
     const removal = (async () => {
       job.abort?.abort();
-      await Promise.allSettled(job.upload === null ? [] : [job.upload]);
+      const upload = job.upload;
+      if (upload !== null) {
+        upload.cancel();
+        const settled = await settleWithin(upload.promise, 1_000);
+        if (!settled) {
+          this.#accepting = false;
+          throw new PdfEngineUnavailableError();
+        }
+      }
       await job.completion;
       if (this.#jobs.get(jobId) === job) this.#jobs.delete(jobId);
       await this.#persistence.removeWorkspace(job.workspace);
@@ -1007,3 +1025,19 @@ export class PdfJobNotFoundError extends Error {}
 export class PdfJobConflictError extends Error {}
 export class PdfEngineBusyError extends Error {}
 export class PdfEngineUnavailableError extends Error {}
+class PdfProcessCleanupError extends Error {}
+
+async function settleWithin(promise: Promise<unknown>, milliseconds: number): Promise<boolean> {
+  let timeout: NodeJS.Timeout | undefined;
+  const settled = await Promise.race([
+    promise.then(
+      () => true,
+      () => true,
+    ),
+    new Promise<false>((resolve) => {
+      timeout = setTimeout(() => resolve(false), milliseconds);
+    }),
+  ]);
+  if (timeout !== undefined) clearTimeout(timeout);
+  return settled;
+}
