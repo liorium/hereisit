@@ -14,6 +14,7 @@ import {
   runPdfOptimization,
   settleProcessTermination,
   terminateProcessGroups,
+  validateTerminalRunnerStatus,
 } from "./job-runner";
 import { createPdfJobWorkspace } from "./workspace";
 
@@ -83,6 +84,26 @@ describe("detached qpdf process cleanup", () => {
     ]);
   });
 
+  it("cleans every observed detached group even after a normal runner exit", async () => {
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const alive = new Set([21]);
+    await terminateProcessGroups({
+      runnerPgid: 20,
+      registeredProcessGroups: [21],
+      enumerate: async () => {
+        throw Object.assign(new Error("exited"), { code: "ENOENT" });
+      },
+      signal: async (pgid, value) => {
+        signals.push([pgid, value]);
+        if (value === "SIGKILL") alive.delete(pgid);
+      },
+      wait: async () => undefined,
+      alive: async (pgid) => alive.has(pgid),
+    });
+    expect(signals).toContainEqual([21, "SIGTERM"]);
+    expect(signals).toContainEqual([21, "SIGKILL"]);
+  });
+
   it("sums RSS and CPU across the complete descendant tree", async () => {
     const stats = new Map([
       [20, { stat: "20 (qpdf) S 1 20 20 0 0 0 0 0 0 0 10 20", rss: 100 }],
@@ -95,7 +116,45 @@ describe("detached qpdf process cleanup", () => {
         readStat: async (pid) => stats.get(pid)?.stat ?? "",
         readRss: async (pid) => stats.get(pid)?.rss ?? 0,
       }),
-    ).resolves.toEqual({ rssBytes: 300, cpuMs: 1000 });
+    ).resolves.toEqual({ rssBytes: 300, cpuMs: 1000, processGroups: [21] });
+  });
+
+  it("fails closed on persistent or non-race resource measurement errors", async () => {
+    const denied = Object.assign(new Error("denied"), { code: "EACCES" });
+    await expect(
+      measureProcessTreeUsage(20, {
+        listPids: async () => [20],
+        readStat: async () => {
+          throw denied;
+        },
+        readRss: async () => 0,
+      }),
+    ).rejects.toBe(denied);
+    await expect(
+      measureProcessTreeUsage(20, {
+        listPids: async () => [20],
+        readStat: async () => {
+          throw Object.assign(new Error("gone"), { code: "ENOENT" });
+        },
+        readRss: async () => 0,
+      }),
+    ).rejects.toThrow("gone");
+  });
+
+  it("tolerates only a descendant RSS ENOENT exit race", async () => {
+    await expect(
+      measureProcessTreeUsage(20, {
+        listPids: async () => [20, 21],
+        readStat: async (pid) =>
+          pid === 20
+            ? "20 (qpdf) S 1 20 20 0 0 0 0 0 0 0 10 20"
+            : "21 (child) S 20 21 20 0 0 0 0 0 0 0 30 40",
+        readRss: async (pid) => {
+          if (pid === 21) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+          return 100;
+        },
+      }),
+    ).resolves.toEqual({ rssBytes: 100, cpuMs: 300, processGroups: [] });
   });
 
   it("uses only the job-private HOME and TMPDIR", () => {
@@ -181,6 +240,29 @@ describe("bounded PDF optimization", () => {
     await expect(stat(workspace.structuralCandidate)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("aggregates actual qpdf CPU, peak RSS, and memory-time usage", async () => {
+    const workspace = await fixture();
+    const base = runner();
+    let invocation = 0;
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => ({
+      ...(await base(args, signal)),
+      usage: {
+        cpuMs: ++invocation,
+        peakRssBytes: invocation * 100,
+        memoryByteMilliseconds: invocation * 1000,
+      },
+    }));
+    const result = await runPdfOptimization({ request, workspace, runQpdf });
+    expect(result).toMatchObject({
+      state: "succeeded",
+      measurements: {
+        cpuMs: 66,
+        peakMemoryBytes: 1100,
+        memoryByteMilliseconds: 66_000,
+      },
+    });
+  });
+
   it("returns original-retained when candidates expand or miss the 1% threshold", async () => {
     const workspace = await fixture();
     const result = await runPdfOptimization({
@@ -235,6 +317,51 @@ describe("bounded PDF optimization", () => {
     expect(result).toMatchObject({
       state: "succeeded",
       result: { kind: "download", profile: "structural", byteLength: 950 },
+    });
+  });
+
+  it("rejects one invalid candidate and keeps the other valid candidate", async () => {
+    const workspace = await fixture();
+    const base = runner();
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      const result = await base(args, signal);
+      if (args[0] === "--check" && args.at(-1)?.endsWith("optimized.pdf"))
+        return { ...result, kind: "invalid" as const };
+      return result;
+    });
+    await expect(runPdfOptimization({ request, workspace, runQpdf })).resolves.toMatchObject({
+      state: "succeeded",
+      result: { kind: "download", profile: "structural" },
+    });
+  });
+
+  it("returns original-retained when every candidate is invalid", async () => {
+    const workspace = await fixture();
+    const base = runner();
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      const result = await base(args, signal);
+      if (args[0] === "--check" && !args.at(-1)?.endsWith("input.bin"))
+        return { ...result, kind: "invalid" as const };
+      return result;
+    });
+    await expect(runPdfOptimization({ request, workspace, runQpdf })).resolves.toMatchObject({
+      state: "succeeded",
+      result: { kind: "original-retained" },
+    });
+  });
+
+  it("maps invalid source inspection to unsupported input", async () => {
+    const workspace = await fixture();
+    const base = runner();
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      const result = await base(args, signal);
+      return args[0] === "--check" && args.at(-1)?.endsWith("input.bin")
+        ? { ...result, kind: "invalid" as const }
+        : result;
+    });
+    await expect(runPdfOptimization({ request, workspace, runQpdf })).resolves.toMatchObject({
+      state: "failed",
+      error: { code: "UNSUPPORTED_INPUT" },
     });
   });
 
@@ -371,6 +498,64 @@ describe("PDF controller failure and concurrency boundaries", () => {
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
   });
 
+  it("installs the run transition before awaiting running-status persistence", async () => {
+    const blocked = deferred<void>();
+    let writes = 0;
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-run-transition-"));
+    roots.push(root);
+    const controller = new PdfJobController({
+      workspaceRoot: root,
+      runner: async () => {
+        throw new Error("runner must not start");
+      },
+      persistence: {
+        writeJson: async (path, value) => {
+          writes += 1;
+          if (writes === 4) await blocked.promise;
+          const { writeJsonAtomic } = await import("./workspace");
+          await writeJsonAtomic(path, value);
+        },
+      },
+    });
+    await controller.create(request);
+    await controller.upload(request.jobId, Readable.from([pdf(1000)]));
+    const running = controller.run(request.jobId);
+    await vi.waitFor(() => expect(writes).toBe(4));
+    const removal = controller.remove(request.jobId);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(stat(join(root, request.jobId))).resolves.toBeDefined();
+    blocked.resolve();
+    await Promise.all([running, removal]);
+    expect(controller.get(request.jobId)).toBeNull();
+  });
+
+  it("cancels and awaits a pending upload before deletion and same-ID recreation", async () => {
+    const blocked = deferred<void>();
+    const stream = Readable.from(
+      (async function* () {
+        yield pdf(500);
+        await blocked.promise;
+        yield pdf(500);
+      })(),
+    );
+    const { controller } = await createController(async () => {
+      throw new Error("not run");
+    });
+    const upload = controller.upload(request.jobId, stream);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const removal = controller.remove(request.jobId);
+    const recreation = controller.create(request);
+    await expect(
+      Promise.race([recreation.then(() => "created"), Promise.resolve("pending")]),
+    ).resolves.toBe("pending");
+    blocked.resolve();
+    await Promise.allSettled([upload, removal]);
+    await expect(recreation).resolves.toMatchObject({
+      replay: false,
+      status: { state: "created" },
+    });
+  });
+
   it.each([
     "reject",
     "invalid",
@@ -394,6 +579,71 @@ describe("PDF controller failure and concurrency boundaries", () => {
     await expect(stat(join(root, request.jobId, "input.bin"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("removes output and candidates when a post-output runner failure is sanitized", async () => {
+    const { controller, root } = await createController(async ({ workspace }) => {
+      await Promise.all([
+        writeFile(workspace.output, pdf(800)),
+        writeFile(workspace.structuralCandidate, pdf(900)),
+      ]);
+      throw new Error("after output");
+    });
+    await controller.upload(request.jobId, Readable.from([pdf(1000)]));
+    await controller.run(request.jobId);
+    await expect.poll(() => controller.get(request.jobId)).toMatchObject({ state: "failed" });
+    await expect(readdir(join(root, request.jobId))).resolves.toEqual([
+      "request.json",
+      "status.json",
+    ]);
+  });
+
+  it.each([
+    [
+      "wrong job",
+      (status: Awaited<ReturnType<typeof runPdfOptimization>>) => ({
+        ...status,
+        jobId: "223e4567-e89b-42d3-a456-426614174002",
+      }),
+    ],
+    [
+      "non-terminal",
+      () => ({
+        protocol: 1,
+        jobId: request.jobId,
+        state: "running",
+        phase: "validating",
+        fraction: null,
+        sequence: 3,
+      }),
+    ],
+    [
+      "non-monotonic",
+      (status: Awaited<ReturnType<typeof runPdfOptimization>>) => ({ ...status, sequence: 3 }),
+    ],
+  ] as const)("rejects a %s runner status before persistence", async (_name, mutate) => {
+    const terminal = {
+      protocol: 1,
+      jobId: request.jobId,
+      state: "cancelled",
+      phase: null,
+      fraction: null,
+      sequence: 4,
+      measurements: {
+        processedInputBytes: 1000,
+        cpuMs: 0,
+        memoryByteMilliseconds: 0,
+        peakMemoryBytes: 0,
+        testedCandidates: 0,
+        processingMs: 0,
+      },
+      inspection: null,
+      error: { code: "CANCELLED", retryable: false },
+    } as const;
+    expect(validateTerminalRunnerStatus(request.jobId, 3, terminal)).toEqual(terminal);
+    expect(() => validateTerminalRunnerStatus(request.jobId, 3, mutate(terminal as never))).toThrow(
+      "runner status is invalid",
+    );
   });
 
   it("keeps a sanitized in-memory crash and cleans up when terminal status persistence fails", async () => {

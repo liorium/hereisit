@@ -21,12 +21,23 @@ import {
   writeJsonAtomic,
 } from "./workspace";
 
+export interface QpdfUsage {
+  readonly cpuMs: number;
+  readonly peakRssBytes: number;
+  readonly memoryByteMilliseconds: number;
+}
 export type QpdfProcessResult =
-  | { readonly kind: "ok"; readonly stdout: string; readonly diagnostic: Buffer }
+  | {
+      readonly kind: "ok" | "invalid";
+      readonly stdout: string;
+      readonly diagnostic: Buffer;
+      readonly usage?: QpdfUsage;
+    }
   | {
       readonly kind: "failed" | "timeout" | "oom";
       readonly stdout: string;
       readonly diagnostic: Buffer;
+      readonly usage?: QpdfUsage;
     };
 export type QpdfRunner = (
   args: readonly string[],
@@ -113,7 +124,11 @@ export async function listDescendantProcessGroups(
 export async function measureProcessTreeUsage(
   rootPid: number,
   dependencies: ProcessTreeDependencies & { readonly readRss: (pid: number) => Promise<number> },
-): Promise<{ readonly rssBytes: number; readonly cpuMs: number }> {
+): Promise<{
+  readonly rssBytes: number;
+  readonly cpuMs: number;
+  readonly processGroups: readonly number[];
+}> {
   const processes = new Map<
     number,
     ReturnType<typeof parseProcessStat> & { readonly cpuMs: number }
@@ -147,15 +162,24 @@ export async function measureProcessTreeUsage(
   }
   let rssBytes = 0;
   let cpuMs = 0;
+  const processGroups = new Set<number>();
   for (const pid of descendants) {
-    rssBytes += await dependencies.readRss(pid);
+    try {
+      rssBytes += await dependencies.readRss(pid);
+    } catch (error) {
+      if (pid !== rootPid && exited(error)) continue;
+      throw error;
+    }
     cpuMs += processes.get(pid)?.cpuMs ?? 0;
+    const group = processes.get(pid)?.processGroup;
+    if (pid !== rootPid && group !== undefined && group !== rootPid) processGroups.add(group);
   }
-  return { rssBytes, cpuMs };
+  return { rssBytes, cpuMs, processGroups: [...processGroups].sort((left, right) => left - right) };
 }
 
 export interface ProcessTerminationInput {
   readonly runnerPgid: number;
+  readonly registeredProcessGroups?: readonly number[];
   readonly enumerate: () => Promise<readonly number[]>;
   readonly signal: (pgid: number, signal: NodeJS.Signals) => Promise<void>;
   readonly wait: (milliseconds: number) => Promise<void>;
@@ -163,7 +187,7 @@ export interface ProcessTerminationInput {
 }
 
 export async function terminateProcessGroups(input: ProcessTerminationInput): Promise<void> {
-  const known = new Set<number>();
+  const known = new Set(input.registeredProcessGroups ?? []);
   const enumerate = async () => {
     try {
       for (const pgid of await input.enumerate()) known.add(pgid);
@@ -299,6 +323,10 @@ export function createQpdfProcessRunner(options: {
       let stdoutBytes = 0;
       let diagnosticBytes = 0;
       let observedCpuMs = 0;
+      let peakRssBytes = 0;
+      let memoryByteMilliseconds = 0;
+      let lastSampleAt = performance.now();
+      const processGroups = new Set<number>();
       child.stdout.on("data", (raw: Buffer) => {
         if (stdoutBytes >= 1024) return;
         const chunk = Buffer.from(raw).subarray(0, 1024 - stdoutBytes);
@@ -332,13 +360,25 @@ export function createQpdfProcessRunner(options: {
             : directoryBytes(options.workspaceRoot),
         ])
           .then(([usage, workspaceBytes]) => {
+            const sampledAt = performance.now();
+            memoryByteMilliseconds += usage.rssBytes * Math.max(0, sampledAt - lastSampleAt);
+            lastSampleAt = sampledAt;
             observedCpuMs = Math.max(observedCpuMs, usage.cpuMs);
+            peakRssBytes = Math.max(peakRssBytes, usage.rssBytes);
+            for (const pgid of usage.processGroups) processGroups.add(pgid);
             if (usage.rssBytes > options.maxRssBytes) stop("oom");
             else if (usage.cpuMs > available.cpuMs) stop("timeout");
             else if (workspaceBytes > (options.maxWorkspaceBytes ?? Number.MAX_SAFE_INTEGER))
               stop("oom");
           })
-          .catch(() => undefined);
+          .catch(async () => {
+            try {
+              process.kill(-pid, 0);
+              stop("failed");
+            } catch {
+              // The close event is racing the final sample; close performs survivor cleanup.
+            }
+          });
       }, 100);
       const abort = () => stop("failed");
       signal?.addEventListener("abort", abort, { once: true });
@@ -349,15 +389,41 @@ export function createQpdfProcessRunner(options: {
         clearTimeout(timeout);
         clearInterval(sampler);
         signal?.removeEventListener("abort", abort);
-        const cleaned = await termination;
+        const normalCleanup =
+          forced === null
+            ? settleProcessTermination(
+                terminateProcessGroups({
+                  runnerPgid: pid,
+                  registeredProcessGroups: [...processGroups],
+                  enumerate: () => listDescendantProcessGroups(pid),
+                  signal: async (pgid, value) => {
+                    process.kill(-pgid, value);
+                  },
+                  wait: (milliseconds) =>
+                    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+                  alive: async (pgid) => {
+                    try {
+                      process.kill(-pgid, 0);
+                      return true;
+                    } catch {
+                      return false;
+                    }
+                  },
+                }),
+              )
+            : termination;
+        const cleaned = await normalCleanup;
         budget.recordCpu(observedCpuMs);
         resolve({
           kind:
             code === 0 && forced === null && !signal?.aborted && cleaned
               ? "ok"
-              : (forced ?? "failed"),
+              : code !== 0 && forced === null && !signal?.aborted && cleaned
+                ? "invalid"
+                : (forced ?? "failed"),
           stdout: Buffer.concat(stdout).toString("utf8"),
           diagnostic: Buffer.concat(diagnostics),
+          usage: { cpuMs: observedCpuMs, peakRssBytes, memoryByteMilliseconds },
         });
       });
     });
@@ -416,7 +482,7 @@ function failedStatus(
 function processFailure(
   result: QpdfProcessResult,
 ): "ENGINE_TIMEOUT" | "ENGINE_OOM" | "ENGINE_CRASH" | null {
-  if (result.kind === "ok") return null;
+  if (result.kind === "ok" || result.kind === "invalid") return null;
   return result.kind === "timeout"
     ? "ENGINE_TIMEOUT"
     : result.kind === "oom"
@@ -437,7 +503,7 @@ async function inspectPdf(
   if (pages.kind !== "ok") return pages;
   const pageCount = Number(pages.stdout.trim());
   if (!Number.isSafeInteger(pageCount) || pageCount < 1 || pageCount > 100)
-    return { kind: "failed", stdout: "", diagnostic: Buffer.alloc(0) };
+    return { kind: "invalid", stdout: "", diagnostic: Buffer.alloc(0) };
   const encryption = await runQpdf(["--show-encryption", "--", path], signal);
   if (signal?.aborted) return { kind: "failed", stdout: "", diagnostic: Buffer.alloc(0) };
   if (encryption.kind !== "ok") return encryption;
@@ -464,12 +530,32 @@ export async function runPdfOptimization(input: {
 }): Promise<PdfEngineJobStatus> {
   const startedAt = performance.now();
   let testedCandidates = 0;
+  let cpuMs = 0;
+  let peakMemoryBytes = 0;
+  let memoryByteMilliseconds = 0;
+  const runQpdf: QpdfRunner = async (args, signal) => {
+    const result = await input.runQpdf(args, signal);
+    cpuMs += result.usage?.cpuMs ?? 0;
+    peakMemoryBytes = Math.max(peakMemoryBytes, result.usage?.peakRssBytes ?? 0);
+    memoryByteMilliseconds += result.usage?.memoryByteMilliseconds ?? 0;
+    return result;
+  };
   const duration = () => Math.max(0, Math.round(performance.now() - startedAt));
   const terminalCleanup = async (status: PdfEngineJobStatus) => {
     await sensitiveCleanup(input.workspace);
     if (status.state !== "succeeded" || status.result.kind !== "download")
       await rm(input.workspace.output, { force: true });
-    return status;
+    return "measurements" in status
+      ? {
+          ...status,
+          measurements: {
+            ...status.measurements,
+            cpuMs,
+            peakMemoryBytes,
+            memoryByteMilliseconds,
+          },
+        }
+      : status;
   };
   const cancelled = (): Extract<PdfEngineJobStatus, { state: "cancelled" }> => ({
     protocol: 1,
@@ -494,7 +580,7 @@ export async function runPdfOptimization(input: {
     const source = await readFile(input.workspace.input);
     if (!envelope(source))
       return terminalCleanup(failedStatus(input.request, "UNSUPPORTED_INPUT", duration()));
-    const sourceInspection = await inspectPdf(input.workspace.input, input.runQpdf, input.signal);
+    const sourceInspection = await inspectPdf(input.workspace.input, runQpdf, input.signal);
     const inputFailure = "kind" in sourceInspection ? processFailure(sourceInspection) : null;
     if (input.signal?.aborted) return terminalCleanup(cancelled());
     if (inputFailure !== null)
@@ -529,7 +615,7 @@ export async function runPdfOptimization(input: {
     for (const candidate of candidates) {
       if (input.signal?.aborted) return terminalCleanup(cancelled());
       testedCandidates += 1;
-      const execution = await input.runQpdf(candidate.args, input.signal);
+      const execution = await runQpdf(candidate.args, input.signal);
       const failure = processFailure(execution);
       if (input.signal?.aborted) return terminalCleanup(cancelled());
       if (failure !== null)
@@ -547,7 +633,7 @@ export async function runPdfOptimization(input: {
         await rm(candidate.path, { force: true });
         continue;
       }
-      const inspection = await inspectPdf(candidate.path, input.runQpdf, input.signal);
+      const inspection = await inspectPdf(candidate.path, runQpdf, input.signal);
       if (input.signal?.aborted) return terminalCleanup(cancelled());
       const inspectionFailure = "kind" in inspection ? processFailure(inspection) : null;
       if (inspectionFailure !== null)
@@ -651,6 +737,22 @@ export type PdfOptimizationRunner = (input: {
   readonly workspace: PdfJobWorkspace;
   readonly signal: AbortSignal;
 }) => Promise<PdfEngineJobStatus>;
+
+export function validateTerminalRunnerStatus(
+  jobId: string,
+  previousSequence: number,
+  raw: unknown,
+): PdfEngineJobStatus {
+  const status = pdfEngineJobStatusSchema.parse(raw) as PdfEngineJobStatus;
+  if (
+    status.jobId !== jobId ||
+    status.sequence <= previousSequence ||
+    (status.state !== "succeeded" && status.state !== "failed" && status.state !== "cancelled")
+  )
+    throw new TypeError("runner status is invalid");
+  return status;
+}
+
 interface Job {
   readonly request: EngineCreatePdfJobRequest;
   readonly identity: string;
@@ -689,12 +791,18 @@ export class PdfJobController {
       removeWorkspace: input.persistence?.removeWorkspace ?? removePdfJobWorkspace,
     };
   }
-  async create(raw: unknown) {
+  async create(
+    raw: unknown,
+  ): Promise<{ readonly replay: boolean; readonly status: PdfEngineJobStatus }> {
     if (!this.#accepting) throw new PdfEngineUnavailableError();
     const request = engineCreatePdfJobRequestSchema.parse(raw) as EngineCreatePdfJobRequest;
     const identity = JSON.stringify(request);
     const existing = this.#jobs.get(request.jobId);
     if (existing !== undefined) {
+      if (existing.removal !== null) {
+        await existing.removal;
+        return this.create(raw);
+      }
       if (existing.identity !== identity) throw new PdfJobConflictError();
       return { replay: true, status: existing.status };
     }
@@ -801,23 +909,27 @@ export class PdfJobController {
       fraction: null,
       sequence: 3,
     };
-    try {
-      await this.#persistence.writeJson(job.workspace.status, job.status);
-    } catch {
-      await this.#recordCrash(job);
-      if (this.#active === jobId) this.#active = null;
-      job.abort = null;
-      return;
-    }
     const abort = job.abort;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const completion = (async () => {
       try {
+        try {
+          await this.#persistence.writeJson(job.workspace.status, job.status);
+        } catch {
+          await this.#recordCrash(job);
+          return;
+        } finally {
+          markStarted();
+        }
         const status = await this.#runner({
           request: job.request,
           workspace: job.workspace,
           signal: abort.signal,
         });
-        const parsed = pdfEngineJobStatusSchema.parse(status) as PdfEngineJobStatus;
+        const parsed = validateTerminalRunnerStatus(jobId, job.status.sequence, status);
         await this.#persistence.writeJson(job.workspace.status, parsed);
         job.status = parsed;
       } catch {
@@ -830,6 +942,7 @@ export class PdfJobController {
     })();
     job.completion = completion;
     void completion;
+    await started;
   }
   async #recordCrash(job: Job) {
     const crash = failedStatus(job.request, "ENGINE_CRASH", 0);
@@ -837,7 +950,11 @@ export class PdfJobController {
     await this.#persistence.writeJson(job.workspace.status, crash).catch(() => {
       persisted = false;
     });
-    if (persisted) await sensitiveCleanup(job.workspace).catch(() => undefined);
+    if (persisted)
+      await Promise.all([
+        sensitiveCleanup(job.workspace),
+        rm(job.workspace.output, { force: true }),
+      ]).catch(() => undefined);
     else await this.#persistence.removeWorkspace(job.workspace).catch(() => undefined);
     job.status = crash;
   }
@@ -864,6 +981,7 @@ export class PdfJobController {
     if (job.removal !== null) return job.removal;
     const removal = (async () => {
       job.abort?.abort();
+      await Promise.allSettled(job.upload === null ? [] : [job.upload]);
       await job.completion;
       if (this.#jobs.get(jobId) === job) this.#jobs.delete(jobId);
       await this.#persistence.removeWorkspace(job.workspace);
