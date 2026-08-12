@@ -271,8 +271,11 @@ describe("pdf.optimize@1 policy", () => {
     expect(
       pdfOptimizePolicyResponseSchema.safeParse({ ...serverPolicy, engine: "qpdf" }).success,
     ).toBe(false);
+  });
+
+  it("represents a release-gated public server policy without claiming maintainer status", () => {
     expect(
-      pdfOptimizePolicyResponseSchema.safeParse({ ...serverPolicy, maintainer: false }).success,
+      pdfOptimizePolicyResponseSchema.parse({ ...serverPolicy, maintainer: false }).maintainer,
     ).toBe(false);
   });
 

@@ -37,6 +37,190 @@ jobs:
             --gate-schema docs/deployment/pdf-engine-release-gate.schema.json
       - run: pnpm verify
 
+  release-authority:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    environment: processing-release-authority
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.11.0
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.0.0
+        with:
+          version: v0.34.1
+          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+      - name: Install locked release tooling
+        run: pnpm install --frozen-lockfile
+      - name: Build exact release inputs once
+        env:
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN: https://api.hereisit.app
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p .artifacts/release-source .artifacts/runtime
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          git archive --format=tar "$GITHUB_SHA" > .artifacts/runtime/exact-source.tar
+          for engine in image pdf; do
+            dockerfile="apps/$engine-engine/Dockerfile"
+            docker buildx build --file "$dockerfile" --platform linux/amd64 \
+              --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" --target production \
+              --tag "hereisit-$engine-engine:$GITHUB_SHA" \
+              --output "type=oci,dest=.artifacts/release-source/$engine-engine-linux-amd64.oci.tar,rewrite-timestamp=true" \
+              --output "type=docker,dest=.artifacts/release-source/$engine-engine-linux-amd64.docker.tar,rewrite-timestamp=true" .
+          done
+          mkdir -p .artifacts/build/api-worker-bundle
+          pnpm --filter @hereisit/api-worker exec wrangler deploy --config wrangler.local.jsonc \
+            --containers-rollout none --dry-run --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
+          cp .artifacts/build/api-worker-bundle/index.js .artifacts/release-source/api-worker.mjs
+          rm -rf apps/web/.next apps/web/out
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN=https://hereisit-processing-staging.liorium.workers.dev pnpm --filter @hereisit/web build
+          node scripts/create-deterministic-tree-archive.mjs --root apps/web/out \
+            --output .artifacts/release-source/web-staging.tar > .artifacts/runtime/web-staging.json
+          rm -rf apps/web/.next apps/web/out
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN=https://api.hereisit.app pnpm --filter @hereisit/web build
+          node scripts/create-deterministic-tree-archive.mjs --root apps/web/out \
+            --output .artifacts/release-source/web-production.tar > .artifacts/runtime/web-production.json
+          node scripts/verify-and-extract-tree-archive.mjs \
+            --archive .artifacts/release-source/web-staging.tar \
+            --expected-archive-sha256 "$(node -p 'require("./.artifacts/runtime/web-staging.json").archiveSha256')" \
+            --expected-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-staging.json").treeSha256')" \
+            --output .artifacts/runtime/web-staging-scan
+          node scripts/verify-and-extract-tree-archive.mjs \
+            --archive .artifacts/release-source/web-production.tar \
+            --expected-archive-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").archiveSha256')" \
+            --expected-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").treeSha256')" \
+            --output .artifacts/runtime/web-production-scan
+          cp docs/deployment/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json
+          cp docs/deployment/pdf-engine-benchmark.schema.json .artifacts/release-source/pdf-engine-benchmark.schema.json
+          cp docs/deployment/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json
+          cp docs/deployment/pdf-engine-release-gate.schema.json .artifacts/release-source/pdf-engine-release-gate.schema.json
+          cp docs/deployment/provider-usage-schema.v1.json .artifacts/runtime/provider-usage-schema.v1.json
+      - name: Generate and verify both engine and application security evidence
+        env:
+          SYFT_IMAGE: ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d
+          TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689
+        run: |
+          set -euo pipefail
+          TRIVY_DB_DIGEST="$(docker buildx imagetools inspect ghcr.io/aquasecurity/trivy-db:2 | awk '$1 == "Digest:" { print $2; exit }')"
+          [[ "$TRIVY_DB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$TRIVY_DB_DIGEST" = "${{ vars.TRIVY_DB_DIGEST }}"
+          mkdir -p .artifacts/runtime/trivy-cache
+          docker run --rm -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
+            image --cache-dir /trivy-cache --db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST" \
+            --download-db-only
+          docker load --input .artifacts/release-source/image-engine-linux-amd64.docker.tar
+          docker load --input .artifacts/release-source/pdf-engine-linux-amd64.docker.tar
+          IMAGE_ENGINE_SHA256="$(docker image inspect "hereisit-image-engine:$GITHUB_SHA" --format '{{.Id}}' | sed 's/^sha256://')"
+          PDF_ENGINE_SHA256="$(docker image inspect "hereisit-pdf-engine:$GITHUB_SHA" --format '{{.Id}}' | sed 's/^sha256://')"
+          WEB_STAGING_SHA256="$(sha256sum .artifacts/release-source/web-staging.tar | cut -d' ' -f1)"
+          WEB_PRODUCTION_SHA256="$(sha256sum .artifacts/release-source/web-production.tar | cut -d' ' -f1)"
+          WORKER_SHA256="$(sha256sum .artifacts/release-source/api-worker.mjs | cut -d' ' -f1)"
+          LOCKFILE_SHA256="$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)"
+          for scope in engine pdf-engine web-staging web-production worker lockfile; do
+            case "$scope" in
+              engine) artifact=.artifacts/release-source/image-engine-linux-amd64.docker.tar; artifact_sha256="$IMAGE_ENGINE_SHA256"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
+              pdf-engine) artifact=.artifacts/release-source/pdf-engine-linux-amd64.docker.tar; artifact_sha256="$PDF_ENGINE_SHA256"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
+              web-staging) artifact=.artifacts/release-source/web-staging.tar; artifact_sha256="$WEB_STAGING_SHA256"; source="dir:/repo/.artifacts/runtime/$scope-scan"; trivy=(filesystem "/repo/.artifacts/runtime/$scope-scan") ;;
+              web-production) artifact=.artifacts/release-source/web-production.tar; artifact_sha256="$WEB_PRODUCTION_SHA256"; source="dir:/repo/.artifacts/runtime/$scope-scan"; trivy=(filesystem "/repo/.artifacts/runtime/$scope-scan") ;;
+              worker) artifact=.artifacts/release-source/api-worker.mjs; artifact_sha256="$WORKER_SHA256"; source="file:/repo/$artifact"; trivy=(filesystem "/repo/$artifact") ;;
+              lockfile) artifact=pnpm-lock.yaml; artifact_sha256="$LOCKFILE_SHA256"; source="file:/repo/$artifact"; trivy=(filesystem "/repo/$artifact") ;;
+            esac
+            docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" -o cyclonedx-json \
+              > ".artifacts/runtime/security-sbom-$scope.raw.json"
+            docker run --rm -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache:ro" "$TRIVY_IMAGE" \
+              "${trivy[@]}" --cache-dir /trivy-cache --skip-db-update --offline-scan --format json \
+              > ".artifacts/runtime/security-trivy-$scope.raw.json"
+            node scripts/normalize-processing-security-evidence.mjs --scope "$scope" \
+              --artifact-sha256 "$artifact_sha256" \
+              --sbom-input ".artifacts/runtime/security-sbom-$scope.raw.json" \
+              --sbom-output ".artifacts/release-source/security-sbom-$scope.cdx.json" \
+              --trivy-input ".artifacts/runtime/security-trivy-$scope.raw.json" \
+              --trivy-output ".artifacts/release-source/security-trivy-$scope.json"
+          done
+          node scripts/verify-image-engine-licenses.mjs --root apps/image-engine \
+            --output .artifacts/release-source/security-image-engine-license-gate.json
+          node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine \
+            --output .artifacts/release-source/security-pdf-engine-license-gate.json
+          node scripts/application-supply-chain.mjs --mode verify --repository . \
+            --policy security/application-license-policy.json --lockfile pnpm-lock.yaml \
+            --notices-output apps/web/public/THIRD_PARTY_NOTICES.txt \
+            --gate-output .artifacts/release-source/security-application-supply-chain-gate.json \
+            --engine-sbom .artifacts/release-source/security-sbom-engine.cdx.json --engine-artifact-sha256 "$IMAGE_ENGINE_SHA256" \
+            --pdf-engine-sbom .artifacts/release-source/security-sbom-pdf-engine.cdx.json --pdf-engine-artifact-sha256 "$PDF_ENGINE_SHA256" \
+            --web-staging-sbom .artifacts/release-source/security-sbom-web-staging.cdx.json --web-staging-artifact-sha256 "$WEB_STAGING_SHA256" \
+            --web-production-sbom .artifacts/release-source/security-sbom-web-production.cdx.json --web-production-artifact-sha256 "$WEB_PRODUCTION_SHA256" \
+            --worker-sbom .artifacts/release-source/security-sbom-worker.cdx.json --worker-artifact-sha256 "$WORKER_SHA256" \
+            --lockfile-sbom .artifacts/release-source/security-sbom-lockfile.cdx.json --lockfile-artifact-sha256 "$LOCKFILE_SHA256"
+          node scripts/verify-vulnerability-results.mjs \
+            --engine-report .artifacts/release-source/security-trivy-engine.json --engine-artifact-sha256 "$IMAGE_ENGINE_SHA256" \
+            --pdf-engine-report .artifacts/release-source/security-trivy-pdf-engine.json --pdf-engine-artifact-sha256 "$PDF_ENGINE_SHA256" \
+            --web-staging-report .artifacts/release-source/security-trivy-web-staging.json --web-staging-artifact-sha256 "$WEB_STAGING_SHA256" \
+            --web-production-report .artifacts/release-source/security-trivy-web-production.json --web-production-artifact-sha256 "$WEB_PRODUCTION_SHA256" \
+            --worker-report .artifacts/release-source/security-trivy-worker.json --worker-artifact-sha256 "$WORKER_SHA256" \
+            --lockfile-report .artifacts/release-source/security-trivy-lockfile.json --lockfile-artifact-sha256 "$LOCKFILE_SHA256" \
+            --scanner-policy security/vulnerability-scan-policy.json \
+            --engine-exceptions apps/image-engine/security/vulnerability-exceptions.json \
+            --application-exceptions security/application-vulnerability-exceptions.json \
+            --trivy-db-digest "$TRIVY_DB_DIGEST" \
+            --output .artifacts/release-source/security-vulnerability-gate.json
+      - name: Create signed @2 candidate and exact report authority
+        env:
+          PROCESSING_EVIDENCE_PRIVATE_KEY: ${{ secrets.PROCESSING_EVIDENCE_PRIVATE_KEY }}
+          PROCESSING_EVIDENCE_PUBLIC_KEY: ${{ secrets.PROCESSING_EVIDENCE_PUBLIC_KEY }}
+          PROCESSING_REVIEW_EVIDENCE_JSON: ${{ secrets.PROCESSING_REVIEW_EVIDENCE_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          RELEASE_ID="$(date -u +%F).${GITHUB_RUN_ATTEMPT}"
+          test -n "$PROCESSING_EVIDENCE_PRIVATE_KEY"
+          printf '%s' "$PROCESSING_EVIDENCE_PRIVATE_KEY" > .artifacts/runtime/evidence-private.pem
+          printf '%s' "$PROCESSING_EVIDENCE_PUBLIC_KEY" > .artifacts/runtime/evidence-public.pem
+          node scripts/prepare-processing-ci-release-source.mjs \
+            --source-root .artifacts/release-source --runtime-root .artifacts/runtime \
+            --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
+            --source-archive .artifacts/runtime/exact-source.tar
+          node scripts/create-processing-candidate.mjs --source-root .artifacts/release-source \
+            --output-root .artifacts/built-candidate --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
+            --staging-processing-api-origin https://hereisit-processing-staging.liorium.workers.dev \
+            --production-processing-api-origin https://api.hereisit.app \
+            --staging-web-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-staging.json").treeSha256')" \
+            --production-web-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").treeSha256')" \
+            --trivy-db-digest "${{ vars.TRIVY_DB_DIGEST }}" \
+            --provider-usage-schema docs/deployment/provider-usage-schema.v1.json
+          node scripts/prepare-processing-ci-evidence.mjs --candidate .artifacts/built-candidate/processing-candidate.json \
+            --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" --output .artifacts/runtime/evidence.json
+          node scripts/processing-evidence-signature.mjs --mode sign --bundle .artifacts/runtime/evidence.json \
+            --signature .artifacts/runtime/evidence.sig --private-key .artifacts/runtime/evidence-private.pem --repository-root .
+          node scripts/create-processing-release-report.mjs --candidate-root .artifacts/built-candidate \
+            --candidate-manifest .artifacts/built-candidate/processing-candidate.json \
+            --evidence-bundle .artifacts/runtime/evidence.json --evidence-signature .artifacts/runtime/evidence.sig \
+            --public-key .artifacts/runtime/evidence-public.pem --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --output .artifacts/runtime/processing-release-report.json
+          node scripts/finalize-processing-candidate.mjs --built-root .artifacts/built-candidate \
+            --output-root .artifacts/release-authority --report .artifacts/runtime/processing-release-report.json \
+            --evidence-bundle .artifacts/runtime/evidence.json --evidence-signature .artifacts/runtime/evidence.sig
+          cp .artifacts/runtime/evidence-public.pem .artifacts/release-authority/evidence-public.pem
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: processing-release-authority-${{ github.sha }}
+          path: .artifacts/release-authority
+          compression-level: 0
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
+
   browser:
     if: github.event_name == 'pull_request'
     needs: verify

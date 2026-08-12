@@ -123,6 +123,7 @@ function makeRuntime(overrides: Partial<CreateJobRouteRuntime> = {}): CreateJobR
       appOrigins: [new URL(allowedOrigin)],
       rolloutPercent: 100,
       maintainerSessionHashes: new Set<string>(),
+      pdfPublicAdmissionEnabled: false,
       accountDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
       anonymousDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
       networkDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
@@ -420,6 +421,52 @@ describe("POST /v1/jobs for PDF", () => {
         resourceClass: "pdf-standard-v1",
       }),
     );
+  });
+
+  it("creates a non-maintainer PDF reservation only when public admission is enabled", async () => {
+    const repository = {
+      reserveAndCreate: vi.fn(async (input: PdfReserveAndCreateInput) => ({
+        kind: "created" as const,
+        mode: "upload-required" as const,
+        job: {
+          jobId: input.jobId,
+          status: "created" as const,
+          contractId: "pdf.optimize@1" as const,
+          specHash: input.specHash,
+          declaredBytes: input.request.input.byteLength,
+          declaredMime: "application/pdf" as const,
+          declaredWidth: null,
+          declaredHeight: null,
+          declaredPageCount: input.request.input.pageCount,
+          inputKey: input.inputKey,
+          inputEtag: null,
+          uploadVersion: 0,
+          outputKey: input.outputKey,
+          reservedWeightedUnits: input.estimate.reservedWeightedUnits,
+          resourceClass: "pdf-standard-v1" as const,
+          attempt: 1,
+          queueEpoch: input.queueEpoch,
+          queueGeneration: 1,
+          cancelRequestedAt: null,
+          uploadExpiresAt: input.uploadExpiresAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        },
+      })),
+    };
+    const runtime = makeRuntime({
+      repository: repository as never,
+      readJson: vi.fn(async () => pdfCreateBody()),
+      config: {
+        ...makeRuntime().config,
+        rolloutPercent: 100,
+        pdfPublicAdmissionEnabled: true,
+      },
+    });
+
+    const response = await routeCreateJobRequest(createRequest(pdfCreateBody()), runtime);
+    expect(response.status).toBe(201);
+    expect(repository.reserveAndCreate).toHaveBeenCalledOnce();
   });
 
   it.each([

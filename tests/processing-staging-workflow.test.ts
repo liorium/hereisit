@@ -64,20 +64,21 @@ describe("processing staging workflow", () => {
     expect(firstCloudflareMutation).toBeGreaterThan(validateEnvironment);
   });
 
-  it("removes the manual signed-release ceremony", () => {
-    expect(workflow).not.toMatch(
-      /processing-evidence|release_tag|release-input|verify-release|PRIVATE(?:_|-)KEY/,
+  it("downloads the automatic exact-SHA CI release authority without a manual release", () => {
+    expect(workflow).toContain(
+      `processing-release-authority-\${{ github.event.workflow_run.head_sha }}`,
     );
+    expect(workflow).toContain("verify-processing-deployment-authority.mjs");
     expect(workflow).not.toContain("gh release");
-    expect(workflow).not.toContain("actions/download-artifact@");
+    expect(workflow).toContain("actions/download-artifact@");
   });
 
   it("builds and deploys one immutable rollout-zero staging source", () => {
     const deploy = jobBody("deploy");
-    const buildImage = deploy.indexOf("docker buildx build");
-    const buildWorker = deploy.indexOf("--dry-run");
-    const buildWeb = deploy.indexOf("NEXT_PUBLIC_PROCESSING_API_ORIGIN");
-    const createCostModel = deploy.indexOf("node scripts/create-live-cost-model.mjs");
+    const bindAuthority = deploy.indexOf("verify-processing-deployment-authority.mjs");
+    const bindImage = deploy.indexOf("image-engine-linux-amd64.docker.tar");
+    const bindWorker = deploy.indexOf('cp .artifacts/authority/api-worker.mjs "$WORKER_MODULE"');
+    const bindWeb = deploy.indexOf("verify-and-extract-tree-archive.mjs");
     const pushImage = deploy.indexOf("wrangler containers push");
     const resolveDigest = deploy.indexOf("node scripts/resolve-cloudflare-image-digest.mjs");
     const provision = deploy.indexOf("node scripts/ensure-cloudflare-processing-resources.mjs");
@@ -87,11 +88,11 @@ describe("processing staging workflow", () => {
     const deployPages = deploy.indexOf("wrangler pages deploy");
     const verifyPages = deploy.indexOf("node scripts/verify-pages-alias.mjs");
 
-    expect(buildImage).toBeGreaterThanOrEqual(0);
-    expect(buildWorker).toBeGreaterThan(buildImage);
-    expect(buildWeb).toBeGreaterThan(buildWorker);
-    expect(createCostModel).toBeGreaterThan(buildWeb);
-    expect(pushImage).toBeGreaterThan(createCostModel);
+    expect(bindAuthority).toBeGreaterThanOrEqual(0);
+    expect(bindImage).toBeGreaterThan(bindAuthority);
+    expect(bindWorker).toBeGreaterThan(bindAuthority);
+    expect(bindWeb).toBeGreaterThan(bindWorker);
+    expect(pushImage).toBeGreaterThan(bindWeb);
     expect(resolveDigest).toBeGreaterThan(pushImage);
     expect(provision).toBeGreaterThan(resolveDigest);
     expect(migrations).toBeGreaterThan(provision);
@@ -105,13 +106,7 @@ describe("processing staging workflow", () => {
     expect(deploy).toContain(
       'REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine:$EXPECTED_HEAD_SHA-$IMAGE_CONFIG_HEX"',
     );
-    expect(deploy).toContain(
-      'SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"',
-    );
-    expect(deploy).toContain('--build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"');
-    expect(deploy).toContain(
-      "--output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true",
-    );
+    expect(deploy).not.toContain("docker buildx build");
     expect(deploy).toContain('--engine-image "$ENGINE_IMAGE"');
     expect(deploy).toContain(`LOGPUSH_STATUS_TOKEN: \${{ secrets.STAGING_LOGPUSH_STATUS_TOKEN }}`);
   });
@@ -136,7 +131,7 @@ describe("processing staging workflow", () => {
     const cleanupStep = deploy.indexOf(
       "      - name: Re-pause and verify both queues after any failed delivery attempt",
     );
-    const cleanup = deploy.indexOf('wrangler queues pause-delivery "$QUEUE_NAME"', cleanupStep);
+    const cleanup = deploy.indexOf('restore_queue image-primary "$QUEUE_NAME"', cleanupStep);
 
     expect(arm).toBeGreaterThan(verifyPages);
     expect(resume).toBeGreaterThan(arm);
@@ -150,10 +145,9 @@ describe("processing staging workflow", () => {
     expect(cleanupStep).toBeGreaterThan(smoke);
     expect(cleanup).toBeGreaterThan(cleanupStep);
     expect(deploy.slice(cleanupStep + 1)).not.toMatch(/^ {6}- /m);
-    expect(deploy).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
+    expect(deploy).toContain("(failure() || cancelled())");
     expect(deploy).not.toContain('queues resume-delivery "$DLQ_NAME"');
-    expect(deploy.slice(cleanup)).toContain('--queue "$QUEUE_NAME" --expected paused');
-    expect(deploy.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
+    expect(deploy.slice(cleanupStep)).toContain('--expected "$expected"');
   });
 
   it("rotates staging cost accounting after attestation while rollout and queues remain closed", () => {
@@ -170,7 +164,7 @@ describe("processing staging workflow", () => {
       `CLOUDFLARE_D1_API_TOKEN: \${{ secrets.CLOUDFLARE_D1_API_TOKEN }}`,
     );
     expect(deploy.slice(rotation, deployPages)).toContain(
-      '--release-report-sha256 "$SOURCE_SHA256"',
+      '--release-report-sha256 "$REPORT_SHA256"',
     );
   });
 
@@ -240,6 +234,10 @@ describe("processing staging workflow", () => {
 
     expect(paths).toEqual([
       ".artifacts/deployment/source-sha.txt",
+      ".artifacts/deployment/release-authority.json",
+      ".artifacts/deployment/processing-candidate.json",
+      ".artifacts/deployment/processing-release-report.json",
+      ".artifacts/deployment/evidence-public.pem",
       ".artifacts/deployment/cloudflare-image-digest.txt",
       ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",

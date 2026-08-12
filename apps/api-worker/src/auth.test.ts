@@ -175,6 +175,15 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
     LIVE_COST_MODEL_SHA256: sha256Hex(canonicalJson(liveCostModel)),
     PROVIDER_USAGE_SCHEMA_SHA256: "2".repeat(64),
     RELEASE_REPORT_SHA256: "3".repeat(64),
+    PDF_PUBLIC_ADMISSION_JSON: canonicalJson({
+      schema: "hereisit-pdf-public-admission@1",
+      enabled: false,
+      releaseReportSha256: "3".repeat(64),
+      visualProfilesMeasured: 0,
+      deletionPassed: false,
+      costPassed: false,
+      rollbackPassed: false,
+    }),
     IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "100",
     MAINTAINER_SESSION_HASHES: "[]",
     ENGINE_INSTANCE_NAME: "image-slot-0",
@@ -460,6 +469,69 @@ describe("strict operational configuration", () => {
     ]);
     expect(config.liveCostModel.arrivalProjection.steadyHourlyJobs).toHaveLength(24);
     expect(config.rolloutPercent).toBe(100);
+    expect(config.pdfPublicAdmissionEnabled).toBe(false);
+  });
+
+  it("enables public PDF admission only for complete evidence bound to the release report", async () => {
+    const config = await parseOperationalConfig(
+      makeEnv({
+        PDF_PUBLIC_ADMISSION_JSON: canonicalJson({
+          schema: "hereisit-pdf-public-admission@1",
+          enabled: true,
+          releaseReportSha256: "3".repeat(64),
+          visualProfilesMeasured: 1,
+          deletionPassed: true,
+          costPassed: true,
+          rollbackPassed: true,
+        }),
+      }),
+    );
+    expect(config.pdfPublicAdmissionEnabled).toBe(true);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "{"],
+    [
+      "report drift",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "4".repeat(64),
+        visualProfilesMeasured: 1,
+        deletionPassed: true,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+    [
+      "missing visual evidence",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "3".repeat(64),
+        visualProfilesMeasured: 0,
+        deletionPassed: true,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+    [
+      "missing deletion evidence",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "3".repeat(64),
+        visualProfilesMeasured: 1,
+        deletionPassed: false,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+  ])("rejects a %s PDF public-admission state", async (_label, state) => {
+    await expect(
+      parseOperationalConfig(makeEnv({ PDF_PUBLIC_ADMISSION_JSON: state })),
+    ).rejects.toThrow(/PDF|admission|JSON|canonical/i);
   });
 
   it("keeps production processing disabled when the account budget is absent", async () => {

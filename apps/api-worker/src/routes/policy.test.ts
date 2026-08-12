@@ -69,6 +69,7 @@ function makePolicyConfig(overrides: Record<string, unknown> = {}) {
     networkPendingJobLimit: 3,
     maximumQueuedAgeSeconds: 600,
     maintainerSessionHashes: new Set<string>(),
+    pdfPublicAdmissionEnabled: false,
     ...overrides,
   };
 }
@@ -402,6 +403,23 @@ describe("deterministic PDF optimization policy", () => {
       maintainer: false,
       execution: "local",
       reason: "LOCAL_FALLBACK_REQUIRED",
+    });
+  });
+
+  it("admits a non-maintainer PDF request only when the release-bound public gate is enabled", async () => {
+    const response = await getPolicy(policyRequest(pdfPolicyBody()), {
+      rolloutPercent: 100,
+      accountDailyWeightedUnitLimit: 10_000_000,
+      anonymousDailyWeightedUnitLimit: 1_000_000,
+      networkDailyWeightedUnitLimit: 3_000_000,
+      pdfPublicAdmissionEnabled: true,
+    });
+
+    expect(pdfOptimizePolicyResponseSchema.parse(await response.json())).toMatchObject({
+      toolContract: "pdf.optimize@1",
+      maintainer: false,
+      execution: "server",
+      reason: null,
     });
   });
 });

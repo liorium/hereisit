@@ -41,6 +41,7 @@ type CreateConfig = Pick<
   | "accountPendingJobLimit"
   | "networkPendingJobLimit"
   | "maximumQueuedAgeSeconds"
+  | "pdfPublicAdmissionEnabled"
 >;
 
 export interface CreateJobLogEvent {
@@ -235,9 +236,11 @@ function serverCohortAllowed(input: {
   maintainer: boolean;
   rolloutBucket: number;
   toolContract?: AnyCreateRequest["toolContract"];
+  pdfPublicAdmissionEnabled: boolean;
 }): boolean {
   return input.toolContract === "pdf.optimize@1"
-    ? input.maintainer
+    ? input.maintainer ||
+        (input.pdfPublicAdmissionEnabled && input.rolloutBucket < input.rolloutPercent)
     : input.maintainer || input.rolloutBucket < input.rolloutPercent;
 }
 
@@ -375,6 +378,7 @@ export async function routeCreateJobRequest(
       maintainer,
       rolloutBucket,
       toolContract: parsed.data.toolContract,
+      pdfPublicAdmissionEnabled: runtime.config.pdfPublicAdmissionEnabled,
     })
   ) {
     return processingDisabledResponse("LOCAL_FALLBACK_REQUIRED");

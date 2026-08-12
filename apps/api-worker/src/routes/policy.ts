@@ -27,6 +27,7 @@ export interface PolicyDecisionConfig {
   networkPendingJobLimit?: number;
   maximumQueuedAgeSeconds?: number;
   maintainerSessionHashes?: ReadonlySet<string>;
+  pdfPublicAdmissionEnabled?: boolean;
 }
 
 export interface PolicyRouterConfig extends PolicyDecisionConfig {
@@ -115,6 +116,7 @@ function normalizedConfig(config: PolicyDecisionConfig): Required<PolicyDecision
     networkPendingJobLimit: config.networkPendingJobLimit ?? Number.MAX_SAFE_INTEGER,
     maximumQueuedAgeSeconds: config.maximumQueuedAgeSeconds ?? Number.MAX_SAFE_INTEGER,
     maintainerSessionHashes: config.maintainerSessionHashes ?? new Set<string>(),
+    pdfPublicAdmissionEnabled: config.pdfPublicAdmissionEnabled ?? false,
   };
 }
 
@@ -171,7 +173,8 @@ function makePolicyPayload(input: {
   const inRollout =
     input.rolloutBucket !== null &&
     (toolContract === "pdf.optimize@1"
-      ? maintainer
+      ? maintainer ||
+        (config.pdfPublicAdmissionEnabled && input.rolloutBucket < config.rolloutPercent)
       : maintainer || input.rolloutBucket < config.rolloutPercent);
   const execution = admissionAllowed && inRollout ? "server" : "local";
   if (execution === "server") {

@@ -111,6 +111,15 @@ function validInput(environment: "staging" | "production" = "staging") {
     liveCostModelSha256: "e".repeat(64),
     providerUsageSchemaSha256: CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256,
     releaseReportSha256: "1".repeat(64),
+    pdfPublicAdmission: {
+      schema: "hereisit-pdf-public-admission@1" as const,
+      enabled: false,
+      releaseReportSha256: "1".repeat(64),
+      visualProfilesMeasured: 0,
+      deletionPassed: false,
+      costPassed: false,
+      rollbackPassed: false,
+    },
     rolloutPercent: environment === "staging" ? 0 : 5,
     maintainerSessionHashes: ["2".repeat(64)],
     sessionRateLimitNamespaceId: "21001",
@@ -191,6 +200,8 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
     input.providerUsageSchemaSha256,
     "--release-report-sha256",
     input.releaseReportSha256,
+    "--pdf-public-admission-json",
+    canonicalJson(input.pdfPublicAdmission),
     "--session-rate-limit-namespace-id",
     input.sessionRateLimitNamespaceId,
     "--network-rate-limit-namespace-id",
@@ -227,6 +238,9 @@ describe("processing Wrangler generator", () => {
     });
 
     expect(config.vars.LIVE_COST_MODEL_JSON).toBe(canonicalJson(liveCostModel));
+    expect(config.vars.PDF_PUBLIC_ADMISSION_JSON).toBe(
+      canonicalJson(validInput().pdfPublicAdmission),
+    );
   });
 
   it("generates variables accepted by the Worker runtime contract", async () => {

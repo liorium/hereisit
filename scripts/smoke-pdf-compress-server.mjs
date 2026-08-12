@@ -20,7 +20,9 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const digestPattern = /^sha-256=[A-Za-z0-9+/]{43}=$/;
 const MAX_RESULT_BYTES = 50 * 1024 * 1024;
+const MAX_CONTROL_BYTES = 16 * 1024;
 const DEFAULT_DEADLINE_MS = 20 * 60_000;
+const CLEANUP_DEADLINE_MS = 10_000;
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -123,10 +125,45 @@ function assertResponseStatus(response, expected, stage) {
 
 async function jsonResponse(response, expected, stage) {
   assertResponseStatus(response, expected, stage);
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
+  const declared = response.headers.get("content-length");
+  if (
+    contentType !== "application/json" ||
+    declared === null ||
+    !/^(?:0|[1-9]\d*)$/.test(declared) ||
+    Number(declared) < 1 ||
+    Number(declared) > MAX_CONTROL_BYTES ||
+    response.body === null
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new TypeError(`PDF smoke ${stage} control response envelope is invalid`);
+  }
+  const expectedBytes = Number(declared);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
   try {
-    return assertObject(await response.json(), `PDF smoke ${stage}`);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > expectedBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TypeError(`PDF smoke ${stage} control response exceeds declared length`);
+      }
+      chunks.push(value);
+    }
+    if (received !== expectedBytes) {
+      throw new TypeError(`PDF smoke ${stage} control response length is invalid`);
+    }
+    return assertObject(
+      JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8")),
+      `PDF smoke ${stage}`,
+    );
   } catch {
     throw new TypeError(`PDF smoke ${stage} response is invalid`);
+  } finally {
+    reader.releaseLock();
   }
 }
 
@@ -309,13 +346,14 @@ export async function runPdfSmokeLifecycle(input) {
     input.sleep ?? ((milliseconds) => new Promise((done) => setTimeout(done, milliseconds)));
   const now = input.now ?? Date.now;
   const deadline = now() + (input.deadlineMs ?? DEFAULT_DEADLINE_MS);
+  const timeoutSignal = input.timeoutSignal ?? AbortSignal.timeout;
   const clientRequestId = randomUUID();
   const jobToken = randomBytes(32).toString("base64url");
   const sourceDigest = sha256Digest(source);
   const trace = [];
   let jobId;
   const request = async (path, init, timeoutMs = 15_000) => {
-    const signal = AbortSignal.timeout(Math.min(timeoutMs, Math.max(1, deadline - now())));
+    const signal = timeoutSignal(Math.min(timeoutMs, Math.max(1, deadline - now())));
     return fetcher(`${apiOrigin}${path}`, {
       ...init,
       headers: { origin: pageOrigin, ...(init.headers ?? {}) },
@@ -336,8 +374,8 @@ export async function runPdfSmokeLifecycle(input) {
     });
     const policy = await jsonResponse(policyResponse, 200, "policy");
     trace.push(traceEntry("POST", "/v1/policy", policyResponse.status));
-    if (policy.execution !== "server" || policy.maintainer !== true) {
-      throw new TypeError("PDF smoke maintainer policy is not server enabled");
+    if (policy.execution !== "server" || policy.maintainer !== (input.anonymous !== true)) {
+      throw new TypeError("PDF smoke policy is not server enabled for the requested cohort");
     }
     const createResponse = await request("/v1/jobs", {
       method: "POST",
@@ -484,9 +522,13 @@ export async function runPdfSmokeLifecycle(input) {
     });
   } catch (error) {
     if (jobId !== undefined) {
-      await request(`/v1/jobs/${jobId}`, {
+      const signal = timeoutSignal(CLEANUP_DEADLINE_MS);
+      await fetcher(`${apiOrigin}/v1/jobs/${jobId}`, {
         method: "DELETE",
-        headers: { authorization: `Bearer ${jobToken}` },
+        headers: { origin: pageOrigin, authorization: `Bearer ${jobToken}` },
+        cache: "no-store",
+        credentials: "omit",
+        signal,
       }).catch(() => undefined);
     }
     throw error;
@@ -497,22 +539,28 @@ function parseCli(argv, environment) {
   const args = parseCliArguments(argv);
   const pageOrigin = args["page-origin"];
   const outputPath = args.output;
-  const sessionId =
-    pageOrigin === STAGING_PAGE_ORIGIN
+  const anonymous = args.anonymous === "true";
+  const sessionId = anonymous
+    ? "018f47a2-65d4-7f31-a377-5afbb8f53f27"
+    : pageOrigin === STAGING_PAGE_ORIGIN
       ? environment.STAGING_MAINTAINER_SESSION_ID
       : pageOrigin === PRODUCTION_PAGE_ORIGIN
         ? environment.PRODUCTION_MAINTAINER_SESSION_ID
         : undefined;
   if (
-    argv.join("\0") !== `--page-origin\0${pageOrigin ?? ""}\0--output\0${outputPath ?? ""}` ||
-    Object.keys(args).sort().join() !== "output,page-origin" ||
+    argv.join("\0") !==
+      (anonymous
+        ? `--page-origin\0${pageOrigin ?? ""}\0--anonymous\0true\0--output\0${outputPath ?? ""}`
+        : `--page-origin\0${pageOrigin ?? ""}\0--output\0${outputPath ?? ""}`) ||
+    Object.keys(args).sort().join() !==
+      (anonymous ? "anonymous,output,page-origin" : "output,page-origin") ||
     typeof outputPath !== "string" ||
     outputPath.length === 0 ||
     !UUID_PATTERN.test(sessionId ?? "")
   ) {
     throw new TypeError("PDF smoke configuration is invalid");
   }
-  return { pageOrigin, outputPath, sessionId };
+  return { pageOrigin, outputPath, sessionId, anonymous };
 }
 
 export async function runPdfSmokeCli({ argv, environment }) {

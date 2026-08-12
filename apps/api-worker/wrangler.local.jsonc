@@ -188,6 +188,7 @@
     "LIVE_COST_MODEL_SHA256": "f3d711d9d580e5576ed7deef7a848749edeaaf7a8eafbecbc7fa66179d5abf6f",
     "PROVIDER_USAGE_SCHEMA_SHA256": "cabac55c2f89b604777f03f6f82ee96a567a5f8380dfe4f1b0c33250c5df291d",
     "RELEASE_REPORT_SHA256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "PDF_PUBLIC_ADMISSION_JSON": "{\"costPassed\":false,\"deletionPassed\":false,\"enabled\":false,\"releaseReportSha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"rollbackPassed\":false,\"schema\":\"hereisit-pdf-public-admission@1\",\"visualProfilesMeasured\":0}\n",
     "IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT": "100",
     "MAINTAINER_SESSION_HASHES": "[]",
     "ENGINE_INSTANCE_NAME": "image-slot-0",

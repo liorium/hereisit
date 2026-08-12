@@ -61,6 +61,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: processing-release-authority-${{ github.event.workflow_run.head_sha }}
+          path: .artifacts/authority
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
       - name: Bind the exact successful CI source
         run: |
           set -euo pipefail
@@ -70,8 +76,23 @@ jobs:
           test -z "$(git status --porcelain)"
           mkdir -p .artifacts/build .artifacts/deployment .artifacts/runtime .wrangler/generated
           printf '%s\n' "$EXPECTED_HEAD_SHA" > .artifacts/deployment/source-sha.txt
-          SOURCE_SHA256="$(sha256sum .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
-          echo "SOURCE_SHA256=$SOURCE_SHA256" >> "$GITHUB_ENV"
+          test "$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field gitSha)" = "$EXPECTED_HEAD_SHA"
+          REPORT_SHA256="$(sha256sum .artifacts/authority/processing-release-report.json | cut -d' ' -f1)"
+          RELEASE_ID="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field releaseId)"
+          node scripts/verify-processing-deployment-authority.mjs \
+            --candidate-root .artifacts/authority \
+            --candidate-manifest .artifacts/authority/processing-candidate.json \
+            --evidence-bundle ".artifacts/authority/evidence-v1--$RELEASE_ID--processing-evidence.json" \
+            --evidence-signature ".artifacts/authority/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
+            --public-key .artifacts/authority/evidence-public.pem \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --report .artifacts/authority/processing-release-report.json \
+            --expected-git-sha "$EXPECTED_HEAD_SHA" --expected-report-sha256 "$REPORT_SHA256" \
+            > .artifacts/deployment/release-authority.json
+          cp .artifacts/authority/processing-candidate.json .artifacts/deployment/processing-candidate.json
+          cp .artifacts/authority/processing-release-report.json .artifacts/deployment/processing-release-report.json
+          cp .artifacts/authority/evidence-public.pem .artifacts/deployment/evidence-public.pem
+          echo "REPORT_SHA256=$REPORT_SHA256" >> "$GITHUB_ENV"
       - name: Install locked dependencies
         run: |
           set -euo pipefail
@@ -95,71 +116,29 @@ jobs:
         with:
           version: v0.34.1
           driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
-      - name: Build the engine, Worker, web, and cost model
+      - name: Bind CI-built engine, Worker, web, benchmark, cost, SBOM, Trivy, and license assets
         run: |
           set -euo pipefail
           umask 077
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$EXPECTED_HEAD_SHA")"
-          [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]
-          docker buildx build \
-            --file apps/image-engine/Dockerfile \
-            --platform linux/amd64 \
-            --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
-            --target production \
-            --tag "hereisit-image-engine:$EXPECTED_HEAD_SHA" \
-            --output type=docker,dest=.artifacts/build/image-engine-linux-amd64.docker.tar,rewrite-timestamp=true \
-            .
+          cp .artifacts/authority/api-worker.mjs "$WORKER_MODULE"
+          cp .artifacts/authority/live-cost-model.json .artifacts/runtime/live-cost-model.json
+          cp .artifacts/authority/image-engine-linux-amd64.docker.tar .artifacts/build/image-engine-linux-amd64.docker.tar
+          cp .artifacts/authority/pdf-engine-linux-amd64.docker.tar .artifacts/build/pdf-engine-linux-amd64.docker.tar
           docker load --input .artifacts/build/image-engine-linux-amd64.docker.tar
-          LOCAL_IMAGE_CONFIG_DIGEST="$(docker image inspect --format '{{.Id}}' \
-            "hereisit-image-engine:$EXPECTED_HEAD_SHA")"
-          [[ "$LOCAL_IMAGE_CONFIG_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-
-          docker buildx build \
-            --file apps/pdf-engine/Dockerfile \
-            --platform linux/amd64 \
-            --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
-            --target production \
-            --tag "hereisit-pdf-engine:$EXPECTED_HEAD_SHA" \
-            --output type=docker,dest=.artifacts/build/pdf-engine-linux-amd64.docker.tar,rewrite-timestamp=true \
-            .
           docker load --input .artifacts/build/pdf-engine-linux-amd64.docker.tar
-          LOCAL_PDF_CONFIG_DIGEST="$(docker image inspect --format '{{.Id}}' \
-            "hereisit-pdf-engine:$EXPECTED_HEAD_SHA")"
-          [[ "$LOCAL_PDF_CONFIG_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine \
-            --output .artifacts/build/security-pdf-engine-license-gate.json
-          node scripts/validate-pdf-benchmark-evidence.mjs \
-            --report docs/deployment/pdf-engine-benchmark.json \
-            --gate docs/deployment/pdf-engine-release-gate.json \
-            --benchmark-schema docs/deployment/pdf-engine-benchmark.schema.json \
-            --gate-schema docs/deployment/pdf-engine-release-gate.schema.json \
-            > .artifacts/build/pdf-quality-validation.json
-
-          mkdir -p .artifacts/build/api-worker-bundle
-          pnpm --filter @hereisit/api-worker exec wrangler deploy \
-            --config wrangler.local.jsonc \
-            --containers-rollout none \
-            --dry-run \
-            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
-          test -f .artifacts/build/api-worker-bundle/index.js
-          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
-
-          rm -rf apps/web/.next apps/web/out
-          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$STAGING_API_ORIGIN" \
-            pnpm --filter @hereisit/web build
-          test -d apps/web/out
-
-          LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
-            --input docs/deployment/processing-staging-cost-input.json \
-            --schema docs/deployment/live-cost-model.schema.json \
-            --output .artifacts/runtime/live-cost-model.json)"
-          [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
-            'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
-          [[ "$PROVIDER_USAGE_SCHEMA_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          LOCAL_IMAGE_CONFIG_DIGEST="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field engine.oci.configDigest)"
+          LOCAL_PDF_CONFIG_DIGEST="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field pdfEngine.oci.configDigest)"
+          LIVE_COST_MODEL_SHA256="$(sha256sum .artifacts/runtime/live-cost-model.json | cut -d' ' -f1)"
+          PROVIDER_USAGE_SCHEMA_SHA256="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field providerUsage.schemaSha256)"
+          rm -rf apps/web/out
+          node scripts/verify-and-extract-tree-archive.mjs \
+            --archive .artifacts/authority/web-staging.tar \
+            --expected-archive-sha256 "$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field web.staging.archiveSha256)" \
+            --expected-tree-sha256 "$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field web.staging.treeSha256)" \
+            --output apps/web/out
           {
-             echo "LOCAL_IMAGE_CONFIG_DIGEST=$LOCAL_IMAGE_CONFIG_DIGEST"
-             echo "LOCAL_PDF_CONFIG_DIGEST=$LOCAL_PDF_CONFIG_DIGEST"
+            echo "LOCAL_IMAGE_CONFIG_DIGEST=$LOCAL_IMAGE_CONFIG_DIGEST"
+            echo "LOCAL_PDF_CONFIG_DIGEST=$LOCAL_PDF_CONFIG_DIGEST"
             echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
             echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
           } >> "$GITHUB_ENV"
@@ -283,7 +262,8 @@ jobs:
               --live-cost-model .artifacts/runtime/live-cost-model.json \
               --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
               --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
-              --release-report-sha256 "$SOURCE_SHA256" \
+              --release-report-sha256 "$REPORT_SHA256" \
+              --pdf-public-admission-json "$(node -e 'process.stdout.write(JSON.stringify({costPassed:false,deletionPassed:false,enabled:false,releaseReportSha256:process.argv[1],rollbackPassed:false,schema:"hereisit-pdf-public-admission@1",visualProfilesMeasured:0}))' "$REPORT_SHA256")" \
               --session-rate-limit-namespace-id 21001 \
               --network-rate-limit-namespace-id 21002 \
               --job-read-rate-limit-namespace-id 21003 \
@@ -414,7 +394,7 @@ jobs:
             --mode capture-bootstrap \
             --worker-module "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" \
-            --release-report .artifacts/deployment/source-sha.txt \
+            --release-report .artifacts/authority/processing-release-report.json \
             --output .artifacts/runtime/bootstrap-witness.json
           {
             echo "STAGING_D1_DATABASE_ID=$STAGING_D1_DATABASE_ID"
@@ -464,7 +444,7 @@ jobs:
             --bootstrap-witness .artifacts/runtime/bootstrap-witness.json \
             --worker-module "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" \
-            --release-report .artifacts/deployment/source-sha.txt \
+            --release-report .artifacts/authority/processing-release-report.json \
             --output .artifacts/runtime/worker-version-attestations.json \
             --previous-active-version-id "$PREVIOUS_ACTIVE_VERSION_ID" \
             --before-deployment .artifacts/runtime/deployment-before.json
@@ -482,7 +462,7 @@ jobs:
           node scripts/rotate-staging-accounting-epoch.mjs \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$STAGING_D1_DATABASE_ID" \
-            --release-report-sha256 "$SOURCE_SHA256"
+            --release-report-sha256 "$REPORT_SHA256"
       - name: Deploy and verify the staging Pages tree
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -528,7 +508,14 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Arm primary queue failure cleanup
         id: resume-attempt
-        run: echo "attempted=true" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          node scripts/capture-processing-queue-states.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
+            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
+            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
       - name: Resume image delivery for the image canary
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -590,6 +577,11 @@ jobs:
           name: processing-staging-deployment-${{ github.event.workflow_run.head_sha }}
           path: |
             .artifacts/deployment/source-sha.txt
+            .artifacts/deployment/release-authority.json
+            .artifacts/deployment/processing-candidate.json
+            .artifacts/deployment/processing-release-report.json
+            .artifacts/deployment/evidence-public.pem
+            .artifacts/authority/**
             .artifacts/deployment/cloudflare-image-digest.txt
             .artifacts/deployment/cloudflare-pdf-image-digest.txt
             .artifacts/deployment/worker-version.json
@@ -601,18 +593,22 @@ jobs:
           include-hidden-files: true
           retention-days: 7
       - name: Re-pause and verify both queues after any failed delivery attempt
-        if: failure() && steps.resume-attempt.outputs.attempted == 'true'
+        if: always() && steps.resume-attempt.outputs.attempted == 'true' && (failure() || cancelled())
+        timeout-minutes: 5
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_CLEANUP_API_TOKEN }}
         run: |
-          set -euo pipefail
-          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
-          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          set +e
+          status=0
+          restore_queue() {
+            key="$1"; name="$2"
+            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
+            if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
+            pnpm exec wrangler queues "$action" "$name" || status=1
+            node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          }
+          restore_queue image-primary "$QUEUE_NAME"
+          restore_queue image-dlq "$DLQ_NAME"
+          restore_queue pdf-primary "$PDF_QUEUE_NAME"
+          restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          exit "$status"

@@ -85,6 +85,7 @@ const inputKeys = new Set([
   "liveCostModelSha256",
   "providerUsageSchemaSha256",
   "releaseReportSha256",
+  "pdfPublicAdmission",
   "rolloutPercent",
   "maintainerSessionHashes",
   "sessionRateLimitNamespaceId",
@@ -117,6 +118,45 @@ function assertSafeInteger(value, label, { maximum = Number.MAX_SAFE_INTEGER } =
     throw new RangeError(`${label} must be a non-negative safe integer at most ${maximum}`);
   }
   return value;
+}
+
+function validatePdfPublicAdmission(value, releaseReportSha256) {
+  const state = assertPlainObject(value, "pdfPublicAdmission");
+  assertExactKeys(
+    state,
+    [
+      "schema",
+      "enabled",
+      "releaseReportSha256",
+      "visualProfilesMeasured",
+      "deletionPassed",
+      "costPassed",
+      "rollbackPassed",
+    ],
+    "pdfPublicAdmission",
+  );
+  if (state.schema !== "hereisit-pdf-public-admission@1" || typeof state.enabled !== "boolean") {
+    throw new TypeError("pdfPublicAdmission schema or enabled value is invalid");
+  }
+  assertSha256(state.releaseReportSha256, "pdfPublicAdmission.releaseReportSha256");
+  if (state.releaseReportSha256 !== releaseReportSha256) {
+    throw new TypeError("pdfPublicAdmission must bind the exact release report SHA-256");
+  }
+  assertSafeInteger(state.visualProfilesMeasured, "pdfPublicAdmission.visualProfilesMeasured");
+  for (const key of ["deletionPassed", "costPassed", "rollbackPassed"]) {
+    if (typeof state[key] !== "boolean")
+      throw new TypeError(`pdfPublicAdmission.${key} is invalid`);
+  }
+  if (
+    state.enabled &&
+    (state.visualProfilesMeasured <= 0 ||
+      !state.deletionPassed ||
+      !state.costPassed ||
+      !state.rollbackPassed)
+  ) {
+    throw new TypeError("enabled pdfPublicAdmission requires complete release evidence");
+  }
+  return state;
 }
 
 function assertPositiveNumber(value, label) {
@@ -334,6 +374,7 @@ function validateInput(input) {
   for (const key of ["liveCostModelSha256", "providerUsageSchemaSha256", "releaseReportSha256"]) {
     assertSha256(value[key], key);
   }
+  validatePdfPublicAdmission(value.pdfPublicAdmission, value.releaseReportSha256);
   if (value.providerUsageSchemaSha256 !== CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256) {
     throw new TypeError("provider usage schema hash does not match the checked-in contract");
   }
@@ -537,6 +578,7 @@ export function generateProcessingWrangler(input) {
       LIVE_COST_MODEL_SHA256: value.liveCostModelSha256,
       PROVIDER_USAGE_SCHEMA_SHA256: value.providerUsageSchemaSha256,
       RELEASE_REPORT_SHA256: value.releaseReportSha256,
+      PDF_PUBLIC_ADMISSION_JSON: canonicalJson(value.pdfPublicAdmission),
       IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: String(value.rolloutPercent),
       MAINTAINER_SESSION_HASHES: JSON.stringify(value.maintainerSessionHashes),
       ENGINE_INSTANCE_NAME: "image-slot-0",
@@ -631,6 +673,12 @@ export function parseProcessingWranglerArguments(argv, liveCostModel) {
         parsed.maintainerSessionHashes = JSON.parse(value);
       } catch {
         throw new TypeError("--maintainer-session-hashes-json must be valid JSON");
+      }
+    } else if (name === "pdf-public-admission-json") {
+      try {
+        parsed.pdfPublicAdmission = JSON.parse(value);
+      } catch {
+        throw new TypeError("--pdf-public-admission-json must be valid JSON");
       }
     } else if (Object.hasOwn(cliScalarFields, name)) {
       parsed[cliScalarFields[name]] = value;

@@ -339,7 +339,7 @@ export const pdfOptimizePolicyResponseSchema = z.discriminatedUnion("execution",
       ...policyCommonShape,
       execution: z.literal("server"),
       reason: z.null(),
-      maintainer: z.literal(true),
+      maintainer: z.boolean(),
       disclosure: z
         .object({
           upload: z.literal(true),

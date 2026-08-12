@@ -74,6 +74,7 @@ export interface OperationalConfig {
   liveCostModelSha256: string;
   providerUsageSchemaSha256: string;
   releaseReportSha256: string;
+  pdfPublicAdmissionEnabled: boolean;
   rolloutPercent: number;
   maintainerSessionHashes: ReadonlySet<string>;
   engineInstanceName: "image-slot-0";
@@ -156,6 +157,18 @@ const liveCostModelSchema = z
   })
   .strict();
 
+const pdfPublicAdmissionSchema = z
+  .object({
+    schema: z.literal("hereisit-pdf-public-admission@1"),
+    enabled: z.boolean(),
+    releaseReportSha256: sha256HexSchema,
+    visualProfilesMeasured: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    deletionPassed: z.boolean(),
+    costPassed: z.boolean(),
+    rollbackPassed: z.boolean(),
+  })
+  .strict();
+
 function canonicalJsonValue(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
@@ -193,6 +206,28 @@ function parseJson(value: string, label: string): unknown {
   } catch {
     throw new TypeError(`${label} must be valid JSON.`);
   }
+}
+
+function parsePdfPublicAdmission(value: string, releaseReportSha256: string): boolean {
+  const state = pdfPublicAdmissionSchema.parse(parseJson(value, "PDF_PUBLIC_ADMISSION_JSON"));
+  if (value !== canonicalJson(state)) {
+    throw new TypeError("PDF_PUBLIC_ADMISSION_JSON must use deterministic canonical JSON.");
+  }
+  if (state.releaseReportSha256 !== releaseReportSha256) {
+    throw new TypeError("PDF public admission must be bound to the exact release report SHA-256.");
+  }
+  if (
+    state.enabled &&
+    (state.visualProfilesMeasured <= 0 ||
+      !state.deletionPassed ||
+      !state.costPassed ||
+      !state.rollbackPassed)
+  ) {
+    throw new TypeError(
+      "PDF public admission requires visual, deletion, cost, and rollback evidence.",
+    );
+  }
+  return state.enabled;
 }
 
 function parseEnvironment(value: string): OperationalConfig["environment"] {
@@ -365,6 +400,10 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
   const liveCostModelSha256 = sha256HexSchema.parse(env.LIVE_COST_MODEL_SHA256);
   const providerUsageSchemaSha256 = sha256HexSchema.parse(env.PROVIDER_USAGE_SCHEMA_SHA256);
   const releaseReportSha256 = sha256HexSchema.parse(env.RELEASE_REPORT_SHA256);
+  const pdfPublicAdmissionEnabled = parsePdfPublicAdmission(
+    env.PDF_PUBLIC_ADMISSION_JSON,
+    releaseReportSha256,
+  );
   if (env.ENGINE_INSTANCE_NAME !== "image-slot-0") {
     throw new TypeError("ENGINE_INSTANCE_NAME must be image-slot-0.");
   }
@@ -420,6 +459,7 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
     liveCostModelSha256,
     providerUsageSchemaSha256,
     releaseReportSha256,
+    pdfPublicAdmissionEnabled,
     rolloutPercent,
     maintainerSessionHashes: parseMaintainerHashes(env.MAINTAINER_SESSION_HASHES),
     engineInstanceName: "image-slot-0",

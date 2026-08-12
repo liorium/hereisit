@@ -252,10 +252,10 @@ export function validateProcessingReleaseReport(value) {
   return report;
 }
 
-function createProcessingReleaseReport(inputs) {
+function createProcessingReleaseReport(inputs, { dual = true } = {}) {
   const payload = canonicalize({
-    schema: "hereisit-processing-release-report@2",
-    version: 2,
+    schema: dual ? "hereisit-processing-release-report@2" : "hereisit-processing-release-report@1",
+    version: dual ? 2 : 1,
     passed: true,
     ...inputs,
   });
@@ -485,42 +485,50 @@ async function deriveProcessingReleaseReport(
       throw new TypeError("finalized release inputs changed during verification");
     }
   }
-  return createProcessingReleaseReport({
-    releaseId: builtCandidate.releaseId,
-    gitSha: builtCandidate.gitSha,
-    candidateVerificationSha256: builtCandidate.verificationSha256,
-    verifiedAt: now,
-    expiresAt: evidence.expiresAt,
-    evidence: {
-      bundleSha256: evidenceIdentity.bundleSha256,
-      signatureSha256: evidenceIdentity.signatureSha256,
-      reports: Object.fromEntries(
-        processingEvidenceReportNames.map((name) => [
-          name,
-          {
-            sourceSha256: evidence.reports[name].sourceSha256,
-            summarySha256: evidence.reports[name].summarySha256,
-          },
-        ]),
+  const dual = builtCandidate.schema === "hereisit-processing-candidate@2";
+  return createProcessingReleaseReport(
+    {
+      releaseId: builtCandidate.releaseId,
+      gitSha: builtCandidate.gitSha,
+      candidateVerificationSha256: builtCandidate.verificationSha256,
+      verifiedAt: now,
+      expiresAt: evidence.expiresAt,
+      evidence: {
+        bundleSha256: evidenceIdentity.bundleSha256,
+        signatureSha256: evidenceIdentity.signatureSha256,
+        reports: Object.fromEntries(
+          processingEvidenceReportNames.map((name) => [
+            name,
+            {
+              sourceSha256: evidence.reports[name].sourceSha256,
+              summarySha256: evidence.reports[name].summarySha256,
+            },
+          ]),
+        ),
+      },
+      security: cloneSecurity(
+        builtCandidate.releaseAssets.security,
+        builtCandidate.security.trivyDbDigest,
       ),
+      artifacts: {
+        engineDockerConfigDigest: builtCandidate.engine.docker.configDigest,
+        ...(dual
+          ? {
+              pdfEngineDockerConfigDigest: builtCandidate.pdfEngine.docker.configDigest,
+              pdfBenchmarkSha256: builtCandidate.pdfQuality.benchmarkSha256,
+              pdfReleaseGateSha256: builtCandidate.pdfQuality.releaseGateSha256,
+              pdfVisualProfilesMeasured: builtCandidate.pdfQuality.visualProfilesMeasured,
+              pdfPublicAdmissionReady: builtCandidate.pdfQuality.publicAdmissionReady,
+            }
+          : {}),
+        webStagingArchiveSha256: builtCandidate.web.staging.archiveSha256,
+        webProductionArchiveSha256: builtCandidate.web.production.archiveSha256,
+        workerSha256: builtCandidate.releaseAssets.worker.sha256,
+        lockfileSha256: applicationGate.lockfileSha256,
+      },
     },
-    security: cloneSecurity(
-      builtCandidate.releaseAssets.security,
-      builtCandidate.security.trivyDbDigest,
-    ),
-    artifacts: {
-      engineDockerConfigDigest: builtCandidate.engine.docker.configDigest,
-      pdfEngineDockerConfigDigest: builtCandidate.pdfEngine.docker.configDigest,
-      pdfBenchmarkSha256: builtCandidate.pdfQuality.benchmarkSha256,
-      pdfReleaseGateSha256: builtCandidate.pdfQuality.releaseGateSha256,
-      pdfVisualProfilesMeasured: builtCandidate.pdfQuality.visualProfilesMeasured,
-      pdfPublicAdmissionReady: builtCandidate.pdfQuality.publicAdmissionReady,
-      webStagingArchiveSha256: builtCandidate.web.staging.archiveSha256,
-      webProductionArchiveSha256: builtCandidate.web.production.archiveSha256,
-      workerSha256: builtCandidate.releaseAssets.worker.sha256,
-      lockfileSha256: applicationGate.lockfileSha256,
-    },
-  });
+    { dual },
+  );
 }
 
 export async function createAndWriteProcessingReleaseReport({ reportPath, ...inputs }) {

@@ -37,16 +37,13 @@ describe("processing production admission workflow", () => {
     expect(workflow).not.toContain("node scripts/ensure-cloudflare-processing-resources.mjs");
   });
 
-  it("rebuilds and validates the Worker exactly like the production canary", () => {
-    expect(workflow).toContain("pnpm --filter @hereisit/api-worker exec wrangler deploy \\");
-    expect(workflow).toContain("--config wrangler.local.jsonc \\");
+  it("uses and validates the exact CI-built Worker from the production canary", () => {
     expect(workflow).toContain(
       'pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \\',
     );
     expect(workflow).toContain("--no-bundle --containers-rollout none --dry-run");
-    expect(
-      workflow.match(/cp \.artifacts\/build\/api-worker-bundle\/index\.js "\$WORKER_MODULE"/gu),
-    ).toHaveLength(1);
+    expect(workflow).toContain('cp .artifacts/canary/authority/api-worker.mjs "$WORKER_MODULE"');
+    expect(workflow).not.toContain("api-worker-bundle/index.js");
   });
 
   it("fixes public rollout, cost ceilings, quotas, and namespaces in source", () => {
@@ -123,12 +120,21 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain(
       "if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())",
     );
-    expect(
-      workflow.slice(workflow.indexOf("  promote:"), workflow.indexOf("  disable:")),
-    ).not.toContain("timeout-minutes:");
+    expect(workflow).toContain("timeout-minutes: 5");
+    expect(workflow).toContain("CLOUDFLARE_CLEANUP_API_TOKEN");
+    expect(workflow).toContain("CLOUDFLARE_D1_CLEANUP_API_TOKEN");
     expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
     expect(workflow).toContain("--mode disable");
     expect(workflow).toContain('versions deploy "$CANARY_VERSION_ID@100%"');
+    expect(workflow).toContain("processing-admission-rollback-state.mjs");
+    expect(workflow).toContain("prior-admission-state.json");
+    expect(workflow).toContain("prior-queue-states.json");
+    expect(workflow).toContain("deployment-restored.json");
+    expect(workflow).toContain("container-restored.json");
+    expect(workflow).toContain("pdf-container-restored.json");
+    for (const key of ["image-primary", "image-dlq", "pdf-primary", "pdf-dlq"]) {
+      expect(workflow).toContain(`restore_queue ${key}`);
+    }
     expect(workflow).toContain('body.execution !== "local"');
     expect(workflow).toContain("body.disclosure?.upload !== false");
     expect(workflow).toContain("QUEUE_RECOVERY");

@@ -99,7 +99,13 @@ describe("native PDF server smoke", () => {
     const json = (body: unknown, status = 200) =>
       new Response(body === null ? null : JSON.stringify(body), {
         status,
-        headers: { "content-type": "application/json" },
+        headers:
+          body === null
+            ? undefined
+            : {
+                "content-type": "application/json",
+                "content-length": String(Buffer.byteLength(JSON.stringify(body))),
+              },
       });
     const fetcher: typeof fetch = async (input, init) => {
       const path = new URL(typeof input === "string" ? input : input.url).pathname;
@@ -168,5 +174,99 @@ describe("native PDF server smoke", () => {
       sweepPassed: true,
     });
     expect(JSON.stringify(calls)).not.toMatch(/filename|private|presigned|https?:/i);
+  });
+
+  it.each([
+    ["missing length", { headers: { "content-type": "application/json" }, body: "{}" }],
+    [
+      "oversized declaration",
+      { headers: { "content-type": "application/json", "content-length": "20000" }, body: "{}" },
+    ],
+    [
+      "stream overrun",
+      { headers: { "content-type": "application/json", "content-length": "2" }, body: "{}x" },
+    ],
+    [
+      "wrong content type",
+      { headers: { "content-type": "text/plain", "content-length": "2" }, body: "{}" },
+    ],
+    [
+      "malformed JSON",
+      { headers: { "content-type": "application/json", "content-length": "1" }, body: "{" },
+    ],
+  ])("rejects a %s control response without exposing its private body", async (_label, fixture) => {
+    const fetcher: typeof fetch = async () =>
+      new Response(fixture.body, { status: 200, headers: fixture.headers });
+    let message = "";
+    await runPdfSmokeLifecycle({
+      pageOrigin: "https://processing-staging.hereisit.pages.dev",
+      sessionId: "123e4567-e89b-42d3-a456-426614174001",
+      fetch: fetcher,
+      source: new Uint8Array(1024).fill(1),
+    }).catch((error) => {
+      message = error instanceof Error ? error.message : String(error);
+    });
+    expect(message).toMatch(/response|envelope|control/i);
+    expect(message).not.toContain(fixture.body);
+  });
+
+  it("uses a fresh bounded cleanup deadline after the lifecycle deadline expires", async () => {
+    const jobId = "123e4567-e89b-42d3-a456-426614174000";
+    const timeouts: number[] = [];
+    let now = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const path = new URL(typeof input === "string" ? input : input.url).pathname;
+      const method = init?.method ?? "GET";
+      const reply = (value: unknown, status: number) => {
+        const body = value === null ? null : JSON.stringify(value);
+        return new Response(body, {
+          status,
+          headers:
+            body === null
+              ? undefined
+              : {
+                  "content-type": "application/json",
+                  "content-length": String(Buffer.byteLength(body)),
+                },
+        });
+      };
+      if (path === "/v1/policy") return reply({ maintainer: true, execution: "server" }, 200);
+      if (path === "/v1/jobs" && method === "POST") {
+        return reply(
+          {
+            jobId,
+            mode: "upload-required",
+            upload: {
+              path: `/v1/jobs/${jobId}/input`,
+              byteLength: 1024,
+              contentType: "application/pdf",
+            },
+          },
+          201,
+        );
+      }
+      if (method === "PUT") {
+        now = 20_000;
+        throw new Error("private upload failure");
+      }
+      if (method === "DELETE") return reply(null, 204);
+      throw new Error("unexpected request");
+    };
+
+    await expect(
+      runPdfSmokeLifecycle({
+        pageOrigin: "https://processing-staging.hereisit.pages.dev",
+        sessionId: "123e4567-e89b-42d3-a456-426614174001",
+        fetch: fetcher,
+        source: new Uint8Array(1024).fill(1),
+        deadlineMs: 10_000,
+        now: () => now,
+        timeoutSignal: (milliseconds: number) => {
+          timeouts.push(milliseconds);
+          return new AbortController().signal;
+        },
+      }),
+    ).rejects.toThrow(/private upload failure/);
+    expect(timeouts.at(-1)).toBe(10_000);
   });
 });
