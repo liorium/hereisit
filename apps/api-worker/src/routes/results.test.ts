@@ -66,7 +66,13 @@ function succeededJob(overrides: Partial<LifecycleJob> = {}): LifecycleJob {
   };
 }
 
-async function runtime(job: LifecycleJob = succeededJob()): Promise<LifecycleRouteRuntime> {
+async function runtime(
+  job: LifecycleJob = succeededJob(),
+  artifactOverrides: Partial<{
+    contentType: string | undefined;
+    sha256: string | undefined;
+  }> = {},
+): Promise<LifecycleRouteRuntime> {
   const tokenHash = await hashJobToken(token);
   const leaseHash = await hashJobToken(leaseToken);
   return {
@@ -103,6 +109,7 @@ async function runtime(job: LifecycleJob = succeededJob()): Promise<LifecycleRou
         kind: "output",
         jobId,
         sha256: `${"A".repeat(43)}=`,
+        ...artifactOverrides,
       })),
       deleteInput: vi.fn(async () => undefined),
       deleteOutput: vi.fn(async () => undefined),
@@ -329,7 +336,7 @@ describe("authenticated job lifecycle routes", () => {
   });
 
   it("claims a download lease and streams an attachment without an R2 URL", async () => {
-    const rt = await runtime();
+    const rt = await runtime(succeededJob(), { sha256: undefined });
     const response = await routeJobResultRequest(request(`/v1/jobs/${jobId}/result`), jobId, rt);
 
     expect(response.status).toBe(200);
@@ -339,9 +346,51 @@ describe("authenticated job lifecycle routes", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("x-download-lease")).toBe(leaseToken);
-    expect(response.headers.get("digest")).toBe(`sha-256=${"A".repeat(43)}=`);
+    expect(response.headers.get("digest")).toBeNull();
     expect(response.headers.get("location")).toBeNull();
     await expect(response.arrayBuffer()).resolves.toEqual(Uint8Array.of(1, 2).buffer);
+  });
+
+  it("requires SHA metadata only for a PDF and emits its exact Digest through CORS", async () => {
+    const pdfJob = succeededJob({
+      contractId: "pdf.optimize@1",
+      declaredPageCount: 1,
+      outputMime: "application/pdf",
+      outputWidth: null,
+      outputHeight: null,
+      outputPageCount: 1,
+      pdfProfile: "structural",
+      codecBuildId: null,
+      warnings: ["SIGNATURES_INVALIDATED"],
+    });
+    const missing = await runtime(pdfJob, { sha256: undefined });
+    expect(
+      (await routeJobResultRequest(request(`/v1/jobs/${jobId}/result`), jobId, missing)).status,
+    ).toBe(503);
+
+    const valid = await runtime(pdfJob, { sha256: `${"C".repeat(43)}=` });
+    const response = await routeRequestWithDependencies(
+      request(`/v1/jobs/${jobId}/result`, { headers: { origin: "https://app.example" } }),
+      { config: { appOrigins: [new URL("https://app.example")] } } as never,
+      { lifecycle: valid },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("digest")).toBe(`sha-256=${"C".repeat(43)}=`);
+    expect(response.headers.get("access-control-expose-headers")).toContain("digest");
+  });
+
+  it("rejects a PDF MIME borrowed by an image contract", async () => {
+    const confused = succeededJob({
+      contractId: "image.optimize@1",
+      outputMime: "application/pdf",
+    });
+    const rt = await runtime(confused, {
+      contentType: "application/pdf",
+      sha256: `${"C".repeat(43)}=`,
+    });
+    const response = await routeJobResultRequest(request(`/v1/jobs/${jobId}/result`), jobId, rt);
+    expect(response.status).toBe(409);
+    expect(rt.artifacts.getOutput).not.toHaveBeenCalled();
   });
 
   it("download rate limiting never claims a lease or touches the result", async () => {

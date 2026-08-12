@@ -482,6 +482,9 @@ function validDownloadJob(job: LifecycleJob): job is LifecycleJob & {
     job.resultKind === "download" &&
     job.outputBytes !== null &&
     job.outputMime !== null &&
+    (job.contractId === "pdf.optimize@1"
+      ? job.outputMime === "application/pdf"
+      : job.outputMime !== "application/pdf") &&
     job.downloadAcknowledgedAt === null
   );
 }
@@ -556,8 +559,8 @@ export async function routeJobResultRequest(
     artifact.contentType !== claimed.job.outputMime ||
     artifact.kind !== "output" ||
     artifact.jobId !== jobId ||
-    artifact.sha256 === undefined ||
-    !/^[A-Za-z0-9+/]{43}=$/.test(artifact.sha256) ||
+    (claimed.job.outputMime === "application/pdf" &&
+      (artifact.sha256 === undefined || !/^[A-Za-z0-9+/]{43}=$/.test(artifact.sha256))) ||
     !/^"[\x20-\x7e]+"$/.test(artifact.httpEtag)
   ) {
     await artifact?.body.cancel().catch(() => undefined);
@@ -571,18 +574,19 @@ export async function routeJobResultRequest(
         : claimed.job.outputMime === "image/png"
           ? "png"
           : "webp";
-  return new Response(artifact.body, {
-    headers: {
-      "cache-control": "private, no-store",
-      "content-disposition": `attachment; filename="hereisit-compressed.${extension}"`,
-      "content-length": String(artifact.size),
-      "content-type": claimed.job.outputMime,
-      digest: `sha-256=${artifact.sha256}`,
-      etag: artifact.httpEtag,
-      "x-content-type-options": "nosniff",
-      "x-download-lease": leaseToken,
-    },
+  const headers = new Headers({
+    "cache-control": "private, no-store",
+    "content-disposition": `attachment; filename="hereisit-compressed.${extension}"`,
+    "content-length": String(artifact.size),
+    "content-type": claimed.job.outputMime,
+    etag: artifact.httpEtag,
+    "x-content-type-options": "nosniff",
+    "x-download-lease": leaseToken,
   });
+  if (claimed.job.outputMime === "application/pdf") {
+    headers.set("digest", `sha-256=${artifact.sha256 as string}`);
+  }
+  return new Response(artifact.body, { headers });
 }
 
 export async function routeJobDownloadedRequest(
