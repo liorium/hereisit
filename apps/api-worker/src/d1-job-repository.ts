@@ -409,6 +409,7 @@ type BeginUploadResultForMime<Mime extends DeclaredMime> =
     };
 
 export type BeginUploadResult = BeginUploadResultForMime<"image/jpeg" | "image/png" | "image/webp">;
+export type PdfBeginUploadResult = BeginUploadResultForMime<"application/pdf">;
 type AnyBeginUploadResult = BeginUploadResultForMime<DeclaredMime>;
 
 export type CommitStoredInputResult =
@@ -490,6 +491,7 @@ export interface JobRepository {
 
 export interface PdfJobRepository {
   reserveAndCreate(input: PdfReserveAndCreateInput): Promise<PdfReserveAndCreateResult>;
+  beginUpload(input: { jobId: string; now: number }): Promise<PdfBeginUploadResult>;
 }
 
 export type AnyJobRepository = JobRepository & PdfJobRepository;
@@ -1573,6 +1575,7 @@ class D1JobRepository implements JobRepository, PdfJobRepository {
   }
 
   async beginUpload(input: { jobId: string; now: number }): Promise<BeginUploadResult>;
+  async beginUpload(input: { jobId: string; now: number }): Promise<PdfBeginUploadResult>;
   async beginUpload(input: { jobId: string; now: number }): Promise<AnyBeginUploadResult> {
     validateJobIdAndTime(input.jobId, input.now);
     const session = this.database.withSession("first-primary");

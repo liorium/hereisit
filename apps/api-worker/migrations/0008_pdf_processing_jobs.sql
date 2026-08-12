@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = OFF;
-
 CREATE TABLE jobs_next (
   id TEXT PRIMARY KEY NOT NULL,
   client_request_id TEXT NOT NULL,
@@ -79,6 +77,8 @@ CREATE TABLE jobs_next (
     (
       contract_id = 'image.optimize@1'
       AND declared_mime IN ('image/jpeg', 'image/png', 'image/webp')
+      AND declared_width IS NOT NULL
+      AND declared_height IS NOT NULL
       AND declared_width BETWEEN 1 AND 32768
       AND declared_height BETWEEN 1 AND 32768
       AND declared_width * declared_height <= 40000000
@@ -92,6 +92,7 @@ CREATE TABLE jobs_next (
       AND declared_mime = 'application/pdf'
       AND declared_width IS NULL
       AND declared_height IS NULL
+      AND declared_page_count IS NOT NULL
       AND declared_page_count BETWEEN 1 AND 100
       AND input_has_alpha IS NULL
       AND content_class IS NULL
@@ -154,8 +155,64 @@ SELECT
   engine_contact_started_at, finished_at, created_at, updated_at
 FROM jobs;
 
+CREATE TABLE migration_0008_usage_ledger AS
+SELECT
+  job_id, session_hash, network_hash, day_key, reserved_units,
+  actual_units, outcome, settled_at, created_at
+FROM usage_ledger;
+
+CREATE TABLE migration_0008_job_outbox AS
+SELECT
+  job_id, payload, attempts, next_attempt_at, sent_at, reconciled_at
+FROM job_outbox;
+
+CREATE TABLE migration_0008_job_quarantine AS
+SELECT
+  job_id, queue_name, attempt, error_code, quarantined_at, inspected_at
+FROM job_quarantine;
+
+CREATE TABLE migration_0008_artifact_presence_audit AS
+SELECT
+  job_id, input_exists, output_exists, checked_at
+FROM artifact_presence_audit;
+
 DROP TABLE jobs;
 ALTER TABLE jobs_next RENAME TO jobs;
+
+INSERT INTO usage_ledger (
+  job_id, session_hash, network_hash, day_key, reserved_units,
+  actual_units, outcome, settled_at, created_at
+)
+SELECT
+  job_id, session_hash, network_hash, day_key, reserved_units,
+  actual_units, outcome, settled_at, created_at
+FROM migration_0008_usage_ledger;
+
+INSERT INTO job_outbox (
+  job_id, payload, attempts, next_attempt_at, sent_at, reconciled_at
+)
+SELECT
+  job_id, payload, attempts, next_attempt_at, sent_at, reconciled_at
+FROM migration_0008_job_outbox;
+
+INSERT INTO job_quarantine (
+  job_id, queue_name, attempt, error_code, quarantined_at, inspected_at
+)
+SELECT
+  job_id, queue_name, attempt, error_code, quarantined_at, inspected_at
+FROM migration_0008_job_quarantine;
+
+INSERT INTO artifact_presence_audit (
+  job_id, input_exists, output_exists, checked_at
+)
+SELECT
+  job_id, input_exists, output_exists, checked_at
+FROM migration_0008_artifact_presence_audit;
+
+DROP TABLE migration_0008_usage_ledger;
+DROP TABLE migration_0008_job_outbox;
+DROP TABLE migration_0008_job_quarantine;
+DROP TABLE migration_0008_artifact_presence_audit;
 
 CREATE INDEX jobs_expiry_idx
   ON jobs(status, upload_expires_at, result_expires_at);
@@ -171,5 +228,3 @@ CREATE UNIQUE INDEX jobs_client_request_idx
   ON jobs(session_hash, client_request_id);
 CREATE INDEX jobs_health_window_idx
   ON jobs(finished_at, status, error_code, verified_input_mime, input_has_alpha, declared_bytes);
-
-PRAGMA foreign_keys = ON;

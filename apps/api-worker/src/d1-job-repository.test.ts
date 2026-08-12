@@ -3,12 +3,16 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { calculateSettledWeightedUnits, estimateImageOptimizeUnits } from "@hereisit/server-job";
 import type { ImageOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/image-optimize";
 import type { PdfOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/pdf-optimize";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
 import {
+  type BeginUploadResult,
   claimQueuedJob,
   createD1JobRepository,
   createD1LifecycleRepository,
+  type JobRepository,
+  type PdfBeginUploadResult,
+  type PdfJobRepository,
   type PdfReserveAndCreateInput,
   parseStoredJob,
   RepositoryIntegrityError,
@@ -17,15 +21,20 @@ import {
 
 const baseMigration = [
   "0001_processing_jobs.sql",
+  "0002_worker_version_attestations.sql",
   "0003_circuit_breaker.sql",
+  "0004_live_cost_accounting.sql",
+  "0005_usage_log_ledger.sql",
+  "0006_container_provider_egress.sql",
   "0007_operational_counters.sql",
 ]
   .map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"))
   .join("\n");
-const migration = `${baseMigration}\n${readFileSync(
+const pdfMigration = readFileSync(
   new URL("../migrations/0008_pdf_processing_jobs.sql", import.meta.url),
   "utf8",
-)}`;
+);
+const migration = `${baseMigration}\n${pdfMigration}`;
 const now = Date.parse("2026-07-16T00:10:00.000Z");
 const dayKey = "2026-07-16";
 const priorDayKey = "2026-07-15";
@@ -385,8 +394,85 @@ function seedQueuedJob(
     );
 }
 
+function applyPdfMigrationInTransaction(database: DatabaseSync): void {
+  expect(database.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+  database.exec("BEGIN");
+  try {
+    database.exec(pdfMigration);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function databaseWithMigratedImageAndPdfRows(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  database.exec(baseMigration);
+  database
+    .prepare(
+      `INSERT INTO anonymous_usage
+        (session_hash, day_key, created_at, updated_at)
+       VALUES ('invariant-session', ?, ?, ?)`,
+    )
+    .run(dayKey, now, now);
+  database
+    .prepare(
+      `INSERT INTO jobs (
+        id, client_request_id, token_hash, session_hash, day_key, status, phase,
+        contract_id, spec_json, spec_hash, declared_bytes, declared_mime,
+        declared_width, declared_height, input_key, output_key, reserved_units,
+        resource_class, queue_epoch, upload_expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'invariant-session', ?, 'created', 'uploading',
+        'image.optimize@1', ?, ?, 1000, 'image/png', 320, 200, ?, ?, 1,
+        'image-standard-v1', ?, ?, ?, ?)`,
+    )
+    .run(
+      jobId,
+      clientRequestId,
+      "a".repeat(64),
+      dayKey,
+      JSON.stringify(request().spec),
+      "b".repeat(64),
+      inputKey,
+      outputKey,
+      queueEpoch,
+      now + 10_000,
+      now,
+      now,
+    );
+
+  applyPdfMigrationInTransaction(database);
+  database
+    .prepare(
+      `INSERT INTO jobs (
+        id, client_request_id, token_hash, session_hash, day_key, status, phase,
+        contract_id, spec_json, spec_hash, declared_bytes, declared_mime,
+        declared_page_count, input_key, output_key, reserved_units, resource_class,
+        queue_epoch, upload_expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'invariant-session', ?, 'created', 'uploading',
+        'pdf.optimize@1', ?, ?, 1000, 'application/pdf', 3, ?, ?, 1,
+        'pdf-standard-v1', ?, ?, ?, ?)`,
+    )
+    .run(
+      alternateJobId,
+      alternateClientRequestId,
+      "c".repeat(64),
+      dayKey,
+      JSON.stringify(pdfRequest().spec),
+      "d".repeat(64),
+      "inputs/55555555-5555-4555-8555-555555555555",
+      "outputs/66666666-6666-4666-8666-666666666666",
+      "77777777-7777-4777-8777-777777777777",
+      now + 10_000,
+      now,
+      now,
+    );
+  return database;
+}
+
 describe("PDF job migration", () => {
-  it("copies every existing image value and recreates all job indexes", () => {
+  it("preserves the image row and every child row inside the migration transaction", () => {
     const database = new DatabaseSync(":memory:");
     database.exec(baseMigration);
     database
@@ -468,15 +554,17 @@ describe("PDF job migration", () => {
         database.prepare(`SELECT * FROM ${table}`).all(),
       ]),
     );
-    let pdfMigration = "";
-    expect(() => {
-      pdfMigration = readFileSync(
-        new URL("../migrations/0008_pdf_processing_jobs.sql", import.meta.url),
-        "utf8",
-      );
-    }).not.toThrow();
-
-    database.exec(pdfMigration);
+    const childSchemaBefore = database
+      .prepare(
+        `SELECT type, name, tbl_name, sql
+         FROM sqlite_schema
+         WHERE tbl_name IN (
+           'usage_ledger', 'job_outbox', 'job_quarantine', 'artifact_presence_audit'
+         )
+         ORDER BY type, name`,
+      )
+      .all();
+    applyPdfMigrationInTransaction(database);
 
     const after = database.prepare("SELECT * FROM jobs").get() as Record<string, unknown>;
     expect(Object.fromEntries(Object.keys(before).map((key) => [key, after[key]]))).toEqual(before);
@@ -493,6 +581,18 @@ describe("PDF job migration", () => {
         ]),
       ),
     ).toEqual(childrenBefore);
+    expect(
+      database
+        .prepare(
+          `SELECT type, name, tbl_name, sql
+           FROM sqlite_schema
+           WHERE tbl_name IN (
+             'usage_ledger', 'job_outbox', 'job_quarantine', 'artifact_presence_audit'
+           )
+           ORDER BY type, name`,
+        )
+        .all(),
+    ).toEqual(childSchemaBefore);
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(
       database
@@ -512,6 +612,26 @@ describe("PDF job migration", () => {
       "sqlite_autoindex_jobs_2",
       "sqlite_autoindex_jobs_3",
     ]);
+  });
+
+  it.each([
+    ["image width", jobId, "declared_width", null],
+    ["image height", jobId, "declared_height", null],
+    ["image page count", jobId, "declared_page_count", 1],
+    ["image output page count", jobId, "output_page_count", 1],
+    ["image PDF profile", jobId, "pdf_profile", "structural"],
+    ["PDF page count", alternateJobId, "declared_page_count", null],
+    ["PDF width", alternateJobId, "declared_width", 1],
+    ["PDF height", alternateJobId, "declared_height", 1],
+    ["PDF alpha flag", alternateJobId, "input_has_alpha", 1],
+    ["PDF image content class", alternateJobId, "content_class", "photo"],
+    ["PDF output width", alternateJobId, "output_width", 1],
+    ["PDF output height", alternateJobId, "output_height", 1],
+  ] as const)("rejects an invalid %s field combination", (_label, targetId, field, value) => {
+    const database = databaseWithMigratedImageAndPdfRows();
+    expect(() =>
+      database.prepare(`UPDATE jobs SET ${field} = ? WHERE id = ?`).run(value, targetId),
+    ).toThrow("CHECK constraint failed");
   });
 });
 
@@ -539,8 +659,15 @@ describe("atomic job reservation", () => {
       resource_class: "pdf-standard-v1",
     });
 
+    const pdfRepository: PdfJobRepository = repository;
+    expectTypeOf<ReturnType<JobRepository["beginUpload"]>>().toEqualTypeOf<
+      Promise<BeginUploadResult>
+    >();
+    expectTypeOf<ReturnType<PdfJobRepository["beginUpload"]>>().toEqualTypeOf<
+      Promise<PdfBeginUploadResult>
+    >();
     await expect(
-      repository.beginUpload({ jobId: alternateJobId, now: now + 1 }),
+      pdfRepository.beginUpload({ jobId: alternateJobId, now: now + 1 }),
     ).resolves.toMatchObject({
       kind: "ready",
       declaredMime: "application/pdf",
