@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -45,11 +45,27 @@ export async function removePdfJobWorkspace(workspace: PdfJobWorkspace): Promise
 }
 
 export async function scrubPdfWorkspaceRoot(root: string): Promise<void> {
+  const absolute = resolve(root);
+  const base = "/tmp/hereisit-pdf-engine";
+  if (absolute !== base && !absolute.startsWith(`${base}${sep}`))
+    throw new TypeError("workspace root is invalid");
+  const segments = absolute.split(sep).filter(Boolean);
+  let current: string = sep;
+  for (const segment of segments) {
+    current = join(current, segment);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink() || !info.isDirectory())
+        throw new TypeError("workspace root is invalid");
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+    }
+  }
   process.umask(0o077);
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  for (const name of await readdir(root))
-    await rm(join(root, name), { recursive: true, force: true });
-  if ((await readdir(root)).length !== 0) throw new Error("workspace scrub failed");
+  await mkdir(absolute, { recursive: true, mode: 0o700 });
+  for (const name of await readdir(absolute))
+    await rm(join(absolute, name), { recursive: true, force: true });
+  if ((await readdir(absolute)).length !== 0) throw new Error("workspace scrub failed");
 }
 
 export async function writeExactPdfInput(input: {

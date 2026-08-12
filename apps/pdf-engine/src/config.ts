@@ -16,6 +16,15 @@ function integer(
   return value;
 }
 
+function workspaceRoot(value: string | undefined): string {
+  const raw = value ?? "/tmp/hereisit-pdf-engine";
+  const root = resolve(raw);
+  const base = "/tmp/hereisit-pdf-engine";
+  if (!raw.startsWith(sep) || (root !== base && !root.startsWith(`${base}${sep}`)))
+    throw new TypeError("WORKSPACE_ROOT is invalid");
+  return root;
+}
+
 export interface PdfEngineConfig {
   readonly host: string;
   readonly port: number;
@@ -31,7 +40,7 @@ export function readPdfEngineConfig(env: NodeJS.ProcessEnv = process.env): PdfEn
   return {
     host: env.HOST ?? "0.0.0.0",
     port: integer(env, "PORT", 8080, 1, 65_535),
-    workspaceRoot: env.WORKSPACE_ROOT ?? "/tmp/hereisit-pdf-engine",
+    workspaceRoot: workspaceRoot(env.WORKSPACE_ROOT),
     shutdownGraceMs: integer(env, "ROLLOUT_GRACE_MS", 30_000, 0, 120_000),
     maxWallMs: integer(env, "PDF_MAX_WALL_MS", 45_000, 1, 120_000),
     maxRssBytes: integer(
@@ -55,3 +64,5 @@ export function readPdfEngineConfig(env: NodeJS.ProcessEnv = process.env): PdfEn
     },
   };
 }
+
+import { resolve, sep } from "node:path";

@@ -58,7 +58,9 @@ export async function verifyPdfEngineLicenses({ root }) {
   if (
     !image.includes("user 10001:10001") ||
     !image.includes("/tmp/hereisit-pdf-engine") ||
-    !script.includes("sha256sum --check --strict")
+    !script.includes("sha256sum --check --strict") ||
+    !script.includes("sources.lock.json") ||
+    /^\s*(?:VERSION=[0-9]|URL=https?:|SHA256=[0-9a-f]{64}\s*$)/mu.test(script)
   )
     throw new TypeError("PDF engine build controls are missing");
   for (const prohibited of policy.runtime.prohibitedComponents)

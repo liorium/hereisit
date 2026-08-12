@@ -22,6 +22,8 @@ async function startServer(): Promise<void> {
           maxRssBytes: config.maxRssBytes,
           maxWorkspaceBytes: config.maxWorkspaceBytes,
           workspaceRoot: workspace.root,
+          workspaceHome: workspace.home,
+          workspaceTmp: workspace.tmp,
         }),
       }),
   });

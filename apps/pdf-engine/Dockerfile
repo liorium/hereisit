@@ -13,9 +13,10 @@ RUN corepack enable && corepack prepare pnpm@11.11.0 --activate \
 
 FROM debian:bookworm-slim AS native-build
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates cmake curl g++ libjpeg62-turbo-dev libssl-dev make ninja-build pkg-config zlib1g-dev \
+  && apt-get install --yes --no-install-recommends ca-certificates cmake curl g++ jq libjpeg62-turbo-dev libssl-dev make ninja-build pkg-config zlib1g-dev \
   && rm -rf /var/lib/apt/lists/*
 COPY apps/pdf-engine/native/build-qpdf.sh /usr/local/src/build-qpdf.sh
+COPY apps/pdf-engine/native/sources.lock.json /usr/local/src/sources.lock.json
 RUN /usr/local/src/build-qpdf.sh
 
 FROM node:24.13.0-bookworm-slim AS runtime

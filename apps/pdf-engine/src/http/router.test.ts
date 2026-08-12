@@ -224,8 +224,9 @@ describe("PDF engine HTTP lifecycle", () => {
     const busy = await fetch(`${base}/v1/jobs/${second.jobId}/run`, { method: "POST" });
     expect(busy.status).toBe(409);
     expect(await busy.text()).toBe("");
-    expect((await fetch(`${base}/v1/jobs/${first.jobId}`, { method: "DELETE" })).status).toBe(204);
+    const deletion = fetch(`${base}/v1/jobs/${first.jobId}`, { method: "DELETE" });
     release();
+    expect((await deletion).status).toBe(204);
     await new Promise<void>((resolve) => secondServer.close(() => resolve()));
   });
 

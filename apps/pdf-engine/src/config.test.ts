@@ -24,4 +24,21 @@ describe("PDF engine config", () => {
   ])("rejects an invalid %s", (name, value) => {
     expect(() => readPdfEngineConfig({ ...valid, [name]: value })).toThrow();
   });
+
+  it.each([
+    "/",
+    "/tmp",
+    "relative",
+    "/tmp/hereisit-pdf-engine-other",
+    "/tmp/hereisit-pdf-engine/../outside",
+  ])("rejects unsafe workspace root %s", (workspaceRoot) => {
+    expect(() => readPdfEngineConfig({ ...valid, WORKSPACE_ROOT: workspaceRoot })).toThrow();
+  });
+
+  it("accepts only the fixed workspace root or its descendants", () => {
+    expect(
+      readPdfEngineConfig({ ...valid, WORKSPACE_ROOT: "/tmp/hereisit-pdf-engine/private" })
+        .workspaceRoot,
+    ).toBe("/tmp/hereisit-pdf-engine/private");
+  });
 });

@@ -1,4 +1,14 @@
-import { lstat, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -39,7 +49,8 @@ describe("PDF engine workspace", () => {
   });
 
   it("scrubs orphans without following symlinks", async () => {
-    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-scrub-"));
+    await mkdir("/tmp/hereisit-pdf-engine", { recursive: true });
+    const root = await mkdtemp("/tmp/hereisit-pdf-engine/scrub-");
     const outside = await mkdtemp(join(tmpdir(), "hereisit-pdf-outside-"));
     roots.push(root, outside);
     await writeFile(join(root, "orphan"), "private");
@@ -47,6 +58,18 @@ describe("PDF engine workspace", () => {
     await symlink(outside, join(root, "link"));
     await scrubPdfWorkspaceRoot(root);
     expect(await readdir(root)).toEqual([]);
+    expect(await readFile(join(outside, "keep"), "utf8")).toBe("keep");
+  });
+
+  it("rejects a symlink workspace root without touching its target", async () => {
+    await mkdir("/tmp/hereisit-pdf-engine", { recursive: true });
+    const parent = await mkdtemp("/tmp/hereisit-pdf-engine/safe-parent-");
+    const outside = await mkdtemp(join(tmpdir(), "hereisit-pdf-safe-outside-"));
+    roots.push(parent, outside);
+    const root = join(parent, "hereisit-pdf-engine");
+    await writeFile(join(outside, "keep"), "keep");
+    await symlink(outside, root);
+    await expect(scrubPdfWorkspaceRoot(root)).rejects.toThrow(/workspace/u);
     expect(await readFile(join(outside, "keep"), "utf8")).toBe("keep");
   });
 
