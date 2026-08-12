@@ -29,6 +29,8 @@ const INPUT_KEY_PATTERN =
   /^inputs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OUTPUT_KEY_PATTERN =
   /^outputs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const PENDING_INPUT_KEY_PATTERN =
+  /^pending-inputs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export interface ResultRetentionState {
   readonly resultExpiresAt: number | null;
@@ -693,6 +695,11 @@ export async function sweepOrphanArtifactsFromSavedCursor(
   let removed = 0;
   for (const object of listed.objects) {
     if (object.uploaded.valueOf() > olderThan) continue;
+    if (PENDING_INPUT_KEY_PATTERN.test(object.key)) {
+      await env.JOB_OBJECTS.delete(object.key);
+      removed += 1;
+      continue;
+    }
     if (!INPUT_KEY_PATTERN.test(object.key) && !OUTPUT_KEY_PATTERN.test(object.key)) continue;
     const owner = await env.DB.prepare(
       `SELECT COUNT(*) AS count FROM (

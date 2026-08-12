@@ -300,6 +300,21 @@ describe("workerd result lifecycle", () => {
     expect(listed.objects).toHaveLength(0);
   }, 30_000);
 
+  it("removes a stale pending PDF upload as an orphan-cleanup fallback", async () => {
+    const pendingKey = `pending-inputs/${uuid(105)}/${uuid(205)}`;
+    objectKeys.add(pendingKey);
+    await env.JOB_OBJECTS.put(pendingKey, Uint8Array.of(1, 2, 3), {
+      customMetadata: {
+        kind: "pending-input",
+        uploadVersion: "1",
+        ownershipMarker: uuid(305),
+      },
+    });
+
+    expect(await sweepOrphanArtifactsFromSavedCursor(env as Env, Date.now() + 1_000, 100)).toBe(1);
+    await expect(env.JOB_OBJECTS.head(pendingKey)).resolves.toBeNull();
+  });
+
   it("reconciles one lost Queue delivery with a new authoritative generation", async () => {
     const jobId = uuid(4);
     const inputKey = `inputs/${uuid(104)}`;

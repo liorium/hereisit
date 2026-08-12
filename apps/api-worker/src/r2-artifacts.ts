@@ -10,6 +10,7 @@ const INPUT_KEY_PATTERN = new RegExp(`^inputs/${UUID_PATTERN.source.slice(1, -1)
 const OUTPUT_KEY_PATTERN = new RegExp(`^outputs/${UUID_PATTERN.source.slice(1, -1)}$`);
 const SAFE_ETAG_PATTERN = /^[\x20-\x7e]{1,256}$/;
 const ALLOWED_MIMES = new Set<ImageOptimizeMime>(["image/jpeg", "image/png", "image/webp"]);
+const PENDING_CLEANUP_TIMEOUT_MILLISECONDS = 250;
 
 export type ArtifactMime = ImageOptimizeMime | PdfOptimizeMime;
 
@@ -247,6 +248,45 @@ function encodeDigest(bytes: ArrayBuffer): string {
   return `sha-256=${btoa(binary)}`;
 }
 
+async function boundedCleanupOperation<T>(operation: Promise<T>): Promise<T | undefined> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T | undefined) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(undefined), PENDING_CLEANUP_TIMEOUT_MILLISECONDS);
+    void operation.then(
+      (value) => finish(value),
+      () => finish(undefined),
+    );
+  });
+}
+
+async function deletePendingIfOwned(input: {
+  readonly bucket: ArtifactBucket;
+  readonly key: string;
+  readonly uploadVersion: number;
+  readonly ownershipMarker: string;
+}): Promise<void> {
+  const head = await boundedCleanupOperation(input.bucket.head(input.key));
+  const metadata = head?.customMetadata;
+  if (
+    head === null ||
+    head === undefined ||
+    metadata === undefined ||
+    Object.keys(metadata).length !== 3 ||
+    metadata.kind !== "pending-input" ||
+    metadata.uploadVersion !== String(input.uploadVersion) ||
+    metadata.ownershipMarker !== input.ownershipMarker
+  ) {
+    return;
+  }
+  await boundedCleanupOperation(input.bucket.delete(input.key));
+}
+
 async function storeVerifiedPdfArtifact(input: {
   readonly bucket: ArtifactBucket;
   readonly source: ReadableStream<Uint8Array>;
@@ -263,6 +303,10 @@ async function storeVerifiedPdfArtifact(input: {
   const remainingMilliseconds = input.deadlineAt - input.now();
   if (remainingMilliseconds <= 0) throw new ArtifactUploadError("UPLOAD_EXPIRED");
   const pendingKey = pendingInputKey(input.key, input.randomUuid());
+  const ownershipMarker = input.randomUuid();
+  if (!UUID_PATTERN.test(ownershipMarker)) {
+    throw new ArtifactUploadError("INVALID_ARTIFACT_REQUEST");
+  }
   const fixedLengthStream = (input.createFixedLengthStream ?? defaultFixedLengthStream)(
     input.byteLength,
   );
@@ -290,10 +334,10 @@ async function storeVerifiedPdfArtifact(input: {
       customMetadata: {
         kind: "pending-input",
         uploadVersion: String(input.uploadVersion),
+        ownershipMarker,
       },
     }),
   );
-  let ownsPending = false;
   try {
     const [produced, storedPending] = await Promise.allSettled([producer, pendingPut]);
     clearTimeout(timeout);
@@ -301,7 +345,6 @@ async function storeVerifiedPdfArtifact(input: {
       throw new ArtifactUploadError(deadlineExpired ? "UPLOAD_EXPIRED" : "STORAGE_FAILURE");
     }
     if (storedPending.value === null) throw new ArtifactUploadError("UPLOAD_MISMATCH");
-    ownsPending = true;
     const digest = await digestObserved;
     if (digest.status === "rejected") {
       throw new ArtifactUploadError("UPLOAD_MISMATCH");
@@ -316,7 +359,8 @@ async function storeVerifiedPdfArtifact(input: {
       pending.size !== input.byteLength ||
       pending.httpMetadata?.contentType !== "application/pdf" ||
       pending.customMetadata?.kind !== "pending-input" ||
-      pending.customMetadata.uploadVersion !== String(input.uploadVersion)
+      pending.customMetadata.uploadVersion !== String(input.uploadVersion) ||
+      pending.customMetadata.ownershipMarker !== ownershipMarker
     ) {
       throw new ArtifactUploadError("UPLOAD_MISMATCH");
     }
@@ -352,7 +396,12 @@ async function storeVerifiedPdfArtifact(input: {
     clearTimeout(timeout);
     abortController.abort(new ArtifactUploadError("UPLOAD_MISMATCH"));
     await Promise.allSettled([producer, pendingPut]);
-    if (ownsPending) await input.bucket.delete(pendingKey).catch(() => undefined);
+    await deletePendingIfOwned({
+      bucket: input.bucket,
+      key: pendingKey,
+      uploadVersion: input.uploadVersion,
+      ownershipMarker,
+    });
   }
 }
 

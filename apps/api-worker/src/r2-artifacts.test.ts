@@ -54,7 +54,15 @@ function pdfObject(
 }
 
 function pdfBucket(
-  input: { readonly canonical?: StoredObject; readonly throwAfterCanonicalStore?: boolean } = {},
+  input: {
+    readonly canonical?: StoredObject;
+    readonly throwAfterCanonicalStore?: boolean;
+    readonly throwAfterPendingStore?: boolean;
+    readonly rejectPendingWithoutStore?: boolean;
+    readonly replacePendingBeforeHead?: StoredObject;
+    readonly failPendingHead?: boolean;
+    readonly hangPendingHead?: boolean;
+  } = {},
 ) {
   const objects = new Map<string, StoredObject>();
   if (input.canonical !== undefined) objects.set(INPUT_KEY, input.canonical);
@@ -74,8 +82,14 @@ function pdfBucket(
       ) {
         const body = new Uint8Array(await new Response(stream).arrayBuffer());
         if (objects.has(key)) return null;
+        if (key.startsWith("pending-inputs/") && input.rejectPendingWithoutStore) {
+          throw new Error("pending put rejected before storage");
+        }
         const stored = pdfObject(key, body, options.customMetadata);
         objects.set(key, stored);
+        if (key.startsWith("pending-inputs/") && input.throwAfterPendingStore) {
+          throw new Error("lost pending put response");
+        }
         if (key === INPUT_KEY && input.throwAfterCanonicalStore) {
           throw new Error("lost canonical put response");
         }
@@ -86,6 +100,15 @@ function pdfBucket(
         return stored === undefined ? null : { ...stored, body: bytes(...stored.body) };
       },
       async head(key: string) {
+        if (key.startsWith("pending-inputs/") && input.hangPendingHead) {
+          return await new Promise<StoredObject | null>(() => undefined);
+        }
+        if (key.startsWith("pending-inputs/") && input.failPendingHead) {
+          throw new Error("private pending head failure");
+        }
+        if (key.startsWith("pending-inputs/") && input.replacePendingBeforeHead !== undefined) {
+          objects.set(key, input.replacePendingBeforeHead);
+        }
         return objects.get(key) ?? null;
       },
       async delete(key: string) {
@@ -111,7 +134,10 @@ function storePdf(
     expectedSha256: PDF_DIGEST,
     createFixedLengthStream: passthroughFixedLengthStream,
     createDigestStream,
-    randomUuid: () => "11111111-1111-4111-8111-111111111111",
+    randomUuid: vi
+      .fn()
+      .mockReturnValueOnce("11111111-1111-4111-8111-111111111111")
+      .mockReturnValueOnce("22222222-2222-4222-8222-222222222222"),
   });
 }
 
@@ -240,6 +266,60 @@ describe("R2 input invariants", () => {
     await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "UPLOAD_MISMATCH" });
     expect(state.objects.get(pendingKey)).toBe(pendingWinner);
     expect(state.deleted).not.toContain(pendingKey);
+  });
+
+  it("deletes a store-then-throw pending object only when its ownership marker matches", async () => {
+    const pendingKey = `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`;
+    const state = pdfBucket({ throwAfterPendingStore: true });
+    await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "STORAGE_FAILURE" });
+    expect(state.deleted).toEqual([pendingKey]);
+    expect(state.objects.has(pendingKey)).toBe(false);
+  });
+
+  it("does not delete when a rejected pending put stored no object", async () => {
+    const state = pdfBucket({ rejectPendingWithoutStore: true });
+    await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "STORAGE_FAILURE" });
+    expect(state.deleted).toEqual([]);
+  });
+
+  it("never deletes a nonmatching replacement at the same pending key", async () => {
+    const pendingKey = `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`;
+    const replacement = pdfObject(pendingKey, Uint8Array.of(7, 7, 7), {
+      kind: "pending-input",
+      uploadVersion: "1",
+      ownershipMarker: "33333333-3333-4333-8333-333333333333",
+    });
+    const state = pdfBucket({
+      throwAfterPendingStore: true,
+      replacePendingBeforeHead: replacement,
+    });
+    await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "STORAGE_FAILURE" });
+    expect(state.deleted).toEqual([]);
+    expect(state.objects.get(pendingKey)).toBe(replacement);
+  });
+
+  it("returns safely without deletion when pending ownership HEAD fails", async () => {
+    const pendingKey = `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`;
+    const state = pdfBucket({ throwAfterPendingStore: true, failPendingHead: true });
+    await expect(storePdf(state.bucket)).rejects.toEqual(
+      new ArtifactUploadError("STORAGE_FAILURE"),
+    );
+    expect(state.deleted).toEqual([]);
+    expect(state.objects.has(pendingKey)).toBe(true);
+  });
+
+  it("bounds an unresponsive pending ownership HEAD", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = pdfBucket({ throwAfterPendingStore: true, hangPendingHead: true });
+      const result = storePdf(state.bucket);
+      const assertion = expect(result).rejects.toEqual(new ArtifactUploadError("STORAGE_FAILURE"));
+      await vi.advanceTimersByTimeAsync(250);
+      await assertion;
+      expect(state.deleted).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("deletes only its pending PDF when digest computation rejects after storage", async () => {
