@@ -184,6 +184,38 @@ describe("pdf.optimize@1 results", () => {
       }).result?.kind,
     ).toBe("original-retained");
   });
+
+  it("accepts only fixed sanitized PDF failure errors", () => {
+    const status = {
+      contract: "tool-job@1",
+      jobId: crypto.randomUUID(),
+      state: "failed",
+      phase: "optimizing",
+      phaseFraction: 0.5,
+      sequence: 8,
+      attempt: 1,
+      error: {
+        code: "ENGINE_TIMEOUT",
+        message: "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+        retryable: true,
+      },
+      updatedAt: "2026-08-11T00:00:00.000Z",
+    };
+
+    expect(pdfOptimizeStatusResponseSchema.safeParse(status).success).toBe(true);
+    expect(
+      pdfOptimizeStatusResponseSchema.safeParse({
+        ...status,
+        error: { ...status.error, message: "private qpdf failure detail" },
+      }).success,
+    ).toBe(false);
+    expect(
+      pdfOptimizeStatusResponseSchema.safeParse({
+        ...status,
+        error: { ...status.error, code: "PIXEL_LIMIT_EXCEEDED" },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("pdf.optimize@1 policy", () => {

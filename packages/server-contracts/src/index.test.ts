@@ -689,12 +689,38 @@ describe("PDF engine contract branch", () => {
       },
     };
 
-    expect(serverEngineJobStatusSchema.safeParse(status).success).toBe(true);
+    expect(serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...status }).success).toBe(
+      true,
+    );
     expect(
       serverEngineJobStatusSchema.safeParse({
+        tool: "pdf.optimize",
         ...status,
         result: { ...status.result, width: 4000 },
       }).success,
+    ).toBe(false);
+  });
+
+  it("requires a matching tool discriminator around every server engine status", () => {
+    const pdfStatus = {
+      protocol: 1,
+      jobId,
+      state: "running",
+      phase: "optimizing",
+      fraction: 0.5,
+      sequence: 7,
+    };
+    const imageStatus = succeededStatus();
+
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...pdfStatus }).success,
+    ).toBe(true);
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "image.optimize", ...imageStatus }).success,
+    ).toBe(true);
+    expect(serverEngineJobStatusSchema.safeParse(pdfStatus).success).toBe(false);
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...imageStatus }).success,
     ).toBe(false);
   });
 

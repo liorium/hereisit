@@ -148,6 +148,116 @@ export const pdfOptimizePhaseSchema = z.enum([
 
 export type PdfOptimizePhase = z.infer<typeof pdfOptimizePhaseSchema>;
 
+export const pdfOptimizeErrorPayloadSchema = z.discriminatedUnion("code", [
+  z
+    .object({
+      code: z.literal("UNSUPPORTED_INPUT"),
+      message: z.literal("이 PDF는 처리 서버에서 압축할 수 없습니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("UNSUPPORTED_FEATURE"),
+      message: z.literal("이 PDF 기능은 처리 서버에서 지원하지 않습니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("INPUT_LIMIT_EXCEEDED"),
+      message: z.literal("PDF가 처리 제한을 초과했습니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("SERVER_PROCESSING_DISABLED"),
+      message: z.literal("처리 서버를 현재 사용할 수 없습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("LOCAL_FALLBACK_REQUIRED"),
+      message: z.literal("브라우저에서 원본 PDF를 유지합니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("UPLOAD_EXPIRED"),
+      message: z.literal("PDF 업로드 시간이 만료되었습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("UPLOAD_MISMATCH"),
+      message: z.literal("업로드한 PDF를 확인할 수 없습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("QUEUE_UNAVAILABLE"),
+      message: z.literal("처리 서버를 현재 사용할 수 없습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("ENGINE_TIMEOUT"),
+      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("ENGINE_OOM"),
+      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("ENGINE_CRASH"),
+      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("STORAGE_FAILURE"),
+      message: z.literal("PDF 처리 결과를 저장할 수 없습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("VERIFICATION_FAILED"),
+      message: z.literal("PDF 처리 결과를 확인할 수 없습니다."),
+      retryable: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("CANCELLED"),
+      message: z.literal("PDF 압축을 취소했습니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      code: z.literal("EXPIRED"),
+      message: z.literal("PDF 압축 결과가 만료되었습니다."),
+      retryable: z.literal(false),
+    })
+    .strict(),
+]);
+
+export type PdfOptimizeErrorPayload = z.infer<typeof pdfOptimizeErrorPayloadSchema>;
+
 export const pdfOptimizeStatusResponseSchema = createToolJobStatusEnvelopeSchema(
   pdfOptimizePhaseSchema,
   pdfOptimizeResultDescriptorSchema,
@@ -160,6 +270,14 @@ export const pdfOptimizeStatusResponseSchema = createToolJobStatusEnvelopeSchema
       code: "custom",
       message: "성공한 PDF 작업은 완료 단계여야 합니다.",
       path: ["phase"],
+    });
+  }
+
+  if (status.error && !pdfOptimizeErrorPayloadSchema.safeParse(status.error).success) {
+    context.addIssue({
+      code: "custom",
+      message: "PDF 상태 오류는 공개 허용 목록과 일치해야 합니다.",
+      path: ["error"],
     });
   }
 });
