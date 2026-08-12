@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "defaultDecision": "deny",
+  "component": {
+    "name": "qpdf",
+    "version": "12.4.0",
+    "license": "Apache-2.0",
+    "sourceSha256": "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+    "requiredNotices": ["qpdf-12.4.0-Apache-2.0.txt", "qpdf-12.4.0-NOTICE.md"]
+  },
+  "runtime": {
+    "uid": 10001,
+    "requiredArtifacts": [
+      "/usr/local/bin/qpdf",
+      "/app/dist/server.mjs",
+      "/app/dist/self-test.mjs",
+      "/licenses/qpdf/LICENSE.txt",
+      "/licenses/qpdf/NOTICE.md",
+      "/licenses/debian/libjpeg62-turbo/copyright",
+      "/licenses/debian/libssl3/copyright"
+    ],
+    "prohibitedComponents": ["ghostscript", "mupdf", "poppler", "pdfcpu", "python"]
+  }
+}

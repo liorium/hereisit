@@ -1,0 +1,23 @@
+{
+  "name": "@hereisit/pdf-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/server.ts src/self-test.ts --bundle --platform=node --format=esm --target=node24 --outdir=dist --out-extension:.js=.mjs",
+    "start": "node dist/server.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. apps/pdf-engine/src"
+  },
+  "dependencies": {
+    "@hereisit/server-contracts": "workspace:*",
+    "@hereisit/tool-contracts": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.10",
+    "esbuild": "0.28.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

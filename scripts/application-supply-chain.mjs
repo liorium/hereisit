@@ -66,6 +66,8 @@ const PNPM_REQUEST = Object.freeze({
     "@hereisit/web...",
     "--filter",
     "@hereisit/api-worker...",
+    "--filter",
+    "@hereisit/pdf-engine...",
   ],
   maxBuffer: INVENTORY_MAXIMUM_BYTES,
 });

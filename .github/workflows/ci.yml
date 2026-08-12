@@ -27,6 +27,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine
       - run: pnpm verify
 
   browser:
