@@ -46,7 +46,8 @@ const STRUCTURED = new Set([
   "mixed",
 ]);
 const VERDICTS = new Set(["reduced", "original-retained", "rejected"]);
-const VERIFICATIONS = new Set(["passed", "failed", "not-applicable", "not-required"]);
+const SEMANTIC_VERIFICATIONS = new Set(["passed", "failed", "not-applicable"]);
+const VISUAL_VERIFICATIONS = new Set(["passed", "failed", "not-applicable", "not-required"]);
 
 function integer(value, minimum, maximum, label) {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum)
@@ -90,7 +91,7 @@ function validateRunner(raw, label) {
   if (!Array.isArray(runner.samples) || runner.samples.length !== REPEATS)
     throw new TypeError(`${label} samples are incomplete`);
   const repeats = new Set();
-  for (const rawSample of runner.samples) {
+  for (const [index, rawSample] of runner.samples.entries()) {
     const sample = assertObject(rawSample, `${label} sample`);
     assertExactKeys(
       sample,
@@ -109,6 +110,7 @@ function validateRunner(raw, label) {
       `${label} sample`,
     );
     repeats.add(integer(sample.repeat, 0, REPEATS - 1, `${label} repeat`));
+    if (sample.repeat !== index) throw new TypeError(`${label} repeat order is not canonical`);
     if (!VERDICTS.has(sample.verdict)) throw new TypeError(`${label} verdict is invalid`);
     if (sample.effectiveBytes !== null)
       integer(sample.effectiveBytes, 1, MAX_OUTPUT_BYTES, `${label} effective bytes`);
@@ -118,7 +120,7 @@ function validateRunner(raw, label) {
     if (sample.code !== null) safeString(sample.code, /^[A-Z][A-Z0-9_]{2,48}$/u, `${label} code`);
     if (sample.profile !== null && !["structural", "image-optimized"].includes(sample.profile))
       throw new TypeError(`${label} profile is invalid`);
-    if (!VERIFICATIONS.has(sample.semantic) || !VERIFICATIONS.has(sample.visual))
+    if (!SEMANTIC_VERIFICATIONS.has(sample.semantic) || !VISUAL_VERIFICATIONS.has(sample.visual))
       throw new TypeError(`${label} verification is invalid`);
     if (
       (sample.verdict === "rejected") !== (sample.effectiveBytes === null) ||
@@ -172,6 +174,8 @@ export function validatePdfBenchmarkReport(raw) {
   );
   safeString(identity.engineImageId, /^sha256:[a-f0-9]{64}$/u, "engine image ID");
   safeString(identity.engineImageDigest, /^sha256:[a-f0-9]{64}$/u, "engine image digest");
+  if (identity.engineImageId !== identity.engineImageDigest)
+    throw new TypeError("PDF benchmark image identity is inconsistent");
   safeString(identity.qpdfVersion, /^12\.4\.0$/u, "qpdf version");
   assertSha256(identity.corpusManifestSha256, "corpus manifest SHA-256");
   assertSha256(identity.sourceLockSha256, "source lock SHA-256");
@@ -191,6 +195,7 @@ export function validatePdfBenchmarkReport(raw) {
     ],
     "PDF benchmark limits",
   );
+  const derivedPassed = gateFailures(report).length === 0;
   if (
     limits.repeats !== REPEATS ||
     limits.maximumSamples !== MAX_SAMPLES ||
@@ -294,7 +299,7 @@ export function validatePdfBenchmarkReport(raw) {
     summary.rejectedSafely !== rejectedSafely ||
     summary.maximumPeakRssBytes !== maximumPeakRssBytes ||
     summary.visualProfilesMeasured !== visualProfilesMeasured ||
-    typeof summary.passed !== "boolean"
+    summary.passed !== derivedPassed
   )
     throw new TypeError("summary derivation is invalid");
   return report;
@@ -313,7 +318,11 @@ function gateFailures(report) {
           failures.push(`${record.stratum}:${runnerName}:EXPANSION`);
         if (sample.peakRssBytes > report.limits.maximumPeakRssBytes)
           failures.push(`${record.stratum}:${runnerName}:RSS_LIMIT`);
-        if (sample.verdict !== "rejected" && sample.peakRssBytes === 0)
+        if (
+          sample.peakRssBytes === 0 &&
+          (sample.verdict !== "rejected" ||
+            (record.stratum === "decompression-bomb" && runnerName === "native"))
+        )
           failures.push(`${record.stratum}:${runnerName}:RSS_NOT_MEASURED`);
         if (sample.semantic !== "passed" && sample.verdict !== "rejected")
           failures.push(`${record.stratum}:${runnerName}:SEMANTIC`);
@@ -322,6 +331,16 @@ function gateFailures(report) {
           (sample.profile === "image-optimized" && sample.visual !== "passed")
         )
           failures.push(`${record.stratum}:${runnerName}:VISUAL`);
+        const safeCode =
+          record.stratum === "decompression-bomb"
+            ? runnerName === "native"
+              ? "INPUT_LIMIT_EXCEEDED"
+              : "INFLATED_LIMIT_EXCEEDED"
+            : HOSTILE.has(record.stratum)
+              ? "UNSUPPORTED_INPUT"
+              : null;
+        if (sample.verdict === "rejected" && safeCode !== null && sample.code !== safeCode)
+          failures.push(`${record.stratum}:${runnerName}:UNSAFE_REJECTION_CODE`);
       }
     }
     if (
@@ -372,13 +391,113 @@ export async function readBoundedPdfResponse(response) {
 }
 
 export async function fetchBeforeDeadline(input, init, deadline, fetchImplementation = fetch) {
-  const remaining = Math.max(1, deadline - Date.now());
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("PDF benchmark wall limit exceeded");
   const timeout = AbortSignal.timeout(remaining);
   const signal = init.signal === undefined ? timeout : AbortSignal.any([init.signal, timeout]);
   return fetchImplementation(input, { ...init, signal });
 }
 
+export async function runBenchmarkRepeats({ deadline, operation, now = Date.now }) {
+  const results = [];
+  for (let repeat = 0; repeat < REPEATS; repeat += 1) {
+    if (now() >= deadline) throw new Error("PDF benchmark wall limit exceeded");
+    results.push(await operation(repeat, deadline));
+    if (now() >= deadline) throw new Error("PDF benchmark wall limit exceeded");
+  }
+  return results;
+}
+
+function resolveSchemaReference(root, reference) {
+  if (typeof reference !== "string" || !reference.startsWith("#/") || reference.includes("~"))
+    throw new TypeError("unsupported JSON Schema reference");
+  return reference
+    .slice(2)
+    .split("/")
+    .reduce((value, key) => value?.[key], root);
+}
+
+function schemaTypeMatches(value, type) {
+  if (type === "null") return value === null;
+  if (type === "array") return Array.isArray(value);
+  if (type === "object")
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (type === "integer") return Number.isSafeInteger(value);
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  return typeof value === type;
+}
+
+function validateJsonSchema(value, schema, root, path = "$") {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema))
+    throw new TypeError(`${path} schema is invalid`);
+  if (schema.$ref !== undefined)
+    return validateJsonSchema(value, resolveSchemaReference(root, schema.$ref), root, path);
+  if (schema.const !== undefined && canonicalJson(value) !== canonicalJson(schema.const))
+    throw new TypeError(`${path} violates const`);
+  if (
+    schema.enum !== undefined &&
+    !schema.enum.some((item) => canonicalJson(item) === canonicalJson(value))
+  )
+    throw new TypeError(`${path} violates enum`);
+  if (schema.type !== undefined) {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    if (!types.some((type) => schemaTypeMatches(value, type)))
+      throw new TypeError(`${path} violates type`);
+  }
+  if (typeof value === "string") {
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, "u").test(value))
+      throw new TypeError(`${path} violates pattern`);
+  }
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum)
+      throw new TypeError(`${path} violates minimum`);
+    if (schema.maximum !== undefined && value > schema.maximum)
+      throw new TypeError(`${path} violates maximum`);
+  }
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems)
+      throw new TypeError(`${path} violates minItems`);
+    if (schema.maxItems !== undefined && value.length > schema.maxItems)
+      throw new TypeError(`${path} violates maxItems`);
+    if (schema.uniqueItems === true && new Set(value.map(canonicalJson)).size !== value.length)
+      throw new TypeError(`${path} violates uniqueItems`);
+    if (schema.items !== undefined)
+      value.forEach((item, index) => {
+        validateJsonSchema(item, schema.items, root, `${path}[${index}]`);
+      });
+  }
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const properties = schema.properties ?? {};
+    for (const key of schema.required ?? [])
+      if (!Object.hasOwn(value, key)) throw new TypeError(`${path} misses required property`);
+    if (schema.additionalProperties === false)
+      for (const key of Object.keys(value))
+        if (!Object.hasOwn(properties, key)) throw new TypeError(`${path} has additional property`);
+    for (const [key, child] of Object.entries(properties))
+      if (Object.hasOwn(value, key)) validateJsonSchema(value[key], child, root, `${path}.${key}`);
+  }
+}
+
+function assertClosedSchema(schema, path = "$") {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return;
+  if (schema.type === "object") {
+    if (schema.additionalProperties !== false) throw new TypeError(`${path} schema must be closed`);
+    const properties = Object.keys(schema.properties ?? {}).sort();
+    const required = [...(schema.required ?? [])].sort();
+    if (canonicalJson(properties) !== canonicalJson(required))
+      throw new TypeError(`${path} schema required fields are incomplete`);
+  }
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "properties" || key === "$defs")
+      for (const [child, nested] of Object.entries(value))
+        assertClosedSchema(nested, `${path}.${child}`);
+    else if (key === "items") assertClosedSchema(value, `${path}.items`);
+  }
+}
+
 export async function validatePdfEvidenceSchemas({ report, gate, benchmarkSchema, gateSchema }) {
+  assertClosedSchema(benchmarkSchema);
+  assertClosedSchema(gateSchema);
   const benchmarkVocabulary = benchmarkSchema?.properties?.schema?.const;
   const gateVocabulary = gateSchema?.properties?.schema?.const;
   const sampleProperties = benchmarkSchema?.$defs?.sample?.properties;
@@ -394,11 +513,15 @@ export async function validatePdfEvidenceSchemas({ report, gate, benchmarkSchema
       canonicalJson(["passed", "failed", "not-applicable"]) ||
     canonicalJson(sampleProperties.visual.enum) !==
       canonicalJson(["passed", "failed", "not-applicable", "not-required"]) ||
+    sampleProperties.repeat.minimum !== 0 ||
+    sampleProperties.repeat.maximum !== REPEATS - 1 ||
     failurePattern !== "^[A-Za-z0-9:_-]{3,100}$"
   )
     throw new TypeError("PDF evidence schema vocabulary is inconsistent");
+  validateJsonSchema(report, benchmarkSchema, benchmarkSchema);
+  validateJsonSchema(gate, gateSchema, gateSchema);
   validatePdfBenchmarkReport(report);
-  validatePdfReleaseGate(gate);
+  validatePdfReleaseGate(gate, report);
 }
 
 export function evaluatePdfEngineReleaseGate(rawReport) {
@@ -416,7 +539,7 @@ export function evaluatePdfEngineReleaseGate(rawReport) {
   };
 }
 
-export function validatePdfReleaseGate(raw) {
+export function validatePdfReleaseGate(raw, report) {
   const gate = assertObject(raw, "PDF release gate");
   assertExactKeys(
     gate,
@@ -451,6 +574,11 @@ export function validatePdfReleaseGate(raw) {
     gate.passed !== (gate.failures.length === 0)
   )
     throw new TypeError("PDF release failure set is inconsistent");
+  if (report !== undefined) {
+    const expected = evaluatePdfEngineReleaseGate(report);
+    if (canonicalJson(gate) !== canonicalJson(expected))
+      throw new TypeError("PDF release gate image or benchmark binding is inconsistent");
+  }
   return gate;
 }
 
@@ -545,8 +673,7 @@ async function poll(origin, jobId, deadline) {
   throw new Error("native PDF benchmark timed out");
 }
 
-async function nativeRun(origin, bytes, pageCount) {
-  const deadline = Date.now() + 60_000;
+async function nativeRun(origin, bytes, pageCount, deadline) {
   const jobId = randomUUID();
   const body = {
     protocol: 1,
@@ -821,53 +948,57 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
       const bytes = await readFile(join(corpusRoot, entry.artifact));
       const localRuns = [];
       const nativeRuns = [];
-      for (let repeat = 0; repeat < REPEATS; repeat += 1) {
-        const local = await localStructural(bytes, entry.stratum, entry.safety);
-        local.semantic =
-          local.verdict === "rejected"
-            ? "not-applicable"
-            : local.verdict === "reduced"
-              ? (await semanticVerdict(bytes, local.output, entry.pageCount)) === "passed"
-                ? await featureSemanticVerdict(
-                    bytes,
-                    local.output,
-                    entry.stratum,
-                    entry.safety,
-                    local.profile,
-                  )
-                : "failed"
-              : "passed";
-        local.visual = await visualVerdict(
-          bytes,
-          local.output,
-          entry.pageCount ?? 1,
-          local.profile,
-        );
-        localRuns.push(local);
-        const native = await nativeRun(origin, bytes, entry.pageCount);
-        native.semantic =
-          native.verdict === "rejected"
-            ? "not-applicable"
-            : native.verdict === "reduced"
-              ? (await semanticVerdict(bytes, native.output, entry.pageCount)) === "passed"
-                ? await featureSemanticVerdict(
-                    bytes,
-                    native.output,
-                    entry.stratum,
-                    entry.safety,
-                    native.profile,
-                  )
-                : "failed"
-              : "passed";
-        native.visual = await visualVerdict(
-          bytes,
-          native.output,
-          entry.pageCount ?? 1,
-          native.profile,
-        );
-        nativeRuns.push(native);
-        measuredSamples += 1;
-      }
+      const pairs = await runBenchmarkRepeats({
+        deadline: benchmarkDeadline,
+        operation: async () => {
+          const local = await localStructural(bytes, entry.stratum, entry.safety);
+          local.semantic =
+            local.verdict === "rejected"
+              ? "not-applicable"
+              : local.verdict === "reduced"
+                ? (await semanticVerdict(bytes, local.output, entry.pageCount)) === "passed"
+                  ? await featureSemanticVerdict(
+                      bytes,
+                      local.output,
+                      entry.stratum,
+                      entry.safety,
+                      local.profile,
+                    )
+                  : "failed"
+                : "passed";
+          local.visual = await visualVerdict(
+            bytes,
+            local.output,
+            entry.pageCount ?? 1,
+            local.profile,
+          );
+          const native = await nativeRun(origin, bytes, entry.pageCount, benchmarkDeadline);
+          native.semantic =
+            native.verdict === "rejected"
+              ? "not-applicable"
+              : native.verdict === "reduced"
+                ? (await semanticVerdict(bytes, native.output, entry.pageCount)) === "passed"
+                  ? await featureSemanticVerdict(
+                      bytes,
+                      native.output,
+                      entry.stratum,
+                      entry.safety,
+                      native.profile,
+                    )
+                  : "failed"
+                : "passed";
+          native.visual = await visualVerdict(
+            bytes,
+            native.output,
+            entry.pageCount ?? 1,
+            native.profile,
+          );
+          measuredSamples += 1;
+          return { local, native };
+        },
+      });
+      localRuns.push(...pairs.map((pair) => pair.local));
+      nativeRuns.push(...pairs.map((pair) => pair.native));
       const local = runnerRecord(localRuns, bytes.byteLength);
       const native = runnerRecord(nativeRuns, bytes.byteLength);
       const smallerOnly = [...local.samples, ...native.samples].every(
@@ -945,7 +1076,7 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
         passed: false,
       },
     };
-    draft.summary.passed = gateFailures(validatePdfBenchmarkReport(draft)).length === 0;
+    draft.summary.passed = gateFailures(draft).length === 0;
     const report = validatePdfBenchmarkReport(draft);
     await writeFile(outputPath, canonicalJson(report), { mode: 0o600 });
     const gate = validatePdfReleaseGate(evaluatePdfEngineReleaseGate(report));

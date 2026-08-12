@@ -4,7 +4,6 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { inflateSync } from "node:zlib";
 import {
   type EngineCreatePdfJobRequest,
   engineCreatePdfJobRequestSchema,
@@ -32,6 +31,7 @@ export type QpdfProcessResult =
       readonly kind: "ok" | "invalid";
       readonly stdout: string;
       readonly diagnostic: Buffer;
+      readonly stdoutBytes?: number;
       readonly usage?: QpdfUsage;
       readonly cleanupFailed?: boolean;
     }
@@ -39,12 +39,22 @@ export type QpdfProcessResult =
       readonly kind: "failed" | "timeout" | "oom";
       readonly stdout: string;
       readonly diagnostic: Buffer;
+      readonly stdoutBytes?: number;
+      readonly usage?: QpdfUsage;
+      readonly cleanupFailed?: boolean;
+    }
+  | {
+      readonly kind: "output-limit";
+      readonly stdout: string;
+      readonly stdoutBytes: number;
+      readonly diagnostic: Buffer;
       readonly usage?: QpdfUsage;
       readonly cleanupFailed?: boolean;
     };
 export type QpdfRunner = (
   args: readonly string[],
   signal?: AbortSignal,
+  options?: { readonly maximumStdoutBytes?: number; readonly captureStdoutBytes?: number },
 ) => Promise<QpdfProcessResult>;
 
 const EMPTY = { cpuMs: 0, memoryByteMilliseconds: 0, peakMemoryBytes: 0 } as const;
@@ -276,6 +286,24 @@ export function createQpdfJobBudget(input: {
   };
 }
 
+export function normalizeQpdfUsage(input: {
+  readonly cpuMs: number;
+  readonly peakRssBytes: number;
+  readonly memoryByteMilliseconds: number;
+}) {
+  const normalize = (value: number) => {
+    const rounded = Math.ceil(value);
+    if (!Number.isSafeInteger(rounded) || rounded < 0)
+      throw new RangeError("qpdf usage measurement is invalid");
+    return rounded;
+  };
+  return {
+    cpuMs: normalize(input.cpuMs),
+    peakRssBytes: normalize(input.peakRssBytes),
+    memoryByteMilliseconds: normalize(input.memoryByteMilliseconds),
+  } as const;
+}
+
 async function directoryBytes(root: string): Promise<number> {
   let total = 0;
   const visit = async (path: string): Promise<void> => {
@@ -305,7 +333,7 @@ export function createQpdfProcessRunner(options: {
     maxWallMs: options.maxWallMs,
     maxCpuMs: options.maxCpuMs ?? options.maxWallMs,
   });
-  return async (args, signal) => {
+  return async (args, signal, invocation = {}) => {
     const available = budget.remaining();
     if (available.wallMs <= 0 || available.cpuMs <= 0)
       return { kind: "timeout", stdout: "", diagnostic: Buffer.alloc(0) };
@@ -332,10 +360,13 @@ export function createQpdfProcessRunner(options: {
       let lastSampleAt = performance.now();
       const processGroups = new Set<number>();
       child.stdout.on("data", (raw: Buffer) => {
-        if (stdoutBytes >= 1024) return;
-        const chunk = Buffer.from(raw).subarray(0, 1024 - stdoutBytes);
-        stdout.push(chunk);
+        const maximum = invocation.maximumStdoutBytes ?? 1024;
+        const capture = Math.min(maximum, invocation.captureStdoutBytes ?? maximum);
+        const chunk = Buffer.from(raw);
+        const retained = chunk.subarray(0, Math.max(0, capture - Math.min(stdoutBytes, capture)));
+        if (retained.byteLength > 0) stdout.push(retained);
         stdoutBytes += chunk.byteLength;
+        if (stdoutBytes > maximum) stop("output-limit");
       });
       child.stderr.on("data", (raw: Buffer) => {
         if (diagnosticBytes >= 8192) return;
@@ -343,7 +374,7 @@ export function createQpdfProcessRunner(options: {
         diagnostics.push(chunk);
         diagnosticBytes += chunk.byteLength;
       });
-      const stop = (reason: "timeout" | "oom" | "failed") => {
+      const stop = (reason: "timeout" | "oom" | "failed" | "output-limit") => {
         if (forced !== null) return;
         forced = reason;
         termination = settleProcessTermination(killGroup(pid, [...processGroups]));
@@ -426,14 +457,19 @@ export function createQpdfProcessRunner(options: {
         budget.recordCpu(observedCpuMs);
         resolve({
           kind:
-            code === 0 && forced === null && !signal?.aborted && cleaned
+            (code === 0 || code === 3) && forced === null && !signal?.aborted && cleaned
               ? "ok"
-              : code !== 0 && forced === null && !signal?.aborted && cleaned
+              : code !== 0 && code !== 3 && forced === null && !signal?.aborted && cleaned
                 ? "invalid"
                 : (forced ?? "failed"),
           stdout: Buffer.concat(stdout).toString("utf8"),
+          stdoutBytes,
           diagnostic: Buffer.concat(diagnostics),
-          usage: { cpuMs: observedCpuMs, peakRssBytes, memoryByteMilliseconds },
+          usage: normalizeQpdfUsage({
+            cpuMs: observedCpuMs,
+            peakRssBytes,
+            memoryByteMilliseconds,
+          }),
           cleanupFailed: !cleaned,
         });
       });
@@ -448,31 +484,71 @@ function envelope(bytes: Buffer): boolean {
   );
 }
 
-const MAX_DECLARED_INFLATED_BYTES = 1024 * 1024;
+const MAX_QPDF_JSON_BYTES = 16 * 1024 * 1024;
+const MAX_FILTERED_STREAM_BYTES = 100 * 1024 * 1024;
+const MIN_FILTERED_STREAM_BYTES = 16 * 1024 * 1024;
+const MAX_FILTERED_EXPANSION_RATIO = 200;
 
-function compressedStreamExpansionSafe(bytes: Buffer): boolean {
-  const text = bytes.toString("latin1");
-  const streams = text.matchAll(/(<<[\s\S]{0,4096}?>>)\s*stream\r?\n/gu);
-  for (const match of streams) {
-    const dictionary = match[1] ?? "";
-    if (!/\/Filter\s*(?:\/FlateDecode|\[[^\]]*\/FlateDecode)/u.test(dictionary)) continue;
-    const rawLength = /\/Length\s+(\d+)\b/u.exec(dictionary)?.[1];
-    const start = (match.index ?? -1) + match[0].length;
-    const length = Number(rawLength);
-    if (
-      !Number.isSafeInteger(length) ||
-      length < 1 ||
-      start < 0 ||
-      start + length > bytes.byteLength
-    )
-      return false;
-    try {
-      inflateSync(bytes.subarray(start, start + length), {
-        maxOutputLength: MAX_DECLARED_INFLATED_BYTES + 1,
-      });
-    } catch {
-      return false;
+function flateStreamObjects(raw: string): readonly string[] | null {
+  try {
+    const json = JSON.parse(raw);
+    const objects = json?.qpdf?.[1];
+    if (typeof objects !== "object" || objects === null || Array.isArray(objects)) return null;
+    const selected = [];
+    for (const [key, value] of Object.entries(objects)) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+      const stream = (value as { readonly stream?: unknown }).stream;
+      if (stream === undefined) continue;
+      if (typeof stream !== "object" || stream === null || Array.isArray(stream)) return null;
+      const dictionary = (stream as { readonly dict?: unknown }).dict;
+      if (typeof dictionary !== "object" || dictionary === null || Array.isArray(dictionary))
+        return null;
+      const filter = (dictionary as Record<string, unknown>)["/Filter"];
+      if (filter === undefined) continue;
+      const filters = Array.isArray(filter) ? filter : [filter];
+      if (!filters.every((item) => typeof item === "string")) return null;
+      if (!filters.includes("/FlateDecode")) continue;
+      const match = /^obj:(\d+) (\d+) R$/u.exec(key);
+      if (match === null) return null;
+      selected.push(`${match[1]},${match[2]}`);
     }
+    return selected;
+  } catch {
+    return null;
+  }
+}
+
+async function compressedStreamExpansionSafe(
+  path: string,
+  sourceBytes: number,
+  runQpdf: QpdfRunner,
+  signal: AbortSignal | undefined,
+): Promise<boolean | QpdfProcessResult> {
+  const inspection = await runQpdf(
+    ["--json=2", "--json-key=qpdf", "--json-stream-data=none", "--", path],
+    signal,
+    { maximumStdoutBytes: MAX_QPDF_JSON_BYTES },
+  );
+  if (inspection.kind !== "ok") return inspection;
+  const objects = flateStreamObjects(inspection.stdout);
+  if (objects === null) return false;
+  const ceiling = Math.min(
+    MAX_FILTERED_STREAM_BYTES,
+    Math.max(MIN_FILTERED_STREAM_BYTES, sourceBytes * MAX_FILTERED_EXPANSION_RATIO),
+  );
+  let total = 0;
+  for (const object of objects) {
+    const remaining = ceiling - total;
+    if (remaining <= 0) return false;
+    const decoded = await runQpdf(
+      [`--show-object=${object}`, "--filtered-stream-data", "--", path],
+      signal,
+      { maximumStdoutBytes: remaining + 1, captureStdoutBytes: 0 },
+    );
+    if (decoded.kind === "output-limit") return false;
+    if (decoded.kind !== "ok") return false;
+    total += decoded.stdoutBytes ?? Buffer.byteLength(decoded.stdout);
+    if (total > ceiling) return false;
   }
   return true;
 }
@@ -522,7 +598,8 @@ function failedStatus(
 function processFailure(
   result: QpdfProcessResult,
 ): "ENGINE_TIMEOUT" | "ENGINE_OOM" | "ENGINE_CRASH" | null {
-  if (result.kind === "ok" || result.kind === "invalid") return null;
+  if (result.kind === "ok" || result.kind === "invalid" || result.kind === "output-limit")
+    return null;
   return result.kind === "timeout"
     ? "ENGINE_TIMEOUT"
     : result.kind === "oom"
@@ -573,8 +650,8 @@ export async function runPdfOptimization(input: {
   let cpuMs = 0;
   let peakMemoryBytes = 0;
   let memoryByteMilliseconds = 0;
-  const runQpdf: QpdfRunner = async (args, signal) => {
-    const result = await input.runQpdf(args, signal);
+  const runQpdf: QpdfRunner = async (args, signal, options) => {
+    const result = await input.runQpdf(args, signal, options);
     if (result.cleanupFailed) throw new PdfProcessCleanupError();
     cpuMs += result.usage?.cpuMs ?? 0;
     peakMemoryBytes = Math.max(peakMemoryBytes, result.usage?.peakRssBytes ?? 0);
@@ -621,8 +698,6 @@ export async function runPdfOptimization(input: {
     const source = await readFile(input.workspace.input);
     if (!envelope(source))
       return terminalCleanup(failedStatus(input.request, "UNSUPPORTED_INPUT", duration()));
-    if (!compressedStreamExpansionSafe(source))
-      return terminalCleanup(failedStatus(input.request, "INPUT_LIMIT_EXCEEDED", duration()));
     const sourceInspection = await inspectPdf(input.workspace.input, runQpdf, input.signal);
     const inputFailure = "kind" in sourceInspection ? processFailure(sourceInspection) : null;
     if (input.signal?.aborted) return terminalCleanup(cancelled());
@@ -634,6 +709,18 @@ export async function runPdfOptimization(input: {
       return terminalCleanup(failedStatus(input.request, "UNSUPPORTED_FEATURE", duration()));
     if (sourceInspection.pageCount !== input.request.input.pageCount)
       return terminalCleanup(failedStatus(input.request, "VERIFICATION_FAILED", duration()));
+    const streamAdmission = await compressedStreamExpansionSafe(
+      input.workspace.input,
+      source.byteLength,
+      runQpdf,
+      input.signal,
+    );
+    if (streamAdmission !== true) {
+      const failure = streamAdmission === false ? null : processFailure(streamAdmission);
+      return terminalCleanup(
+        failedStatus(input.request, failure ?? "INPUT_LIMIT_EXCEEDED", duration()),
+      );
+    }
     const candidates = [
       {
         profile: "structural" as const,

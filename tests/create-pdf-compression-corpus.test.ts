@@ -79,6 +79,23 @@ describe("generated PDF compression corpus", () => {
     await expect(verifyPdfCorpusFiles(swapped, output)).rejects.toThrow();
   });
 
+  it("binds defining token, form value, and embedded content by digest", async () => {
+    const output = await root("semantic-digests");
+    const manifest = await createPdfCompressionCorpus(output);
+    for (const entry of manifest.entries.filter(
+      (item) => !["corrupt", "encrypted"].includes(item.stratum),
+    ))
+      expect(entry.probe.signature.tokenDigest, entry.stratum).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      manifest.entries.find((entry) => entry.stratum === "form")?.probe.signature,
+    ).toMatchObject({
+      valueDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(
+      manifest.entries.find((entry) => entry.stratum === "attachment")?.probe.signature,
+    ).toMatchObject({ contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  });
+
   it("rejects duplicate, missing, tampered, extra, unsafe, or path-leaking manifest data", async () => {
     const output = await root("validation");
     const manifest = await createPdfCompressionCorpus(output);

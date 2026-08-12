@@ -9,6 +9,11 @@ image downsampling and does not always reduce a PDF. `pdf-quality-benchmark.yml`
 runs three bounded repeats, and emits sanitized benchmark and release-gate JSON. The measured evidence in
 `pdf-engine-benchmark.json` records derived repeat evidence and safe hostile rejection truthfully.
 
+Before candidate processing, qpdf structurally discovers every Flate/filter-chain stream and decodes each
+through a bounded process output. The aggregate ceiling is the smaller of 100 MiB and the larger of 16 MiB
+or 200 times the input size. Introspection/decode failures fail closed; only an observed output-limit event
+is classified as `INPUT_LIMIT_EXCEEDED`. Encrypted input is rejected without exposing feature detail.
+
 The current corpus selected only structural qpdf outputs, so `visualProfilesMeasured` is zero and
 `publicAdmissionReady` is false. The bounded image-optimized PDF.js pixel path exists but is not claimed as
 measured coverage; Task 8 browser admission must exercise it before public rollout.

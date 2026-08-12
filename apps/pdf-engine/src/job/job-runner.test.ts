@@ -10,6 +10,7 @@ import {
   createQpdfProcessRunner,
   listDescendantProcessGroups,
   measureProcessTreeUsage,
+  normalizeQpdfUsage,
   PdfEngineUnavailableError,
   PdfJobController,
   type QpdfProcessResult,
@@ -39,6 +40,11 @@ afterEach(async () =>
 );
 
 describe("detached qpdf process cleanup", () => {
+  it("normalizes sampled usage to the integer server contract without understating it", () => {
+    expect(
+      normalizeQpdfUsage({ cpuMs: 1.1, peakRssBytes: 2.1, memoryByteMilliseconds: 3.1 }),
+    ).toEqual({ cpuMs: 2, peakRssBytes: 3, memoryByteMilliseconds: 4 });
+  });
   it("settles as a sanitized failure when process cleanup itself rejects", async () => {
     await expect(
       settleProcessTermination(Promise.reject(new Error("private cleanup detail"))),
@@ -159,6 +165,50 @@ describe("detached qpdf process cleanup", () => {
     expect(result.usage?.peakRssBytes).toBeGreaterThan(0);
   });
 
+  it("accepts qpdf exit 3 as parsed output with recoverable warnings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-warning-exit-"));
+    roots.push(root);
+    const runner = createQpdfProcessRunner({
+      maxWallMs: 5000,
+      maxRssBytes: 128 * 1024 * 1024,
+      workspaceRoot: root,
+      workspaceHome: root,
+      workspaceTmp: root,
+      qpdfPath: process.execPath,
+    });
+    const result = await runner(["-e", "process.stdout.write('{}'); process.exit(3)"]);
+    expect(result).toMatchObject({ kind: "ok", stdout: "{}", stdoutBytes: 2 });
+  });
+
+  it("terminates oversized stdout as a clean deterministic output-limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-output-limit-"));
+    roots.push(root);
+    const runner = createQpdfProcessRunner({
+      maxWallMs: 5000,
+      maxRssBytes: 128 * 1024 * 1024,
+      workspaceRoot: root,
+      workspaceHome: root,
+      workspaceTmp: root,
+      qpdfPath: process.execPath,
+    });
+    for (let repeat = 0; repeat < 3; repeat += 1) {
+      const result = await runner(
+        ["-e", "process.stdout.write(Buffer.alloc(20 * 1024 * 1024))"],
+        undefined,
+        { maximumStdoutBytes: 16 * 1024 * 1024, captureStdoutBytes: 0 },
+      );
+      expect(result).toMatchObject({
+        kind: "output-limit",
+        cleanupFailed: false,
+      });
+      expect(result.stdoutBytes).toBeGreaterThan(16 * 1024 * 1024);
+      expect(result.usage).toBeDefined();
+      for (const measurement of Object.values(result.usage ?? {})) {
+        expect(Number.isSafeInteger(measurement)).toBe(true);
+      }
+    }
+  });
+
   it("fails closed on persistent or non-race resource measurement errors", async () => {
     const denied = Object.assign(new Error("denied"), { code: "EACCES" });
     await expect(
@@ -257,7 +307,28 @@ function runner(
         stdout: options.encrypted ? "R = 6" : "File is not encrypted",
         diagnostic: Buffer.alloc(0),
       } as const;
+    if (args[0] === "--json=2")
+      return {
+        kind: "ok",
+        stdout: JSON.stringify({ qpdf: [{}, {}] }),
+        stdoutBytes: 23,
+        diagnostic: Buffer.alloc(0),
+      } as const;
     return options.process ?? ({ kind: "ok", stdout: "", diagnostic: Buffer.alloc(0) } as const);
+  });
+}
+
+function streamDiscovery(...objects: Array<[number, string | string[]]>) {
+  return JSON.stringify({
+    qpdf: [
+      {},
+      Object.fromEntries(
+        objects.map(([number, filter]) => [
+          `obj:${number} 0 R`,
+          { stream: { dict: { "/Filter": filter, "/Length": "99 0 R" } } },
+        ]),
+      ),
+    ],
   });
 }
 
@@ -296,9 +367,9 @@ describe("bounded PDF optimization", () => {
     expect(result).toMatchObject({
       state: "succeeded",
       measurements: {
-        cpuMs: 66,
-        peakMemoryBytes: 1100,
-        memoryByteMilliseconds: 66_000,
+        cpuMs: 78,
+        peakMemoryBytes: 1200,
+        memoryByteMilliseconds: 78_000,
       },
     });
   });
@@ -344,15 +415,111 @@ describe("bounded PDF optimization", () => {
       Buffer.from("\nendstream\nendobj\n%%EOF\n"),
     ]);
     await writeFile(workspace.input, source);
+    const base = runner();
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      if (args[0] === "--json=2") {
+        const stdout = streamDiscovery([6, "/FlateDecode"]);
+        return {
+          kind: "ok",
+          stdout,
+          stdoutBytes: Buffer.byteLength(stdout),
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      }
+      if (args[0] === "--show-object=6,0")
+        return {
+          kind: "output-limit",
+          stdout: "",
+          stdoutBytes: 100 * 1024 * 1024 + 1,
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      return base(args, signal);
+    });
     const result = await runPdfOptimization({
       request: { ...request, input: { ...request.input, byteLength: source.byteLength } },
       workspace,
-      runQpdf: runner(),
+      runQpdf,
     });
     expect(result).toMatchObject({
       state: "failed",
       error: { code: "INPUT_LIMIT_EXCEEDED", retryable: false },
       measurements: { testedCandidates: 0 },
+    });
+  });
+
+  it("uses qpdf parsing for indirect Length, filter arrays, and CR-delimited Flate streams", async () => {
+    const workspace = await fixture();
+    const base = runner();
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      if (args[0] === "--json=2") {
+        const stdout = streamDiscovery([9, ["/ASCIIHexDecode", "/FlateDecode"]]);
+        return {
+          kind: "ok",
+          stdout,
+          stdoutBytes: Buffer.byteLength(stdout),
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      }
+      if (args[0] === "--show-object=9,0")
+        return {
+          kind: "output-limit",
+          stdout: "",
+          stdoutBytes: 100 * 1024 * 1024 + 1,
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      return base(args, signal);
+    });
+    await expect(runPdfOptimization({ request, workspace, runQpdf })).resolves.toMatchObject({
+      state: "failed",
+      error: { code: "INPUT_LIMIT_EXCEEDED" },
+      measurements: { testedCandidates: 0 },
+    });
+    expect(runQpdf).toHaveBeenCalledWith(
+      ["--show-object=9,0", "--filtered-stream-data", "--", workspace.input],
+      undefined,
+      { maximumStdoutBytes: 16 * 1024 * 1024 + 1, captureStdoutBytes: 0 },
+    );
+  });
+
+  it("rejects cumulative decoded stream output across many individually bounded streams", async () => {
+    const largeRequest = {
+      ...request,
+      input: { ...request.input, byteLength: 1024 * 1024 },
+    };
+    const workspace = await fixture(largeRequest);
+    const base = runner();
+    const decoded = 60 * 1024 * 1024;
+    const runQpdf = vi.fn(async (args: readonly string[], signal?: AbortSignal) => {
+      if (args[0] === "--json=2") {
+        const stdout = streamDiscovery([9, "/FlateDecode"], [10, "/FlateDecode"]);
+        return {
+          kind: "ok",
+          stdout,
+          stdoutBytes: Buffer.byteLength(stdout),
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      }
+      if (args[0] === "--show-object=9,0")
+        return {
+          kind: "ok",
+          stdout: "",
+          stdoutBytes: decoded,
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      if (args[0] === "--show-object=10,0")
+        return {
+          kind: "output-limit",
+          stdout: "",
+          stdoutBytes: decoded,
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      return base(args, signal);
+    });
+    await expect(
+      runPdfOptimization({ request: largeRequest, workspace, runQpdf }),
+    ).resolves.toMatchObject({
+      state: "failed",
+      error: { code: "INPUT_LIMIT_EXCEEDED" },
     });
   });
 
@@ -465,6 +632,12 @@ describe("bounded PDF optimization", () => {
         return {
           kind: "ok",
           stdout: "File is not encrypted",
+          diagnostic: Buffer.alloc(0),
+        } as const;
+      if (args[0] === "--json=2")
+        return {
+          kind: "ok",
+          stdout: JSON.stringify({ qpdf: [{}, {}] }),
           diagnostic: Buffer.alloc(0),
         } as const;
       return { kind: "ok", stdout: "", diagnostic: Buffer.alloc(0) } as const;

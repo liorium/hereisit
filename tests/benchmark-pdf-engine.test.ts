@@ -4,6 +4,7 @@ import {
   evaluatePdfEngineReleaseGate,
   fetchBeforeDeadline,
   readBoundedPdfResponse,
+  runBenchmarkRepeats,
   validatePdfBenchmarkReport,
   validatePdfEvidenceSchemas,
   validatePdfReleaseGate,
@@ -31,7 +32,9 @@ function sample(stratum: string, runner: "local" | "native", repeat: number) {
     candidateCount: rejected ? 0 : runner === "native" ? 2 : 1,
     code: rejected
       ? stratum === "decompression-bomb"
-        ? "INFLATED_LIMIT_EXCEEDED"
+        ? runner === "native"
+          ? "INPUT_LIMIT_EXCEEDED"
+          : "INFLATED_LIMIT_EXCEEDED"
         : "UNSUPPORTED_INPUT"
       : null,
     profile: rejected || runner === "local" ? null : "structural",
@@ -112,6 +115,12 @@ describe("PDF native benchmark release gate", () => {
     });
   });
 
+  it("pairs native and local samples by canonical repeat number, not array position", () => {
+    const report = passingReport();
+    report.records[7].native.samples.reverse();
+    expect(() => validatePdfBenchmarkReport(report)).toThrow(/repeat order/i);
+  });
+
   it.each([
     [
       "derived bytes",
@@ -130,6 +139,7 @@ describe("PDF native benchmark release gate", () => {
       (r: ReturnType<typeof passingReport>) => (r.records[7].nativeAdvantageRatio = 0.9),
     ],
     ["derived summary", (r: ReturnType<typeof passingReport>) => (r.summary.nativeWins = 2)],
+    ["derived pass true", (r: ReturnType<typeof passingReport>) => (r.summary.passed = false)],
     [
       "derived maximum",
       (r: ReturnType<typeof passingReport>) => (r.summary.maximumPeakRssBytes = 3),
@@ -147,6 +157,11 @@ describe("PDF native benchmark release gate", () => {
       "unknown sample key",
       (r: ReturnType<typeof passingReport>) =>
         Object.assign(r.records[0].native.samples[0], { path: "/tmp/x" }),
+    ],
+    [
+      "visual-only semantic value",
+      (r: ReturnType<typeof passingReport>) =>
+        (r.records[0].native.samples[0].semantic = "not-required"),
     ],
   ])("rejects tampered evidence: %s", (_, mutate) => {
     const report = passingReport();
@@ -166,6 +181,36 @@ describe("PDF native benchmark release gate", () => {
     report.summary.nativeWins = 0;
     report.summary.passed = false;
     expect(evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report)).passed).toBe(false);
+  });
+
+  it.each([
+    "ENGINE_CRASH",
+    "ENGINE_TIMEOUT",
+    "ENGINE_OOM",
+  ])("does not count a decompression bomb %s as a safe native admission rejection", (code) => {
+    const report = passingReport();
+    const bomb = report.records.at(-1);
+    const sample = bomb?.native.samples[0];
+    if (sample === undefined) throw new Error("fixture bomb sample is missing");
+    sample.code = code;
+    report.summary.passed = false;
+    expect(evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report)).failures).toContain(
+      "decompression-bomb:native:UNSAFE_REJECTION_CODE",
+    );
+  });
+
+  it("requires measured native resources for decompression-bomb admission", () => {
+    const report = passingReport();
+    const bomb = report.records.at(-1);
+    const sample = bomb?.native.samples[0];
+    if (bomb === undefined || sample === undefined)
+      throw new Error("fixture bomb sample is missing");
+    sample.peakRssBytes = 0;
+    bomb.native.maximumPeakRssBytes = 10_000_002;
+    report.summary.passed = false;
+    expect(evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report)).failures).toContain(
+      "decompression-bomb:native:RSS_NOT_MEASURED",
+    );
   });
 
   it.each([
@@ -207,6 +252,27 @@ describe("PDF native benchmark release gate", () => {
     expect(hanging.mock.calls[0]?.[1]?.signal.aborted).toBe(true);
   });
 
+  it("shares one outer deadline across repeats and never starts a repeat after exhaustion", async () => {
+    const started = Date.now();
+    const attempts: number[] = [];
+    const hanging = (_input, init) =>
+      new Promise((_resolve, reject) =>
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }),
+      );
+    await expect(
+      runBenchmarkRepeats({
+        deadline: started + 20,
+        operation: async (repeat, deadline) => {
+          attempts.push(repeat);
+          if (repeat === 0) return repeat;
+          return fetchBeforeDeadline("http://engine.invalid", {}, deadline, hanging);
+        },
+      }),
+    ).rejects.toThrow();
+    expect(attempts).toEqual([0, 1]);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
   it("keeps checked-in schemas and parser vocabularies identical", async () => {
     const report = passingReport();
     const gate = evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report));
@@ -223,5 +289,59 @@ describe("PDF native benchmark release gate", () => {
       }),
     ).resolves.toBeUndefined();
     expect(validatePdfReleaseGate(gate)).toEqual(gate);
+  });
+
+  it.each([
+    "empty required",
+    "open objects",
+    "wrong bound",
+  ])("rejects a weakened benchmark schema: %s", async (mutation) => {
+    const report = passingReport();
+    const benchmarkSchema = JSON.parse(
+      await readFile("docs/deployment/pdf-engine-benchmark.schema.json", "utf8"),
+    );
+    const gateSchema = JSON.parse(
+      await readFile("docs/deployment/pdf-engine-release-gate.schema.json", "utf8"),
+    );
+    if (mutation === "empty required") benchmarkSchema.required = [];
+    else if (mutation === "open objects") benchmarkSchema.additionalProperties = true;
+    else benchmarkSchema.$defs.sample.properties.repeat.maximum = 3;
+    await expect(
+      validatePdfEvidenceSchemas({
+        report,
+        gate: evaluatePdfEngineReleaseGate(report),
+        benchmarkSchema,
+        gateSchema,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects evidence that violates a checked-in schema even if vocabulary fields are intact", async () => {
+    const report = passingReport();
+    Object.assign(report.records[0].native.samples[0], { durationMs: "8" });
+    const benchmarkSchema = JSON.parse(
+      await readFile("docs/deployment/pdf-engine-benchmark.schema.json", "utf8"),
+    );
+    const gateSchema = JSON.parse(
+      await readFile("docs/deployment/pdf-engine-release-gate.schema.json", "utf8"),
+    );
+    await expect(
+      validatePdfEvidenceSchemas({
+        report,
+        gate: evaluatePdfEngineReleaseGate(passingReport()),
+        benchmarkSchema,
+        gateSchema,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("binds one exact image ID and digest throughout report and gate", () => {
+    const report = passingReport();
+    report.identity.engineImageDigest = `sha256:${sha("d")}`;
+    expect(() => validatePdfBenchmarkReport(report)).toThrow(/image identity/i);
+    const valid = passingReport();
+    const gate = evaluatePdfEngineReleaseGate(valid);
+    gate.engineImageDigest = `sha256:${sha("d")}`;
+    expect(() => validatePdfReleaseGate(gate, valid)).toThrow(/image/i);
   });
 });

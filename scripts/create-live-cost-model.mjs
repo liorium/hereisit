@@ -118,6 +118,8 @@ export function createLiveCostModel(rawInput) {
       pdfBenchmark,
       [
         "evidenceSha256",
+        "engineImageId",
+        "engineImageDigest",
         "maximumCandidates",
         "maximumInputBytes",
         "maximumMeasuredPeakRssBytes",
@@ -128,6 +130,14 @@ export function createLiveCostModel(rawInput) {
       "pdfBenchmark",
     );
     assertSha256(pdfBenchmark.evidenceSha256, "pdfBenchmark.evidenceSha256");
+    for (const field of ["engineImageId", "engineImageDigest"])
+      if (
+        typeof pdfBenchmark[field] !== "string" ||
+        !/^sha256:[a-f0-9]{64}$/u.test(pdfBenchmark[field])
+      )
+        throw new TypeError(`pdfBenchmark.${field} is invalid`);
+    if (pdfBenchmark.engineImageId !== pdfBenchmark.engineImageDigest)
+      throw new TypeError("pdfBenchmark image identity is inconsistent");
     for (const field of [
       "maximumCandidates",
       "maximumInputBytes",

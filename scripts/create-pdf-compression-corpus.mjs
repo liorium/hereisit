@@ -50,6 +50,10 @@ const MAX_PAGES = 100;
 const SAFE_TOKEN = /^HIS_[A-Z0-9_]{3,48}$/u;
 const VERDICTS = new Set(["measure", "reject", "original-retained"]);
 
+function digest(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function integer(value, minimum, maximum, label) {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum)
     throw new TypeError(`${label} is invalid`);
@@ -197,6 +201,7 @@ const PNG = Buffer.from(
 );
 
 async function generate(stratum, token) {
+  if (stratum === "decompression-bomb") return decompressionBombPdf(token);
   const { document, page } = await baseDocument(token, !["expansion", "scan"].includes(stratum));
   if (stratum === "text-vector") {
     for (let index = 0; index < 8; index += 1)
@@ -299,22 +304,6 @@ async function generate(stratum, token) {
       PDFHexString.of("00112233445566778899aabbccddeeff"),
       PDFHexString.of("00112233445566778899aabbccddeeff"),
     ]);
-  } else if (stratum === "decompression-bomb") {
-    const inflated = Buffer.alloc(4 * 1024 * 1024, 66);
-    Buffer.from(token, "ascii").copy(inflated);
-    const compressed = deflateSync(inflated, { level: 9 });
-    page.node.setXObject(
-      PDFName.of("BombEnvelope"),
-      document.context.register(
-        document.context.stream(compressed, {
-          Type: "XObject",
-          Subtype: "Form",
-          Filter: "FlateDecode",
-          HereIsItInflatedBytes: inflated.byteLength,
-          BBox: [0, 0, 1, 1],
-        }),
-      ),
-    );
   }
   let bytes = await save(document, { useObjectStreams: stratum === "expansion" });
   if (stratum === "corrupt")
@@ -323,6 +312,53 @@ async function generate(stratum, token) {
       "ascii",
     );
   return bytes;
+}
+
+function decompressionBombPdf(token) {
+  const inflated = Buffer.alloc(20 * 1024 * 1024, 66);
+  Buffer.from(token, "ascii").copy(inflated);
+  const encoded = Buffer.from(`${deflateSync(inflated, { level: 9 }).toString("hex")}>`, "ascii");
+  const objects = [
+    `<< /Type /Catalog /Pages 2 0 R /HereIsItProbe /${token} >>`,
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 360 240] /Resources << /XObject << /BombEnvelope 4 0 R >> >> /Contents 6 0 R >>",
+    Buffer.concat([
+      Buffer.from(
+        `<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Filter [/ASCIIHexDecode /FlateDecode] /Length 5 0 R /HereIsItInflatedBytes ${inflated.byteLength} >>\rstream\r`,
+        "ascii",
+      ),
+      encoded,
+      Buffer.from("\rendstream", "ascii"),
+    ]),
+    String(encoded.byteLength),
+    "<< /Length 0 >>\nstream\n\nendstream",
+  ];
+  const chunks = [Buffer.from("%PDF-1.7\n", "ascii")];
+  const offsets = [0];
+  let offset = chunks[0].byteLength;
+  for (const [index, object] of objects.entries()) {
+    offsets.push(offset);
+    const chunk = Buffer.concat([
+      Buffer.from(`${index + 1} 0 obj\n`, "ascii"),
+      Buffer.isBuffer(object) ? object : Buffer.from(object, "ascii"),
+      Buffer.from("\nendobj\n", "ascii"),
+    ]);
+    chunks.push(chunk);
+    offset += chunk.byteLength;
+  }
+  const xref = offset;
+  chunks.push(
+    Buffer.from(
+      `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets
+        .slice(1)
+        .map((value) => `${String(value).padStart(10, "0")} 00000 n `)
+        .join(
+          "\n",
+        )}\ntrailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
+      "ascii",
+    ),
+  );
+  return Buffer.concat(chunks);
 }
 
 function expected(stratum) {
@@ -356,14 +392,15 @@ export async function createPdfCompressionCorpus(outputRoot) {
       safety: {
         maximumSourceBytes: MAX_FILE_BYTES,
         maximumOutputBytes: MAX_FILE_BYTES,
-        maximumInflatedBytes: stratum === "decompression-bomb" ? 1024 * 1024 : 8 * 1024 * 1024,
+        maximumInflatedBytes: stratum === "decompression-bomb" ? 16 * 1024 * 1024 : 8 * 1024 * 1024,
         maximumPages: MAX_PAGES,
       },
       probe: {
         kind: probeKind(stratum),
         token,
         signature: await probePdfCorpusFeature(bytes, stratum, {
-          maximumInflatedBytes: stratum === "decompression-bomb" ? 1024 * 1024 : 8 * 1024 * 1024,
+          maximumInflatedBytes:
+            stratum === "decompression-bomb" ? 16 * 1024 * 1024 : 8 * 1024 * 1024,
         }),
       },
     });
@@ -376,7 +413,7 @@ export async function createPdfCompressionCorpus(outputRoot) {
       maximumCorpusBytes: MAX_CORPUS_BYTES,
       maximumFileBytes: MAX_FILE_BYTES,
       maximumPages: MAX_PAGES,
-      maximumInflatedBytes: 8 * 1024 * 1024,
+      maximumInflatedBytes: 16 * 1024 * 1024,
     },
     entries,
   });
@@ -426,22 +463,52 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
     ignoreEncryption: true,
   });
   const objectText = [];
-  const decoded = [];
+  const rawStreams = [];
+  const embeddedContents = [];
   for (const [, object] of document.context.enumerateIndirectObjects()) {
     objectText.push(object.toString());
     if (object instanceof PDFRawStream) {
-      try {
-        decoded.push(Buffer.from(decodePDFRawStream(object).decode()).toString("latin1"));
-      } catch {}
+      rawStreams.push(object);
+      if (/\/Type\s*\/EmbeddedFile\b/u.test(object.dict.toString())) {
+        try {
+          embeddedContents.push(Buffer.from(decodePDFRawStream(object).decode()));
+        } catch {}
+      }
     }
   }
   const catalog = document.catalog.toString();
   const objects = objectText.join("\n");
-  const streams = decoded.join("\n");
   const pageCount = document.getPageCount();
+  const token = /\/HereIsItProbe\s*\/([A-Z0-9_]+)/u.exec(catalog)?.[1];
+  if (token === undefined) throw new TypeError("PDF corpus token probe failed");
+  const tokenDigest = digest(token);
+  if (stratum === "decompression-bomb") {
+    const marker = /\/HereIsItInflatedBytes\s+(\d+)/u.exec(objects);
+    const inflatedBytes = Number(marker?.[1]);
+    if (
+      !Number.isSafeInteger(inflatedBytes) ||
+      inflatedBytes <= (safety.maximumInflatedBytes ?? 0) ||
+      !/\/FlateDecode\b/u.test(objects)
+    )
+      throw new TypeError("decompression-bomb PDF probe failed");
+    return {
+      kind: "decompression-bomb",
+      pageCount,
+      tokenDigest,
+      inflatedBytes,
+      maximumInflatedBytes: safety.maximumInflatedBytes,
+    };
+  }
+  const decoded = [];
+  for (const object of rawStreams) {
+    try {
+      decoded.push(Buffer.from(decodePDFRawStream(object).decode()).toString("latin1"));
+    } catch {}
+  }
+  const streams = decoded.join("\n");
   const imageCount = occurrences(objects, /\/Subtype\s*\/Image\b/gu);
   const textBlocks = occurrences(streams, /\bBT\b/gu);
-  const signature = { pageCount };
+  const signature = { pageCount, tokenDigest };
   const requireFeature = (condition, feature) => {
     if (!condition) throw new TypeError(`${feature} PDF probe failed`);
     return { ...signature, kind: feature };
@@ -464,14 +531,30 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
       ...requireFeature(/\/Subtype\s*\/Text\b/u.test(objects), "annotation"),
       textAnnotations: occurrences(objects, /\/Subtype\s*\/Text\b/gu),
     };
-  if (stratum === "form")
-    return requireFeature(/\/AcroForm\b/u.test(catalog) && /\/FT\s*\/Tx\b/u.test(objects), "form");
+  if (stratum === "form") {
+    const textField = document.getForm().getTextField("generated_field");
+    const value = textField.getText();
+    return {
+      ...requireFeature(
+        /\/AcroForm\b/u.test(catalog) && /\/FT\s*\/Tx\b/u.test(objects) && value !== undefined,
+        "form",
+      ),
+      valueDigest: digest(value ?? ""),
+    };
+  }
   if (stratum === "outline") return requireFeature(/\/Outlines\b/u.test(catalog), "outline");
-  if (stratum === "attachment")
-    return requireFeature(
-      /\/EmbeddedFiles\b/u.test(objects) && /\/Type\s*\/Filespec\b/u.test(objects),
-      "attachment",
-    );
+  if (stratum === "attachment") {
+    const content = embeddedContents.find((value) => value.includes(Buffer.from(token, "ascii")));
+    return {
+      ...requireFeature(
+        /\/EmbeddedFiles\b/u.test(objects) &&
+          /\/Type\s*\/Filespec\b/u.test(objects) &&
+          content !== undefined,
+        "attachment",
+      ),
+      contentDigest: digest(content ?? ""),
+    };
+  }
   if (stratum === "layer")
     return requireFeature(
       /\/OCProperties\b/u.test(catalog) && /\/Type\s*\/OCG\b/u.test(objects),
@@ -516,22 +599,6 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
   if (stratum === "mixed")
     return { ...requireFeature(imageCount > 0 && textBlocks > 0, "mixed"), imageCount, textBlocks };
   if (stratum === "expansion") return requireFeature(pageCount === 1, "expansion");
-  if (stratum === "decompression-bomb") {
-    const marker = /\/HereIsItInflatedBytes\s+(\d+)/u.exec(objects);
-    const inflatedBytes = Number(marker?.[1]);
-    if (
-      !Number.isSafeInteger(inflatedBytes) ||
-      inflatedBytes <= (safety.maximumInflatedBytes ?? 0) ||
-      !/\/FlateDecode\b/u.test(objects)
-    )
-      throw new TypeError("decompression-bomb PDF probe failed");
-    return {
-      kind: "decompression-bomb",
-      pageCount,
-      inflatedBytes,
-      maximumInflatedBytes: safety.maximumInflatedBytes,
-    };
-  }
   throw new TypeError("unknown PDF corpus stratum");
 }
 
