@@ -8,6 +8,8 @@
     "benchmarkSha256",
     "engineImageDigest",
     "corpusManifestSha256",
+    "visualProfilesMeasured",
+    "publicAdmissionReady",
     "passed",
     "failures"
   ],
@@ -16,12 +18,14 @@
     "benchmarkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "engineImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "corpusManifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "visualProfilesMeasured": { "type": "integer", "minimum": 0, "maximum": 51 },
+    "publicAdmissionReady": { "type": "boolean" },
     "passed": { "type": "boolean" },
     "failures": {
       "type": "array",
       "uniqueItems": true,
       "maxItems": 100,
-      "items": { "type": "string", "pattern": "^[A-Z0-9:-]{3,100}$" }
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9:_-]{3,100}$" }
     }
   }
 }

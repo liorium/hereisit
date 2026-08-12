@@ -7,7 +7,11 @@ then returns only an at-least-1%-smaller verified PDF.
 qpdf 12.4.0 is Apache-2.0. It recompresses streams and eligible JPEG objects but does not perform DPI-aware
 image downsampling and does not always reduce a PDF. `pdf-quality-benchmark.yml` generates all 17 strata,
 runs three bounded repeats, and emits sanitized benchmark and release-gate JSON. The measured evidence in
-`pdf-engine-benchmark.json` passed with eight structured wins and three safe hostile rejections.
+`pdf-engine-benchmark.json` records derived repeat evidence and safe hostile rejection truthfully.
+
+The current corpus selected only structural qpdf outputs, so `visualProfilesMeasured` is zero and
+`publicAdmissionReady` is false. The bounded image-optimized PDF.js pixel path exists but is not claimed as
+measured coverage; Task 8 browser admission must exercise it before public rollout.
 
 Task 8 must bind the exact benchmark, cost input, source SHA, Worker artifact, and both immutable engine
 digests. Keep PDF public admission local until staging canary, deletion, cost, and rollback evidence pass.

@@ -44,6 +44,11 @@ jobs:
             --engine-image hereisit-pdf-engine:quality \
             --corpus .artifacts/pdf-corpus/manifest.json \
             --output .artifacts/pdf-benchmark.json
+          node scripts/validate-pdf-benchmark-evidence.mjs \
+            --report .artifacts/pdf-benchmark.json \
+            --gate .artifacts/pdf-benchmark-gate.json \
+            --benchmark-schema docs/deployment/pdf-engine-benchmark.schema.json \
+            --gate-schema docs/deployment/pdf-engine-release-gate.schema.json
           pnpm exec vitest run tests/create-pdf-compression-corpus.test.ts tests/benchmark-pdf-engine.test.ts
       - name: Upload sanitized evidence only
         if: always()

@@ -3,7 +3,16 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
-import { PDFDocument, PDFHexString, PDFName, PDFString, rgb, StandardFonts } from "@cantoo/pdf-lib";
+import {
+  decodePDFRawStream,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFRawStream,
+  PDFString,
+  rgb,
+  StandardFonts,
+} from "@cantoo/pdf-lib";
 import {
   assertExactKeys,
   assertObject,
@@ -118,10 +127,12 @@ export function validatePdfCorpusManifest(raw) {
     integer(safety.maximumInflatedBytes, 1, limits.maximumInflatedBytes, "inflated ceiling");
     integer(safety.maximumPages, 1, limits.maximumPages, "page ceiling");
     const probe = assertObject(entry.probe, "PDF corpus feature probe");
-    assertExactKeys(probe, ["kind", "token"], "PDF corpus feature probe");
+    assertExactKeys(probe, ["kind", "token", "signature"], "PDF corpus feature probe");
     exactString(probe.kind, /^[a-z][a-z0-9-]{2,40}$/u, "feature probe kind");
     exactString(probe.token, SAFE_TOKEN, "feature probe token");
     if (hasLeak(probe.token)) throw new TypeError("PDF corpus probe leaks unsafe data");
+    if (canonicalJson(probe.signature).length > 1024)
+      throw new TypeError("PDF corpus signature is invalid");
   }
   if (total > limits.maximumCorpusBytes)
     throw new RangeError("PDF corpus exceeds its byte ceiling");
@@ -186,7 +197,7 @@ const PNG = Buffer.from(
 );
 
 async function generate(stratum, token) {
-  const { document, page } = await baseDocument(token, stratum !== "expansion");
+  const { document, page } = await baseDocument(token, !["expansion", "scan"].includes(stratum));
   if (stratum === "text-vector") {
     for (let index = 0; index < 8; index += 1)
       page.drawLine({
@@ -258,7 +269,12 @@ async function generate(stratum, token) {
     page.node.setXObject(
       PDFName.of("UnusedFlateProbe"),
       document.context.register(
-        document.context.stream(payload, { Type: "XObject", Subtype: "Form", BBox: [0, 0, 1, 1] }),
+        document.context.stream(deflateSync(payload), {
+          Type: "XObject",
+          Subtype: "Form",
+          Filter: "FlateDecode",
+          BBox: [0, 0, 1, 1],
+        }),
       ),
     );
   } else if (["jpeg-heavy", "scan", "mixed"].includes(stratum)) {
@@ -343,7 +359,13 @@ export async function createPdfCompressionCorpus(outputRoot) {
         maximumInflatedBytes: stratum === "decompression-bomb" ? 1024 * 1024 : 8 * 1024 * 1024,
         maximumPages: MAX_PAGES,
       },
-      probe: { kind: probeKind(stratum), token },
+      probe: {
+        kind: probeKind(stratum),
+        token,
+        signature: await probePdfCorpusFeature(bytes, stratum, {
+          maximumInflatedBytes: stratum === "decompression-bomb" ? 1024 * 1024 : 8 * 1024 * 1024,
+        }),
+      },
     });
   }
   const manifest = validatePdfCorpusManifest({
@@ -369,11 +391,148 @@ export async function verifyPdfCorpusFiles(manifest, root) {
     if (
       bytes.byteLength !== entry.byteLength ||
       createHash("sha256").update(bytes).digest("hex") !== entry.sha256 ||
-      !bytes.includes(Buffer.from(entry.probe.token, "ascii"))
+      canonicalJson(await probePdfCorpusFeature(bytes, entry.stratum, entry.safety)) !==
+        canonicalJson(entry.probe.signature)
     )
       throw new TypeError("PDF corpus artifact verification failed");
   }
   return manifest;
+}
+
+function occurrences(value, pattern) {
+  return [...value.matchAll(pattern)].length;
+}
+
+export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
+  const raw = Buffer.from(bytes).toString("latin1");
+  if (stratum === "corrupt") {
+    const danglingPages = /\/Pages\s+99\s+0\s+R\b/u.test(raw);
+    if (!danglingPages || raw.includes("%%EOF")) throw new TypeError("corrupt PDF probe failed");
+    return { kind: "corrupt", danglingPages: true, eof: false };
+  }
+  if (stratum === "encrypted") {
+    let rejected = false;
+    try {
+      await PDFDocument.load(bytes, { throwOnInvalidObject: true });
+    } catch {
+      rejected = true;
+    }
+    if (!rejected || !/\/Encrypt\b/u.test(raw)) throw new TypeError("encrypted PDF probe failed");
+    return { kind: "encrypted", parseRejected: true, encryptDictionary: true };
+  }
+  const document = await PDFDocument.load(bytes, {
+    updateMetadata: false,
+    throwOnInvalidObject: true,
+    ignoreEncryption: true,
+  });
+  const objectText = [];
+  const decoded = [];
+  for (const [, object] of document.context.enumerateIndirectObjects()) {
+    objectText.push(object.toString());
+    if (object instanceof PDFRawStream) {
+      try {
+        decoded.push(Buffer.from(decodePDFRawStream(object).decode()).toString("latin1"));
+      } catch {}
+    }
+  }
+  const catalog = document.catalog.toString();
+  const objects = objectText.join("\n");
+  const streams = decoded.join("\n");
+  const pageCount = document.getPageCount();
+  const imageCount = occurrences(objects, /\/Subtype\s*\/Image\b/gu);
+  const textBlocks = occurrences(streams, /\bBT\b/gu);
+  const signature = { pageCount };
+  const requireFeature = (condition, feature) => {
+    if (!condition) throw new TypeError(`${feature} PDF probe failed`);
+    return { ...signature, kind: feature };
+  };
+  if (stratum === "text-vector")
+    return {
+      ...requireFeature(textBlocks > 0 && /\b(?:m|l)\b/u.test(streams), "text-vector"),
+      textBlocks,
+    };
+  if (stratum === "link")
+    return {
+      ...requireFeature(
+        /\/Subtype\s*\/Link\b/u.test(objects) && /\/S\s*\/URI\b/u.test(objects),
+        "link",
+      ),
+      uriAnnotations: occurrences(objects, /\/Subtype\s*\/Link\b/gu),
+    };
+  if (stratum === "annotation")
+    return {
+      ...requireFeature(/\/Subtype\s*\/Text\b/u.test(objects), "annotation"),
+      textAnnotations: occurrences(objects, /\/Subtype\s*\/Text\b/gu),
+    };
+  if (stratum === "form")
+    return requireFeature(/\/AcroForm\b/u.test(catalog) && /\/FT\s*\/Tx\b/u.test(objects), "form");
+  if (stratum === "outline") return requireFeature(/\/Outlines\b/u.test(catalog), "outline");
+  if (stratum === "attachment")
+    return requireFeature(
+      /\/EmbeddedFiles\b/u.test(objects) && /\/Type\s*\/Filespec\b/u.test(objects),
+      "attachment",
+    );
+  if (stratum === "layer")
+    return requireFeature(
+      /\/OCProperties\b/u.test(catalog) && /\/Type\s*\/OCG\b/u.test(objects),
+      "layer",
+    );
+  if (stratum === "duplicate-resource") {
+    const duplicateStreams = occurrences(objects, /\/Subtype\s*\/Form\b/gu);
+    const sourceFeature =
+      duplicateStreams === 2 && occurrences(raw, /HIS_DUPLICATE_RESOURCE/gu) >= 4096;
+    const optimizedFeature =
+      safety.allowDeduplicated === true &&
+      duplicateStreams <= 2 &&
+      occurrences(raw, /HIS_DUPLICATE_RESOURCE/gu) < 4096;
+    return {
+      ...requireFeature(sourceFeature || optimizedFeature, "duplicate-resource"),
+      duplicateStreams,
+    };
+  }
+  if (stratum === "flate-heavy")
+    return requireFeature(
+      /\/Filter\s*\/FlateDecode\b/u.test(objects) && streams.includes("HIS_FLATE_HEAVY"),
+      "flate-heavy",
+    );
+  if (stratum === "jpeg-heavy")
+    return {
+      ...requireFeature(imageCount > 0 && /\/DCTDecode\b/u.test(objects), "jpeg-heavy"),
+      imageCount,
+      imageEncoding: "dct",
+    };
+  if (stratum === "non-jpeg-image")
+    return {
+      ...requireFeature(imageCount > 0 && !/\/DCTDecode\b/u.test(objects), "non-jpeg-image"),
+      imageCount,
+      imageEncoding: "non-dct",
+    };
+  if (stratum === "scan")
+    return {
+      ...requireFeature(imageCount > 0 && textBlocks === 0, "scan"),
+      imageCount,
+      textBlocks,
+    };
+  if (stratum === "mixed")
+    return { ...requireFeature(imageCount > 0 && textBlocks > 0, "mixed"), imageCount, textBlocks };
+  if (stratum === "expansion") return requireFeature(pageCount === 1, "expansion");
+  if (stratum === "decompression-bomb") {
+    const marker = /\/HereIsItInflatedBytes\s+(\d+)/u.exec(objects);
+    const inflatedBytes = Number(marker?.[1]);
+    if (
+      !Number.isSafeInteger(inflatedBytes) ||
+      inflatedBytes <= (safety.maximumInflatedBytes ?? 0) ||
+      !/\/FlateDecode\b/u.test(objects)
+    )
+      throw new TypeError("decompression-bomb PDF probe failed");
+    return {
+      kind: "decompression-bomb",
+      pageCount,
+      inflatedBytes,
+      maximumInflatedBytes: safety.maximumInflatedBytes,
+    };
+  }
+  throw new TypeError("unknown PDF corpus stratum");
 }
 
 function help() {

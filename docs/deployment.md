@@ -182,6 +182,9 @@ with a proxy or disable the legacy compatibility origins in the same release.
 For a production release, run all four tracked smokes only after the current GitHub CI and Cloudflare
 Pages production deployment have succeeded for the exact merge SHA:
 
+The PDF benchmark is only structural evidence when `visualProfilesMeasured` is zero. In that state
+`publicAdmissionReady` remains false until Task 8 exercises image-optimized browser verification.
+
 ~~~bash
 node scripts/smoke-navigation.mjs https://hereisit.app
 node scripts/smoke-image-watermark.mjs https://hereisit.app

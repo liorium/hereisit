@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
 import {
   evaluatePdfEngineReleaseGate,
+  fetchBeforeDeadline,
+  readBoundedPdfResponse,
   validatePdfBenchmarkReport,
+  validatePdfEvidenceSchemas,
   validatePdfReleaseGate,
 } from "../scripts/benchmark-pdf-engine.mjs";
 import { REQUIRED_PDF_CORPUS_STRATA } from "../scripts/create-pdf-compression-corpus.mjs";
@@ -9,44 +13,63 @@ import { REQUIRED_PDF_CORPUS_STRATA } from "../scripts/create-pdf-compression-co
 const sha = (character: string) => character.repeat(64);
 const hostile = new Set(["encrypted", "corrupt", "decompression-bomb"]);
 
-function record(stratum: string) {
+function sample(stratum: string, runner: "local" | "native", repeat: number) {
   const rejected = hostile.has(stratum);
-  const sourceBytes = 10_000;
-  const localBytes = stratum === "duplicate-resource" ? 9_500 : sourceBytes - 1;
-  const nativeBytes = stratum === "duplicate-resource" ? 7_000 : sourceBytes - 1;
+  const winningStratum = stratum === "duplicate-resource";
+  const win = winningStratum && runner === "native" && repeat < 2;
+  const effectiveBytes = rejected ? null : win ? 7_000 : 9_500;
+  return {
+    repeat,
+    verdict: rejected
+      ? "rejected"
+      : (effectiveBytes ?? 10_000) < 10_000
+        ? "reduced"
+        : "original-retained",
+    effectiveBytes,
+    durationMs: 8 + repeat,
+    peakRssBytes: 10_000_000 + repeat,
+    candidateCount: rejected ? 0 : runner === "native" ? 2 : 1,
+    code: rejected
+      ? stratum === "decompression-bomb"
+        ? "INFLATED_LIMIT_EXCEEDED"
+        : "UNSUPPORTED_INPUT"
+      : null,
+    profile: rejected || runner === "local" ? null : "structural",
+    semantic: rejected ? "not-applicable" : "passed",
+    visual: rejected ? "not-applicable" : "not-required",
+  };
+}
+
+function record(stratum: string) {
+  const localSamples = [0, 1, 2].map((repeat) => sample(stratum, "local", repeat));
+  const nativeSamples = [0, 1, 2].map((repeat) => sample(stratum, "native", repeat));
+  const win = stratum === "duplicate-resource";
   return {
     stratum,
-    sourceBytes,
+    sourceBytes: 10_000,
     local: {
-      verdict: rejected ? "rejected" : localBytes < sourceBytes ? "reduced" : "original-retained",
-      outputBytes: rejected ? null : localBytes,
-      ratio: rejected ? null : localBytes / sourceBytes,
-      coldMs: rejected ? 0 : 10,
-      warmMedianMs: rejected ? 0 : 8,
-      peakRssBytes: rejected ? 0 : 10_000_000,
-      candidateCount: rejected ? 0 : 1,
-      semantic: rejected ? "not-applicable" : "passed",
-      visual: "not-required",
+      samples: localSamples,
+      medianEffectiveBytes: hostile.has(stratum) ? null : 9_500,
+      medianDurationMs: 9,
+      maximumPeakRssBytes: 10_000_002,
+      maximumCandidateCount: hostile.has(stratum) ? 0 : 1,
     },
     native: {
-      verdict: rejected ? "rejected" : nativeBytes < sourceBytes ? "reduced" : "original-retained",
-      outputBytes: rejected ? null : nativeBytes,
-      ratio: rejected ? null : nativeBytes / sourceBytes,
-      coldMs: rejected ? 0 : 12,
-      warmMedianMs: rejected ? 0 : 9,
-      peakRssBytes: rejected ? 0 : 20_000_000,
-      candidateCount: rejected ? 0 : 2,
-      semantic: rejected ? "not-applicable" : "passed",
-      visual: "not-required",
+      samples: nativeSamples,
+      medianEffectiveBytes: hostile.has(stratum) ? null : win ? 7_000 : 9_500,
+      medianDurationMs: 9,
+      maximumPeakRssBytes: 10_000_002,
+      maximumCandidateCount: hostile.has(stratum) ? 0 : 2,
     },
     smallerOnly: true,
-    nativeAdvantageRatio: stratum === "duplicate-resource" ? 0.25 : 0,
+    repeatableNativeWins: win ? 2 : 0,
+    nativeAdvantageRatio: win ? 0.25 : 0,
   };
 }
 
 function passingReport() {
   return {
-    schema: "hereisit.pdf-engine-benchmark@1",
+    schema: "hereisit.pdf-engine-benchmark@2",
     identity: {
       engineImageId: `sha256:${sha("a")}`,
       engineImageDigest: `sha256:${sha("a")}`,
@@ -67,84 +90,138 @@ function passingReport() {
     },
     records: REQUIRED_PDF_CORPUS_STRATA.map(record),
     summary: {
-      strata: REQUIRED_PDF_CORPUS_STRATA.length,
-      measuredSamples: 42,
+      strata: 17,
+      measuredSamples: 51,
       nativeWins: 1,
       rejectedSafely: 3,
+      maximumPeakRssBytes: 10_000_002,
+      visualProfilesMeasured: 0,
       passed: true,
     },
   };
 }
 
 describe("PDF native benchmark release gate", () => {
-  it("accepts only complete bounded evidence with a repeatable structured native win", () => {
+  it("accepts only complete evidence derived from all three repeats", () => {
     const report = validatePdfBenchmarkReport(passingReport());
-    const gate = evaluatePdfEngineReleaseGate(report);
-    expect(gate.passed).toBe(true);
-    expect(gate.failures).toEqual([]);
-    expect(validatePdfReleaseGate(gate)).toEqual(gate);
+    expect(evaluatePdfEngineReleaseGate(report)).toMatchObject({
+      passed: true,
+      failures: [],
+      visualProfilesMeasured: 0,
+      publicAdmissionReady: false,
+    });
   });
 
   it.each([
-    ["missing stratum", (report: ReturnType<typeof passingReport>) => report.records.pop()],
     [
-      "duplicate stratum",
-      (report: ReturnType<typeof passingReport>) => report.records.push(report.records[0]),
+      "derived bytes",
+      (r: ReturnType<typeof passingReport>) => (r.records[0].native.medianEffectiveBytes = 1),
     ],
     [
-      "unknown key",
-      (report: ReturnType<typeof passingReport>) => Object.assign(report, { path: "/tmp/a" }),
+      "derived smaller-only",
+      (r: ReturnType<typeof passingReport>) => (r.records[0].smallerOnly = false),
     ],
     [
-      "unsafe number",
-      (report: ReturnType<typeof passingReport>) =>
-        (report.records[0].native.warmMedianMs = Number.NaN),
+      "derived repeat wins",
+      (r: ReturnType<typeof passingReport>) => (r.records[7].repeatableNativeWins = 3),
     ],
     [
-      "path leakage",
-      (report: ReturnType<typeof passingReport>) => (report.identity.localRunner = "/home/private"),
+      "derived advantage",
+      (r: ReturnType<typeof passingReport>) => (r.records[7].nativeAdvantageRatio = 0.9),
+    ],
+    ["derived summary", (r: ReturnType<typeof passingReport>) => (r.summary.nativeWins = 2)],
+    [
+      "derived maximum",
+      (r: ReturnType<typeof passingReport>) => (r.summary.maximumPeakRssBytes = 3),
     ],
     [
-      "URL leakage",
-      (report: ReturnType<typeof passingReport>) =>
-        (report.identity.localRunner = "https://private"),
+      "derived visual coverage",
+      (r: ReturnType<typeof passingReport>) => (r.summary.visualProfilesMeasured = 1),
     ],
-  ])("rejects malformed evidence: %s", (_, mutate) => {
+    ["missing repeat", (r: ReturnType<typeof passingReport>) => r.records[0].native.samples.pop()],
+    [
+      "duplicate repeat",
+      (r: ReturnType<typeof passingReport>) => (r.records[0].native.samples[2].repeat = 1),
+    ],
+    [
+      "unknown sample key",
+      (r: ReturnType<typeof passingReport>) =>
+        Object.assign(r.records[0].native.samples[0], { path: "/tmp/x" }),
+    ],
+  ])("rejects tampered evidence: %s", (_, mutate) => {
     const report = passingReport();
     mutate(report);
     expect(() => validatePdfBenchmarkReport(report)).toThrow();
   });
 
-  it("fails on expansion, semantic/visual failure, limit escape, unsafe rejection, or no native win", () => {
-    const mutations = [
-      (report: ReturnType<typeof passingReport>) => {
-        report.records[0].native.verdict = "reduced";
-        report.records[0].native.outputBytes = 10_001;
-        report.records[0].native.ratio = 1.0001;
-        report.records[0].smallerOnly = false;
+  it("requires at least two repeat wins and a threshold-sized median advantage", () => {
+    const report = passingReport();
+    const winning = report.records.find((item) => item.stratum === "duplicate-resource");
+    expect(winning).toBeDefined();
+    if (winning === undefined) throw new Error("winning record is missing");
+    winning.native.samples[1].effectiveBytes = 9_500;
+    winning.native.medianEffectiveBytes = 9_500;
+    winning.repeatableNativeWins = 1;
+    winning.nativeAdvantageRatio = 0;
+    report.summary.nativeWins = 0;
+    report.summary.passed = false;
+    expect(evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report)).passed).toBe(false);
+  });
+
+  it.each([
+    undefined,
+    "",
+    "x",
+    "52428801",
+  ])("rejects missing, noncanonical, or oversized Content-Length: %s", async (length) => {
+    const headers = length === undefined ? {} : { "content-length": length };
+    await expect(
+      readBoundedPdfResponse(new Response(new Uint8Array([1]), { headers })),
+    ).rejects.toThrow();
+  });
+
+  it("aborts and cancels a response stream that overruns the declared bounded length", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(6));
       },
-      (report: ReturnType<typeof passingReport>) => (report.records[0].native.semantic = "failed"),
-      (report: ReturnType<typeof passingReport>) => (report.records[0].native.visual = "failed"),
-      (report: ReturnType<typeof passingReport>) =>
-        (report.records[0].native.peakRssBytes = 805_306_369),
-      (report: ReturnType<typeof passingReport>) => (report.records[0].native.peakRssBytes = 0),
-      (report: ReturnType<typeof passingReport>) => {
-        const native = report.records[report.records.length - 1].native;
-        native.verdict = "reduced";
-        native.outputBytes = 9_000;
-        native.ratio = 0.9;
-        native.semantic = "passed";
-      },
-      (report: ReturnType<typeof passingReport>) => {
-        for (const item of report.records) item.nativeAdvantageRatio = 0;
-      },
-    ];
-    for (const mutate of mutations) {
-      const report = passingReport();
-      mutate(report);
-      const gate = evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report));
-      expect(gate.passed).toBe(false);
-      expect(validatePdfReleaseGate(gate)).toEqual(gate);
-    }
+      cancel,
+    });
+    await expect(
+      readBoundedPdfResponse(new Response(body, { headers: { "content-length": "5" } })),
+    ).rejects.toThrow();
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("aborts a hanging fetch at the remaining job deadline", async () => {
+    const hanging = vi.fn(
+      (_input, init) =>
+        new Promise((_resolve, reject) =>
+          init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }),
+        ),
+    );
+    await expect(
+      fetchBeforeDeadline("http://engine.invalid", {}, Date.now() + 10, hanging),
+    ).rejects.toThrow();
+    expect(hanging.mock.calls[0]?.[1]?.signal.aborted).toBe(true);
+  });
+
+  it("keeps checked-in schemas and parser vocabularies identical", async () => {
+    const report = passingReport();
+    const gate = evaluatePdfEngineReleaseGate(validatePdfBenchmarkReport(report));
+    await expect(
+      validatePdfEvidenceSchemas({
+        report,
+        gate,
+        benchmarkSchema: JSON.parse(
+          await readFile("docs/deployment/pdf-engine-benchmark.schema.json", "utf8"),
+        ),
+        gateSchema: JSON.parse(
+          await readFile("docs/deployment/pdf-engine-release-gate.schema.json", "utf8"),
+        ),
+      }),
+    ).resolves.toBeUndefined();
+    expect(validatePdfReleaseGate(gate)).toEqual(gate);
   });
 });

@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import {
+  probePdfCorpusFeature,
   REQUIRED_PDF_CORPUS_STRATA,
   validatePdfCorpusManifest,
   verifyPdfCorpusFiles,
@@ -21,7 +22,7 @@ import {
 
 const execute = promisify(execFile);
 const pdfLibVersion = "2.7.1";
-const SCHEMA = "hereisit.pdf-engine-benchmark@1";
+const SCHEMA = "hereisit.pdf-engine-benchmark@2";
 const GATE_SCHEMA = "hereisit.pdf-engine-release-gate@1";
 const REPEATS = 3;
 const MAX_SAMPLES = REQUIRED_PDF_CORPUS_STRATA.length * REPEATS;
@@ -69,38 +70,82 @@ function safeString(value, pattern, label) {
   return value;
 }
 
+function median(values) {
+  return values.toSorted((left, right) => left - right)[Math.floor(values.length / 2)];
+}
+
 function validateRunner(raw, label) {
   const runner = assertObject(raw, label);
   assertExactKeys(
     runner,
     [
-      "verdict",
-      "outputBytes",
-      "ratio",
-      "coldMs",
-      "warmMedianMs",
-      "peakRssBytes",
-      "candidateCount",
-      "semantic",
-      "visual",
+      "samples",
+      "medianEffectiveBytes",
+      "medianDurationMs",
+      "maximumPeakRssBytes",
+      "maximumCandidateCount",
     ],
     label,
   );
-  if (!VERDICTS.has(runner.verdict)) throw new TypeError(`${label} verdict is invalid`);
-  if (runner.outputBytes !== null)
-    integer(runner.outputBytes, 1, MAX_OUTPUT_BYTES, `${label} output`);
-  if (runner.ratio !== null) finite(runner.ratio, 0, 2, `${label} ratio`);
-  finite(runner.coldMs, 0, MAX_WALL_MS, `${label} cold duration`);
-  finite(runner.warmMedianMs, 0, MAX_WALL_MS, `${label} warm duration`);
-  integer(runner.peakRssBytes, 0, Number.MAX_SAFE_INTEGER, `${label} peak RSS`);
-  integer(runner.candidateCount, 0, 2, `${label} candidate count`);
-  if (!VERIFICATIONS.has(runner.semantic) || !VERIFICATIONS.has(runner.visual))
-    throw new TypeError(`${label} verification is invalid`);
+  if (!Array.isArray(runner.samples) || runner.samples.length !== REPEATS)
+    throw new TypeError(`${label} samples are incomplete`);
+  const repeats = new Set();
+  for (const rawSample of runner.samples) {
+    const sample = assertObject(rawSample, `${label} sample`);
+    assertExactKeys(
+      sample,
+      [
+        "repeat",
+        "verdict",
+        "effectiveBytes",
+        "durationMs",
+        "peakRssBytes",
+        "candidateCount",
+        "code",
+        "profile",
+        "semantic",
+        "visual",
+      ],
+      `${label} sample`,
+    );
+    repeats.add(integer(sample.repeat, 0, REPEATS - 1, `${label} repeat`));
+    if (!VERDICTS.has(sample.verdict)) throw new TypeError(`${label} verdict is invalid`);
+    if (sample.effectiveBytes !== null)
+      integer(sample.effectiveBytes, 1, MAX_OUTPUT_BYTES, `${label} effective bytes`);
+    finite(sample.durationMs, 0, MAX_WALL_MS, `${label} duration`);
+    integer(sample.peakRssBytes, 0, Number.MAX_SAFE_INTEGER, `${label} peak RSS`);
+    integer(sample.candidateCount, 0, 2, `${label} candidate count`);
+    if (sample.code !== null) safeString(sample.code, /^[A-Z][A-Z0-9_]{2,48}$/u, `${label} code`);
+    if (sample.profile !== null && !["structural", "image-optimized"].includes(sample.profile))
+      throw new TypeError(`${label} profile is invalid`);
+    if (!VERIFICATIONS.has(sample.semantic) || !VERIFICATIONS.has(sample.visual))
+      throw new TypeError(`${label} verification is invalid`);
+    if (
+      (sample.verdict === "rejected") !== (sample.effectiveBytes === null) ||
+      (sample.verdict === "rejected") !== (sample.code !== null)
+    )
+      throw new TypeError(`${label} verdict fields are inconsistent`);
+    if (
+      sample.verdict === "rejected" &&
+      (sample.semantic !== "not-applicable" || sample.visual !== "not-applicable")
+    )
+      throw new TypeError(`${label} rejection verification is invalid`);
+  }
+  if (repeats.size !== REPEATS) throw new TypeError(`${label} repeats are duplicated`);
+  const effective = runner.samples
+    .map((sample) => sample.effectiveBytes)
+    .filter((value) => value !== null);
+  const derivedBytes = effective.length === REPEATS ? median(effective) : null;
+  const derivedDuration = median(runner.samples.map((sample) => sample.durationMs));
+  const derivedRss = Math.max(...runner.samples.map((sample) => sample.peakRssBytes));
+  const derivedCandidates = Math.max(...runner.samples.map((sample) => sample.candidateCount));
   if (
-    (runner.verdict === "rejected" && (runner.outputBytes !== null || runner.ratio !== null)) ||
-    (runner.verdict !== "rejected" && (runner.outputBytes === null || runner.ratio === null))
+    runner.medianEffectiveBytes !== derivedBytes ||
+    runner.medianDurationMs !== derivedDuration ||
+    runner.maximumPeakRssBytes !== derivedRss ||
+    runner.maximumCandidateCount !== derivedCandidates
   )
-    throw new TypeError(`${label} output fields do not match verdict`);
+    throw new TypeError(`${label} derivation is inconsistent`);
   return runner;
 }
 
@@ -164,7 +209,15 @@ export function validatePdfBenchmarkReport(raw) {
     const record = assertObject(recordRaw, "PDF benchmark record");
     assertExactKeys(
       record,
-      ["stratum", "sourceBytes", "local", "native", "smallerOnly", "nativeAdvantageRatio"],
+      [
+        "stratum",
+        "sourceBytes",
+        "local",
+        "native",
+        "smallerOnly",
+        "repeatableNativeWins",
+        "nativeAdvantageRatio",
+      ],
       "PDF benchmark record",
     );
     if (!REQUIRED_PDF_CORPUS_STRATA.includes(record.stratum) || seen.has(record.stratum))
@@ -173,30 +226,77 @@ export function validatePdfBenchmarkReport(raw) {
     integer(record.sourceBytes, 1, MAX_SOURCE_BYTES, "PDF benchmark source bytes");
     const local = validateRunner(record.local, "local PDF runner");
     const native = validateRunner(record.native, "native PDF runner");
-    if (typeof record.smallerOnly !== "boolean")
-      throw new TypeError("smaller-only verdict is invalid");
+    const allSamples = [...local.samples, ...native.samples];
+    const smallerOnly = allSamples.every(
+      (sample) => sample.effectiveBytes === null || sample.effectiveBytes <= record.sourceBytes,
+    );
+    if (record.smallerOnly !== smallerOnly)
+      throw new TypeError("smaller-only derivation is invalid");
+    const wins = native.samples.filter(
+      (sample, index) =>
+        sample.effectiveBytes !== null &&
+        local.samples[index].effectiveBytes !== null &&
+        local.samples[index].effectiveBytes - sample.effectiveBytes >=
+          Math.max(1, Math.ceil(record.sourceBytes / 100)),
+    ).length;
+    integer(record.repeatableNativeWins, 0, REPEATS, "repeatable native wins");
+    if (record.repeatableNativeWins !== wins)
+      throw new TypeError("repeat win derivation is invalid");
     finite(record.nativeAdvantageRatio, -1, 1, "native advantage ratio");
-    for (const runner of [local, native]) {
-      if (
-        runner.outputBytes !== null &&
-        Math.abs(runner.ratio - runner.outputBytes / record.sourceBytes) > 1e-9
-      )
-        throw new TypeError("PDF benchmark ratio is inconsistent");
-    }
+    const advantage =
+      local.medianEffectiveBytes === null || native.medianEffectiveBytes === null
+        ? 0
+        : (local.medianEffectiveBytes - native.medianEffectiveBytes) / record.sourceBytes;
+    if (Math.abs(record.nativeAdvantageRatio - advantage) > 1e-9)
+      throw new TypeError("native advantage derivation is invalid");
   }
   if (REQUIRED_PDF_CORPUS_STRATA.some((stratum) => !seen.has(stratum)))
     throw new TypeError("PDF benchmark stratum is missing");
   const summary = assertObject(report.summary, "PDF benchmark summary");
   assertExactKeys(
     summary,
-    ["strata", "measuredSamples", "nativeWins", "rejectedSafely", "passed"],
+    [
+      "strata",
+      "measuredSamples",
+      "nativeWins",
+      "rejectedSafely",
+      "maximumPeakRssBytes",
+      "visualProfilesMeasured",
+      "passed",
+    ],
     "PDF benchmark summary",
   );
-  integer(summary.strata, 1, REQUIRED_PDF_CORPUS_STRATA.length, "summary strata");
-  integer(summary.measuredSamples, 0, MAX_SAMPLES, "summary samples");
-  integer(summary.nativeWins, 0, REQUIRED_PDF_CORPUS_STRATA.length, "summary native wins");
-  integer(summary.rejectedSafely, 0, HOSTILE.size, "summary safe rejections");
-  if (typeof summary.passed !== "boolean") throw new TypeError("summary pass is invalid");
+  const nativeWins = report.records.filter(
+    (record) =>
+      STRUCTURED.has(record.stratum) &&
+      record.repeatableNativeWins >= 2 &&
+      record.nativeAdvantageRatio >= 0.01,
+  ).length;
+  const rejectedSafely = report.records.filter(
+    (record) =>
+      HOSTILE.has(record.stratum) &&
+      [...record.local.samples, ...record.native.samples].every(
+        (sample) => sample.verdict === "rejected",
+      ),
+  ).length;
+  const maximumPeakRssBytes = Math.max(
+    ...report.records.flatMap((record) =>
+      [...record.local.samples, ...record.native.samples].map((sample) => sample.peakRssBytes),
+    ),
+  );
+  const visualProfilesMeasured = report.records
+    .flatMap((record) => record.native.samples)
+    .filter((sample) => sample.profile === "image-optimized" && sample.visual === "passed").length;
+  if (
+    summary.strata !== report.records.length ||
+    summary.measuredSamples !== report.records.length * REPEATS ||
+    summary.nativeWins !== nativeWins ||
+    summary.rejectedSafely !== rejectedSafely ||
+    summary.maximumPeakRssBytes !== maximumPeakRssBytes ||
+    summary.visualProfilesMeasured !== visualProfilesMeasured ||
+    typeof summary.passed !== "boolean"
+  )
+    throw new TypeError("summary derivation is invalid");
   return report;
 }
 
@@ -208,28 +308,97 @@ function gateFailures(report) {
       ["local", record.local],
       ["native", record.native],
     ]) {
-      if (runner.outputBytes !== null && runner.outputBytes > record.sourceBytes)
-        failures.push(`${record.stratum}:${runnerName}:EXPANSION`);
-      if (runner.peakRssBytes > report.limits.maximumPeakRssBytes)
-        failures.push(`${record.stratum}:${runnerName}:RSS_LIMIT`);
-      if (runner.verdict !== "rejected" && runner.peakRssBytes === 0)
-        failures.push(`${record.stratum}:${runnerName}:RSS_NOT_MEASURED`);
-      if (runner.semantic === "failed") failures.push(`${record.stratum}:${runnerName}:SEMANTIC`);
-      if (runner.visual === "failed") failures.push(`${record.stratum}:${runnerName}:VISUAL`);
+      for (const sample of runner.samples) {
+        if (sample.effectiveBytes !== null && sample.effectiveBytes > record.sourceBytes)
+          failures.push(`${record.stratum}:${runnerName}:EXPANSION`);
+        if (sample.peakRssBytes > report.limits.maximumPeakRssBytes)
+          failures.push(`${record.stratum}:${runnerName}:RSS_LIMIT`);
+        if (sample.verdict !== "rejected" && sample.peakRssBytes === 0)
+          failures.push(`${record.stratum}:${runnerName}:RSS_NOT_MEASURED`);
+        if (sample.semantic !== "passed" && sample.verdict !== "rejected")
+          failures.push(`${record.stratum}:${runnerName}:SEMANTIC`);
+        if (
+          sample.visual === "failed" ||
+          (sample.profile === "image-optimized" && sample.visual !== "passed")
+        )
+          failures.push(`${record.stratum}:${runnerName}:VISUAL`);
+      }
     }
     if (
       HOSTILE.has(record.stratum) &&
-      (record.local.verdict !== "rejected" || record.native.verdict !== "rejected")
+      [...record.local.samples, ...record.native.samples].some(
+        (sample) => sample.verdict !== "rejected",
+      )
     )
       failures.push(`${record.stratum}:UNSAFE_ACCEPTANCE`);
   }
   if (
     !report.records.some(
-      (record) => STRUCTURED.has(record.stratum) && record.nativeAdvantageRatio >= 0.01,
+      (record) =>
+        STRUCTURED.has(record.stratum) &&
+        record.repeatableNativeWins >= 2 &&
+        record.nativeAdvantageRatio >= 0.01,
     )
   )
     failures.push("NO_REPEATABLE_STRUCTURED_NATIVE_ADVANTAGE");
   return [...new Set(failures)].sort();
+}
+
+export async function readBoundedPdfResponse(response) {
+  const rawLength = response.headers.get("content-length");
+  if (rawLength === null || !/^(?:[1-9]\d*)$/u.test(rawLength))
+    throw new TypeError("PDF output length is invalid");
+  const expected = Number(rawLength);
+  if (!Number.isSafeInteger(expected) || expected > MAX_OUTPUT_BYTES || response.body === null)
+    throw new RangeError("PDF output length exceeds its limit");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > expected || total > MAX_OUTPUT_BYTES)
+        throw new RangeError("PDF output stream exceeded its limit");
+      chunks.push(Buffer.from(value));
+    }
+    if (total !== expected) throw new RangeError("PDF output length mismatch");
+    return Buffer.concat(chunks, total);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function fetchBeforeDeadline(input, init, deadline, fetchImplementation = fetch) {
+  const remaining = Math.max(1, deadline - Date.now());
+  const timeout = AbortSignal.timeout(remaining);
+  const signal = init.signal === undefined ? timeout : AbortSignal.any([init.signal, timeout]);
+  return fetchImplementation(input, { ...init, signal });
+}
+
+export async function validatePdfEvidenceSchemas({ report, gate, benchmarkSchema, gateSchema }) {
+  const benchmarkVocabulary = benchmarkSchema?.properties?.schema?.const;
+  const gateVocabulary = gateSchema?.properties?.schema?.const;
+  const sampleProperties = benchmarkSchema?.$defs?.sample?.properties;
+  const stratumValues = benchmarkSchema?.$defs?.record?.properties?.stratum?.enum;
+  const failurePattern = gateSchema?.properties?.failures?.items?.pattern;
+  if (
+    benchmarkVocabulary !== SCHEMA ||
+    gateVocabulary !== GATE_SCHEMA ||
+    !Array.isArray(stratumValues) ||
+    canonicalJson(stratumValues) !== canonicalJson(REQUIRED_PDF_CORPUS_STRATA) ||
+    !sampleProperties ||
+    canonicalJson(sampleProperties.semantic.enum) !==
+      canonicalJson(["passed", "failed", "not-applicable"]) ||
+    canonicalJson(sampleProperties.visual.enum) !==
+      canonicalJson(["passed", "failed", "not-applicable", "not-required"]) ||
+    failurePattern !== "^[A-Za-z0-9:_-]{3,100}$"
+  )
+    throw new TypeError("PDF evidence schema vocabulary is inconsistent");
+  validatePdfBenchmarkReport(report);
+  validatePdfReleaseGate(gate);
 }
 
 export function evaluatePdfEngineReleaseGate(rawReport) {
@@ -240,6 +409,8 @@ export function evaluatePdfEngineReleaseGate(rawReport) {
     benchmarkSha256: createHash("sha256").update(canonicalJson(report)).digest("hex"),
     engineImageDigest: report.identity.engineImageDigest,
     corpusManifestSha256: report.identity.corpusManifestSha256,
+    visualProfilesMeasured: report.summary.visualProfilesMeasured,
+    publicAdmissionReady: failures.length === 0 && report.summary.visualProfilesMeasured > 0,
     passed: failures.length === 0,
     failures,
   };
@@ -254,6 +425,8 @@ export function validatePdfReleaseGate(raw) {
       "benchmarkSha256",
       "engineImageDigest",
       "corpusManifestSha256",
+      "visualProfilesMeasured",
+      "publicAdmissionReady",
       "passed",
       "failures",
     ],
@@ -263,6 +436,12 @@ export function validatePdfReleaseGate(raw) {
   assertSha256(gate.benchmarkSha256, "benchmark SHA-256");
   safeString(gate.engineImageDigest, /^sha256:[a-f0-9]{64}$/u, "release engine digest");
   assertSha256(gate.corpusManifestSha256, "release corpus SHA-256");
+  integer(gate.visualProfilesMeasured, 0, MAX_SAMPLES, "release visual coverage");
+  if (
+    typeof gate.publicAdmissionReady !== "boolean" ||
+    gate.publicAdmissionReady !== (gate.passed && gate.visualProfilesMeasured > 0)
+  )
+    throw new TypeError("PDF release admission readiness is invalid");
   if (typeof gate.passed !== "boolean" || !Array.isArray(gate.failures))
     throw new TypeError("PDF release result is invalid");
   for (const failure of gate.failures)
@@ -283,14 +462,24 @@ async function docker(args, options = {}) {
   return result.stdout.trim();
 }
 
-function median(values) {
-  return values.toSorted((left, right) => left - right)[Math.floor(values.length / 2)];
-}
-
-async function localStructural(bytes) {
+async function localStructural(bytes, stratum, safety) {
   const started = performance.now();
   let peakMemoryBytes = process.memoryUsage().rss;
   try {
+    const admission = await probePdfCorpusFeature(bytes, stratum, safety);
+    if (stratum === "decompression-bomb" && admission.inflatedBytes > safety.maximumInflatedBytes)
+      return {
+        verdict: "rejected",
+        output: null,
+        duration: performance.now() - started,
+        pageCount: null,
+        code: "INFLATED_LIMIT_EXCEEDED",
+        profile: null,
+        measurements: {
+          peakMemoryBytes: Math.max(peakMemoryBytes, process.memoryUsage().rss),
+          testedCandidates: 0,
+        },
+      };
     const document = await PDFDocument.load(bytes, {
       updateMetadata: false,
       throwOnInvalidObject: true,
@@ -301,6 +490,8 @@ async function localStructural(bytes) {
         output: null,
         duration: performance.now() - started,
         pageCount: null,
+        code: "UNSUPPORTED_INPUT",
+        profile: null,
         measurements: { peakMemoryBytes, testedCandidates: 0 },
       };
     const output = Buffer.from(
@@ -322,6 +513,8 @@ async function localStructural(bytes) {
           : bytes,
       duration: performance.now() - started,
       pageCount: document.getPageCount(),
+      code: null,
+      profile: "structural",
       measurements: {
         peakMemoryBytes: Math.max(peakMemoryBytes, process.memoryUsage().rss),
         testedCandidates: 1,
@@ -334,15 +527,16 @@ async function localStructural(bytes) {
       output: null,
       duration: performance.now() - started,
       pageCount: null,
+      code: "UNSUPPORTED_INPUT",
+      profile: null,
       measurements: { peakMemoryBytes, testedCandidates: 0 },
     };
   }
 }
 
-async function poll(origin, jobId) {
-  const started = Date.now();
-  while (Date.now() - started < 60_000) {
-    const response = await fetch(`${origin}/v1/jobs/${jobId}`);
+async function poll(origin, jobId, deadline) {
+  while (Date.now() < deadline) {
+    const response = await fetchBeforeDeadline(`${origin}/v1/jobs/${jobId}`, {}, deadline);
     if (!response.ok) throw new Error("native status request failed");
     const status = await response.json();
     if (["succeeded", "failed", "cancelled"].includes(status.state)) return status;
@@ -351,14 +545,8 @@ async function poll(origin, jobId) {
   throw new Error("native PDF benchmark timed out");
 }
 
-async function nativeRun(origin, bytes, pageCount, stratum) {
-  if (stratum === "decompression-bomb")
-    return {
-      verdict: "rejected",
-      output: null,
-      duration: 0,
-      measurements: { peakMemoryBytes: 0, testedCandidates: 0 },
-    };
+async function nativeRun(origin, bytes, pageCount) {
+  const deadline = Date.now() + 60_000;
   const jobId = randomUUID();
   const body = {
     protocol: 1,
@@ -377,37 +565,56 @@ async function nativeRun(origin, bytes, pageCount, stratum) {
     resourceClass: "pdf-standard-v1",
   };
   const started = performance.now();
-  const created = await fetch(`${origin}/v1/jobs`, { method: "POST", body: JSON.stringify(body) });
+  const created = await fetchBeforeDeadline(
+    `${origin}/v1/jobs`,
+    { method: "POST", body: JSON.stringify(body) },
+    deadline,
+  );
   if (created.status !== 201) throw new Error("native job create failed");
   try {
-    const uploaded = await fetch(`${origin}/v1/jobs/${jobId}/input`, {
-      method: "PUT",
-      headers: { "content-type": "application/pdf", "content-length": String(bytes.byteLength) },
-      body: bytes,
-    });
+    const uploaded = await fetchBeforeDeadline(
+      `${origin}/v1/jobs/${jobId}/input`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/pdf", "content-length": String(bytes.byteLength) },
+        body: bytes,
+      },
+      deadline,
+    );
     if (uploaded.status !== 204) throw new Error("native PDF upload failed");
-    const run = await fetch(`${origin}/v1/jobs/${jobId}/run`, { method: "POST" });
+    const run = await fetchBeforeDeadline(
+      `${origin}/v1/jobs/${jobId}/run`,
+      { method: "POST" },
+      deadline,
+    );
     if (run.status !== 202) throw new Error("native PDF run failed");
-    const status = await poll(origin, jobId);
+    const status = await poll(origin, jobId, deadline);
     let output = null;
     let verdict = "rejected";
     if (status.state === "succeeded") {
       verdict = status.result.kind === "download" ? "reduced" : "original-retained";
       if (verdict === "reduced") {
-        const response = await fetch(`${origin}/v1/jobs/${jobId}/output`);
+        const response = await fetchBeforeDeadline(
+          `${origin}/v1/jobs/${jobId}/output`,
+          {},
+          deadline,
+        );
         if (!response.ok) throw new Error("native PDF output failed");
-        output = Buffer.from(await response.arrayBuffer());
+        output = await readBoundedPdfResponse(response);
       }
     }
     return {
       verdict,
       output,
       profile: status.result?.profile ?? null,
+      code: status.error?.code ?? null,
       duration: performance.now() - started,
       measurements: status.measurements ?? { peakMemoryBytes: 0, testedCandidates: 0 },
     };
   } finally {
-    await fetch(`${origin}/v1/jobs/${jobId}`, { method: "DELETE" }).catch(() => undefined);
+    await fetchBeforeDeadline(`${origin}/v1/jobs/${jobId}`, { method: "DELETE" }, deadline).catch(
+      () => undefined,
+    );
   }
 }
 
@@ -432,25 +639,118 @@ async function semanticVerdict(source, output, pageCount) {
   }
 }
 
-function runnerRecord(runs, sourceBytes) {
-  const cold = runs[0];
-  const last = runs.at(-1);
-  const outputBytes =
-    last.output?.byteLength ?? (last.verdict === "original-retained" ? sourceBytes : null);
-  return {
-    verdict: last.verdict,
-    outputBytes,
-    ratio: outputBytes === null ? null : outputBytes / sourceBytes,
-    coldMs: Math.round(cold.duration * 1000) / 1000,
-    warmMedianMs: Math.round(median(runs.slice(1).map((run) => run.duration)) * 1000) / 1000,
-    peakRssBytes: Math.max(...runs.map((run) => run.measurements?.peakMemoryBytes ?? 0)),
-    candidateCount: Math.max(
-      ...runs.map(
-        (run) => run.measurements?.testedCandidates ?? (run.verdict === "rejected" ? 0 : 1),
+async function featureSemanticVerdict(source, output, stratum, safety, profile) {
+  if (output === null) return "not-applicable";
+  try {
+    const [before, after] = await Promise.all([
+      probePdfCorpusFeature(source, stratum, safety),
+      probePdfCorpusFeature(
+        output,
+        stratum,
+        stratum === "duplicate-resource" ? { ...safety, allowDeduplicated: true } : safety,
       ),
-    ),
-    semantic: last.semantic,
-    visual: last.visual,
+    ]);
+    if (profile === "image-optimized" || stratum === "duplicate-resource") {
+      const omitted =
+        stratum === "duplicate-resource" ? ["duplicateStreams"] : ["imageEncoding", "imageCount"];
+      const omitImages = (value) =>
+        Object.fromEntries(Object.entries(value).filter(([key]) => !omitted.includes(key)));
+      return canonicalJson(omitImages(before)) === canonicalJson(omitImages(after))
+        ? "passed"
+        : "failed";
+    }
+    return canonicalJson(before) === canonicalJson(after) ? "passed" : "failed";
+  } catch {
+    return "failed";
+  }
+}
+
+let pdfjsPromise;
+async function pdfjs() {
+  pdfjsPromise ??= import(
+    pathToFileURL(
+      resolve("node_modules/.pnpm/pdfjs-dist@6.2.108/node_modules/pdfjs-dist/legacy/build/pdf.mjs"),
+    ).href
+  );
+  return pdfjsPromise;
+}
+
+async function renderSample(bytes, pageNumber) {
+  const module = await pdfjs();
+  const task = module.getDocument({
+    data: new Uint8Array(bytes),
+    isEvalSupported: false,
+    useSystemFonts: false,
+    stopEvent: true,
+  });
+  try {
+    const document = await task.promise;
+    const page = await document.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 96 / 72 });
+    if (viewport.width * viewport.height > MAX_PARSER_PIXELS)
+      throw new RangeError("visual pixel limit exceeded");
+    const factory = document.canvasFactory;
+    if (factory === undefined) throw new Error("PDF canvas adapter unavailable");
+    const canvas = factory.create(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    await page.render({ canvasContext: canvas.context, canvas: canvas.canvas, viewport }).promise;
+    const pixels = canvas.context.getImageData(
+      0,
+      0,
+      canvas.canvas.width,
+      canvas.canvas.height,
+    ).data;
+    factory.destroy(canvas);
+    return pixels;
+  } finally {
+    await task.destroy();
+  }
+}
+
+async function visualVerdict(source, output, pageCount, profile) {
+  if (output === null) return "not-applicable";
+  if (profile !== "image-optimized") return "not-required";
+  try {
+    const pages = [...new Set([1, Math.max(1, pageCount)])].slice(0, 5);
+    for (const page of pages) {
+      const [before, after] = await Promise.all([
+        renderSample(source, page),
+        renderSample(output, page),
+      ]);
+      if (before.length !== after.length) return "failed";
+      let total = 0;
+      for (let index = 0; index < before.length; index += 1)
+        total += Math.abs(before[index] - after[index]);
+      if (total / (before.length * 255) > 0.08) return "failed";
+    }
+    return "passed";
+  } catch {
+    return "failed";
+  }
+}
+
+function runnerRecord(runs, sourceBytes) {
+  const samples = runs.map((run, repeat) => ({
+    repeat,
+    verdict: run.verdict,
+    effectiveBytes:
+      run.output?.byteLength ?? (run.verdict === "original-retained" ? sourceBytes : null),
+    durationMs: Math.round(run.duration * 1000) / 1000,
+    peakRssBytes: run.measurements?.peakMemoryBytes ?? 0,
+    candidateCount: run.measurements?.testedCandidates ?? (run.verdict === "rejected" ? 0 : 1),
+    code: run.code ?? (run.verdict === "rejected" ? "UNSUPPORTED_INPUT" : null),
+    profile: run.profile ?? null,
+    semantic: run.semantic,
+    visual: run.visual,
+  }));
+  const effective = samples
+    .map((sample) => sample.effectiveBytes)
+    .filter((value) => value !== null);
+  return {
+    samples,
+    medianEffectiveBytes: effective.length === REPEATS ? median(effective) : null,
+    medianDurationMs: median(samples.map((sample) => sample.durationMs)),
+    maximumPeakRssBytes: Math.max(...samples.map((sample) => sample.peakRssBytes)),
+    maximumCandidateCount: Math.max(...samples.map((sample) => sample.candidateCount)),
   };
 }
 
@@ -500,14 +800,18 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
     if (isIP(address) !== 4 || !/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(address))
       throw new Error("native PDF benchmark container address is invalid");
     const origin = `http://${address}:8080`;
+    const benchmarkDeadline = startedAt + MAX_WALL_MS;
     for (let attempt = 0; attempt < 300; attempt += 1) {
       try {
-        if ((await fetch(`${origin}/healthz`)).status === 204) break;
+        if ((await fetchBeforeDeadline(`${origin}/healthz`, {}, benchmarkDeadline)).status === 204)
+          break;
       } catch {}
       if (attempt === 299) throw new Error("native PDF engine did not become healthy");
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
-    const build = await (await fetch(`${origin}/v1/build`)).json();
+    const build = await (
+      await fetchBeforeDeadline(`${origin}/v1/build`, {}, benchmarkDeadline)
+    ).json();
     if (build.qpdf !== "12.4.0") throw new Error("native PDF qpdf version mismatch");
     const records = [];
     let measuredSamples = 0;
@@ -518,56 +822,75 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
       const localRuns = [];
       const nativeRuns = [];
       for (let repeat = 0; repeat < REPEATS; repeat += 1) {
-        if (entry.stratum === "decompression-bomb") {
-          localRuns.push({
-            verdict: "rejected",
-            output: null,
-            duration: 0,
-            pageCount: null,
-            semantic: "not-applicable",
-            visual: "not-required",
-          });
-          nativeRuns.push({
-            verdict: "rejected",
-            output: null,
-            duration: 0,
-            measurements: { peakMemoryBytes: 0, testedCandidates: 0 },
-            semantic: "not-applicable",
-            visual: "not-required",
-          });
-          continue;
-        }
-        const local = await localStructural(bytes);
+        const local = await localStructural(bytes, entry.stratum, entry.safety);
         local.semantic =
-          local.verdict === "reduced"
-            ? await semanticVerdict(bytes, local.output, entry.pageCount)
-            : "not-applicable";
-        local.visual = "not-required";
+          local.verdict === "rejected"
+            ? "not-applicable"
+            : local.verdict === "reduced"
+              ? (await semanticVerdict(bytes, local.output, entry.pageCount)) === "passed"
+                ? await featureSemanticVerdict(
+                    bytes,
+                    local.output,
+                    entry.stratum,
+                    entry.safety,
+                    local.profile,
+                  )
+                : "failed"
+              : "passed";
+        local.visual = await visualVerdict(
+          bytes,
+          local.output,
+          entry.pageCount ?? 1,
+          local.profile,
+        );
         localRuns.push(local);
-        const native = await nativeRun(origin, bytes, entry.pageCount, entry.stratum);
+        const native = await nativeRun(origin, bytes, entry.pageCount);
         native.semantic =
-          native.verdict === "reduced"
-            ? await semanticVerdict(bytes, native.output, entry.pageCount)
-            : "not-applicable";
-        native.visual = "not-required";
+          native.verdict === "rejected"
+            ? "not-applicable"
+            : native.verdict === "reduced"
+              ? (await semanticVerdict(bytes, native.output, entry.pageCount)) === "passed"
+                ? await featureSemanticVerdict(
+                    bytes,
+                    native.output,
+                    entry.stratum,
+                    entry.safety,
+                    native.profile,
+                  )
+                : "failed"
+              : "passed";
+        native.visual = await visualVerdict(
+          bytes,
+          native.output,
+          entry.pageCount ?? 1,
+          native.profile,
+        );
         nativeRuns.push(native);
         measuredSamples += 1;
       }
       const local = runnerRecord(localRuns, bytes.byteLength);
       const native = runnerRecord(nativeRuns, bytes.byteLength);
-      const smallerOnly = [local, native].every(
-        (runner) => runner.outputBytes === null || runner.outputBytes <= bytes.byteLength,
+      const smallerOnly = [...local.samples, ...native.samples].every(
+        (sample) => sample.effectiveBytes === null || sample.effectiveBytes <= bytes.byteLength,
       );
+      const repeatableNativeWins = native.samples.filter(
+        (sample, index) =>
+          sample.effectiveBytes !== null &&
+          local.samples[index].effectiveBytes !== null &&
+          local.samples[index].effectiveBytes - sample.effectiveBytes >=
+            Math.max(1, Math.ceil(bytes.byteLength / 100)),
+      ).length;
       const nativeAdvantageRatio =
-        local.outputBytes === null || native.outputBytes === null
+        local.medianEffectiveBytes === null || native.medianEffectiveBytes === null
           ? 0
-          : (local.outputBytes - native.outputBytes) / bytes.byteLength;
+          : (local.medianEffectiveBytes - native.medianEffectiveBytes) / bytes.byteLength;
       records.push({
         stratum: entry.stratum,
         sourceBytes: bytes.byteLength,
         local,
         native,
         smallerOnly,
+        repeatableNativeWins,
         nativeAdvantageRatio,
       });
     }
@@ -596,14 +919,29 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
         strata: records.length,
         measuredSamples,
         nativeWins: records.filter(
-          (record) => STRUCTURED.has(record.stratum) && record.nativeAdvantageRatio >= 0.01,
+          (record) =>
+            STRUCTURED.has(record.stratum) &&
+            record.repeatableNativeWins >= 2 &&
+            record.nativeAdvantageRatio >= 0.01,
         ).length,
         rejectedSafely: records.filter(
           (record) =>
             HOSTILE.has(record.stratum) &&
-            record.local.verdict === "rejected" &&
-            record.native.verdict === "rejected",
+            [...record.local.samples, ...record.native.samples].every(
+              (sample) => sample.verdict === "rejected",
+            ),
         ).length,
+        maximumPeakRssBytes: Math.max(
+          ...records.flatMap((record) =>
+            [...record.local.samples, ...record.native.samples].map(
+              (sample) => sample.peakRssBytes,
+            ),
+          ),
+        ),
+        visualProfilesMeasured: records
+          .flatMap((record) => record.native.samples)
+          .filter((sample) => sample.profile === "image-optimized" && sample.visual === "passed")
+          .length,
         passed: false,
       },
     };

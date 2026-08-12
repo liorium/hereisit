@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
+import { deflateSync } from "node:zlib";
 import type { EngineCreatePdfJobRequest } from "@hereisit/server-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -330,6 +331,29 @@ describe("bounded PDF optimization", () => {
     const result = await runPdfOptimization({ request, workspace, runQpdf: runner() });
     expect(result).toMatchObject({ state: "failed", error: { code } });
     await expect(stat(workspace.input)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects a compressed-stream expansion beyond the bounded admission ceiling", async () => {
+    const workspace = await fixture();
+    const compressed = deflateSync(Buffer.alloc(2 * 1024 * 1024, 65));
+    const source = Buffer.concat([
+      Buffer.from(
+        `%PDF-1.7\n1 0 obj\n<< /Length ${compressed.byteLength} /Filter /FlateDecode >>\nstream\n`,
+      ),
+      compressed,
+      Buffer.from("\nendstream\nendobj\n%%EOF\n"),
+    ]);
+    await writeFile(workspace.input, source);
+    const result = await runPdfOptimization({
+      request: { ...request, input: { ...request.input, byteLength: source.byteLength } },
+      workspace,
+      runQpdf: runner(),
+    });
+    expect(result).toMatchObject({
+      state: "failed",
+      error: { code: "INPUT_LIMIT_EXCEEDED", retryable: false },
+      measurements: { testedCandidates: 0 },
+    });
   });
 
   it("rejects encrypted input and declared page mismatch", async () => {

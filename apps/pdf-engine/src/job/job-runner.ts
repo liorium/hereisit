@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
+import { inflateSync } from "node:zlib";
 import {
   type EngineCreatePdfJobRequest,
   engineCreatePdfJobRequestSchema,
@@ -447,6 +448,35 @@ function envelope(bytes: Buffer): boolean {
   );
 }
 
+const MAX_DECLARED_INFLATED_BYTES = 1024 * 1024;
+
+function compressedStreamExpansionSafe(bytes: Buffer): boolean {
+  const text = bytes.toString("latin1");
+  const streams = text.matchAll(/(<<[\s\S]{0,4096}?>>)\s*stream\r?\n/gu);
+  for (const match of streams) {
+    const dictionary = match[1] ?? "";
+    if (!/\/Filter\s*(?:\/FlateDecode|\[[^\]]*\/FlateDecode)/u.test(dictionary)) continue;
+    const rawLength = /\/Length\s+(\d+)\b/u.exec(dictionary)?.[1];
+    const start = (match.index ?? -1) + match[0].length;
+    const length = Number(rawLength);
+    if (
+      !Number.isSafeInteger(length) ||
+      length < 1 ||
+      start < 0 ||
+      start + length > bytes.byteLength
+    )
+      return false;
+    try {
+      inflateSync(bytes.subarray(start, start + length), {
+        maxOutputLength: MAX_DECLARED_INFLATED_BYTES + 1,
+      });
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function regularFile(path: string, expectedBytes?: number): Promise<number | null> {
   try {
     const info = await lstat(path);
@@ -591,6 +621,8 @@ export async function runPdfOptimization(input: {
     const source = await readFile(input.workspace.input);
     if (!envelope(source))
       return terminalCleanup(failedStatus(input.request, "UNSUPPORTED_INPUT", duration()));
+    if (!compressedStreamExpansionSafe(source))
+      return terminalCleanup(failedStatus(input.request, "INPUT_LIMIT_EXCEEDED", duration()));
     const sourceInspection = await inspectPdf(input.workspace.input, runQpdf, input.signal);
     const inputFailure = "kind" in sourceInspection ? processFailure(sourceInspection) : null;
     if (input.signal?.aborted) return terminalCleanup(cancelled());

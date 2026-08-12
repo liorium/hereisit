@@ -1,8 +1,8 @@
 {
   "identity": {
-    "corpusManifestSha256": "d56e64c63d14572812ddab0aa2c9b4072814a80b0c6b77bdf2c37853d8c49c92",
-    "engineImageDigest": "sha256:5c2d836417918cd72d153bf9d82bd7b61c2c4314656daec0d690f25149526349",
-    "engineImageId": "sha256:5c2d836417918cd72d153bf9d82bd7b61c2c4314656daec0d690f25149526349",
+    "corpusManifestSha256": "9486485aa2b1fbefc34e20b4d5e647406ea2c13fe0d08ac62b93369f36cb20b8",
+    "engineImageDigest": "sha256:5910e98dffcfe39f635a8e960312805cfda58aaeb2fabc98b02f1772604bd8d8",
+    "engineImageId": "sha256:5910e98dffcfe39f635a8e960312805cfda58aaeb2fabc98b02f1772604bd8d8",
     "localRunner": "pdf-lib-structural@2.7.1",
     "qpdfVersion": "12.4.0",
     "sourceLockSha256": "bfadff5727326fd2799129854b78cd4e621befd4b4f64c0d131a55bae4a6722c"
@@ -20,487 +20,1628 @@
   "records": [
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 14.582,
-        "outputBytes": 963,
-        "peakRssBytes": 111071232,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 2.627
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 114225152,
+        "medianDurationMs": 2.561,
+        "medianEffectiveBytes": 963,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 9.675,
+            "effectiveBytes": 963,
+            "peakRssBytes": 97886208,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.561,
+            "effectiveBytes": 963,
+            "peakRssBytes": 114225152,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.233,
+            "effectiveBytes": 963,
+            "peakRssBytes": 111861760,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 1497.677,
-        "outputBytes": 963,
-        "peakRssBytes": 7663616,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1479.009
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6557696,
+        "medianDurationMs": 1476.588,
+        "medianEffectiveBytes": 963,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1520.957,
+            "effectiveBytes": 963,
+            "peakRssBytes": 2510848,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1476.588,
+            "effectiveBytes": 963,
+            "peakRssBytes": 6533120,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1458.238,
+            "effectiveBytes": 963,
+            "peakRssBytes": 6557696,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 963,
       "stratum": "text-vector"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 2.256,
-        "outputBytes": 1056,
-        "peakRssBytes": 111742976,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 2.438
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 116187136,
+        "medianDurationMs": 2.077,
+        "medianEffectiveBytes": 1056,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.466,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 112254976,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.077,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 114483200,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.915,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 116187136,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3183.038,
-        "outputBytes": 969,
-        "peakRssBytes": 6721536,
-        "ratio": 0.9176136363636364,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3187.836
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7802880,
+        "medianDurationMs": 3201.949,
+        "medianEffectiveBytes": 969,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3207.042,
+            "effectiveBytes": 969,
+            "peakRssBytes": 6889472,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3194.947,
+            "effectiveBytes": 969,
+            "peakRssBytes": 7802880,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3201.949,
+            "effectiveBytes": 969,
+            "peakRssBytes": 6529024,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.08238636363636363,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1056,
       "stratum": "link"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.533,
-        "outputBytes": 1021,
-        "peakRssBytes": 112467968,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 2.099
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 123002880,
+        "medianDurationMs": 3.19,
+        "medianEffectiveBytes": 1021,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.675,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 123002880,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.19,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 103047168,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.37,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 105525248,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3189.317,
-        "outputBytes": 942,
-        "peakRssBytes": 4890624,
-        "ratio": 0.9226248775710089,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3184.19
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3465216,
+        "medianDurationMs": 3224.8,
+        "medianEffectiveBytes": 942,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3194.728,
+            "effectiveBytes": 942,
+            "peakRssBytes": 3465216,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3224.8,
+            "effectiveBytes": 942,
+            "peakRssBytes": 2510848,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3236.051,
+            "effectiveBytes": 942,
+            "peakRssBytes": 3452928,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.07737512242899118,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1021,
       "stratum": "annotation"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 3.043,
-        "outputBytes": 1596,
-        "peakRssBytes": 117710848,
-        "ratio": 0.8325508607198748,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 4.751
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 118370304,
+        "medianDurationMs": 3.635,
+        "medianEffectiveBytes": 1596,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 5.716,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 109981696,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.635,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 113389568,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.97,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 118370304,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3164.627,
-        "outputBytes": 1467,
-        "peakRssBytes": 6565888,
-        "ratio": 0.7652582159624414,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3191.528
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6721536,
+        "medianDurationMs": 3244.584,
+        "medianEffectiveBytes": 1467,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3205.443,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 3317760,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3357.031,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 5480448,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3244.584,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 6721536,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.06729264475743349,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1917,
       "stratum": "form"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.404,
-        "outputBytes": 1094,
-        "peakRssBytes": 130949120,
-        "ratio": 0.9794091316025068,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 1.37
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 126103552,
+        "medianDurationMs": 2.511,
+        "medianEffectiveBytes": 1094,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.02,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 121253888,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.715,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 121909248,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.511,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 126103552,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3186.849,
-        "outputBytes": 981,
-        "peakRssBytes": 6631424,
-        "ratio": 0.8782452999104745,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3180.373
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7929856,
+        "medianDurationMs": 3213.321,
+        "medianEffectiveBytes": 981,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3205.83,
+            "effectiveBytes": 981,
+            "peakRssBytes": 6574080,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3232.545,
+            "effectiveBytes": 981,
+            "peakRssBytes": 3129344,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3213.321,
+            "effectiveBytes": 981,
+            "peakRssBytes": 7929856,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.10116383169203223,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1117,
       "stratum": "outline"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 4.87,
-        "outputBytes": 1356,
-        "peakRssBytes": 134094848,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 3.784
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 136982528,
+        "medianDurationMs": 2.648,
+        "medianEffectiveBytes": 1356,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.159,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 130297856,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.648,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 136327168,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.67,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 136982528,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3206.846,
-        "outputBytes": 1176,
-        "peakRssBytes": 7204864,
-        "ratio": 0.8672566371681416,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3348.957
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7614464,
+        "medianDurationMs": 3201.297,
+        "medianEffectiveBytes": 1176,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3216.462,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 7614464,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3187.811,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 7479296,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3201.297,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 7495680,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.13274336283185842,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1356,
       "stratum": "attachment"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 3.179,
-        "outputBytes": 1178,
-        "peakRssBytes": 143532032,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.546
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 140783616,
+        "medianDurationMs": 1.675,
+        "medianEffectiveBytes": 1178,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.128,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 140259328,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.675,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 140259328,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.618,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 140783616,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3178.711,
-        "outputBytes": 1084,
-        "peakRssBytes": 2920448,
-        "ratio": 0.9202037351443124,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3195.171
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 5287936,
+        "medianDurationMs": 3198.794,
+        "medianEffectiveBytes": 1084,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3196.814,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 5287936,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3198.794,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 5066752,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3198.852,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 5017600,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.07979626485568761,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1178,
       "stratum": "layer"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 2.617,
-        "outputBytes": 91277,
-        "peakRssBytes": 157032448,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.386
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 162541568,
+        "medianDurationMs": 5.689,
+        "medianEffectiveBytes": 91277,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 4.841,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 141438976,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 6.034,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 156905472,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 5.689,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 162541568,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3184.989,
-        "outputBytes": 1478,
-        "peakRssBytes": 4907008,
-        "ratio": 0.01619246907764278,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3189.374
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7725056,
+        "medianDurationMs": 3198.898,
+        "medianEffectiveBytes": 1478,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3199.594,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 6373376,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3198.898,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 6467584,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3175.991,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 7725056,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.9838075309223572,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 91277,
       "stratum": "duplicate-resource"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 2.388,
-        "outputBytes": 263172,
-        "peakRssBytes": 169353216,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.252
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 174338048,
+        "medianDurationMs": 3.275,
+        "medianEffectiveBytes": 1336,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.63,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 173682688,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.275,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 174338048,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 5.235,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 173891584,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3197.025,
-        "outputBytes": 1327,
-        "peakRssBytes": 7876608,
-        "ratio": 0.005042329731126412,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3200.447
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7835648,
+        "medianDurationMs": 1468.377,
+        "medianEffectiveBytes": 1336,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1465.898,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 2723840,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1473.872,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 3379200,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1468.377,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 7835648,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
-      "nativeAdvantageRatio": 0.9949576702688736,
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
-      "sourceBytes": 263172,
+      "sourceBytes": 1336,
       "stratum": "flate-heavy"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.212,
-        "outputBytes": 1683,
-        "peakRssBytes": 169877504,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.011
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 176381952,
+        "medianDurationMs": 1.51,
+        "medianEffectiveBytes": 1683,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.871,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 173891584,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.51,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 173891584,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.486,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 176381952,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 3171.672,
-        "outputBytes": 1501,
-        "peakRssBytes": 5046272,
-        "ratio": 0.8918597742127153,
-        "semantic": "passed",
-        "verdict": "reduced",
-        "visual": "not-required",
-        "warmMedianMs": 3184.331
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7659520,
+        "medianDurationMs": 3194.209,
+        "medianEffectiveBytes": 1501,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3198.966,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 7659520,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3192.011,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 6541312,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3194.209,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 5230592,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0.1081402257872846,
+      "repeatableNativeWins": 3,
       "smallerOnly": true,
       "sourceBytes": 1683,
       "stratum": "jpeg-heavy"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.334,
-        "outputBytes": 1133,
-        "peakRssBytes": 169877504,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.179
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 177037312,
+        "medianDurationMs": 1.524,
+        "medianEffectiveBytes": 1133,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.73,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 177037312,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.524,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 176656384,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.213,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 176656384,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 1460.493,
-        "outputBytes": 1133,
-        "peakRssBytes": 3440640,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1457.458
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7778304,
+        "medianDurationMs": 1477.59,
+        "medianEffectiveBytes": 1133,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1477.59,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 2998272,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1457.035,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 7778304,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1501.829,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 5951488,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 1133,
       "stratum": "non-jpeg-image"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.166,
-        "outputBytes": 1273,
-        "peakRssBytes": 170926080,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.9
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 176787456,
+        "medianDurationMs": 1.458,
+        "medianEffectiveBytes": 984,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.458,
+            "effectiveBytes": 984,
+            "peakRssBytes": 176787456,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.5,
+            "effectiveBytes": 984,
+            "peakRssBytes": 176787456,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.175,
+            "effectiveBytes": 984,
+            "peakRssBytes": 176787456,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 1453.234,
-        "outputBytes": 1273,
-        "peakRssBytes": 2826240,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1459.63
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7426048,
+        "medianDurationMs": 1463.925,
+        "medianEffectiveBytes": 984,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1463.925,
+            "effectiveBytes": 984,
+            "peakRssBytes": 7409664,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1463.412,
+            "effectiveBytes": 984,
+            "peakRssBytes": 7426048,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1465.681,
+            "effectiveBytes": 984,
+            "peakRssBytes": 6455296,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
-      "sourceBytes": 1273,
+      "sourceBytes": 984,
       "stratum": "scan"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 1.235,
-        "outputBytes": 1274,
-        "peakRssBytes": 170926080,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1.101
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 179146752,
+        "medianDurationMs": 1.498,
+        "medianEffectiveBytes": 1274,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.498,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 176918528,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.644,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 179015680,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.39,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 179146752,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 1459.77,
-        "outputBytes": 1274,
-        "peakRssBytes": 3317760,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1465.998
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 7753728,
+        "medianDurationMs": 1466.998,
+        "medianEffectiveBytes": 1274,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1471.086,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 7753728,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1458.138,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 2789376,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1466.998,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 6017024,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 1274,
       "stratum": "mixed"
     },
     {
       "local": {
-        "candidateCount": 0,
-        "coldMs": 0.674,
-        "outputBytes": null,
-        "peakRssBytes": 170926080,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 0.631
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 179146752,
+        "medianDurationMs": 0.704,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 1.146,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.693,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.704,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 0,
-        "coldMs": 320.489,
-        "outputBytes": null,
-        "peakRssBytes": 3145728,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 320.699
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 5328896,
+        "medianDurationMs": 320.732,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 327.602,
+            "effectiveBytes": null,
+            "peakRssBytes": 3248128,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 320.732,
+            "effectiveBytes": null,
+            "peakRssBytes": 2830336,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 320.404,
+            "effectiveBytes": null,
+            "peakRssBytes": 5328896,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 1185,
       "stratum": "encrypted"
     },
     {
       "local": {
-        "candidateCount": 0,
-        "coldMs": 0.634,
-        "outputBytes": null,
-        "peakRssBytes": 170926080,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 0.468
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 179146752,
+        "medianDurationMs": 0.427,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.673,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.427,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.392,
+            "effectiveBytes": null,
+            "peakRssBytes": 179146752,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 0,
-        "coldMs": 34.48,
-        "outputBytes": null,
-        "peakRssBytes": 0,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 33.678
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 0,
+        "medianDurationMs": 31.453,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 31.443,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 31.453,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 33.131,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 72,
       "stratum": "corrupt"
     },
     {
       "local": {
-        "candidateCount": 1,
-        "coldMs": 0.96,
-        "outputBytes": 423,
-        "peakRssBytes": 170926080,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 0.851
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 179146752,
+        "medianDurationMs": 1.091,
+        "medianEffectiveBytes": 423,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.091,
+            "effectiveBytes": 423,
+            "peakRssBytes": 179146752,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 0.873,
+            "effectiveBytes": 423,
+            "peakRssBytes": 179146752,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.193,
+            "effectiveBytes": 423,
+            "peakRssBytes": 179146752,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 2,
-        "coldMs": 1483.93,
-        "outputBytes": 423,
-        "peakRssBytes": 7344128,
-        "ratio": 1,
-        "semantic": "not-applicable",
-        "verdict": "original-retained",
-        "visual": "not-required",
-        "warmMedianMs": 1469.494
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6561792,
+        "medianDurationMs": 1464.339,
+        "medianEffectiveBytes": 423,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1461.617,
+            "effectiveBytes": 423,
+            "peakRssBytes": 2711552,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1464.339,
+            "effectiveBytes": 423,
+            "peakRssBytes": 3006464,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 1468.008,
+            "effectiveBytes": 423,
+            "peakRssBytes": 6561792,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 423,
       "stratum": "expansion"
     },
     {
       "local": {
-        "candidateCount": 0,
-        "coldMs": 0,
-        "outputBytes": null,
-        "peakRssBytes": 0,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 0
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 199069696,
+        "medianDurationMs": 24.963,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 25.265,
+            "effectiveBytes": null,
+            "peakRssBytes": 199069696,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 24.963,
+            "effectiveBytes": null,
+            "peakRssBytes": 198066176,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 16.944,
+            "effectiveBytes": null,
+            "peakRssBytes": 198066176,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "native": {
-        "candidateCount": 0,
-        "coldMs": 0,
-        "outputBytes": null,
-        "peakRssBytes": 0,
-        "ratio": null,
-        "semantic": "not-applicable",
-        "verdict": "rejected",
-        "visual": "not-required",
-        "warmMedianMs": 0
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 0,
+        "medianDurationMs": 35.792,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 35.792,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 37.671,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 33.838,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
       },
       "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
       "smallerOnly": true,
       "sourceBytes": 5187,
       "stratum": "decompression-bomb"
     }
   ],
-  "schema": "hereisit.pdf-engine-benchmark@1",
+  "schema": "hereisit.pdf-engine-benchmark@2",
   "summary": {
-    "measuredSamples": 48,
-    "nativeWins": 8,
+    "maximumPeakRssBytes": 199069696,
+    "measuredSamples": 51,
+    "nativeWins": 7,
     "passed": true,
     "rejectedSafely": 3,
-    "strata": 17
+    "strata": 17,
+    "visualProfilesMeasured": 0
   }
 }

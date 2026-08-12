@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createPdfCompressionCorpus,
+  probePdfCorpusFeature,
   REQUIRED_PDF_CORPUS_STRATA,
   validatePdfCorpusManifest,
   verifyPdfCorpusFiles,
@@ -39,8 +40,43 @@ describe("generated PDF compression corpus", () => {
       const bytes = await readFile(join(firstRoot, entry.artifact));
       expect(createHash("sha256").update(bytes).digest("hex"), entry.stratum).toBe(entry.sha256);
       expect(bytes.byteLength).toBe(entry.byteLength);
-      expect(bytes.includes(Buffer.from(entry.probe.token, "ascii")), entry.stratum).toBe(true);
+      await expect(probePdfCorpusFeature(bytes, entry.stratum, entry.safety)).resolves.toEqual(
+        entry.probe.signature,
+      );
     }
+  });
+
+  it("rejects swapped labels when the bytes do not contain that stratum's defining feature", async () => {
+    const output = await root("swapped");
+    const manifest = await createPdfCompressionCorpus(output);
+    const link = manifest.entries.find((entry) => entry.stratum === "link");
+    const form = manifest.entries.find((entry) => entry.stratum === "form");
+    expect(link).toBeDefined();
+    expect(form).toBeDefined();
+    if (link === undefined || form === undefined) throw new Error("swapped fixture is missing");
+    const swapped = {
+      ...manifest,
+      entries: manifest.entries.map((entry) =>
+        entry === link
+          ? {
+              ...form,
+              stratum: "link",
+              artifact: link.artifact,
+              sha256: link.sha256,
+              byteLength: link.byteLength,
+            }
+          : entry === form
+            ? {
+                ...link,
+                stratum: "form",
+                artifact: form.artifact,
+                sha256: form.sha256,
+                byteLength: form.byteLength,
+              }
+            : entry,
+      ),
+    };
+    await expect(verifyPdfCorpusFiles(swapped, output)).rejects.toThrow();
   });
 
   it("rejects duplicate, missing, tampered, extra, unsafe, or path-leaking manifest data", async () => {
