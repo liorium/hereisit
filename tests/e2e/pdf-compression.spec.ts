@@ -450,12 +450,13 @@ type PdfServerScenario = "download" | "original-retained" | "pending";
 async function installPdfServerDouble(
   page: Page,
   input: {
+    acknowledgement?: "hold" | "reject" | "succeed";
     source: Buffer;
     output: Buffer;
     scenario?: PdfServerScenario;
-    holdAcknowledgement?: boolean;
   },
 ): Promise<{
+  acknowledgementOutcomes: Array<"rejected" | "succeeded">;
   calls: string[];
   jobId: string;
   releaseAcknowledgement(): void;
@@ -464,6 +465,7 @@ async function installPdfServerDouble(
   const jobId = "123e4567-e89b-42d3-a456-426614174101";
   const lease = "a".repeat(43);
   const digest = createHash("sha256").update(input.output).digest("base64");
+  const acknowledgementOutcomes: Array<"rejected" | "succeeded"> = [];
   const calls: string[] = [];
   let releaseStatus = () => undefined;
   const statusGate = new Promise<void>((resolve) => {
@@ -590,8 +592,9 @@ async function installPdfServerDouble(
     if (call === `POST /v1/jobs/${jobId}/downloaded`) {
       await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
       await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
-      if (input.holdAcknowledgement === true) await acknowledgementGate;
-      await route.fulfill({ status: 204 });
+      if (input.acknowledgement === "hold") await acknowledgementGate;
+      await route.fulfill({ status: input.acknowledgement === "reject" ? 503 : 204 });
+      acknowledgementOutcomes.push(input.acknowledgement === "reject" ? "rejected" : "succeeded");
       return;
     }
     if (call === `POST /v1/jobs/${jobId}/cancel` || call === `DELETE /v1/jobs/${jobId}`) {
@@ -601,7 +604,7 @@ async function installPdfServerDouble(
     await route.abort("blockedbyclient");
   });
 
-  return { calls, jobId, releaseAcknowledgement, releaseStatus };
+  return { acknowledgementOutcomes, calls, jobId, releaseAcknowledgement, releaseStatus };
 }
 
 async function uploadPdf(
@@ -1385,7 +1388,7 @@ test("exposes a server PDF only after browser verification and direct download",
   await privacy.assertClean(1, browserName !== "firefox");
 });
 
-test("handles original retention, replacement, and mobile keyboard fallback without a result", async ({
+test("keeps original-retained mobile fallback keyboard-accessible and allows a new selection", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 720 });
@@ -1446,6 +1449,34 @@ test("cancels and deletes a created server job while ignoring its late status", 
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
 });
 
+test("replaces a pending remote job and ignores its late successful status", async ({ page }) => {
+  await forceLocalNoReduction(page);
+  await installObjectUrlCounters(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, { source, output, scenario: "pending" });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "pending-old.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+  await expect.poll(() => server.calls).toContain(`GET /v1/jobs/${server.jobId}`);
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "replacement.pdf",
+    mimeType: "application/pdf",
+    buffer: await createVectorPdf(1),
+  });
+  server.releaseStatus();
+
+  await expect(page.getByText("replacement.pdf")).toBeVisible();
+  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/cancel`);
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  await expect(page.getByText("pending-old.pdf")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+  expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
+});
+
 test("ignores late verifier completion after cancellation and deletes the result", async ({
   page,
 }) => {
@@ -1481,7 +1512,7 @@ test("deletes an unacknowledged result when reload navigation unmounts during ac
   const server = await installPdfServerDouble(page, {
     source,
     output,
-    holdAcknowledgement: true,
+    acknowledgement: "hold",
   });
 
   await openReadyPdfCompression(page);
@@ -1507,7 +1538,7 @@ test("resets and deletes an unacknowledged result while acknowledgement is pendi
   const server = await installPdfServerDouble(page, {
     source,
     output,
-    holdAcknowledgement: true,
+    acknowledgement: "hold",
   });
 
   await openReadyPdfCompression(page);
@@ -1520,6 +1551,44 @@ test("resets and deletes an unacknowledged result while acknowledgement is pendi
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
   await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
   server.releaseAcknowledgement();
+});
+
+test.describe("rejected server-result acknowledgement cleanup", () => {
+  for (const cleanup of ["reset", "navigation-unmount"] as const) {
+    test(`deletes and revokes the result after ${cleanup}`, async ({ page }) => {
+      await forceLocalNoReduction(page);
+      await installObjectUrlCounters(page);
+      const source = await createCompressibleStructuredPdf();
+      const output = await structurallyRewritePdf(source);
+      const server = await installPdfServerDouble(page, {
+        acknowledgement: "reject",
+        source,
+        output,
+      });
+
+      await openReadyPdfCompression(page);
+      await uploadPdf(page, "ack-reject.pdf", source, 12);
+      await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+      await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+      await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+      await expect.poll(() => server.acknowledgementOutcomes).toEqual(["rejected"]);
+      expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
+
+      if (cleanup === "reset") {
+        await page.getByRole("button", { name: "다른 PDF 압축" }).click();
+        await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
+      } else {
+        await page.locator('a[href="/"]').first().click();
+        await expect(page).toHaveURL(/\/$/);
+      }
+
+      await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+      await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
+      await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+    });
+  }
 });
 
 test("gives preset-specific guidance when a valid oversized page is unsafe at minimum 96DPI", async ({
