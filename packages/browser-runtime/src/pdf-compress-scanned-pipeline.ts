@@ -14,6 +14,7 @@ import {
 import {
   type PdfCompressScannedErrorCode,
   type PdfCompressScannedErrorPayload,
+  type PdfCompressScannedNoSizeReductionReason,
   type PdfCompressScannedProgress,
   type PdfCompressScannedResult,
   type PdfCompressScannedResultV1,
@@ -91,6 +92,7 @@ export class PdfCompressScannedPipelineError extends Error {
     readonly code: PdfCompressScannedErrorCode,
     message: string,
     readonly retryable = false,
+    readonly reason?: PdfCompressScannedNoSizeReductionReason,
   ) {
     super(message);
     this.name = "PdfCompressScannedPipelineError";
@@ -112,8 +114,15 @@ function memoryLimit(): PdfCompressScannedPipelineError {
   return new PdfCompressScannedPipelineError("MEMORY_LIMIT", MEMORY_LIMIT_MESSAGE);
 }
 
-function noSizeReduction(): PdfCompressScannedPipelineError {
-  return new PdfCompressScannedPipelineError("NO_SIZE_REDUCTION", NO_SIZE_REDUCTION_MESSAGE);
+function noSizeReduction(
+  reason: PdfCompressScannedNoSizeReductionReason = "IMAGE_ONLY_NO_SAVINGS",
+): PdfCompressScannedPipelineError {
+  return new PdfCompressScannedPipelineError(
+    "NO_SIZE_REDUCTION",
+    NO_SIZE_REDUCTION_MESSAGE,
+    false,
+    reason,
+  );
 }
 
 function assemblyFailed(): PdfCompressScannedPipelineError {
@@ -492,7 +501,7 @@ export async function runPdfCompressScannedPipeline(
     loadMs = now() - loadStarted;
     throwIfCancelled();
     if (parsed.data.version === 2 && classifyPdfCompressionDocument(pageSignals) !== "image-only") {
-      throw noSizeReduction();
+      throw noSizeReduction("STRUCTURED_OR_MIXED");
     }
 
     try {
@@ -744,6 +753,17 @@ export async function runPdfCompressScannedPipeline(
 
 export function toPdfCompressScannedErrorPayload(error: unknown): PdfCompressScannedErrorPayload {
   if (error instanceof PdfCompressScannedPipelineError) {
+    if (error.code === "NO_SIZE_REDUCTION" && error.reason !== undefined) {
+      return {
+        code: error.code,
+        message: error.message,
+        reason: error.reason,
+        retryable: error.retryable,
+      };
+    }
+    if (error.code === "NO_SIZE_REDUCTION") {
+      return { code: "WORKER_CRASH", message: WORKER_CRASH_MESSAGE, retryable: true };
+    }
     return {
       code: error.code,
       message: error.code === "WORKER_CRASH" ? WORKER_CRASH_MESSAGE : error.message,

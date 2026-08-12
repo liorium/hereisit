@@ -109,6 +109,15 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const serverJobRef = useRef<PdfOptimizeJobHandle | undefined>(undefined);
   const verificationRef = useRef<PdfOptimizeVerificationHandle | undefined>(undefined);
   const remoteResultRef = useRef<RemotePdfResult | undefined>(undefined);
+  const remoteResultRunRef = useRef<number | undefined>(undefined);
+  const acknowledgementRef = useRef<
+    | {
+        readonly remoteResult: RemotePdfResult;
+        readonly runId: number;
+        readonly request: Promise<void>;
+      }
+    | undefined
+  >(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
@@ -132,6 +141,8 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     verificationRef.current = undefined;
     const remoteResult = remoteResultRef.current;
     remoteResultRef.current = undefined;
+    remoteResultRunRef.current = undefined;
+    acknowledgementRef.current = undefined;
     if (remoteResult !== undefined) void remoteResult.dispose().catch(() => undefined);
   }, []);
 
@@ -169,6 +180,38 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     },
     [invalidateActiveWork],
   );
+
+  useEffect(() => {
+    if (result?.source !== "server") return;
+    const remoteResult = remoteResultRef.current;
+    const runId = remoteResultRunRef.current;
+    if (remoteResult === undefined || runId === undefined || runId !== runRef.current) return;
+    const activeAcknowledgement = acknowledgementRef.current;
+    if (
+      activeAcknowledgement?.remoteResult === remoteResult &&
+      activeAcknowledgement.runId === runId
+    ) {
+      return;
+    }
+
+    const request = remoteResult.acknowledge();
+    acknowledgementRef.current = { remoteResult, runId, request };
+    void request
+      .then(() => {
+        if (remoteResultRef.current === remoteResult && remoteResultRunRef.current === runId) {
+          remoteResultRef.current = undefined;
+          remoteResultRunRef.current = undefined;
+        }
+      })
+      .catch(() => {
+        // Keep the verified remote handle so reset or unmount can attempt deletion.
+      })
+      .finally(() => {
+        if (acknowledgementRef.current?.request === request) {
+          acknowledgementRef.current = undefined;
+        }
+      });
+  }, [result]);
 
   const inspectSelectedFile = useCallback(
     async (nextFile: File) => {
@@ -327,7 +370,12 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
           selectedPreset === "balanced"
             ? "균형 150DPI에서는 페이지가 너무 커요. 최소 용량 96DPI로 낮춰 다시 시도해 주세요."
             : "사용 가능한 최소 96DPI에서도 이 PDF를 안전하게 처리할 수 없어요. 원본을 그대로 사용하거나 페이지 크기나 페이지 수를 줄인 PDF를 다시 준비해 주세요.";
-        if (outcome.error.code === "NO_SIZE_REDUCTION") setServerFallback(true);
+        if (
+          outcome.error.code === "NO_SIZE_REDUCTION" &&
+          outcome.error.reason === "STRUCTURED_OR_MIXED"
+        ) {
+          setServerFallback(true);
+        }
         setMessage(
           outcome.error.code === "NO_SIZE_REDUCTION"
             ? noReductionMessage
@@ -429,6 +477,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
 
       remoteResult = outcome.value;
       remoteResultRef.current = remoteResult;
+      remoteResultRunRef.current = runId;
       setMessage("다운로드 전에 PDF 결과를 확인하고 있어요.");
       const resultFile = new File([remoteResult.blob], "result.pdf", {
         type: "application/pdf",
@@ -445,6 +494,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         if (remoteResultRef.current === remoteResult) {
           await remoteResult.dispose().catch(() => undefined);
           remoteResultRef.current = undefined;
+          remoteResultRunRef.current = undefined;
         }
         return;
       }
@@ -453,7 +503,10 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         else productRun.failed(verified.error.code);
         analyticsSettled = true;
         await remoteResult.dispose().catch(() => undefined);
-        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
+        if (remoteResultRef.current === remoteResult) {
+          remoteResultRef.current = undefined;
+          remoteResultRunRef.current = undefined;
+        }
         setMessage("PDF 결과를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.");
         return;
       }
@@ -470,17 +523,14 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       productRun.succeeded();
       analyticsSettled = true;
       setMessage("압축 PDF를 준비했어요.");
-      try {
-        await remoteResult.acknowledge();
-        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
-      } catch {
-        // The verified local Blob remains downloadable; reset/unmount retries deletion.
-      }
     } catch {
       if (!analyticsSettled) productRun.failed("WORKER_CRASH");
       if (remoteResult !== undefined) {
         await remoteResult.dispose().catch(() => undefined);
-        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
+        if (remoteResultRef.current === remoteResult) {
+          remoteResultRef.current = undefined;
+          remoteResultRunRef.current = undefined;
+        }
       }
       if (runRef.current === runId) setMessage(SERVER_RETRY_MESSAGE);
     } finally {

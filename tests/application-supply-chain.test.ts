@@ -315,6 +315,8 @@ describe("application supply-chain gate", () => {
         "@hereisit/web...",
         "--filter",
         "@hereisit/api-worker...",
+        "--filter",
+        "@hereisit/pdf-engine...",
       ],
       cwd: fixture.root,
       maxBuffer: 2 * 1024 * 1024,

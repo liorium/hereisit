@@ -82,8 +82,11 @@ async function structurallyRewritePdf(source: Buffer): Promise<Buffer> {
   );
 }
 
-async function forceLocalNoReduction(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function forceLocalNoReduction(
+  page: Page,
+  reason: "STRUCTURED_OR_MIXED" | "IMAGE_ONLY_NO_SAVINGS" = "STRUCTURED_OR_MIXED",
+): Promise<void> {
+  await page.addInitScript((noReductionReason) => {
     const NativeWorker = Worker;
     class NoReductionWorker extends EventTarget {
       onerror: ((event: ErrorEvent) => unknown) | null = null;
@@ -124,6 +127,7 @@ async function forceLocalNoReduction(page: Page): Promise<void> {
                 error: {
                   code: "NO_SIZE_REDUCTION",
                   message: "PDF 용량을 1% 이상 줄이지 못했어요.",
+                  reason: noReductionReason,
                   retryable: false,
                 },
               },
@@ -171,6 +175,64 @@ async function forceLocalNoReduction(page: Page): Promise<void> {
       terminate() {}
     }
 
+    class LateVerificationWorker extends EventTarget {
+      onerror: ((event: ErrorEvent) => unknown) | null = null;
+      onmessage: ((event: MessageEvent<unknown>) => unknown) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => unknown) | null = null;
+      private verification: { descriptor: unknown; jobId: string; result: File } | undefined;
+
+      constructor() {
+        super();
+        queueMicrotask(() => {
+          this.onmessage?.(new MessageEvent("message", { data: { protocol: 1, type: "ready" } }));
+        });
+      }
+
+      postMessage(value: unknown) {
+        const request = value as {
+          descriptor?: unknown;
+          jobId?: unknown;
+          result?: unknown;
+          type?: unknown;
+        };
+        if (
+          request.type === "verify" &&
+          typeof request.jobId === "string" &&
+          request.result instanceof File
+        ) {
+          this.verification = {
+            descriptor: request.descriptor,
+            jobId: request.jobId,
+            result: request.result,
+          };
+          sessionStorage.setItem("__hereisitPdfVerificationPosted", "1");
+          return;
+        }
+        if (request.type !== "cancel" || this.verification === undefined) return;
+        const verification = this.verification;
+        queueMicrotask(() => {
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: { protocol: 1, type: "cancelled", jobId: verification.jobId },
+            }),
+          );
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: {
+                protocol: 1,
+                type: "complete",
+                jobId: verification.jobId,
+                descriptor: verification.descriptor,
+                blob: verification.result,
+              },
+            }),
+          );
+        });
+      }
+
+      terminate() {}
+    }
+
     Object.defineProperty(globalThis, "Worker", {
       configurable: true,
       value: new Proxy(NativeWorker, {
@@ -190,11 +252,17 @@ async function forceLocalNoReduction(page: Page): Promise<void> {
           ) {
             return new FailedVerificationWorker() as unknown as Worker;
           }
+          if (
+            options?.name === "hereisit-pdf-optimize-verifier" &&
+            sessionStorage.getItem("__hereisitLatePdfVerification") === "1"
+          ) {
+            return new LateVerificationWorker() as unknown as Worker;
+          }
           return Reflect.construct(Target, argumentsList);
         },
       }),
     });
-  });
+  }, reason);
 }
 
 async function createScannedPdf(
@@ -375,6 +443,165 @@ async function objectUrlCounts(page: Page): Promise<{ created: number; revoked: 
     created: Number(sessionStorage.getItem("__hereisitCreatedUrls") ?? "0"),
     revoked: Number(sessionStorage.getItem("__hereisitRevokedUrls") ?? "0"),
   }));
+}
+
+type PdfServerScenario = "download" | "original-retained" | "pending";
+
+async function installPdfServerDouble(
+  page: Page,
+  input: {
+    source: Buffer;
+    output: Buffer;
+    scenario?: PdfServerScenario;
+    holdAcknowledgement?: boolean;
+  },
+): Promise<{
+  calls: string[];
+  jobId: string;
+  releaseAcknowledgement(): void;
+  releaseStatus(): void;
+}> {
+  const jobId = "123e4567-e89b-42d3-a456-426614174101";
+  const lease = "a".repeat(43);
+  const digest = createHash("sha256").update(input.output).digest("base64");
+  const calls: string[] = [];
+  let releaseStatus = () => undefined;
+  const statusGate = new Promise<void>((resolve) => {
+    releaseStatus = resolve;
+  });
+  let releaseAcknowledgement = () => undefined;
+  const acknowledgementGate = new Promise<void>((resolve) => {
+    releaseAcknowledgement = resolve;
+  });
+
+  await page.route("**/v1/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const call = `${request.method()} ${path}`;
+    if (path === "/v1/analytics/events") {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    calls.push(call);
+    if (call === "POST /v1/policy") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          contract: "tool-job@1",
+          toolContract: "pdf.optimize@1",
+          execution: "server",
+          reason: null,
+          maintainer: true,
+          disclosure: {
+            upload: true,
+            inputDeletion: "terminal",
+            resultDeletion: {
+              mode: "server-temporary",
+              acknowledged: "immediate-delete-attempt",
+              unacknowledgedDueSeconds: 1800,
+              applicationSloSeconds: 2100,
+              lifecycleExpirationDays: 1,
+              exceptionalDelayPossible: true,
+            },
+          },
+          limits: {
+            maxFiles: 1,
+            maxBytesPerFile: 50 * 1024 * 1024,
+            maxPagesPerFile: 100,
+          },
+        },
+      });
+      return;
+    }
+    if (call === "POST /v1/jobs") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          contract: "tool-job@1",
+          mode: "upload-required",
+          jobId,
+          upload: {
+            kind: "worker-stream-put",
+            method: "PUT",
+            path: `/v1/jobs/${jobId}/input`,
+            contentType: "application/pdf",
+            byteLength: input.source.byteLength,
+            expiresAt: "2099-01-01T00:00:00.000Z",
+          },
+          reservedWeightedUnits: 1,
+        },
+      });
+      return;
+    }
+    if (call === `PUT /v1/jobs/${jobId}/input`) {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (call === `GET /v1/jobs/${jobId}`) {
+      if (input.scenario === "pending") await statusGate;
+      const result =
+        input.scenario === "original-retained"
+          ? {
+              kind: "original-retained",
+              sourceByteLength: input.source.byteLength,
+              pageCount: 12,
+              engineBuildId: "test-qpdf-12.4.0",
+              warnings: ["ORIGINAL_RETAINED_UNMODIFIED"],
+            }
+          : {
+              kind: "download",
+              mime: "application/pdf",
+              sourceByteLength: input.source.byteLength,
+              byteLength: input.output.byteLength,
+              pageCount: 12,
+              profile: "structural",
+              engineBuildId: "test-qpdf-12.4.0",
+              warnings: ["SIGNATURES_INVALIDATED"],
+            };
+      await route.fulfill({
+        status: 200,
+        json: {
+          contract: "tool-job@1",
+          jobId,
+          state: "succeeded",
+          phase: "completed",
+          phaseFraction: 1,
+          sequence: 1,
+          attempt: 1,
+          updatedAt: "2026-08-12T00:00:00.000Z",
+          result,
+        },
+      });
+      return;
+    }
+    if (call === `GET /v1/jobs/${jobId}/result`) {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-length": String(input.output.byteLength),
+          "content-type": "application/pdf",
+          digest: `sha-256=${digest}`,
+          "x-download-lease": lease,
+        },
+        body: input.output,
+      });
+      return;
+    }
+    if (call === `POST /v1/jobs/${jobId}/downloaded`) {
+      await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+      if (input.holdAcknowledgement === true) await acknowledgementGate;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (call === `POST /v1/jobs/${jobId}/cancel` || call === `DELETE /v1/jobs/${jobId}`) {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.abort("blockedbyclient");
+  });
+
+  return { calls, jobId, releaseAcknowledgement, releaseStatus };
 }
 
 async function uploadPdf(
@@ -1063,6 +1290,34 @@ test("contacts the PDF processing server only after the explicit fallback action
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
 });
 
+test("does not offer or contact the server for an image-only no-savings result", async ({
+  page,
+}) => {
+  await forceLocalNoReduction(page, "IMAGE_ONLY_NO_SAVINGS");
+  const serverRequests: string[] = [];
+  await page.route("**/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/v1/analytics/events") {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    serverRequests.push(`${route.request().method()} ${path}`);
+    await route.abort("blockedbyclient");
+  });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "scan.pdf", await createVectorPdf(1), 1);
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
+
+  await expect(
+    page.getByText(
+      "텍스트와 링크를 유지하면서는 용량을 1% 이상 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toHaveCount(0);
+  expect(serverRequests).toEqual([]);
+});
+
 test("exposes a server PDF only after browser verification and direct download", async ({
   browserName,
   page,
@@ -1077,117 +1332,14 @@ test("exposes a server PDF only after browser verification and direct download",
   const source = await createCompressibleStructuredPdf();
   const output = await structurallyRewritePdf(source);
   expect(output.byteLength).toBeLessThanOrEqual(exactCompressionTarget(source.byteLength));
-  const jobId = "123e4567-e89b-42d3-a456-426614174101";
-  const lease = "a".repeat(43);
-  const digest = createHash("sha256").update(output).digest("base64");
-  const requests: string[] = [];
-  await page.route("**/v1/**", async (route) => {
-    const request = route.request();
-    const path = new URL(request.url()).pathname;
-    const call = `${request.method()} ${path}`;
-    if (path === "/v1/analytics/events") {
-      await route.fulfill({ status: 204 });
-      return;
-    }
-    requests.push(call);
-    if (call === "POST /v1/policy") {
-      await route.fulfill({
-        status: 200,
-        json: {
-          contract: "tool-job@1",
-          toolContract: "pdf.optimize@1",
-          execution: "server",
-          reason: null,
-          maintainer: true,
-          disclosure: {
-            upload: true,
-            inputDeletion: "terminal",
-            resultDeletion: {
-              mode: "server-temporary",
-              acknowledged: "immediate-delete-attempt",
-              unacknowledgedDueSeconds: 1800,
-              applicationSloSeconds: 2100,
-              lifecycleExpirationDays: 1,
-              exceptionalDelayPossible: true,
-            },
-          },
-          limits: {
-            maxFiles: 1,
-            maxBytesPerFile: 50 * 1024 * 1024,
-            maxPagesPerFile: 100,
-          },
-        },
-      });
-    } else if (call === "POST /v1/jobs") {
-      await route.fulfill({
-        status: 200,
-        json: {
-          contract: "tool-job@1",
-          mode: "upload-required",
-          jobId,
-          upload: {
-            kind: "worker-stream-put",
-            method: "PUT",
-            path: `/v1/jobs/${jobId}/input`,
-            contentType: "application/pdf",
-            byteLength: source.byteLength,
-            expiresAt: "2099-01-01T00:00:00.000Z",
-          },
-          reservedWeightedUnits: 1,
-        },
-      });
-    } else if (call === `PUT /v1/jobs/${jobId}/input`) {
-      await route.fulfill({ status: 204 });
-    } else if (call === `GET /v1/jobs/${jobId}`) {
-      await route.fulfill({
-        status: 200,
-        json: {
-          contract: "tool-job@1",
-          jobId,
-          state: "succeeded",
-          phase: "completed",
-          phaseFraction: 1,
-          sequence: 1,
-          attempt: 1,
-          updatedAt: "2026-08-12T00:00:00.000Z",
-          result: {
-            kind: "download",
-            mime: "application/pdf",
-            sourceByteLength: source.byteLength,
-            byteLength: output.byteLength,
-            pageCount: 12,
-            profile: "structural",
-            engineBuildId: "test-qpdf-12.4.0",
-            warnings: ["SIGNATURES_INVALIDATED"],
-          },
-        },
-      });
-    } else if (call === `GET /v1/jobs/${jobId}/result`) {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          "content-length": String(output.byteLength),
-          "content-type": "application/pdf",
-          digest: `sha-256=${digest}`,
-          "x-download-lease": lease,
-        },
-        body: output,
-      });
-    } else if (call === `POST /v1/jobs/${jobId}/downloaded`) {
-      await route.fulfill({ status: 204 });
-    } else if (call === `DELETE /v1/jobs/${jobId}`) {
-      await route.fulfill({ status: 204 });
-    } else {
-      await route.abort("blockedbyclient");
-    }
-  });
+  const server = await installPdfServerDouble(page, { source, output });
 
   await openReadyPdfCompression(page);
   await uploadPdf(page, "server-source.pdf", source, 12);
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
   const fallback = page.getByRole("button", { name: "처리 서버에서 더 압축" });
   await expect(fallback).toBeVisible();
-  expect(requests).toEqual([]);
+  expect(server.calls).toEqual([]);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
   expect(
     await page.evaluate(() =>
@@ -1207,7 +1359,7 @@ test("exposes a server PDF only after browser verification and direct download",
     ),
   ).toContain("hereisit-pdf-optimize-verifier");
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
-  await expect.poll(() => requests).toContain(`POST /v1/jobs/${jobId}/downloaded`);
+  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -1219,7 +1371,7 @@ test("exposes a server PDF only after browser verification and direct download",
   await page.getByRole("button", { name: "다른 PDF 압축" }).click();
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
   await page.evaluate(() => sessionStorage.setItem("__hereisitFailPdfVerification", "1"));
-  requests.length = 0;
+  server.calls.length = 0;
   await uploadPdf(page, "server-source.pdf", source, 12);
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
   await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
@@ -1229,8 +1381,145 @@ test("exposes a server PDF only after browser verification and direct download",
   await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 1 });
-  await expect.poll(() => requests).toContain(`DELETE /v1/jobs/${jobId}`);
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
   await privacy.assertClean(1, browserName !== "firefox");
+});
+
+test("handles original retention, replacement, and mobile keyboard fallback without a result", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await forceLocalNoReduction(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, {
+    source,
+    output,
+    scenario: "original-retained",
+  });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "retained.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  const fallback = page.getByRole("button", { name: "처리 서버에서 더 압축" });
+  await expect(fallback).toBeVisible();
+  await fallback.focus();
+  await expect(fallback).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByText("처리 서버에서도 더 줄이지 못해 원본을 그대로 유지해요."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+
+  const chooserReady = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "PDF 교체" }).click();
+  const chooser = await chooserReady;
+  await chooser.setFiles({
+    name: "replacement.pdf",
+    mimeType: "application/pdf",
+    buffer: await createVectorPdf(1),
+  });
+  await expect(page.getByText("replacement.pdf")).toBeVisible();
+});
+
+test("cancels and deletes a created server job while ignoring its late status", async ({
+  page,
+}) => {
+  await forceLocalNoReduction(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, { source, output, scenario: "pending" });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "cancel.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+  await expect.poll(() => server.calls).toContain(`GET /v1/jobs/${server.jobId}`);
+  await page.getByRole("button", { name: "중단" }).click();
+  server.releaseStatus();
+
+  await expect(page.getByText("PDF 압축을 중단했어요.")).toBeVisible();
+  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/cancel`);
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+});
+
+test("ignores late verifier completion after cancellation and deletes the result", async ({
+  page,
+}) => {
+  await forceLocalNoReduction(page);
+  await installObjectUrlCounters(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, { source, output });
+
+  await openReadyPdfCompression(page);
+  await page.evaluate(() => sessionStorage.setItem("__hereisitLatePdfVerification", "1"));
+  await uploadPdf(page, "late-verifier.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+  await expect
+    .poll(() => page.evaluate(() => sessionStorage.getItem("__hereisitPdfVerificationPosted")))
+    .toBe("1");
+  await page.getByRole("button", { name: "중단" }).click();
+
+  await expect(page.getByText("PDF 압축을 중단했어요.")).toBeVisible();
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  expect(server.calls).not.toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+  expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
+});
+
+test("deletes an unacknowledged result when reload navigation unmounts during acknowledgement", async ({
+  page,
+}) => {
+  await forceLocalNoReduction(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, {
+    source,
+    output,
+    holdAcknowledgement: true,
+  });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "ack-race.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
+  await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+
+  const reload = page.reload();
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  server.releaseAcknowledgement();
+  await reload;
+});
+
+test("resets and deletes an unacknowledged result while acknowledgement is pending", async ({
+  page,
+}) => {
+  await forceLocalNoReduction(page);
+  const source = await createCompressibleStructuredPdf();
+  const output = await structurallyRewritePdf(source);
+  const server = await installPdfServerDouble(page, {
+    source,
+    output,
+    holdAcknowledgement: true,
+  });
+
+  await openReadyPdfCompression(page);
+  await uploadPdf(page, "reset-race.pdf", source, 12);
+  await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
+  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
+  await page.getByRole("button", { name: "다른 PDF 압축" }).click();
+
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
+  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  server.releaseAcknowledgement();
 });
 
 test("gives preset-specific guidance when a valid oversized page is unsafe at minimum 96DPI", async ({

@@ -225,7 +225,11 @@ describe("processing Wrangler generator", () => {
       liveCostModel,
       liveCostModelSha256: liveCostModelSha256(liveCostModel),
     });
-    const operational = await parseOperationalConfig(config.vars as unknown as Env);
+    const operational = await parseOperationalConfig({
+      ...config.vars,
+      PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
+      PDF_ENGINE_IMAGE_DIGEST: "fixture-pdf-engine-digest",
+    } as unknown as Env);
 
     expect(operational.environment).toBe("staging");
     expect(operational.liveCostModel.projectedMonthlyJobs).toBe(10_000);
