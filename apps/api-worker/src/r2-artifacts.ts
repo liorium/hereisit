@@ -1,10 +1,17 @@
-import { IMAGE_OPTIMIZE_MAX_FILE_BYTES, type ImageOptimizeMime } from "@hereisit/tool-contracts";
+import {
+  IMAGE_OPTIMIZE_MAX_FILE_BYTES,
+  type ImageOptimizeMime,
+  PDF_OPTIMIZE_MAX_FILE_BYTES,
+  type PdfOptimizeMime,
+} from "@hereisit/tool-contracts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INPUT_KEY_PATTERN = new RegExp(`^inputs/${UUID_PATTERN.source.slice(1, -1)}$`);
 const OUTPUT_KEY_PATTERN = new RegExp(`^outputs/${UUID_PATTERN.source.slice(1, -1)}$`);
 const SAFE_ETAG_PATTERN = /^[\x20-\x7e]{1,256}$/;
 const ALLOWED_MIMES = new Set<ImageOptimizeMime>(["image/jpeg", "image/png", "image/webp"]);
+
+export type ArtifactMime = ImageOptimizeMime | PdfOptimizeMime;
 
 export type ArtifactObjectKey = `inputs/${string}` | `outputs/${string}`;
 export type InputArtifactObjectKey = `inputs/${string}`;
@@ -26,7 +33,7 @@ export interface ArtifactBucket {
     value: ReadableStream,
     options: {
       onlyIf: Headers;
-      httpMetadata: { contentType: ImageOptimizeMime };
+      httpMetadata: { contentType: ArtifactMime };
       customMetadata: { kind: "input"; uploadVersion: string };
     },
   ): Promise<ArtifactHead | null>;
@@ -42,7 +49,7 @@ export interface FixedLengthStreamPair {
 export interface VerifiedInputArtifact {
   readonly key: InputArtifactObjectKey;
   readonly byteLength: number;
-  readonly mime: ImageOptimizeMime;
+  readonly mime: ArtifactMime;
   readonly etag: string;
   readonly uploadVersion: number;
 }
@@ -79,8 +86,12 @@ export interface ArtifactDeletionAuthorization {
   readonly key: ArtifactObjectKey;
 }
 
-function isImageOptimizeMime(value: string): value is ImageOptimizeMime {
-  return ALLOWED_MIMES.has(value as ImageOptimizeMime);
+function isArtifactMime(value: string): value is ArtifactMime {
+  return value === "application/pdf" || ALLOWED_MIMES.has(value as ImageOptimizeMime);
+}
+
+function maximumBytes(mime: ArtifactMime): number {
+  return mime === "application/pdf" ? PDF_OPTIMIZE_MAX_FILE_BYTES : IMAGE_OPTIMIZE_MAX_FILE_BYTES;
 }
 
 function isCanonicalInputKey(value: string): value is InputArtifactObjectKey {
@@ -161,8 +172,8 @@ export function verifyInputArtifactHead(
     !isCanonicalInputKey(expected.key) ||
     !Number.isSafeInteger(expected.byteLength) ||
     expected.byteLength < 1 ||
-    expected.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES ||
-    !isImageOptimizeMime(expected.mime) ||
+    !isArtifactMime(expected.mime) ||
+    expected.byteLength > maximumBytes(expected.mime) ||
     !Number.isSafeInteger(expected.uploadVersion) ||
     expected.uploadVersion < 1
   ) {
@@ -233,10 +244,10 @@ export async function storeExactInputArtifact(input: {
   const now = input.now ?? Date.now;
   if (
     !isCanonicalInputKey(input.key) ||
-    !isImageOptimizeMime(input.mime) ||
+    !isArtifactMime(input.mime) ||
     !Number.isSafeInteger(input.byteLength) ||
     input.byteLength < 1 ||
-    input.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES ||
+    input.byteLength > maximumBytes(input.mime) ||
     !Number.isSafeInteger(input.deadlineAt) ||
     !Number.isSafeInteger(input.uploadVersion) ||
     input.uploadVersion < 1

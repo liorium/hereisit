@@ -8,6 +8,10 @@ import {
   IMAGE_OPTIMIZE_MAX_PIXELS,
   type ImageOptimizeCreateRequestV1,
   type ImageOptimizeMime,
+  imageOptimizeCreateRequestSchema,
+  PDF_OPTIMIZE_MAX_PAGES,
+  type PdfOptimizeCreateRequestV1,
+  pdfOptimizeCreateRequestSchema,
 } from "@hereisit/tool-contracts";
 
 export interface ResourceEstimate {
@@ -16,6 +20,15 @@ export interface ResourceEstimate {
   inputBytes: number;
   reservationPixelCeiling: 40_000_000;
 }
+
+export interface PdfResourceEstimate {
+  resourceClass: "pdf-standard-v1";
+  reservedWeightedUnits: number;
+  inputBytes: number;
+  reservationPageCeiling: 100;
+}
+
+export type ToolResourceEstimate = ResourceEstimate | PdfResourceEstimate;
 
 export interface ActualUsageSample {
   inputBytes: number;
@@ -306,6 +319,29 @@ export function estimateImageOptimizeUnits(
     inputBytes,
     reservationPixelCeiling: IMAGE_OPTIMIZE_MAX_PIXELS,
   };
+}
+
+export function estimatePdfOptimizeUnits(request: PdfOptimizeCreateRequestV1): PdfResourceEstimate {
+  const parsed = pdfOptimizeCreateRequestSchema.parse(request);
+  const inputBytes = parsed.input.byteLength;
+
+  return {
+    resourceClass: "pdf-standard-v1",
+    reservedWeightedUnits: estimateAttemptReservation({
+      inputBytes,
+      resourceClass: "image-standard-v1",
+    }),
+    inputBytes,
+    reservationPageCeiling: PDF_OPTIMIZE_MAX_PAGES,
+  };
+}
+
+export function estimateResources(
+  request: ImageOptimizeCreateRequestV1 | PdfOptimizeCreateRequestV1,
+): ToolResourceEstimate {
+  return request.toolContract === "pdf.optimize@1"
+    ? estimatePdfOptimizeUnits(request)
+    : estimateImageOptimizeUnits(imageOptimizeCreateRequestSchema.parse(request));
 }
 
 function calculateMeasuredWeightedUnits(sample: ActualUsageSample): number {

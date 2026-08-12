@@ -1,7 +1,13 @@
 import {
   IMAGE_OPTIMIZE_MAX_FILE_BYTES,
   type ImageOptimizeResultDescriptor,
+  imageOptimizeResultDescriptorSchema,
 } from "@hereisit/tool-contracts/image-optimize";
+import {
+  PDF_OPTIMIZE_MAX_FILE_BYTES,
+  type PdfOptimizeResultDescriptor,
+  pdfOptimizeResultDescriptorSchema,
+} from "@hereisit/tool-contracts/pdf-optimize";
 import { toolJobErrorResponseSchema } from "@hereisit/tool-contracts/tool-job";
 import {
   acknowledgeRemoteDownload,
@@ -13,6 +19,10 @@ import {
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+export type RemoteDownloadDescriptor =
+  | Extract<ImageOptimizeResultDescriptor, { kind: "download" }>
+  | Extract<PdfOptimizeResultDescriptor, { kind: "download" }>;
+
 export interface RemoteArchivePart {
   readonly byteLength: number;
   readonly stream: ReadableStream<Uint8Array>;
@@ -21,7 +31,7 @@ export interface RemoteArchivePart {
 }
 
 export interface RemoteDownloadHandle {
-  readonly descriptor: Extract<ImageOptimizeResultDescriptor, { kind: "download" }>;
+  readonly descriptor: RemoteDownloadDescriptor;
   download(input: {
     readonly filename: string;
     readonly onProgress?: (loaded: number, total: number) => void;
@@ -38,7 +48,7 @@ export interface CreateRemoteDownloadHandleInput {
   readonly apiOrigin: string;
   readonly jobId: string;
   readonly jobToken: string;
-  readonly descriptor: Extract<ImageOptimizeResultDescriptor, { kind: "download" }>;
+  readonly descriptor: RemoteDownloadDescriptor;
   readonly fetch?: typeof fetch;
   readonly createObjectURL?: (blob: Blob) => string;
   readonly revokeObjectURL?: (url: string) => void;
@@ -63,10 +73,19 @@ function validateHandleInput(input: CreateRemoteDownloadHandleInput): void {
   if (!JOB_ID_PATTERN.test(input.jobId) || !TOKEN_PATTERN.test(input.jobToken)) {
     throw new RemoteJobError("INVALID_REQUEST", "다운로드 작업 정보가 올바르지 않습니다.", false);
   }
+  const descriptorSchema =
+    input.descriptor.mime === "application/pdf"
+      ? pdfOptimizeResultDescriptorSchema
+      : imageOptimizeResultDescriptorSchema;
+  const maximumResultBytes =
+    input.descriptor.mime === "application/pdf"
+      ? PDF_OPTIMIZE_MAX_FILE_BYTES
+      : IMAGE_OPTIMIZE_MAX_FILE_BYTES;
   if (
+    !descriptorSchema.safeParse(input.descriptor).success ||
     !Number.isSafeInteger(input.descriptor.byteLength) ||
     input.descriptor.byteLength <= 0 ||
-    input.descriptor.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES
+    input.descriptor.byteLength > maximumResultBytes
   ) {
     throw new RemoteJobError(
       "INPUT_LIMIT_EXCEEDED",

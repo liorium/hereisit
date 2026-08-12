@@ -22,6 +22,14 @@ function inputHead(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function pdfHead(overrides: Record<string, unknown> = {}) {
+  return inputHead({
+    size: 40 * 1024 * 1024,
+    httpMetadata: { contentType: "application/pdf" },
+    ...overrides,
+  });
+}
+
 function bytes(...values: number[]) {
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -77,6 +85,25 @@ describe("R2 input invariants", () => {
       etag: "raw-etag",
       uploadVersion: 1,
     });
+  });
+
+  it("accepts a bounded PDF while retaining the smaller image byte ceiling", () => {
+    expect(
+      verifyInputArtifactHead(pdfHead(), {
+        key: INPUT_KEY,
+        byteLength: 40 * 1024 * 1024,
+        mime: "application/pdf",
+        uploadVersion: 1,
+      }),
+    ).toMatchObject({ mime: "application/pdf", etag: "raw-etag" });
+    expect(() =>
+      verifyInputArtifactHead(inputHead({ size: 30 * 1024 * 1024 + 1 }), {
+        key: INPUT_KEY,
+        byteLength: 30 * 1024 * 1024 + 1,
+        mime: "image/png",
+        uploadVersion: 1,
+      }),
+    ).toThrow(ArtifactUploadError);
   });
 
   it.each([

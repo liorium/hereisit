@@ -1,3 +1,5 @@
+import type { ToolResourceEstimate } from "./resource-estimate";
+
 export interface RetryReservationInput {
   accountDailyLimit: number;
   accountReservedToday: number;
@@ -8,7 +10,7 @@ export interface RetryReservationInput {
   networkDailyLimit: number;
   networkReservedToday: number;
   networkSettledToday: number;
-  requestedUnits: number;
+  requestedUnits: ToolResourceEstimate["reservedWeightedUnits"];
 }
 
 export interface CreateAdmissionInput extends RetryReservationInput {
