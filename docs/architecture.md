@@ -7,7 +7,8 @@ HereIsIt chooses the narrowest execution target that can produce a correct resul
 1. Browser Worker for supported local transformations.
 2. Browser Worker plus a lazily loaded WASM codec when the platform codec is insufficient.
 3. A separately deployed server worker for same-format production compression that cannot be matched by
-   the browser's built-in codecs.
+   the browser's built-in codecs. PDF server processing starts only after a local structured no-reduction
+   result and one explicit upload click.
 
 The web application never proxies file bodies through Next.js. Server jobs stream to an authenticated
 Worker route, persist temporary random-key objects, and exchange only opaque job IDs and progress events
@@ -112,7 +113,7 @@ time. The parser Worker, packed CMaps, and standard fonts are versioned, copied 
 package, and served from the Pages origin. Each renderer receives PDF bytes as a transferred typed array;
 it never passes an input URL to PDF.js. Existing image and PDF-edit routes import neither renderer.
 
-These paths have no upload, CDN dependency, WebAssembly decoder, server renderer, or server fallback. PDF.js
+PDF-to-image has no upload, CDN dependency, WebAssembly decoder, server renderer, or server fallback. PDF.js
 6.2.108 does not expose the `isEvalSupported` option, so the runtime intentionally does not pass it. The deployed
 Content Security Policy, which does not grant `unsafe-eval` or `wasm-unsafe-eval`, remains the evaluation
 boundary. A browser that cannot provide the Worker and `OffscreenCanvas` chain receives an unsupported
@@ -143,6 +144,20 @@ bookmark, form, attachment, or other advanced document feature, so that limitati
 after relevant operations. Structure-preserving general PDF compression and internal-image-only
 optimization are not provided. The scan-oriented raster compressor has a hard smaller-only postcondition
 and never offers a larger result. Only other PDF edits can make an output larger than its source.
+
+`pdf.optimize@1` keeps this local compressor first. Only a structured or mixed `NO_SIZE_REDUCTION`
+result reveals the plain upload/deletion disclosure and `처리 서버에서 더 압축`. The server path accepts
+one 1-byte–50MiB PDF with 1–100 pages, creates at most two sequential candidates, and exposes a direct
+download only after qpdf and browser semantic verification. It uses a dedicated PDF queue, DLQ, and
+container, isolated from the image queue and container. Input and result use opaque keys and are deleted
+after acknowledgement or the retention sweep. Rewriting invalidates electronic signatures.
+
+The native engine is qpdf 12.4.0 under Apache-2.0. It can recompress streams, generate object streams,
+remove unreferenced resources, and optimize eligible JPEG objects, but it does not perform DPI-aware
+image downsampling and does not always reduce a PDF. The generated 17-stratum gate measured eight
+structured wins and three safe hostile rejections; exact sanitized evidence is in
+`docs/deployment/pdf-engine-benchmark.json`. Public rollout remains disabled until the Task 8 immutable
+release, canary, deletion, cost, and rollback gates pass.
 
 ## Resource policy
 
@@ -205,6 +220,9 @@ ceiling; an image-heavy document can still exhaust browser memory and fails with
 - Image-watermark result/archive object URLs are revoked on replacement, rerun, reset, removal, unmount,
   archive failure, and archive timeout. No download begins until the user explicitly requests one.
 - Server-mode tools must display the upload boundary and deletion policy before a file leaves the device.
+- The PDF server fallback never sends a file before the explicit click, never logs content or filenames,
+  verifies the downloaded result in a dedicated Worker, and deletes temporary server artifacts
+  automatically. It records only bounded numeric measurements and fixed identifiers.
 - `image.optimize@1` keeps the source `File` in the tab, checks policy twice, uploads sequentially, and
   retains only lazy authenticated download handles. Interrupted downloads stay retryable; MIME or byte
   mismatches are rejected before a browser download begins.

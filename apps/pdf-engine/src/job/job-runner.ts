@@ -347,9 +347,8 @@ export function createQpdfProcessRunner(options: {
         forced = reason;
         termination = settleProcessTermination(killGroup(pid, [...processGroups]));
       };
-      const timeout = setTimeout(() => stop("timeout"), available.wallMs);
-      const sampler = setInterval(() => {
-        void Promise.all([
+      const sample = async () => {
+        const [usage, workspaceBytes] = await Promise.all([
           measureProcessTreeUsage(pid, {
             listPids: async () =>
               (await readdir("/proc", { withFileTypes: true }))
@@ -361,28 +360,35 @@ export function createQpdfProcessRunner(options: {
           options.workspaceRoot === undefined
             ? Promise.resolve(0)
             : directoryBytes(options.workspaceRoot),
-        ])
-          .then(([usage, workspaceBytes]) => {
-            const sampledAt = performance.now();
-            memoryByteMilliseconds += usage.rssBytes * Math.max(0, sampledAt - lastSampleAt);
-            lastSampleAt = sampledAt;
-            observedCpuMs = Math.max(observedCpuMs, usage.cpuMs);
-            peakRssBytes = Math.max(peakRssBytes, usage.rssBytes);
-            for (const pgid of usage.processGroups) processGroups.add(pgid);
-            if (usage.rssBytes > options.maxRssBytes) stop("oom");
-            else if (usage.cpuMs > available.cpuMs) stop("timeout");
-            else if (workspaceBytes > (options.maxWorkspaceBytes ?? Number.MAX_SAFE_INTEGER))
-              stop("oom");
-          })
-          .catch(async () => {
-            try {
-              process.kill(-pid, 0);
-              stop("failed");
-            } catch {
-              // The close event is racing the final sample; close performs survivor cleanup.
-            }
-          });
+        ]);
+        const sampledAt = performance.now();
+        memoryByteMilliseconds += usage.rssBytes * Math.max(0, sampledAt - lastSampleAt);
+        lastSampleAt = sampledAt;
+        observedCpuMs = Math.max(observedCpuMs, usage.cpuMs);
+        peakRssBytes = Math.max(peakRssBytes, usage.rssBytes);
+        for (const pgid of usage.processGroups) processGroups.add(pgid);
+        if (usage.rssBytes > options.maxRssBytes) stop("oom");
+        else if (usage.cpuMs > available.cpuMs) stop("timeout");
+        else if (workspaceBytes > (options.maxWorkspaceBytes ?? Number.MAX_SAFE_INTEGER))
+          stop("oom");
+      };
+      const timeout = setTimeout(() => stop("timeout"), available.wallMs);
+      const sampler = setInterval(() => {
+        void sample().catch(async () => {
+          try {
+            process.kill(-pid, 0);
+            stop("failed");
+          } catch {
+            // The close event is racing the final sample; close performs survivor cleanup.
+          }
+        });
       }, 100);
+      void processRss(pid)
+        .then((rssBytes) => {
+          peakRssBytes = Math.max(peakRssBytes, rssBytes);
+          if (rssBytes > options.maxRssBytes) stop("oom");
+        })
+        .catch(() => undefined);
       const abort = () => stop("failed");
       signal?.addEventListener("abort", abort, { once: true });
       child.once("error", () => stop("failed"));

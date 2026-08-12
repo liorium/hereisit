@@ -1,0 +1,8 @@
+{
+  "benchmarkSha256": "b13528d5ffc9b6d814392534d6468897955bd78c6fa01a191c1bdc7f05fc29e7",
+  "corpusManifestSha256": "d56e64c63d14572812ddab0aa2c9b4072814a80b0c6b77bdf2c37853d8c49c92",
+  "engineImageDigest": "sha256:5c2d836417918cd72d153bf9d82bd7b61c2c4314656daec0d690f25149526349",
+  "failures": [],
+  "passed": true,
+  "schema": "hereisit.pdf-engine-release-gate@1"
+}

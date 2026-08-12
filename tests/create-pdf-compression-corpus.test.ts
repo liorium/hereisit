@@ -1,0 +1,83 @@
+import { createHash } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  createPdfCompressionCorpus,
+  REQUIRED_PDF_CORPUS_STRATA,
+  validatePdfCorpusManifest,
+  verifyPdfCorpusFiles,
+} from "../scripts/create-pdf-compression-corpus.mjs";
+
+const roots: string[] = [];
+
+async function root(label: string) {
+  const path = join(tmpdir(), `hereisit-pdf-corpus-${label}-${crypto.randomUUID()}`);
+  roots.push(path);
+  return path;
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
+
+describe("generated PDF compression corpus", () => {
+  it("generates every machine-probed stratum deterministically within fixed ceilings", async () => {
+    const firstRoot = await root("first");
+    const secondRoot = await root("second");
+    const first = await createPdfCompressionCorpus(firstRoot);
+    const second = await createPdfCompressionCorpus(secondRoot);
+
+    expect(first).toEqual(second);
+    expect(first.entries.map((entry) => entry.stratum)).toEqual(REQUIRED_PDF_CORPUS_STRATA);
+    expect(first.entries.reduce((sum, entry) => sum + entry.byteLength, 0)).toBeLessThanOrEqual(
+      first.limits.maximumCorpusBytes,
+    );
+
+    for (const entry of first.entries) {
+      const bytes = await readFile(join(firstRoot, entry.artifact));
+      expect(createHash("sha256").update(bytes).digest("hex"), entry.stratum).toBe(entry.sha256);
+      expect(bytes.byteLength).toBe(entry.byteLength);
+      expect(bytes.includes(Buffer.from(entry.probe.token, "ascii")), entry.stratum).toBe(true);
+    }
+  });
+
+  it("rejects duplicate, missing, tampered, extra, unsafe, or path-leaking manifest data", async () => {
+    const output = await root("validation");
+    const manifest = await createPdfCompressionCorpus(output);
+    const entry = manifest.entries[0];
+    expect(entry).toBeDefined();
+
+    const invalid = [
+      { ...manifest, entries: manifest.entries.slice(1) },
+      { ...manifest, entries: [...manifest.entries, entry] },
+      { ...manifest, extra: true },
+      {
+        ...manifest,
+        entries: [{ ...entry, byteLength: Number.NaN }, ...manifest.entries.slice(1)],
+      },
+      {
+        ...manifest,
+        entries: [{ ...entry, artifact: "/tmp/private.pdf" }, ...manifest.entries.slice(1)],
+      },
+      {
+        ...manifest,
+        entries: [
+          { ...entry, probe: { ...entry.probe, token: "https://x" } },
+          ...manifest.entries.slice(1),
+        ],
+      },
+    ];
+    for (const candidate of invalid) expect(() => validatePdfCorpusManifest(candidate)).toThrow();
+    await expect(
+      verifyPdfCorpusFiles(
+        {
+          ...manifest,
+          entries: [{ ...entry, sha256: "0".repeat(64) }, ...manifest.entries.slice(1)],
+        },
+        output,
+      ),
+    ).rejects.toThrow();
+  });
+});

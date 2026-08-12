@@ -107,10 +107,37 @@ export function createLiveCostModel(rawInput) {
       "routeCpuBenchmark",
       "projectedMonthlyJobs",
       "arrivalTraces",
+      ...(input.pdfBenchmark === undefined ? [] : ["pdfBenchmark"]),
     ],
     "live cost input",
   );
   if (input.version !== 1) throw new TypeError("live cost input version must be 1");
+  if (input.pdfBenchmark !== undefined) {
+    const pdfBenchmark = assertObject(input.pdfBenchmark, "pdfBenchmark");
+    assertExactKeys(
+      pdfBenchmark,
+      [
+        "evidenceSha256",
+        "maximumCandidates",
+        "maximumInputBytes",
+        "maximumMeasuredPeakRssBytes",
+        "maximumOutputBytes",
+        "maximumPages",
+        "maximumWallMs",
+      ],
+      "pdfBenchmark",
+    );
+    assertSha256(pdfBenchmark.evidenceSha256, "pdfBenchmark.evidenceSha256");
+    for (const field of [
+      "maximumCandidates",
+      "maximumInputBytes",
+      "maximumMeasuredPeakRssBytes",
+      "maximumOutputBytes",
+      "maximumPages",
+      "maximumWallMs",
+    ])
+      assertPositiveNumber(pdfBenchmark[field], `pdfBenchmark.${field}`);
+  }
   const prices = assertObject(input.pricesUsd, "pricesUsd");
   assertExactKeys(prices, priceFields, "pricesUsd");
   const resources = assertObject(input.resources, "resources");

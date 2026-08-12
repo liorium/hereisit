@@ -28,6 +28,15 @@
     "containerInstanceMemoryGib": 6,
     "containerInstanceDiskGb": 12
   },
+  "pdfBenchmark": {
+    "evidenceSha256": "b13528d5ffc9b6d814392534d6468897955bd78c6fa01a191c1bdc7f05fc29e7",
+    "maximumCandidates": 2,
+    "maximumInputBytes": 52428800,
+    "maximumMeasuredPeakRssBytes": 7876608,
+    "maximumOutputBytes": 52428800,
+    "maximumPages": 100,
+    "maximumWallMs": 45000
+  },
   "routeCpuBenchmark": {
     "version": 1,
     "sourceModuleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

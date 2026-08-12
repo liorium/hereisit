@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/pdf-engine-benchmark.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "identity", "limits", "records", "summary"],
+  "properties": {
+    "schema": { "const": "hereisit.pdf-engine-benchmark@1" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engineImageId",
+        "engineImageDigest",
+        "qpdfVersion",
+        "corpusManifestSha256",
+        "sourceLockSha256",
+        "localRunner"
+      ],
+      "properties": {
+        "engineImageId": { "$ref": "#/$defs/digest" },
+        "engineImageDigest": { "$ref": "#/$defs/digest" },
+        "qpdfVersion": { "const": "12.4.0" },
+        "corpusManifestSha256": { "$ref": "#/$defs/sha" },
+        "sourceLockSha256": { "$ref": "#/$defs/sha" },
+        "localRunner": { "pattern": "^pdf-lib-structural@[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repeats",
+        "maximumSamples",
+        "maximumWallMs",
+        "maximumSourceBytes",
+        "maximumOutputBytes",
+        "maximumPeakRssBytes",
+        "maximumParserPixels",
+        "maximumDiagnosticBytes"
+      ],
+      "properties": {
+        "repeats": { "const": 3 },
+        "maximumSamples": { "const": 51 },
+        "maximumWallMs": { "const": 300000 },
+        "maximumSourceBytes": { "const": 52428800 },
+        "maximumOutputBytes": { "const": 52428800 },
+        "maximumPeakRssBytes": { "const": 805306368 },
+        "maximumParserPixels": { "const": 20000000 },
+        "maximumDiagnosticBytes": { "const": 4096 }
+      }
+    },
+    "records": {
+      "type": "array",
+      "minItems": 17,
+      "maxItems": 17,
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strata", "measuredSamples", "nativeWins", "rejectedSafely", "passed"],
+      "properties": {
+        "strata": { "const": 17 },
+        "measuredSamples": { "type": "integer", "minimum": 0, "maximum": 51 },
+        "nativeWins": { "type": "integer", "minimum": 0, "maximum": 17 },
+        "rejectedSafely": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verdict",
+        "outputBytes",
+        "ratio",
+        "coldMs",
+        "warmMedianMs",
+        "peakRssBytes",
+        "candidateCount",
+        "semantic",
+        "visual"
+      ],
+      "properties": {
+        "verdict": { "enum": ["reduced", "original-retained", "rejected"] },
+        "outputBytes": { "type": ["integer", "null"], "minimum": 1, "maximum": 52428800 },
+        "ratio": { "type": ["number", "null"], "minimum": 0, "maximum": 2 },
+        "coldMs": { "type": "number", "minimum": 0, "maximum": 300000 },
+        "warmMedianMs": { "type": "number", "minimum": 0, "maximum": 300000 },
+        "peakRssBytes": { "type": "integer", "minimum": 0 },
+        "candidateCount": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "semantic": { "enum": ["passed", "failed", "not-applicable"] },
+        "visual": { "enum": ["passed", "failed", "not-applicable", "not-required"] }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stratum",
+        "sourceBytes",
+        "local",
+        "native",
+        "smallerOnly",
+        "nativeAdvantageRatio"
+      ],
+      "properties": {
+        "stratum": {
+          "enum": [
+            "text-vector",
+            "link",
+            "annotation",
+            "form",
+            "outline",
+            "attachment",
+            "layer",
+            "duplicate-resource",
+            "flate-heavy",
+            "jpeg-heavy",
+            "non-jpeg-image",
+            "scan",
+            "mixed",
+            "encrypted",
+            "corrupt",
+            "expansion",
+            "decompression-bomb"
+          ]
+        },
+        "sourceBytes": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+        "local": { "$ref": "#/$defs/runner" },
+        "native": { "$ref": "#/$defs/runner" },
+        "smallerOnly": { "type": "boolean" },
+        "nativeAdvantageRatio": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    }
+  }
+}

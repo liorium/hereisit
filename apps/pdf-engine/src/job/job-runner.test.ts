@@ -6,6 +6,7 @@ import type { EngineCreatePdfJobRequest } from "@hereisit/server-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createQpdfJobBudget,
+  createQpdfProcessRunner,
   listDescendantProcessGroups,
   measureProcessTreeUsage,
   PdfEngineUnavailableError,
@@ -139,6 +140,22 @@ describe("detached qpdf process cleanup", () => {
         readRss: async (pid) => stats.get(pid)?.rss ?? 0,
       }),
     ).resolves.toEqual({ rssBytes: 300, cpuMs: 1000, processGroups: [21] });
+  });
+
+  it("captures a nonzero usage sample even when qpdf exits before the periodic sampler", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-fast-usage-"));
+    roots.push(root);
+    const runner = createQpdfProcessRunner({
+      maxWallMs: 5000,
+      maxRssBytes: 128 * 1024 * 1024,
+      workspaceRoot: root,
+      workspaceHome: root,
+      workspaceTmp: root,
+      qpdfPath: process.execPath,
+    });
+    const result = await runner(["-e", "setTimeout(() => process.exit(0), 25)"]);
+    expect(result.kind).toBe("ok");
+    expect(result.usage?.peakRssBytes).toBeGreaterThan(0);
   });
 
   it("fails closed on persistent or non-race resource measurement errors", async () => {

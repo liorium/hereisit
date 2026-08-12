@@ -1,0 +1,58 @@
+name: PDF quality benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdf-quality-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "11.11.0"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the pinned native PDF engine
+        run: docker build --file apps/pdf-engine/Dockerfile --tag hereisit-pdf-engine:quality .
+      - name: Generate and gate the bounded corpus
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .artifacts
+          node scripts/create-pdf-compression-corpus.mjs --output .artifacts/pdf-corpus
+          node scripts/benchmark-pdf-engine.mjs \
+            --engine-image hereisit-pdf-engine:quality \
+            --corpus .artifacts/pdf-corpus/manifest.json \
+            --output .artifacts/pdf-benchmark.json
+          pnpm exec vitest run tests/create-pdf-compression-corpus.test.ts tests/benchmark-pdf-engine.test.ts
+      - name: Upload sanitized evidence only
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pdf-quality-benchmark-${{ github.sha }}
+          path: |
+            .artifacts/pdf-benchmark.json
+            .artifacts/pdf-benchmark-gate.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
