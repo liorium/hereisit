@@ -219,6 +219,16 @@ describe("pdf.optimize@1 results", () => {
         error: { ...status.error, code: "PIXEL_LIMIT_EXCEEDED" },
       }).success,
     ).toBe(false);
+    expect(
+      pdfOptimizeStatusResponseSchema.safeParse({
+        ...status,
+        error: {
+          code: "CANCELLED",
+          message: "PDF 압축을 취소했습니다.",
+          retryable: false,
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("publishes the fixed PDF error payload type", () => {
@@ -231,6 +241,15 @@ describe("pdf.optimize@1 results", () => {
       retryable: true,
     };
     expect(privateError).toBeDefined();
+
+    const cancelledError: PdfStatusError = {
+      // @ts-expect-error a cancelled error belongs only to the cancelled status branch.
+      code: "CANCELLED",
+      // @ts-expect-error a cancelled error message belongs only to the cancelled status branch.
+      message: "PDF 압축을 취소했습니다.",
+      retryable: false,
+    };
+    expect(cancelledError).toBeDefined();
   });
 });
 

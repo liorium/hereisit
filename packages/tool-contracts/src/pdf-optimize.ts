@@ -147,112 +147,80 @@ export const pdfOptimizePhaseSchema = z.enum([
 
 export type PdfOptimizePhase = z.infer<typeof pdfOptimizePhaseSchema>;
 
+function createPdfOptimizeErrorSchema<
+  Code extends string,
+  Message extends string,
+  Retryable extends boolean,
+>(code: Code, message: Message, retryable: Retryable) {
+  return z
+    .object({
+      code: z.literal(code),
+      message: z.literal(message),
+      retryable: z.literal(retryable),
+    })
+    .strict();
+}
+
+const pdfOptimizeFailureErrorSchemas = [
+  createPdfOptimizeErrorSchema(
+    "UNSUPPORTED_INPUT",
+    "이 PDF는 처리 서버에서 압축할 수 없습니다.",
+    false,
+  ),
+  createPdfOptimizeErrorSchema(
+    "UNSUPPORTED_FEATURE",
+    "이 PDF 기능은 처리 서버에서 지원하지 않습니다.",
+    false,
+  ),
+  createPdfOptimizeErrorSchema("INPUT_LIMIT_EXCEEDED", "PDF가 처리 제한을 초과했습니다.", false),
+  createPdfOptimizeErrorSchema(
+    "SERVER_PROCESSING_DISABLED",
+    "처리 서버를 현재 사용할 수 없습니다.",
+    true,
+  ),
+  createPdfOptimizeErrorSchema(
+    "LOCAL_FALLBACK_REQUIRED",
+    "브라우저에서 원본 PDF를 유지합니다.",
+    false,
+  ),
+  createPdfOptimizeErrorSchema("UPLOAD_EXPIRED", "PDF 업로드 시간이 만료되었습니다.", true),
+  createPdfOptimizeErrorSchema("UPLOAD_MISMATCH", "업로드한 PDF를 확인할 수 없습니다.", true),
+  createPdfOptimizeErrorSchema("QUEUE_UNAVAILABLE", "처리 서버를 현재 사용할 수 없습니다.", true),
+  createPdfOptimizeErrorSchema(
+    "ENGINE_TIMEOUT",
+    "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+    true,
+  ),
+  createPdfOptimizeErrorSchema("ENGINE_OOM", "처리 서버에서 PDF 압축을 완료하지 못했습니다.", true),
+  createPdfOptimizeErrorSchema(
+    "ENGINE_CRASH",
+    "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+    true,
+  ),
+  createPdfOptimizeErrorSchema("STORAGE_FAILURE", "PDF 처리 결과를 저장할 수 없습니다.", true),
+  createPdfOptimizeErrorSchema("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true),
+] as const;
+
+const pdfOptimizeCancelledErrorSchema = createPdfOptimizeErrorSchema(
+  "CANCELLED",
+  "PDF 압축을 취소했습니다.",
+  false,
+);
+const pdfOptimizeExpiredErrorSchema = createPdfOptimizeErrorSchema(
+  "EXPIRED",
+  "PDF 압축 결과가 만료되었습니다.",
+  false,
+);
+
+export const pdfOptimizeFailureErrorPayloadSchema = z.discriminatedUnion(
+  "code",
+  pdfOptimizeFailureErrorSchemas,
+);
+
 export const pdfOptimizeErrorPayloadSchema = z.discriminatedUnion("code", [
-  z
-    .object({
-      code: z.literal("UNSUPPORTED_INPUT"),
-      message: z.literal("이 PDF는 처리 서버에서 압축할 수 없습니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("UNSUPPORTED_FEATURE"),
-      message: z.literal("이 PDF 기능은 처리 서버에서 지원하지 않습니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("INPUT_LIMIT_EXCEEDED"),
-      message: z.literal("PDF가 처리 제한을 초과했습니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("SERVER_PROCESSING_DISABLED"),
-      message: z.literal("처리 서버를 현재 사용할 수 없습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("LOCAL_FALLBACK_REQUIRED"),
-      message: z.literal("브라우저에서 원본 PDF를 유지합니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("UPLOAD_EXPIRED"),
-      message: z.literal("PDF 업로드 시간이 만료되었습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("UPLOAD_MISMATCH"),
-      message: z.literal("업로드한 PDF를 확인할 수 없습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("QUEUE_UNAVAILABLE"),
-      message: z.literal("처리 서버를 현재 사용할 수 없습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("ENGINE_TIMEOUT"),
-      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("ENGINE_OOM"),
-      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("ENGINE_CRASH"),
-      message: z.literal("처리 서버에서 PDF 압축을 완료하지 못했습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("STORAGE_FAILURE"),
-      message: z.literal("PDF 처리 결과를 저장할 수 없습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("VERIFICATION_FAILED"),
-      message: z.literal("PDF 처리 결과를 확인할 수 없습니다."),
-      retryable: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("CANCELLED"),
-      message: z.literal("PDF 압축을 취소했습니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
-  z
-    .object({
-      code: z.literal("EXPIRED"),
-      message: z.literal("PDF 압축 결과가 만료되었습니다."),
-      retryable: z.literal(false),
-    })
-    .strict(),
+  ...pdfOptimizeFailureErrorSchemas,
+  pdfOptimizeCancelledErrorSchema,
+  pdfOptimizeExpiredErrorSchema,
 ]);
 
 export type PdfOptimizeErrorPayload = z.infer<typeof pdfOptimizeErrorPayloadSchema>;
@@ -291,7 +259,7 @@ const failedPdfOptimizeStatusSchema = z
     state: z.literal("failed"),
     phase: pdfOptimizePhaseSchema,
     phaseFraction: z.number().finite().min(0).max(1).nullable(),
-    error: pdfOptimizeErrorPayloadSchema,
+    error: pdfOptimizeFailureErrorPayloadSchema,
   })
   .strict();
 
@@ -301,13 +269,7 @@ const cancelledPdfOptimizeStatusSchema = z
     state: z.literal("cancelled"),
     phase: pdfOptimizePhaseSchema,
     phaseFraction: z.number().finite().min(0).max(1).nullable(),
-    error: z
-      .object({
-        code: z.literal("CANCELLED"),
-        message: z.literal("PDF 압축을 취소했습니다."),
-        retryable: z.literal(false),
-      })
-      .strict(),
+    error: pdfOptimizeCancelledErrorSchema,
   })
   .strict();
 
@@ -317,13 +279,7 @@ const expiredPdfOptimizeStatusSchema = z
     state: z.literal("expired"),
     phase: pdfOptimizePhaseSchema,
     phaseFraction: z.number().finite().min(0).max(1).nullable(),
-    error: z
-      .object({
-        code: z.literal("EXPIRED"),
-        message: z.literal("PDF 압축 결과가 만료되었습니다."),
-        retryable: z.literal(false),
-      })
-      .strict(),
+    error: pdfOptimizeExpiredErrorSchema,
   })
   .strict();
 
