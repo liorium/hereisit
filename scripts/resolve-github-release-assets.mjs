@@ -31,6 +31,7 @@ const releaseTagPattern = /^processing-release-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9
 const gitShaPattern = /^[0-9a-f]{40}$/;
 const securityScopes = Object.freeze([
   ["engine", "engine"],
+  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -38,6 +39,7 @@ const securityScopes = Object.freeze([
 ]);
 const securityGates = Object.freeze([
   ["imageEngine", "security-image-engine-license-gate.json"],
+  ["pdfEngine", "security-pdf-engine-license-gate.json"],
   ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
   ["vulnerability", "security-vulnerability-gate.json"],
 ]);
@@ -219,8 +221,8 @@ async function loadCandidate(candidateRoot, expectedReleaseId) {
     throw error;
   }
   if (
-    candidate.schema !== "hereisit-processing-candidate@1" ||
-    candidate.version !== 1 ||
+    candidate.schema !== "hereisit-processing-candidate@2" ||
+    candidate.version !== 2 ||
     candidate.state !== "finalized" ||
     candidate.releaseId !== expectedReleaseId ||
     typeof candidate.gitSha !== "string" ||
@@ -235,6 +237,8 @@ async function loadCandidate(candidateRoot, expectedReleaseId) {
 function expectedAssets(candidate, candidateBytes, releaseId) {
   const assets = assertObject(candidate.releaseAssets, "candidate release assets");
   const engine = assertObject(assets.engine, "candidate engine assets");
+  const pdfEngine = assertObject(assets.pdfEngine, "candidate PDF engine assets");
+  const pdfQuality = assertObject(assets.pdfQuality, "candidate PDF quality assets");
   const web = assertObject(assets.web, "candidate web assets");
   const evidence = assertObject(assets.evidence, "candidate evidence assets");
   const security = assertObject(assets.security, "candidate security assets");
@@ -318,6 +322,32 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
     generic("report", "processing-release-report.json", assets.report),
     generic("engine.oci", "image-engine-linux-amd64.oci.tar", engine.oci),
     generic("engine.docker", "image-engine-linux-amd64.docker.tar", engine.docker),
+    generic("pdfEngine.oci", "pdf-engine-linux-amd64.oci.tar", pdfEngine.oci),
+    generic("pdfEngine.docker", "pdf-engine-linux-amd64.docker.tar", pdfEngine.docker),
+    generic(
+      "pdfQuality.benchmark",
+      "pdf-engine-benchmark.json",
+      pdfQuality.benchmark,
+      MAXIMUM_SECURITY_EVIDENCE_BYTES,
+    ),
+    generic(
+      "pdfQuality.benchmarkSchema",
+      "pdf-engine-benchmark.schema.json",
+      pdfQuality.benchmarkSchema,
+      MAXIMUM_SECURITY_GATE_BYTES,
+    ),
+    generic(
+      "pdfQuality.releaseGate",
+      "pdf-engine-release-gate.json",
+      pdfQuality.releaseGate,
+      MAXIMUM_SECURITY_GATE_BYTES,
+    ),
+    generic(
+      "pdfQuality.releaseGateSchema",
+      "pdf-engine-release-gate.schema.json",
+      pdfQuality.releaseGateSchema,
+      MAXIMUM_SECURITY_GATE_BYTES,
+    ),
     generic("worker", "api-worker.mjs", assets.worker),
     generic("releaseInputs", "processing-release-inputs.json", assets.releaseInputs),
     generic("costModel", "live-cost-model.json", assets.costModel),
@@ -439,14 +469,21 @@ async function downloadAsset({ origin, repository, assetId, headers, expected, o
 function buildManifest({ releaseTag, targetSha, releaseIdNumber, resolved }) {
   const get = (key) => resolved.get(key);
   const payload = {
-    schema: "hereisit-processing-release-assets@1",
-    version: 1,
+    schema: "hereisit-processing-release-assets@2",
+    version: 2,
     apiOrigin: GITHUB_API_ORIGIN,
     repository: REPOSITORY,
     release: { id: releaseIdNumber, tag: releaseTag, targetSha },
     candidate: get("candidate"),
     report: get("report"),
     engine: { oci: get("engine.oci"), docker: get("engine.docker") },
+    pdfEngine: { oci: get("pdfEngine.oci"), docker: get("pdfEngine.docker") },
+    pdfQuality: {
+      benchmark: get("pdfQuality.benchmark"),
+      benchmarkSchema: get("pdfQuality.benchmarkSchema"),
+      releaseGate: get("pdfQuality.releaseGate"),
+      releaseGateSchema: get("pdfQuality.releaseGateSchema"),
+    },
     worker: get("worker"),
     releaseInputs: get("releaseInputs"),
     costModel: get("costModel"),

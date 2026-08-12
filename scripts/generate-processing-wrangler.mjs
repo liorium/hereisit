@@ -63,9 +63,13 @@ const inputKeys = new Set([
   "costAccountingMode",
   "logpushJobId",
   "containerApplicationId",
+  "pdfContainerApplicationId",
   "queueName",
   "dlqName",
+  "pdfQueueName",
+  "pdfDlqName",
   "engineImage",
+  "pdfEngineImage",
   "accountDailyWeightedUnitLimit",
   "anonymousDailyWeightedUnitLimit",
   "networkDailyWeightedUnitLimit",
@@ -246,14 +250,28 @@ function validateInput(input) {
   if (!UUID_PATTERN.test(value.containerApplicationId ?? "")) {
     throw new TypeError("containerApplicationId is invalid");
   }
+  if (!UUID_PATTERN.test(value.pdfContainerApplicationId ?? "")) {
+    throw new TypeError("pdfContainerApplicationId is invalid");
+  }
   if (value.costAccountingMode !== "bootstrap" && value.costAccountingMode !== "active") {
     throw new TypeError("costAccountingMode is invalid");
   }
+  const hasBootstrapContainer =
+    value.containerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID ||
+    value.pdfContainerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID;
   if (
-    (value.costAccountingMode === "bootstrap") !==
-    (value.containerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID)
+    (value.costAccountingMode === "bootstrap" && !hasBootstrapContainer) ||
+    (value.costAccountingMode === "active" && hasBootstrapContainer) ||
+    (value.costAccountingMode === "bootstrap" &&
+      value.containerApplicationId !== value.pdfContainerApplicationId)
   ) {
     throw new TypeError("Container application ID must match the cost accounting mode");
+  }
+  if (
+    value.costAccountingMode === "active" &&
+    value.containerApplicationId === value.pdfContainerApplicationId
+  ) {
+    throw new TypeError("image and PDF Container application IDs must be distinct");
   }
   if (value.costAccountingMode === "bootstrap" && value.rolloutPercent !== 0) {
     throw new TypeError("cost accounting bootstrap requires rollout zero");
@@ -265,6 +283,8 @@ function validateInput(input) {
     productAnalyticsDatasetName: `hereisit_product_usage_${environment}`,
     queueName: `hereisit-image-jobs-${environment}`,
     dlqName: `hereisit-image-jobs-dlq-${environment}`,
+    pdfQueueName: `hereisit-pdf-jobs-${environment}`,
+    pdfDlqName: `hereisit-pdf-jobs-dlq-${environment}`,
   };
   for (const [key, expectedName] of Object.entries(expected)) {
     if (value[key] !== expectedName) throw new TypeError(`${key} does not match ${environment}`);
@@ -274,6 +294,17 @@ function validateInput(input) {
   );
   if (typeof value.engineImage !== "string" || !imagePattern.test(value.engineImage)) {
     throw new TypeError("engineImage must be an immutable same-account Cloudflare registry digest");
+  }
+  const pdfImagePattern = new RegExp(
+    `^registry\\.cloudflare\\.com/(${value.accountId})/hereisit-pdf-engine@sha256:([0-9a-f]{64})$`,
+  );
+  if (typeof value.pdfEngineImage !== "string" || !pdfImagePattern.test(value.pdfEngineImage)) {
+    throw new TypeError(
+      "pdfEngineImage must be an immutable same-account Cloudflare registry digest",
+    );
+  }
+  if (new Set([value.queueName, value.dlqName, value.pdfQueueName, value.pdfDlqName]).size !== 4) {
+    throw new TypeError("processing queue identities must be distinct");
   }
   const appOrigins = normalizeOrigins(value.appOrigins, environment);
   for (const key of [
@@ -407,7 +438,10 @@ export function generateProcessingWrangler(input) {
     ],
     version_metadata: { binding: "WORKER_VERSION" },
     queues: {
-      producers: [{ binding: "IMAGE_JOBS", queue: value.queueName }],
+      producers: [
+        { binding: "IMAGE_JOBS", queue: value.queueName },
+        { binding: "PDF_JOBS", queue: value.pdfQueueName },
+      ],
       consumers: [
         {
           queue: value.queueName,
@@ -424,6 +458,21 @@ export function generateProcessingWrangler(input) {
           max_retries: 0,
           max_concurrency: 1,
         },
+        {
+          queue: value.pdfQueueName,
+          max_batch_size: 1,
+          max_batch_timeout: 1,
+          max_retries: 2,
+          dead_letter_queue: value.pdfDlqName,
+          max_concurrency: 1,
+        },
+        {
+          queue: value.pdfDlqName,
+          max_batch_size: 1,
+          max_batch_timeout: 1,
+          max_retries: 0,
+          max_concurrency: 1,
+        },
       ],
     },
     containers: [
@@ -435,11 +484,25 @@ export function generateProcessingWrangler(input) {
         rollout_active_grace_period: 180,
         rollout_step_percentage: [100],
       },
+      {
+        class_name: "PdfEngineContainer",
+        image: value.pdfEngineImage,
+        instance_type: "standard-2",
+        max_instances: 1,
+        rollout_active_grace_period: 180,
+        rollout_step_percentage: [100],
+      },
     ],
     durable_objects: {
-      bindings: [{ name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" }],
+      bindings: [
+        { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
+        { name: "PDF_ENGINE", class_name: "PdfEngineContainer" },
+      ],
     },
-    migrations: [{ tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] }],
+    migrations: [
+      { tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] },
+      { tag: "pdf-engine-v1", new_sqlite_classes: ["PdfEngineContainer"] },
+    ],
     ratelimits: rateLimits.map(([name, namespace_id, limit]) => ({
       name,
       namespace_id,
@@ -456,6 +519,7 @@ export function generateProcessingWrangler(input) {
       COST_ACCOUNTING_MODE: value.costAccountingMode,
       LOGPUSH_JOB_ID: String(value.logpushJobId),
       CONTAINER_APPLICATION_ID: value.containerApplicationId,
+      PDF_CONTAINER_APPLICATION_ID: value.pdfContainerApplicationId,
       WORKER_SCRIPT_NAME: `hereisit-processing-${environment}`,
       USAGE_LOG_PREFIX: `workers-trace-events/${environment}/`,
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: String(value.accountDailyWeightedUnitLimit),
@@ -479,6 +543,10 @@ export function generateProcessingWrangler(input) {
       ENGINE_IMAGE_DIGEST: value.engineImage,
       IMAGE_JOBS_QUEUE_NAME: value.queueName,
       IMAGE_JOBS_DLQ_NAME: value.dlqName,
+      PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
+      PDF_ENGINE_IMAGE_DIGEST: value.pdfEngineImage,
+      PDF_JOBS_QUEUE_NAME: value.pdfQueueName,
+      PDF_JOBS_DLQ_NAME: value.pdfDlqName,
     },
   };
 }
@@ -493,9 +561,13 @@ const cliScalarFields = {
   "product-analytics-dataset-name": "productAnalyticsDatasetName",
   "cost-accounting-mode": "costAccountingMode",
   "container-application-id": "containerApplicationId",
+  "pdf-container-application-id": "pdfContainerApplicationId",
   "queue-name": "queueName",
   "dlq-name": "dlqName",
+  "pdf-queue-name": "pdfQueueName",
+  "pdf-dlq-name": "pdfDlqName",
   "engine-image": "engineImage",
+  "pdf-engine-image": "pdfEngineImage",
   "live-cost-model-sha256": "liveCostModelSha256",
   "provider-usage-schema-sha256": "providerUsageSchemaSha256",
   "release-report-sha256": "releaseReportSha256",

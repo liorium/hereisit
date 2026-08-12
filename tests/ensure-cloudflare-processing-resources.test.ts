@@ -18,6 +18,8 @@ const config = {
   usageAnalyticsDatasetName: "hereisit_processing_usage_staging",
   queueName: "hereisit-image-jobs-staging",
   dlqName: "hereisit-image-jobs-dlq-staging",
+  pdfQueueName: "hereisit-pdf-jobs-staging",
+  pdfDlqName: "hereisit-pdf-jobs-dlq-staging",
 };
 
 function resources() {
@@ -63,6 +65,22 @@ function resources() {
         id: "2".repeat(32),
         accountId,
         name: config.dlqName,
+        deliveryPaused: true,
+        consumerCount: 0,
+        consumerScriptNames: [],
+      },
+      {
+        id: "3".repeat(32),
+        accountId,
+        name: config.pdfQueueName,
+        deliveryPaused: true,
+        consumerCount: 0,
+        consumerScriptNames: [],
+      },
+      {
+        id: "4".repeat(32),
+        accountId,
+        name: config.pdfDlqName,
         deliveryPaused: true,
         consumerCount: 0,
         consumerScriptNames: [],
@@ -116,6 +134,16 @@ describe("Cloudflare processing resource planner", () => {
         {
           type: "create-queue",
           name: config.queueName,
+          deliveryPaused: true,
+        },
+        {
+          type: "create-queue",
+          name: config.pdfDlqName,
+          deliveryPaused: true,
+        },
+        {
+          type: "create-queue",
+          name: config.pdfQueueName,
           deliveryPaused: true,
         },
         {
@@ -202,6 +230,16 @@ describe("Cloudflare processing resource planner", () => {
       d1: { databaseId: resources().d1[0]?.id, requestedLocationHint: "apac" },
       analytics: { datasetName: config.usageAnalyticsDatasetName, state: "binding-deferred" },
       logpush: { jobId: 41 },
+      queues: {
+        image: {
+          primary: { id: "1".repeat(32), deliveryPaused: true },
+          dlq: { id: "2".repeat(32), deliveryPaused: true },
+        },
+        pdf: {
+          primary: { id: "3".repeat(32), deliveryPaused: true },
+          dlq: { id: "4".repeat(32), deliveryPaused: true },
+        },
+      },
     });
     expect(manifest.verificationSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(manifest)).not.toMatch(/token|secret|access-key/i);

@@ -28,6 +28,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine
+      - name: Verify sealed PDF benchmark and release gate
+        run: |
+          node scripts/validate-pdf-benchmark-evidence.mjs \
+            --report docs/deployment/pdf-engine-benchmark.json \
+            --gate docs/deployment/pdf-engine-release-gate.json \
+            --benchmark-schema docs/deployment/pdf-engine-benchmark.schema.json \
+            --gate-schema docs/deployment/pdf-engine-release-gate.schema.json
       - run: pnpm verify
 
   browser:

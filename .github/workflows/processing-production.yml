@@ -42,6 +42,8 @@ jobs:
       PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_production
       QUEUE_NAME: hereisit-image-jobs-production
       DLQ_NAME: hereisit-image-jobs-dlq-production
+      PDF_QUEUE_NAME: hereisit-pdf-jobs-production
+      PDF_DLQ_NAME: hereisit-pdf-jobs-dlq-production
       WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
       WORKER_MODULE: .artifacts/build/api-worker.mjs
       PRODUCTION_API_ORIGIN: https://api.hereisit.app
@@ -78,7 +80,9 @@ jobs:
           test -z "$(git status --porcelain)"
           test "$(cat .artifacts/staging/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
           ENGINE_IMAGE="$(cat .artifacts/staging/cloudflare-image-digest.txt)"
+          PDF_ENGINE_IMAGE="$(cat .artifacts/staging/cloudflare-pdf-image-digest.txt)"
           [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
+          [[ "$PDF_ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
           node --input-type=module - <<'NODE'
           import { readFile } from "node:fs/promises";
           const root = ".artifacts/staging";
@@ -95,10 +99,13 @@ jobs:
           cp .artifacts/staging/source-sha.txt .artifacts/deployment/source-sha.txt
           cp .artifacts/staging/cloudflare-image-digest.txt \
             .artifacts/deployment/cloudflare-image-digest.txt
+          cp .artifacts/staging/cloudflare-pdf-image-digest.txt \
+            .artifacts/deployment/cloudflare-pdf-image-digest.txt
           printf '%s\n' "$STAGING_RUN_ID" > .artifacts/deployment/staging-run-id.txt
           SOURCE_SHA256="$(shasum -a 256 .artifacts/deployment/source-sha.txt | cut -d' ' -f1)"
           {
             echo "ENGINE_IMAGE=$ENGINE_IMAGE"
+            echo "PDF_ENGINE_IMAGE=$PDF_ENGINE_IMAGE"
             echo "SOURCE_SHA256=$SOURCE_SHA256"
           } >> "$GITHUB_ENV"
       - name: Install locked dependencies
@@ -196,6 +203,8 @@ jobs:
             --database-name "$D1_NAME" \
             --queue-name "$QUEUE_NAME" \
             --dlq-name "$DLQ_NAME" \
+            --pdf-queue-name "$PDF_QUEUE_NAME" \
+            --pdf-dlq-name "$PDF_DLQ_NAME" \
             --output .artifacts/runtime/resources-production.json
           cp .artifacts/runtime/resources-production.json .artifacts/deployment/resources-production.json
           PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
@@ -223,9 +232,13 @@ jobs:
               --cost-accounting-mode "$1" \
               --logpush-job-id "$PRODUCTION_LOGPUSH_JOB_ID" \
               --container-application-id "$2" \
+              --pdf-container-application-id "$3" \
               --queue-name "$QUEUE_NAME" \
               --dlq-name "$DLQ_NAME" \
               --engine-image "$ENGINE_IMAGE" \
+              --pdf-queue-name "$PDF_QUEUE_NAME" \
+              --pdf-dlq-name "$PDF_DLQ_NAME" \
+              --pdf-engine-image "$PDF_ENGINE_IMAGE" \
               --account-daily-weighted-unit-limit "$daily_limit" \
               --anonymous-daily-weighted-unit-limit "$daily_limit" \
               --network-daily-weighted-unit-limit "$daily_limit" \
@@ -253,7 +266,7 @@ jobs:
               --rollout-percent 0
           }
 
-          generate_config bootstrap 00000000-0000-4000-8000-000000000000
+          generate_config bootstrap 00000000-0000-4000-8000-000000000000 00000000-0000-4000-8000-000000000000
           pnpm exec wrangler deploy "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none --dry-run
           pnpm exec wrangler d1 migrations apply "$D1_NAME" \
@@ -331,7 +344,8 @@ jobs:
             --input .artifacts/runtime/container-inventory.json \
             --environment production \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --worker-script-name "$WORKER_SCRIPT_NAME")"
+            --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name ImageEngineContainer)"
           for attempt in {1..90}; do
             if pnpm exec wrangler containers info "$PRODUCTION_CONTAINER_APPLICATION_ID" \
                 > .artifacts/runtime/container-application.json \
@@ -343,6 +357,7 @@ jobs:
                 --environment production \
                 --account-id "$CLOUDFLARE_ACCOUNT_ID" \
                 --worker-script-name "$WORKER_SCRIPT_NAME" \
+                --container-class-name ImageEngineContainer \
                 --application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" \
                 --engine-image "$ENGINE_IMAGE" \
                 --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
@@ -356,7 +371,20 @@ jobs:
             sleep 10
           done
           rm -f .artifacts/runtime/container-application-verify.stderr
-          generate_config active "$PRODUCTION_CONTAINER_APPLICATION_ID"
+          PRODUCTION_PDF_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
+            --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name PdfEngineContainer)"
+          pnpm exec wrangler containers info "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+            > .artifacts/runtime/pdf-container-application.json
+          node scripts/resolve-cloudflare-container-application.mjs \
+            --mode verify --input .artifacts/runtime/pdf-container-application.json \
+            --output .artifacts/runtime/pdf-container-provider-scope.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name PdfEngineContainer \
+            --application-id "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+            --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          generate_config active "$PRODUCTION_CONTAINER_APPLICATION_ID" "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID"
           node scripts/verify-worker-version-chain.mjs \
             --mode capture-bootstrap \
             --worker-module "$WORKER_MODULE" \
@@ -437,6 +465,10 @@ jobs:
             --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - name: Verify public production policy remains local
         run: |
           node --input-type=module - <<'NODE'
@@ -573,6 +605,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       QUEUE_NAME: hereisit-image-jobs-production
       DLQ_NAME: hereisit-image-jobs-dlq-production
+      PDF_QUEUE_NAME: hereisit-pdf-jobs-production
+      PDF_DLQ_NAME: hereisit-pdf-jobs-dlq-production
       PRODUCTION_PAGES_ORIGIN: https://hereisit.app
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -608,11 +642,12 @@ jobs:
       - name: Arm primary queue failure cleanup
         id: resume-attempt
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
-      - name: Resume only primary delivery
+      - name: Resume image delivery for the image canary
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
-      - name: Verify primary resumed and DLQ remained paused
+        run: |
+          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+      - name: Verify the image canary queue isolation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -621,13 +656,48 @@ jobs:
             --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-      - name: Run authenticated production canary smoke
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run authenticated production image canary smoke
         env:
           PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
         run: |
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$PRODUCTION_PAGES_ORIGIN" \
             --output .artifacts/deployment/canary-smoke.json
+      - name: Isolate and resume PDF delivery for the PDF canary
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          pnpm exec wrangler queues resume-delivery "$PDF_QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run authenticated production PDF HTTP canary
+        env:
+          PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
+        run: |
+          node scripts/smoke-pdf-compress-server.mjs \
+            --page-origin "$PRODUCTION_PAGES_ORIGIN" \
+            --output .artifacts/deployment/pdf-canary-smoke.json
+      - name: Restore image delivery and pause PDF delivery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
+          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: processing-production-canary-${{ github.event.workflow_run.head_sha }}
@@ -635,10 +705,12 @@ jobs:
             .artifacts/deployment/source-sha.txt
             .artifacts/deployment/staging-run-id.txt
             .artifacts/deployment/cloudflare-image-digest.txt
+            .artifacts/deployment/cloudflare-pdf-image-digest.txt
             .artifacts/deployment/worker-version.json
             .artifacts/deployment/gate-results.json
             .artifacts/deployment/policy-smoke.json
             .artifacts/deployment/canary-smoke.json
+            .artifacts/deployment/pdf-canary-smoke.json
             .artifacts/deployment/resources-production.json
           compression-level: 0
           if-no-files-found: error
@@ -651,7 +723,12 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"

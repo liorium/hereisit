@@ -170,6 +170,8 @@ describe("processing production admission workflow", () => {
     expect(paths).toEqual([
       ".artifacts/admission/source-sha.txt",
       ".artifacts/admission/cloudflare-image-digest.txt",
+      ".artifacts/admission/cloudflare-pdf-image-digest.txt",
+      ".artifacts/admission/pdf-public-admission.json",
       ".artifacts/admission/transition-attestation.json",
       ".artifacts/admission/gate-result.json",
       ".artifacts/admission/policy-result.json",

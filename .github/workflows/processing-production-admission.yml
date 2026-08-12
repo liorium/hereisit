@@ -33,6 +33,8 @@ env:
   PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_production
   QUEUE_NAME: hereisit-image-jobs-production
   DLQ_NAME: hereisit-image-jobs-dlq-production
+  PDF_QUEUE_NAME: hereisit-pdf-jobs-production
+  PDF_DLQ_NAME: hereisit-pdf-jobs-dlq-production
   WRANGLER_CONFIG: .wrangler/generated/wrangler.production.jsonc
   WORKER_MODULE: .artifacts/build/api-worker.mjs
   PRODUCTION_API_ORIGIN: https://api.hereisit.app
@@ -87,7 +89,9 @@ jobs:
           test -z "$(git status --porcelain)"
           test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
           ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-image-digest.txt)"
+          PDF_ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-pdf-image-digest.txt)"
           [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
+          [[ "$PDF_ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
           node --input-type=module - <<'NODE'
           import { readFile } from "node:fs/promises";
           const exact = (value, keys, label) => {
@@ -117,6 +121,21 @@ jobs:
           mkdir -p .artifacts/admission .artifacts/build/api-worker-bundle .artifacts/runtime .wrangler/generated
           cp .artifacts/canary/source-sha.txt .artifacts/admission/source-sha.txt
           cp .artifacts/canary/cloudflare-image-digest.txt .artifacts/admission/cloudflare-image-digest.txt
+          cp .artifacts/canary/cloudflare-pdf-image-digest.txt .artifacts/admission/cloudflare-pdf-image-digest.txt
+          node --input-type=module - <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const pdfQuality = JSON.parse(await readFile("docs/deployment/pdf-engine-release-gate.json", "utf8"));
+          if (pdfQuality.publicAdmissionReady !== true) {
+            if (pdfQuality.visualProfilesMeasured !== 0 || pdfQuality.publicAdmissionReady !== false) {
+              throw new Error("PDF admission evidence is inconsistent");
+            }
+            await writeFile(
+              ".artifacts/admission/pdf-public-admission.json",
+              `${JSON.stringify({schema:"hereisit-pdf-public-admission@1",passed:false,reason:"PDF_PUBLIC_ADMISSION_BLOCKED_NO_VISUAL_EVIDENCE",visualProfilesMeasured:0,publicAdmissionReady:false})}\n`,
+              { flag: "wx", mode: 0o600 },
+            );
+          }
+          NODE
           for name in transition-attestation gate-result policy-result public-smoke-result recovery-result; do
             printf '%s\n' '{"schema":"hereisit-processing-production-admission-pending@1","passed":false}' > ".artifacts/admission/$name.json"
           done
@@ -124,6 +143,7 @@ jobs:
           SOURCE_SHA256="$(sha256sum .artifacts/admission/source-sha.txt | cut -d' ' -f1)"
           {
             echo "ENGINE_IMAGE=$ENGINE_IMAGE"
+            echo "PDF_ENGINE_IMAGE=$PDF_ENGINE_IMAGE"
             echo "SOURCE_SHA256=$SOURCE_SHA256"
           } >> "$GITHUB_ENV"
       - name: Install locked dependencies and rebuild release inputs
@@ -178,14 +198,29 @@ jobs:
           pnpm exec wrangler containers list --json > .artifacts/runtime/container-inventory.json
           PRODUCTION_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
             --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME")"
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name ImageEngineContainer)"
           pnpm exec wrangler containers info "$PRODUCTION_CONTAINER_APPLICATION_ID" > .artifacts/runtime/container-application.json
           node scripts/resolve-cloudflare-container-application.mjs \
             --mode verify --input .artifacts/runtime/container-application.json \
             --output .artifacts/runtime/container-provider-scope.json --environment production \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name ImageEngineContainer \
             --application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" --engine-image "$ENGINE_IMAGE" \
             --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          PRODUCTION_PDF_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
+            --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name PdfEngineContainer)"
+          pnpm exec wrangler containers info "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+            > .artifacts/runtime/pdf-container-application.json
+          node scripts/resolve-cloudflare-container-application.mjs \
+            --mode verify --input .artifacts/runtime/pdf-container-application.json \
+            --output .artifacts/runtime/pdf-container-provider-scope.json --environment production \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+            --container-class-name PdfEngineContainer \
+            --application-id "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+            --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
           generate_config() {
             local network_rate_limit_namespace_id rollout_args
@@ -207,7 +242,10 @@ jobs:
               --product-analytics-dataset-name "$PRODUCT_ANALYTICS_DATASET_NAME" \
               --cost-accounting-mode active --logpush-job-id "$PRODUCTION_LOGPUSH_JOB_ID" \
               --container-application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" \
+              --pdf-container-application-id "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
               --queue-name "$QUEUE_NAME" --dlq-name "$DLQ_NAME" --engine-image "$ENGINE_IMAGE" \
+              --pdf-queue-name "$PDF_QUEUE_NAME" --pdf-dlq-name "$PDF_DLQ_NAME" \
+              --pdf-engine-image "$PDF_ENGINE_IMAGE" \
               --account-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
               --anonymous-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
               --network-daily-weighted-unit-limit "$CANARY_DAILY_WEIGHTED_UNIT_LIMIT" \
@@ -268,8 +306,11 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
           node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - name: Deploy and attest the public Worker version
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -379,8 +420,12 @@ jobs:
           QUEUE_RECOVERY=0
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_RECOVERY=$?
           pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_RECOVERY=$?
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME" || QUEUE_RECOVERY=$?
+          pnpm exec wrangler queues pause-delivery "$PDF_DLQ_NAME" || QUEUE_RECOVERY=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
           VERSION_RECOVERY=0
           pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
           POLICY_RECOVERY=0
@@ -410,6 +455,8 @@ jobs:
           path: |
             .artifacts/admission/source-sha.txt
             .artifacts/admission/cloudflare-image-digest.txt
+            .artifacts/admission/cloudflare-pdf-image-digest.txt
+            .artifacts/admission/pdf-public-admission.json
             .artifacts/admission/transition-attestation.json
             .artifacts/admission/gate-result.json
             .artifacts/admission/policy-result.json
@@ -469,8 +516,12 @@ jobs:
           QUEUE_DISABLE=0
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_DISABLE=$?
           pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_DISABLE=$?
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME" || QUEUE_DISABLE=$?
+          pnpm exec wrangler queues pause-delivery "$PDF_DLQ_NAME" || QUEUE_DISABLE=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_DISABLE=$?
           POLICY_DISABLE=0
           node --input-type=module - <<'NODE' || POLICY_DISABLE=$?
           const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { evaluatePdfEngineReleaseGate } from "../scripts/benchmark-pdf-engine.mjs";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
 import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import { createBuiltProcessingCandidate } from "../scripts/create-processing-candidate.mjs";
@@ -29,7 +30,14 @@ const releaseId = "2026-07-20.1";
 const gitSha = "a".repeat(40);
 const now = "2026-07-20T12:00:00.000Z";
 const temporaryRoots: string[] = [];
-const securityScopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
+const securityScopes = [
+  "engine",
+  "pdf-engine",
+  "web-staging",
+  "web-production",
+  "worker",
+  "lockfile",
+] as const;
 
 async function fixture() {
   const parent = await mkdtemp(join(tmpdir(), "hereisit-release-report-verify-"));
@@ -125,6 +133,99 @@ async function fixture() {
     output: join(source, "image-engine-linux-amd64.docker.tar"),
   });
 
+  const pdfConfigBytes = Buffer.from(
+    canonicalJson({
+      architecture: "amd64",
+      os: "linux",
+      config: { Labels: { "app.hereisit.engine": "pdf" } },
+      rootfs: { type: "layers", diff_ids: [diffId] },
+    }),
+  );
+  const pdfConfigDigest = `sha256:${sha256Bytes(pdfConfigBytes)}`;
+  const pdfManifestBytes = Buffer.from(
+    canonicalJson({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: {
+        mediaType: "application/vnd.oci.image.config.v1+json",
+        digest: pdfConfigDigest,
+        size: pdfConfigBytes.byteLength,
+      },
+      layers: [
+        {
+          mediaType: "application/vnd.oci.image.layer.v1.tar",
+          digest: layerDigest,
+          size: layerBytes.byteLength,
+        },
+      ],
+    }),
+  );
+  const pdfManifestDigest = `sha256:${sha256Bytes(pdfManifestBytes)}`;
+  const pdfOciTree = join(build, "pdf-oci");
+  await mkdir(join(pdfOciTree, "blobs", "sha256"), { recursive: true });
+  await writeFile(join(pdfOciTree, "oci-layout"), canonicalJson({ imageLayoutVersion: "1.0.0" }));
+  await writeFile(
+    join(pdfOciTree, "index.json"),
+    canonicalJson({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.index.v1+json",
+      manifests: [
+        {
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          digest: pdfManifestDigest,
+          size: pdfManifestBytes.byteLength,
+          platform: { os: "linux", architecture: "amd64" },
+        },
+      ],
+    }),
+  );
+  await writeFile(join(pdfOciTree, "blobs", "sha256", pdfConfigDigest.slice(7)), pdfConfigBytes);
+  await writeFile(
+    join(pdfOciTree, "blobs", "sha256", pdfManifestDigest.slice(7)),
+    pdfManifestBytes,
+  );
+  await writeFile(join(pdfOciTree, "blobs", "sha256", layerDigest.slice(7)), layerBytes);
+  await createDeterministicTreeArchive({
+    root: pdfOciTree,
+    output: join(source, "pdf-engine-linux-amd64.oci.tar"),
+  });
+  const pdfDockerTree = join(build, "pdf-docker");
+  await mkdir(join(pdfDockerTree, "layer"), { recursive: true });
+  await writeFile(join(pdfDockerTree, "config.json"), pdfConfigBytes);
+  await writeFile(join(pdfDockerTree, "layer", "layer.tar"), layerBytes);
+  await writeFile(
+    join(pdfDockerTree, "manifest.json"),
+    canonicalJson([
+      {
+        Config: "config.json",
+        RepoTags: [`hereisit-pdf-engine:${gitSha}`],
+        Layers: ["layer/layer.tar"],
+      },
+    ]),
+  );
+  await createDeterministicTreeArchive({
+    root: pdfDockerTree,
+    output: join(source, "pdf-engine-linux-amd64.docker.tar"),
+  });
+  const pdfBenchmark = JSON.parse(
+    await readFile("docs/deployment/pdf-engine-benchmark.json", "utf8"),
+  );
+  pdfBenchmark.identity.engineImageId = pdfConfigDigest;
+  pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
+  await writeFile(join(source, "pdf-engine-benchmark.json"), canonicalJson(pdfBenchmark));
+  await writeFile(
+    join(source, "pdf-engine-benchmark.schema.json"),
+    await readFile("docs/deployment/pdf-engine-benchmark.schema.json"),
+  );
+  await writeFile(
+    join(source, "pdf-engine-release-gate.json"),
+    canonicalJson(evaluatePdfEngineReleaseGate(pdfBenchmark)),
+  );
+  await writeFile(
+    join(source, "pdf-engine-release-gate.schema.json"),
+    await readFile("docs/deployment/pdf-engine-release-gate.schema.json"),
+  );
+
   const costModel = createLiveCostModel(
     JSON.parse(readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8")),
   );
@@ -163,6 +264,7 @@ async function fixture() {
 
   const artifactHashes = {
     engine: configDigest.slice(7),
+    "pdf-engine": pdfConfigDigest.slice(7),
     "web-staging": staging.archiveSha256,
     "web-production": production.archiveSha256,
     worker: sha256Bytes(await readFile(join(source, "api-worker.mjs"))),
@@ -189,6 +291,19 @@ async function fixture() {
       policySha256: "2".repeat(64),
       exceptionsSha256: "3".repeat(64),
       baseImagesSha256: "4".repeat(64),
+    }),
+  );
+  await writeFile(
+    join(source, "security-pdf-engine-license-gate.json"),
+    canonicalJson({
+      schema: "hereisit-pdf-engine-license-gate@1",
+      passed: true,
+      qpdfVersion: "12.4.0",
+      sourceSha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+      sourceLockSha256: "1".repeat(64),
+      policySha256: "2".repeat(64),
+      licenseSha256: "3".repeat(64),
+      noticeSha256: "4".repeat(64),
     }),
   );
   await writeFile(
@@ -382,6 +497,11 @@ describe("processing release report verification", () => {
     const created = await createAndWriteProcessingReleaseReport(options(value));
     expect(created.artifacts).toEqual({
       engineDockerConfigDigest: value.candidate.engine.docker.configDigest,
+      pdfEngineDockerConfigDigest: value.candidate.pdfEngine.docker.configDigest,
+      pdfBenchmarkSha256: value.candidate.pdfQuality.benchmarkSha256,
+      pdfReleaseGateSha256: value.candidate.pdfQuality.releaseGateSha256,
+      pdfVisualProfilesMeasured: 0,
+      pdfPublicAdmissionReady: false,
       webStagingArchiveSha256: value.candidate.web.staging.archiveSha256,
       webProductionArchiveSha256: value.candidate.web.production.archiveSha256,
       workerSha256: value.candidate.releaseAssets.worker.sha256,

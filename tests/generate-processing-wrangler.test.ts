@@ -85,11 +85,17 @@ function validInput(environment: "staging" | "production" = "staging") {
     costAccountingMode: "active" as const,
     logpushJobId: 123,
     containerApplicationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    pdfContainerApplicationId: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
     queueName: `hereisit-image-jobs-${suffix}`,
     dlqName: `hereisit-image-jobs-dlq-${suffix}`,
+    pdfQueueName: `hereisit-pdf-jobs-${suffix}`,
+    pdfDlqName: `hereisit-pdf-jobs-dlq-${suffix}`,
     engineImage:
       "registry.cloudflare.com/0123456789abcdef0123456789abcdef/hereisit-image-engine@sha256:" +
       "d".repeat(64),
+    pdfEngineImage:
+      "registry.cloudflare.com/0123456789abcdef0123456789abcdef/hereisit-pdf-engine@sha256:" +
+      "f".repeat(64),
     accountDailyWeightedUnitLimit: 80_000_000_000,
     anonymousDailyWeightedUnitLimit: 8_000_000_000,
     networkDailyWeightedUnitLimit: 24_000_000_000,
@@ -141,12 +147,20 @@ function cliArguments(input: ReturnType<typeof validInput>, liveCostModelPath: s
     String(input.logpushJobId),
     "--container-application-id",
     input.containerApplicationId,
+    "--pdf-container-application-id",
+    input.pdfContainerApplicationId,
     "--queue-name",
     input.queueName,
     "--dlq-name",
     input.dlqName,
+    "--pdf-queue-name",
+    input.pdfQueueName,
+    "--pdf-dlq-name",
+    input.pdfDlqName,
     "--engine-image",
     input.engineImage,
+    "--pdf-engine-image",
+    input.pdfEngineImage,
     "--account-daily-weighted-unit-limit",
     String(input.accountDailyWeightedUnitLimit),
     "--anonymous-daily-weighted-unit-limit",
@@ -284,7 +298,10 @@ describe("processing Wrangler generator", () => {
       ],
       version_metadata: { binding: "WORKER_VERSION" },
       durable_objects: {
-        bindings: [{ name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" }],
+        bindings: [
+          { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
+          { name: "PDF_ENGINE", class_name: "PdfEngineContainer" },
+        ],
       },
       containers: [
         {
@@ -295,10 +312,18 @@ describe("processing Wrangler generator", () => {
           rollout_active_grace_period: 180,
           rollout_step_percentage: [100],
         },
+        {
+          class_name: "PdfEngineContainer",
+          image: input.pdfEngineImage,
+          instance_type: "standard-2",
+          max_instances: 1,
+          rollout_active_grace_period: 180,
+          rollout_step_percentage: [100],
+        },
       ],
       send_email: [{ name: "ALERT_EMAIL", destination_address: "operator@example.com" }],
     });
-    expect(config.queues.consumers).toHaveLength(2);
+    expect(config.queues.consumers).toHaveLength(4);
     expect(config.ratelimits.map((entry) => entry.namespace_id)).toEqual([
       "21001",
       "21002",
@@ -323,11 +348,26 @@ describe("processing Wrangler generator", () => {
       COST_ACCOUNTING_MODE: "active",
       LOGPUSH_JOB_ID: "123",
       CONTAINER_APPLICATION_ID: input.containerApplicationId,
+      PDF_CONTAINER_APPLICATION_ID: input.pdfContainerApplicationId,
       WORKER_SCRIPT_NAME: "hereisit-processing-staging",
       USAGE_LOG_PREFIX: "workers-trace-events/staging/",
       IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "0",
       ENGINE_IMAGE_DIGEST: input.engineImage,
+      PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
+      PDF_ENGINE_IMAGE_DIGEST: input.pdfEngineImage,
+      PDF_JOBS_QUEUE_NAME: input.pdfQueueName,
+      PDF_JOBS_DLQ_NAME: input.pdfDlqName,
     });
+    expect(config.queues.producers).toEqual([
+      { binding: "IMAGE_JOBS", queue: input.queueName },
+      { binding: "PDF_JOBS", queue: input.pdfQueueName },
+    ]);
+    expect(config.queues.consumers.map((entry) => entry.queue)).toEqual([
+      input.queueName,
+      input.dlqName,
+      input.pdfQueueName,
+      input.pdfDlqName,
+    ]);
     expect(JSON.stringify(config)).not.toMatch(/SECRET|TOKEN|r2\.dev|upload origin/i);
   });
 
@@ -392,6 +432,7 @@ describe("processing Wrangler generator", () => {
       ...validInput(),
       costAccountingMode: "bootstrap" as const,
       containerApplicationId: "00000000-0000-4000-8000-000000000000",
+      pdfContainerApplicationId: "00000000-0000-4000-8000-000000000000",
     };
 
     expect(generateProcessingWrangler(input).vars).toMatchObject({
@@ -421,6 +462,10 @@ describe("processing Wrangler generator", () => {
     ["wrong bucket", { bucketName: "hereisit-processing-production" }],
     ["wrong dataset", { usageAnalyticsDatasetName: "hereisit_processing_usage_production" }],
     ["wrong product dataset", { productAnalyticsDatasetName: "hereisit_product_usage_production" }],
+    ["wrong PDF queue", { pdfQueueName: "hereisit-pdf-jobs-production" }],
+    ["shared PDF queue", { pdfQueueName: "hereisit-image-jobs-staging" }],
+    ["mutable PDF image", { pdfEngineImage: "registry.cloudflare.com/account/repo:latest" }],
+    ["swapped PDF image", { pdfEngineImage: validInput().engineImage }],
     ["duplicate product namespace", { productAnalyticsRateLimitNamespaceId: "21005" }],
   ])("rejects %s", (_label, override) => {
     expect(() => generateProcessingWrangler({ ...validInput(), ...override })).toThrow();

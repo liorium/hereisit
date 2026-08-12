@@ -202,10 +202,12 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/source-sha.txt",
       ".artifacts/deployment/staging-run-id.txt",
       ".artifacts/deployment/cloudflare-image-digest.txt",
+      ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
       ".artifacts/deployment/canary-smoke.json",
+      ".artifacts/deployment/pdf-canary-smoke.json",
       ".artifacts/deployment/resources-production.json",
     ]);
   });

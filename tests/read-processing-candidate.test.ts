@@ -7,6 +7,7 @@ import {
   readProcessingCandidateField,
   readProcessingCandidateFile,
   runProcessingCandidateReader,
+  validateProcessingCandidate,
 } from "../scripts/read-processing-candidate.mjs";
 
 const releaseId = "2026-07-20.1";
@@ -140,6 +141,15 @@ describe("processing candidate reader", () => {
     expect(readProcessingCandidateField(manifest, "web.production.processingApiOrigin")).toBe(
       "https://api.hereisit.app",
     );
+  });
+
+  it("keeps legacy @1 parseable for history but never authorizes PDF public release", () => {
+    const legacy = candidate();
+    expect(validateProcessingCandidate(legacy)).toMatchObject({
+      schema: "hereisit-processing-candidate@1",
+      version: 1,
+    });
+    expect(() => readProcessingCandidateField(legacy, "pdfQuality.publicAdmissionReady")).toThrow();
   });
 
   it("accepts the reduced built-candidate release asset set", () => {

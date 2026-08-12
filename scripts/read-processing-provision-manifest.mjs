@@ -96,10 +96,26 @@ export function validateProcessingProvisionManifest(value) {
   const r2 = exact(manifest.r2, ["jobs", "usage"], "R2 provision");
   validateBucket(r2.jobs, `hereisit-processing-${suffix}`, 1, "job bucket provision");
   validateBucket(r2.usage, `hereisit-processing-usage-${suffix}`, 3, "usage bucket provision");
-  const queues = exact(manifest.queues, ["primary", "dlq"], "Queue provision");
-  validateQueue(queues.primary, `hereisit-image-jobs-${suffix}`, "primary Queue provision");
-  validateQueue(queues.dlq, `hereisit-image-jobs-dlq-${suffix}`, "DLQ provision");
-  if (queues.primary.id === queues.dlq.id) throw new TypeError("provisioned Queue IDs collide");
+  const queues = exact(manifest.queues, ["image", "pdf"], "Queue provision");
+  const imageQueues = exact(queues.image, ["primary", "dlq"], "image Queue provision");
+  const pdfQueues = exact(queues.pdf, ["primary", "dlq"], "PDF Queue provision");
+  validateQueue(
+    imageQueues.primary,
+    `hereisit-image-jobs-${suffix}`,
+    "image primary Queue provision",
+  );
+  validateQueue(imageQueues.dlq, `hereisit-image-jobs-dlq-${suffix}`, "image DLQ provision");
+  validateQueue(pdfQueues.primary, `hereisit-pdf-jobs-${suffix}`, "PDF primary Queue provision");
+  validateQueue(pdfQueues.dlq, `hereisit-pdf-jobs-dlq-${suffix}`, "PDF DLQ provision");
+  const queueIds = [
+    imageQueues.primary.id,
+    imageQueues.dlq.id,
+    pdfQueues.primary.id,
+    pdfQueues.dlq.id,
+  ];
+  if (new Set(queueIds).size !== queueIds.length) {
+    throw new TypeError("provisioned Queue IDs collide");
+  }
   const analytics = exact(manifest.analytics, ["datasetName", "state"], "Analytics provision");
   if (
     analytics.datasetName !== `hereisit_processing_usage_${suffix}` ||
@@ -121,8 +137,10 @@ const fieldReaders = Object.freeze({
   "d1.databaseId": (manifest) => manifest.d1.databaseId,
   "r2.jobs.name": (manifest) => manifest.r2.jobs.name,
   "r2.usage.name": (manifest) => manifest.r2.usage.name,
-  "queues.primary.id": (manifest) => manifest.queues.primary.id,
-  "queues.dlq.id": (manifest) => manifest.queues.dlq.id,
+  "queues.image.primary.id": (manifest) => manifest.queues.image.primary.id,
+  "queues.image.dlq.id": (manifest) => manifest.queues.image.dlq.id,
+  "queues.pdf.primary.id": (manifest) => manifest.queues.pdf.primary.id,
+  "queues.pdf.dlq.id": (manifest) => manifest.queues.pdf.dlq.id,
   "analytics.datasetName": (manifest) => manifest.analytics.datasetName,
   "logpush.jobId": (manifest) => manifest.logpush.jobId,
 });

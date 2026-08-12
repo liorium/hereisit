@@ -18,6 +18,8 @@ const config = {
   usageAnalyticsDatasetName: "hereisit_processing_usage_staging",
   queueName: "hereisit-image-jobs-staging",
   dlqName: "hereisit-image-jobs-dlq-staging",
+  pdfQueueName: "hereisit-pdf-jobs-staging",
+  pdfDlqName: "hereisit-pdf-jobs-dlq-staging",
 };
 const inventory = {
   d1: [
@@ -65,6 +67,22 @@ const inventory = {
       consumerCount: 0,
       consumerScriptNames: [],
     },
+    {
+      id: "3".repeat(32),
+      accountId,
+      name: config.pdfQueueName,
+      deliveryPaused: true,
+      consumerCount: 0,
+      consumerScriptNames: [],
+    },
+    {
+      id: "4".repeat(32),
+      accountId,
+      name: config.pdfDlqName,
+      deliveryPaused: true,
+      consumerCount: 0,
+      consumerScriptNames: [],
+    },
   ],
   logpush: [
     {
@@ -100,6 +118,7 @@ describe("processing provision manifest reader", () => {
     expect(validateProcessingProvisionManifest(manifest)).toBe(manifest);
     expect(readProcessingProvisionField(manifest, "d1.databaseId")).toBe(inventory.d1[0]?.id);
     expect(readProcessingProvisionField(manifest, "logpush.jobId")).toBe(41);
+    expect(readProcessingProvisionField(manifest, "queues.pdf.primary.id")).toBe("3".repeat(32));
     expect(() => readProcessingProvisionField(manifest, "logpush.destination")).toThrow();
   });
 

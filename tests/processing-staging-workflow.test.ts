@@ -136,7 +136,7 @@ describe("processing staging workflow", () => {
     const cleanupStep = deploy.indexOf(
       "      - name: Re-pause and verify both queues after any failed delivery attempt",
     );
-    const cleanup = deploy.indexOf('wrangler queues pause-delivery "$QUEUE_NAME"');
+    const cleanup = deploy.indexOf('wrangler queues pause-delivery "$QUEUE_NAME"', cleanupStep);
 
     expect(arm).toBeGreaterThan(verifyPages);
     expect(resume).toBeGreaterThan(arm);
@@ -241,9 +241,11 @@ describe("processing staging workflow", () => {
     expect(paths).toEqual([
       ".artifacts/deployment/source-sha.txt",
       ".artifacts/deployment/cloudflare-image-digest.txt",
+      ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/smoke-result.json",
+      ".artifacts/deployment/pdf-smoke-result.json",
     ]);
     expect(upload).toContain("if-no-files-found: error");
     expect(upload).toContain("retention-days: 7");

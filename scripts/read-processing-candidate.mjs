@@ -20,6 +20,7 @@ const workersSubdomainLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 const environments = Object.freeze(["staging", "production"]);
 const securityScopes = Object.freeze([
   ["engine", "engine"],
+  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -70,7 +71,7 @@ function validateArtifact(value, label, expectedPath, maximumBytes) {
   return artifact;
 }
 
-function validateSecurityReleaseAssets(value) {
+function validateSecurityReleaseAssets(value, dual) {
   const security = assertObject(value, "candidate security release assets");
   assertExactKeys(
     security,
@@ -80,7 +81,9 @@ function validateSecurityReleaseAssets(value) {
   const gates = assertObject(security.gates, "candidate security gate assets");
   assertExactKeys(
     gates,
-    ["imageEngine", "applicationSupplyChain", "vulnerability"],
+    dual
+      ? ["imageEngine", "pdfEngine", "applicationSupplyChain", "vulnerability"]
+      : ["imageEngine", "applicationSupplyChain", "vulnerability"],
     "candidate security gate assets",
   );
   validateArtifact(
@@ -89,6 +92,14 @@ function validateSecurityReleaseAssets(value) {
     "security-image-engine-license-gate.json",
     maximumSecurityGateBytes,
   );
+  if (dual) {
+    validateArtifact(
+      gates.pdfEngine,
+      "candidate PDF-engine license gate asset",
+      "security-pdf-engine-license-gate.json",
+      maximumSecurityGateBytes,
+    );
+  }
   validateArtifact(
     gates.applicationSupplyChain,
     "candidate application supply-chain gate asset",
@@ -108,10 +119,10 @@ function validateSecurityReleaseAssets(value) {
     const group = assertObject(security[groupName], `candidate security ${groupName} assets`);
     assertExactKeys(
       group,
-      securityScopes.map(([key]) => key),
+      securityScopes.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
       `candidate security ${groupName} assets`,
     );
-    for (const [key, scope] of securityScopes) {
+    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
       validateArtifact(
         group[key],
         `candidate ${scope} security ${groupName} asset`,
@@ -198,10 +209,11 @@ function validateDockerImageIdentity(value) {
   return identity;
 }
 
-function validateEngine(value, gitSha) {
-  const engine = assertObject(value, "candidate engine identity");
-  assertExactKeys(engine, ["loadedImage", "oci", "docker"], "candidate engine identity");
-  if (engine.loadedImage !== `hereisit-image-engine:${gitSha}`) {
+function validateEngine(value, gitSha, kind = "image") {
+  const label = kind === "pdf" ? "candidate PDF engine identity" : "candidate engine identity";
+  const engine = assertObject(value, label);
+  assertExactKeys(engine, ["loadedImage", "oci", "docker"], label);
+  if (engine.loadedImage !== `hereisit-${kind}-engine:${gitSha}`) {
     throw new TypeError("candidate loaded image is malformed or does not match the git SHA");
   }
   const oci = validateOciImageIdentity(engine.oci);
@@ -216,9 +228,39 @@ function validateEngine(value, gitSha) {
   return engine;
 }
 
-function validateReleaseAssets(value, state, releaseId, web) {
+function validatePdfQuality(value) {
+  const quality = assertObject(value, "candidate PDF quality identity");
+  assertExactKeys(
+    quality,
+    ["benchmarkSha256", "releaseGateSha256", "visualProfilesMeasured", "publicAdmissionReady"],
+    "candidate PDF quality identity",
+  );
+  assertSha256(quality.benchmarkSha256, "candidate PDF benchmark hash");
+  assertSha256(quality.releaseGateSha256, "candidate PDF release gate hash");
+  assertNonNegativeSafeInteger(
+    quality.visualProfilesMeasured,
+    "candidate PDF visual profile count",
+  );
+  if (typeof quality.publicAdmissionReady !== "boolean") {
+    throw new TypeError("candidate PDF public admission state is invalid");
+  }
+  if (quality.publicAdmissionReady && quality.visualProfilesMeasured < 1) {
+    throw new TypeError("candidate PDF public admission requires visual evidence");
+  }
+  return quality;
+}
+
+function validateReleaseAssets(value, state, releaseId, web, dual) {
   const assets = assertObject(value, "candidate release assets");
-  const builtKeys = ["engine", "worker", "web", "releaseInputs", "costModel", "security"];
+  const builtKeys = [
+    "engine",
+    ...(dual ? ["pdfEngine", "pdfQuality"] : []),
+    "worker",
+    "web",
+    "releaseInputs",
+    "costModel",
+    "security",
+  ];
   const finalizedKeys = ["report", ...builtKeys, "evidence"];
   assertExactKeys(
     assets,
@@ -234,6 +276,50 @@ function validateReleaseAssets(value, state, releaseId, web) {
     "candidate Docker release asset",
     "image-engine-linux-amd64.docker.tar",
   );
+  if (dual) {
+    const pdfEngine = assertObject(assets.pdfEngine, "candidate PDF engine release assets");
+    assertExactKeys(pdfEngine, ["oci", "docker"], "candidate PDF engine release assets");
+    validateArtifact(
+      pdfEngine.oci,
+      "candidate PDF OCI release asset",
+      "pdf-engine-linux-amd64.oci.tar",
+    );
+    validateArtifact(
+      pdfEngine.docker,
+      "candidate PDF Docker release asset",
+      "pdf-engine-linux-amd64.docker.tar",
+    );
+    const pdfQuality = assertObject(assets.pdfQuality, "candidate PDF quality release assets");
+    assertExactKeys(
+      pdfQuality,
+      ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
+      "candidate PDF quality release assets",
+    );
+    validateArtifact(
+      pdfQuality.benchmark,
+      "candidate PDF benchmark asset",
+      "pdf-engine-benchmark.json",
+      maximumSecurityEvidenceBytes,
+    );
+    validateArtifact(
+      pdfQuality.benchmarkSchema,
+      "candidate PDF benchmark schema asset",
+      "pdf-engine-benchmark.schema.json",
+      maximumSecurityGateBytes,
+    );
+    validateArtifact(
+      pdfQuality.releaseGate,
+      "candidate PDF release gate asset",
+      "pdf-engine-release-gate.json",
+      maximumSecurityGateBytes,
+    );
+    validateArtifact(
+      pdfQuality.releaseGateSchema,
+      "candidate PDF release gate schema asset",
+      "pdf-engine-release-gate.schema.json",
+      maximumSecurityGateBytes,
+    );
+  }
   validateArtifact(assets.worker, "candidate Worker release asset", "api-worker.mjs");
   validateArtifact(
     assets.releaseInputs,
@@ -241,7 +327,7 @@ function validateReleaseAssets(value, state, releaseId, web) {
     "processing-release-inputs.json",
   );
   validateArtifact(assets.costModel, "candidate live cost model asset", "live-cost-model.json");
-  validateSecurityReleaseAssets(assets.security);
+  validateSecurityReleaseAssets(assets.security, dual);
 
   const webAssets = assertObject(assets.web, "candidate web release assets");
   assertExactKeys(webAssets, environments, "candidate web release assets");
@@ -273,6 +359,9 @@ function validateReleaseAssets(value, state, releaseId, web) {
 
 export function validateProcessingCandidate(value) {
   const manifest = assertObject(value, "processing candidate");
+  const dual = manifest.schema === "hereisit-processing-candidate@2" && manifest.version === 2;
+  const legacy = manifest.schema === "hereisit-processing-candidate@1" && manifest.version === 1;
+  if (!dual && !legacy) throw new TypeError("processing candidate schema is invalid");
   assertExactKeys(
     manifest,
     [
@@ -282,6 +371,7 @@ export function validateProcessingCandidate(value) {
       "releaseId",
       "gitSha",
       "engine",
+      ...(dual ? ["pdfEngine", "pdfQuality"] : []),
       "web",
       "security",
       "providerUsage",
@@ -292,9 +382,6 @@ export function validateProcessingCandidate(value) {
     ],
     "processing candidate",
   );
-  if (manifest.schema !== "hereisit-processing-candidate@1" || manifest.version !== 1) {
-    throw new TypeError("processing candidate schema is invalid");
-  }
   assertSha256(manifest.verificationSha256, "processing candidate verification hash");
   const { verificationSha256: _verificationSha256, ...payload } = manifest;
   if (sha256Canonical(payload) !== manifest.verificationSha256) {
@@ -306,6 +393,8 @@ export function validateProcessingCandidate(value) {
   assertPattern(manifest.releaseId, releaseIdPattern, "processing candidate release ID");
   assertPattern(manifest.gitSha, gitShaPattern, "processing candidate git SHA");
   const engine = validateEngine(manifest.engine, manifest.gitSha);
+  const pdfEngine = dual ? validateEngine(manifest.pdfEngine, manifest.gitSha, "pdf") : undefined;
+  const pdfQuality = dual ? validatePdfQuality(manifest.pdfQuality) : undefined;
 
   const web = assertObject(manifest.web, "candidate web identities");
   assertExactKeys(web, environments, "candidate web identities");
@@ -331,6 +420,7 @@ export function validateProcessingCandidate(value) {
     manifest.state,
     manifest.releaseId,
     web,
+    dual,
   );
   if (releaseAssets.releaseInputs.sha256 !== releaseInputs.sha256) {
     throw new TypeError("candidate release inputs asset does not match its identity");
@@ -341,6 +431,7 @@ export function validateProcessingCandidate(value) {
   return {
     ...manifest,
     engine,
+    ...(dual ? { pdfEngine, pdfQuality } : {}),
     web,
     security,
     providerUsage,
@@ -356,6 +447,9 @@ const fieldReaders = Object.freeze({
   gitSha: (candidate) => candidate.gitSha,
   "engine.loadedImage": (candidate) => candidate.engine.loadedImage,
   "engine.oci.configDigest": (candidate) => candidate.engine.oci.configDigest,
+  "pdfEngine.loadedImage": (candidate) => candidate.pdfEngine.loadedImage,
+  "pdfEngine.oci.configDigest": (candidate) => candidate.pdfEngine.oci.configDigest,
+  "pdfQuality.publicAdmissionReady": (candidate) => candidate.pdfQuality.publicAdmissionReady,
   "security.trivyDbDigest": (candidate) => candidate.security.trivyDbDigest,
   "providerUsage.schemaSha256": (candidate) => candidate.providerUsage.schemaSha256,
   "releaseInputs.sha256": (candidate) => candidate.releaseInputs.sha256,
