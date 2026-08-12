@@ -1495,6 +1495,7 @@ async function consumeServerJob(
       recordContainerActivity(env.DB, {
         segmentId: crypto.randomUUID(),
         contactedAt,
+        engineIdentity: message.contractId === "pdf.optimize@1" ? "pdf:slot-0" : "image:slot-0",
       }));
   const contactEngine = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
     await recordEngineActivity(now());

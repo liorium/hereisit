@@ -179,8 +179,12 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
     MAINTAINER_SESSION_HASHES: "[]",
     ENGINE_INSTANCE_NAME: "image-slot-0",
     ENGINE_IMAGE_DIGEST: "local-dockerfile",
+    PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
+    PDF_ENGINE_IMAGE_DIGEST: "local-dockerfile",
     IMAGE_JOBS_QUEUE_NAME: "hereisit-image-jobs-local",
     IMAGE_JOBS_DLQ_NAME: "hereisit-image-jobs-dlq-local",
+    PDF_JOBS_QUEUE_NAME: "hereisit-pdf-jobs-local",
+    PDF_JOBS_DLQ_NAME: "hereisit-pdf-jobs-dlq-local",
     ABUSE_HMAC_SECRET_CURRENT: currentSecret,
     ABUSE_HMAC_SECRET_PREVIOUS: previousSecret,
     ANALYTICS_READ_TOKEN: "non-working-read-token",
@@ -652,6 +656,8 @@ describe("strict operational configuration", () => {
     ["RELEASE_REPORT_SHA256", "short"],
     ["ENGINE_INSTANCE_NAME", "image-slot-1"],
     ["ENGINE_IMAGE_DIGEST", ""],
+    ["PDF_ENGINE_INSTANCE_NAME", "pdf-slot-1"],
+    ["PDF_ENGINE_IMAGE_DIGEST", ""],
   ])("rejects malformed immutable release setting %s", async (name, value) => {
     await expect(parseOperationalConfig(makeEnv({ [name]: value }))).rejects.toThrow();
   });
@@ -706,6 +712,10 @@ describe("Wrangler source-of-truth and generated environment", () => {
         binding: "IMAGE_JOBS",
         queue: "hereisit-image-jobs-local",
       },
+      {
+        binding: "PDF_JOBS",
+        queue: "hereisit-pdf-jobs-local",
+      },
     ]);
     expect(config.queues?.consumers).toEqual([
       {
@@ -723,6 +733,21 @@ describe("Wrangler source-of-truth and generated environment", () => {
         max_retries: 0,
         max_concurrency: 1,
       },
+      {
+        queue: "hereisit-pdf-jobs-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 2,
+        dead_letter_queue: "hereisit-pdf-jobs-dlq-local",
+        max_concurrency: 1,
+      },
+      {
+        queue: "hereisit-pdf-jobs-dlq-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 0,
+        max_concurrency: 1,
+      },
     ]);
     expect(config.containers).toEqual([
       {
@@ -734,12 +759,23 @@ describe("Wrangler source-of-truth and generated environment", () => {
         rollout_active_grace_period: 180,
         rollout_step_percentage: [100],
       },
+      {
+        class_name: "PdfEngineContainer",
+        image: "../pdf-engine/Dockerfile",
+        image_build_context: "../..",
+        instance_type: "standard-2",
+        max_instances: 1,
+        rollout_active_grace_period: 180,
+        rollout_step_percentage: [100],
+      },
     ]);
     expect(config.durable_objects?.bindings).toEqual([
       { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
+      { name: "PDF_ENGINE", class_name: "PdfEngineContainer" },
     ]);
     expect(config.migrations).toEqual([
       { tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] },
+      { tag: "pdf-engine-v1", new_sqlite_classes: ["PdfEngineContainer"] },
     ]);
     expect(config.ratelimits).toEqual([
       {

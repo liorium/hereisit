@@ -34,7 +34,7 @@ function chunked(text: string, chunkSize: number): ReadableStream<Uint8Array> {
 
 const options = {
   scriptName: "hereisit-processing-staging",
-  allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
+  allowedEntrypoints: new Set(["", "ImageEngineContainer", "PdfEngineContainer"]),
   createDigest: () => ({
     update: async () => undefined,
     finish: async () => "a".repeat(64),
@@ -75,6 +75,23 @@ describe("Workers Trace Events usage-log parser", () => {
       ],
       decompressedBytes: new TextEncoder().encode(input).byteLength,
     });
+  });
+
+  it("accepts both processing containers and rejects an unknown entrypoint", async () => {
+    const input = `${JSON.stringify(record({ Entrypoint: "ImageEngineContainer" }))}\n${JSON.stringify(
+      record({ Entrypoint: "PdfEngineContainer", CPUTimeMs: 3 }),
+    )}\n`;
+
+    await expect(parseTraceEventNdjson(chunked(input, 7), options)).resolves.toMatchObject({
+      invocationCount: 2,
+      hours: [{ invocationCount: 2, workerCpuMs: 10, handlerInvocationCount: 0 }],
+    });
+    await expect(
+      parseTraceEventNdjson(
+        chunked(`${JSON.stringify(record({ Entrypoint: "UnknownContainer" }))}\n`, 7),
+        options,
+      ),
+    ).rejects.toThrow();
   });
 
   it.each([
