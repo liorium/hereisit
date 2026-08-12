@@ -736,41 +736,25 @@ export const pdfEngineJobStatusSchema = z.discriminatedUnion("state", [
   cancelledPdfEngineJobStatusSchema,
 ]);
 
-function createServerEngineStatusSchema<StatusSchema extends z.ZodType>(
-  tool: "image.optimize" | "pdf.optimize",
-  statusSchema: StatusSchema,
-) {
-  return z
-    .object({ tool: z.literal(tool) })
-    .passthrough()
-    .superRefine((value, context) => {
-      const { tool: _, ...status } = value;
-      const parsed = statusSchema.safeParse(status);
-      if (!parsed.success) {
-        context.addIssue({
-          code: "custom",
-          message: "Engine status must match its tool contract.",
-        });
-      }
-    });
-}
+const imageServerEngineJobStatusSchema = z
+  .object({
+    tool: z.literal("image.optimize"),
+    status: imageEngineJobStatusSchema,
+  })
+  .strict();
 
-const imageServerEngineJobStatusSchema = createServerEngineStatusSchema(
-  "image.optimize",
-  imageEngineJobStatusSchema,
-);
-const pdfServerEngineJobStatusSchema = createServerEngineStatusSchema(
-  "pdf.optimize",
-  pdfEngineJobStatusSchema,
-);
+const pdfServerEngineJobStatusSchema = z
+  .object({
+    tool: z.literal("pdf.optimize"),
+    status: pdfEngineJobStatusSchema,
+  })
+  .strict();
 
 export const serverEngineJobStatusSchema = z.discriminatedUnion("tool", [
   imageServerEngineJobStatusSchema,
   pdfServerEngineJobStatusSchema,
 ]);
 
-export type ServerEngineJobStatus =
-  | (ImageEngineJobStatus & { tool: "image.optimize" })
-  | (PdfEngineJobStatus & { tool: "pdf.optimize" });
+export type ServerEngineJobStatus = z.infer<typeof serverEngineJobStatusSchema>;
 export type EngineJobStatus = ImageEngineJobStatus;
 export const engineJobStatusSchema = imageEngineJobStatusSchema;

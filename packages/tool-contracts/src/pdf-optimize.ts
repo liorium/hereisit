@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   createToolJobCreateResponseSchema,
-  createToolJobStatusEnvelopeSchema,
   createToolJobUploadDescriptorSchema,
   TOOL_JOB_CONTRACT_ID,
 } from "./tool-job";
@@ -258,29 +257,83 @@ export const pdfOptimizeErrorPayloadSchema = z.discriminatedUnion("code", [
 
 export type PdfOptimizeErrorPayload = z.infer<typeof pdfOptimizeErrorPayloadSchema>;
 
-export const pdfOptimizeStatusResponseSchema = createToolJobStatusEnvelopeSchema(
-  pdfOptimizePhaseSchema,
-  pdfOptimizeResultDescriptorSchema,
-).superRefine((status, context) => {
-  if (
-    status.state === "succeeded" &&
-    (status.phase !== "completed" || status.phaseFraction !== 1)
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "성공한 PDF 작업은 완료 단계여야 합니다.",
-      path: ["phase"],
-    });
-  }
+const pdfOptimizeStatusCommonShape = {
+  contract: z.literal(TOOL_JOB_CONTRACT_ID),
+  jobId: z.uuid(),
+  sequence: z.number().int().min(0),
+  attempt: z.number().int().min(0),
+  actualWeightedUnits: z.number().finite().min(0).optional(),
+  updatedAt: z.iso.datetime({ offset: true }),
+};
 
-  if (status.error && !pdfOptimizeErrorPayloadSchema.safeParse(status.error).success) {
-    context.addIssue({
-      code: "custom",
-      message: "PDF 상태 오류는 공개 허용 목록과 일치해야 합니다.",
-      path: ["error"],
-    });
-  }
-});
+const pendingPdfOptimizeStatusSchema = z
+  .object({
+    ...pdfOptimizeStatusCommonShape,
+    state: z.enum(["created", "uploading", "queued", "running"]),
+    phase: pdfOptimizePhaseSchema,
+    phaseFraction: z.number().finite().min(0).max(1).nullable(),
+  })
+  .strict();
+
+const succeededPdfOptimizeStatusSchema = z
+  .object({
+    ...pdfOptimizeStatusCommonShape,
+    state: z.literal("succeeded"),
+    phase: z.literal("completed"),
+    phaseFraction: z.literal(1),
+    result: pdfOptimizeResultDescriptorSchema,
+  })
+  .strict();
+
+const failedPdfOptimizeStatusSchema = z
+  .object({
+    ...pdfOptimizeStatusCommonShape,
+    state: z.literal("failed"),
+    phase: pdfOptimizePhaseSchema,
+    phaseFraction: z.number().finite().min(0).max(1).nullable(),
+    error: pdfOptimizeErrorPayloadSchema,
+  })
+  .strict();
+
+const cancelledPdfOptimizeStatusSchema = z
+  .object({
+    ...pdfOptimizeStatusCommonShape,
+    state: z.literal("cancelled"),
+    phase: pdfOptimizePhaseSchema,
+    phaseFraction: z.number().finite().min(0).max(1).nullable(),
+    error: z
+      .object({
+        code: z.literal("CANCELLED"),
+        message: z.literal("PDF 압축을 취소했습니다."),
+        retryable: z.literal(false),
+      })
+      .strict(),
+  })
+  .strict();
+
+const expiredPdfOptimizeStatusSchema = z
+  .object({
+    ...pdfOptimizeStatusCommonShape,
+    state: z.literal("expired"),
+    phase: pdfOptimizePhaseSchema,
+    phaseFraction: z.number().finite().min(0).max(1).nullable(),
+    error: z
+      .object({
+        code: z.literal("EXPIRED"),
+        message: z.literal("PDF 압축 결과가 만료되었습니다."),
+        retryable: z.literal(false),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const pdfOptimizeStatusResponseSchema = z.discriminatedUnion("state", [
+  pendingPdfOptimizeStatusSchema,
+  succeededPdfOptimizeStatusSchema,
+  failedPdfOptimizeStatusSchema,
+  cancelledPdfOptimizeStatusSchema,
+  expiredPdfOptimizeStatusSchema,
+]);
 
 export type PdfOptimizeStatusResponseV1 = z.infer<typeof pdfOptimizeStatusResponseSchema>;
 

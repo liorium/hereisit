@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ImageEngineJobStatus } from "./index";
 import {
   anyEngineCreateJobRequestSchema,
   engineCreateJobRequestSchema,
@@ -689,14 +690,13 @@ describe("PDF engine contract branch", () => {
       },
     };
 
-    expect(serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...status }).success).toBe(
+    expect(serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status }).success).toBe(
       true,
     );
     expect(
       serverEngineJobStatusSchema.safeParse({
         tool: "pdf.optimize",
-        ...status,
-        result: { ...status.result, width: 4000 },
+        status: { ...status, result: { ...status.result, width: 4000 } },
       }).success,
     ).toBe(false);
   });
@@ -713,15 +713,27 @@ describe("PDF engine contract branch", () => {
     const imageStatus = succeededStatus();
 
     expect(
-      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...pdfStatus }).success,
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status: pdfStatus }).success,
     ).toBe(true);
     expect(
-      serverEngineJobStatusSchema.safeParse({ tool: "image.optimize", ...imageStatus }).success,
+      serverEngineJobStatusSchema.safeParse({ tool: "image.optimize", status: imageStatus })
+        .success,
     ).toBe(true);
-    expect(serverEngineJobStatusSchema.safeParse(pdfStatus).success).toBe(false);
+    expect(serverEngineJobStatusSchema.safeParse({ status: pdfStatus }).success).toBe(false);
     expect(
-      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", ...imageStatus }).success,
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status: imageStatus }).success,
     ).toBe(false);
+  });
+
+  it("publishes only matching tagged engine status branches", () => {
+    type TaggedEngineStatus = ReturnType<typeof serverEngineJobStatusSchema.parse>;
+
+    // @ts-expect-error a PDF tag cannot contain an image status.
+    const mismatchedStatus: TaggedEngineStatus = {
+      tool: "pdf.optimize",
+      status: {} as ImageEngineJobStatus,
+    };
+    expect(mismatchedStatus).toBeDefined();
   });
 
   it("routes strict queue messages by the contract discriminator", () => {

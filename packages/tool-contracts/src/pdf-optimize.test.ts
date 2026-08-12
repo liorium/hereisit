@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PdfOptimizeStatusResponseV1 } from "./pdf-optimize";
 import {
   PDF_OPTIMIZE_CONTRACT_ID,
   PDF_OPTIMIZE_MAX_FILE_BYTES,
@@ -163,26 +164,29 @@ describe("pdf.optimize@1 results", () => {
   });
 
   it("models original retention as the only warning", () => {
-    expect(
-      pdfOptimizeStatusResponseSchema.parse({
-        contract: "tool-job@1",
-        jobId: crypto.randomUUID(),
-        state: "succeeded",
-        phase: "completed",
-        phaseFraction: 1,
-        sequence: 8,
-        attempt: 1,
-        result: {
-          kind: "original-retained",
-          sourceByteLength: 1_000,
-          pageCount: 3,
-          engineBuildId: "qpdf-12.4.0",
-          warnings: ["ORIGINAL_RETAINED_UNMODIFIED"],
-        },
-        actualWeightedUnits: 12_000,
-        updatedAt: "2026-08-11T00:00:00.000Z",
-      }).result?.kind,
-    ).toBe("original-retained");
+    const parsed = pdfOptimizeStatusResponseSchema.parse({
+      contract: "tool-job@1",
+      jobId: crypto.randomUUID(),
+      state: "succeeded",
+      phase: "completed",
+      phaseFraction: 1,
+      sequence: 8,
+      attempt: 1,
+      result: {
+        kind: "original-retained",
+        sourceByteLength: 1_000,
+        pageCount: 3,
+        engineBuildId: "qpdf-12.4.0",
+        warnings: ["ORIGINAL_RETAINED_UNMODIFIED"],
+      },
+      actualWeightedUnits: 12_000,
+      updatedAt: "2026-08-11T00:00:00.000Z",
+    });
+
+    expect(parsed.state).toBe("succeeded");
+    if (parsed.state === "succeeded") {
+      expect(parsed.result.kind).toBe("original-retained");
+    }
   });
 
   it("accepts only fixed sanitized PDF failure errors", () => {
@@ -215,6 +219,18 @@ describe("pdf.optimize@1 results", () => {
         error: { ...status.error, code: "PIXEL_LIMIT_EXCEEDED" },
       }).success,
     ).toBe(false);
+  });
+
+  it("publishes the fixed PDF error payload type", () => {
+    type PdfStatusError = Extract<PdfOptimizeStatusResponseV1, { state: "failed" }>["error"];
+
+    const privateError: PdfStatusError = {
+      code: "ENGINE_TIMEOUT",
+      // @ts-expect-error PDF status errors cannot expose arbitrary engine details.
+      message: "private qpdf failure detail",
+      retryable: true,
+    };
+    expect(privateError).toBeDefined();
   });
 });
 
