@@ -107,6 +107,7 @@ export interface ResultArtifact {
   readonly contentType: string | undefined;
   readonly kind: string | undefined;
   readonly jobId: string | undefined;
+  readonly sha256: string | undefined;
 }
 
 export interface LifecycleRouteRuntime {
@@ -555,6 +556,8 @@ export async function routeJobResultRequest(
     artifact.contentType !== claimed.job.outputMime ||
     artifact.kind !== "output" ||
     artifact.jobId !== jobId ||
+    artifact.sha256 === undefined ||
+    !/^[A-Za-z0-9+/]{43}=$/.test(artifact.sha256) ||
     !/^"[\x20-\x7e]+"$/.test(artifact.httpEtag)
   ) {
     await artifact?.body.cancel().catch(() => undefined);
@@ -574,6 +577,7 @@ export async function routeJobResultRequest(
       "content-disposition": `attachment; filename="hereisit-compressed.${extension}"`,
       "content-length": String(artifact.size),
       "content-type": claimed.job.outputMime,
+      digest: `sha-256=${artifact.sha256}`,
       etag: artifact.httpEtag,
       "x-content-type-options": "nosniff",
       "x-download-lease": leaseToken,

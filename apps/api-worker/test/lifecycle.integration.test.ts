@@ -123,6 +123,7 @@ async function runtime(): Promise<LifecycleRouteRuntime> {
           contentType: object.httpMetadata?.contentType,
           kind: object.customMetadata?.kind,
           jobId: object.customMetadata?.jobId,
+          sha256: object.customMetadata?.sha256,
         };
       },
       deleteInput: (key) => env.JOB_OBJECTS.delete(key),

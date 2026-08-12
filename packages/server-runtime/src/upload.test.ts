@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClientJobCredentials } from "./api-client";
-import { uploadImageInput, type XhrLike } from "./upload";
+import { uploadImageInput, uploadPdfInput, type XhrLike } from "./upload";
 
 const jobId = "123e4567-e89b-42d3-a456-426614174001";
 
@@ -121,5 +121,34 @@ describe("remote input upload", () => {
     await expect(run(() => undefined, controller.signal)).rejects.toMatchObject({
       code: "CANCELLED",
     });
+  });
+});
+
+describe("PDF input upload", () => {
+  it("uploads the exact File as application/pdf without exposing its filename", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3)], "private.pdf", {
+      type: "application/pdf",
+    });
+    const xhr = new FakeXhr();
+    const jobToken = createClientJobCredentials().jobToken;
+    await uploadPdfInput({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken,
+      descriptor: {
+        kind: "worker-stream-put",
+        method: "PUT",
+        path: `/v1/jobs/${jobId}/input`,
+        contentType: "application/pdf",
+        byteLength: file.size,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      file,
+      xhrFactory: () => xhr,
+    });
+
+    expect(xhr.headers.get("Content-Type")).toBe("application/pdf");
+    expect(xhr.send).toHaveBeenCalledWith(file);
+    expect(String(xhr.open.mock.calls)).not.toContain(file.name);
   });
 });

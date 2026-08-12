@@ -11,6 +11,18 @@ import {
   imageOptimizeStatusResponseSchema,
 } from "@hereisit/tool-contracts/image-optimize";
 import {
+  PDF_OPTIMIZE_CONTRACT_ID,
+  type PdfOptimizeCreateRequestV1,
+  type PdfOptimizeCreateResponse,
+  type PdfOptimizePolicyResponseV1,
+  type PdfOptimizeStatusResponseV1,
+  pdfOptimizeCreateRequestSchema,
+  pdfOptimizeCreateResponseSchema,
+  pdfOptimizePolicyRequestSchema,
+  pdfOptimizePolicyResponseSchema,
+  pdfOptimizeStatusResponseSchema,
+} from "@hereisit/tool-contracts/pdf-optimize";
+import {
   TOOL_JOB_CONTRACT_ID,
   type ToolJobErrorCode,
   type ToolJobErrorPayload,
@@ -304,6 +316,78 @@ export async function createImageOptimizeJob(
   }
 }
 
+export async function getPdfProcessingPolicy(input: {
+  readonly apiOrigin: string;
+  readonly anonymousSessionId: string;
+  readonly forceRefresh?: boolean;
+  readonly signal?: AbortSignal;
+  readonly fetch?: typeof fetch;
+}): Promise<PdfOptimizePolicyResponseV1> {
+  const policyRequest = pdfOptimizePolicyRequestSchema.safeParse({
+    contract: TOOL_JOB_CONTRACT_ID,
+    toolContract: PDF_OPTIMIZE_CONTRACT_ID,
+    anonymousSessionId: input.anonymousSessionId,
+  });
+  if (!policyRequest.success) {
+    throw new RemoteJobError("INVALID_REQUEST", "익명 세션 정보가 올바르지 않습니다.", false);
+  }
+  return await requestJson({
+    apiOrigin: input.apiOrigin,
+    path: "/v1/policy",
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(policyRequest.data),
+    },
+    schema: pdfOptimizePolicyResponseSchema,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    timeoutMilliseconds: POLICY_TIMEOUT_MILLISECONDS,
+  });
+}
+
+async function createPdfJobOnce(
+  request: PdfOptimizeCreateRequestV1,
+  options: { readonly apiOrigin: string } & FetchOptions,
+): Promise<PdfOptimizeCreateResponse> {
+  const parsedRequest = pdfOptimizeCreateRequestSchema.safeParse(request);
+  if (!parsedRequest.success) {
+    throw new RemoteJobError("INVALID_REQUEST", "PDF 처리 요청이 올바르지 않습니다.", false);
+  }
+  return await requestJson({
+    apiOrigin: options.apiOrigin,
+    path: "/v1/jobs",
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(parsedRequest.data),
+    },
+    schema: pdfOptimizeCreateResponseSchema,
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    timeoutMilliseconds: MUTATION_TIMEOUT_MILLISECONDS,
+  });
+}
+
+export async function createPdfOptimizeJob(
+  request: PdfOptimizeCreateRequestV1,
+  options: { readonly apiOrigin: string } & FetchOptions,
+): Promise<PdfOptimizeCreateResponse> {
+  try {
+    return await createPdfJobOnce(request, options);
+  } catch (error) {
+    if (
+      !(error instanceof RemoteJobError) ||
+      !error.retryable ||
+      error.code !== "STORAGE_FAILURE" ||
+      options.signal?.aborted
+    ) {
+      throw error;
+    }
+    return await createPdfJobOnce(request, options);
+  }
+}
+
 function authenticatedHeaders(jobToken: string): HeadersInit {
   if (!TOKEN_PATTERN.test(jobToken)) {
     throw new RemoteJobError("INVALID_REQUEST", "작업 인증 정보가 올바르지 않습니다.", false);
@@ -324,6 +408,25 @@ export async function getImageOptimizeStatus(input: {
     path: `/v1/jobs/${input.jobId}`,
     init: { method: "GET", headers: authenticatedHeaders(input.jobToken) },
     schema: imageOptimizeStatusResponseSchema,
+    ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    timeoutMilliseconds: MUTATION_TIMEOUT_MILLISECONDS,
+  });
+}
+
+export async function getPdfOptimizeStatus(input: {
+  readonly apiOrigin: string;
+  readonly jobId: string;
+  readonly jobToken: string;
+  readonly fetch?: typeof fetch;
+  readonly signal?: AbortSignal;
+}): Promise<PdfOptimizeStatusResponseV1> {
+  validateJobId(input.jobId);
+  return await requestJson({
+    apiOrigin: input.apiOrigin,
+    path: `/v1/jobs/${input.jobId}`,
+    init: { method: "GET", headers: authenticatedHeaders(input.jobToken) },
+    schema: pdfOptimizeStatusResponseSchema,
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     timeoutMilliseconds: MUTATION_TIMEOUT_MILLISECONDS,

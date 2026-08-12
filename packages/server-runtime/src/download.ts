@@ -68,6 +68,12 @@ interface ClaimedResponse {
   readonly lease: string;
 }
 
+export interface RemotePdfResult {
+  readonly blob: Blob;
+  readonly digest: string;
+  acknowledge(): Promise<void>;
+}
+
 function validateHandleInput(input: CreateRemoteDownloadHandleInput): void {
   canonicalApiOrigin(input.apiOrigin);
   if (!JOB_ID_PATTERN.test(input.jobId) || !TOKEN_PATTERN.test(input.jobToken)) {
@@ -177,6 +183,55 @@ async function acknowledge(
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     ...(signal === undefined ? {} : { signal }),
   });
+}
+
+function encodeBase64(bytes: ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+export async function fetchPdfOptimizeResult(
+  input: CreateRemoteDownloadHandleInput & { readonly signal?: AbortSignal },
+): Promise<RemotePdfResult> {
+  if (input.descriptor.mime !== "application/pdf") {
+    throw new RemoteJobError("INVALID_REQUEST", "PDF 결과 정보가 올바르지 않습니다.", false);
+  }
+  validateHandleInput(input);
+  const claimed = await claimResult(input, input.signal);
+  let digest: string;
+  let blob: Blob;
+  try {
+    const header = claimed.response.headers.get("digest");
+    if (header === null || !/^sha-256=[A-Za-z0-9+/]{43}=$/.test(header)) {
+      await claimed.response.body?.cancel().catch(() => undefined);
+      throw new RemoteJobError("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true);
+    }
+    digest = header;
+    blob = await readExactBlob(
+      claimed.response,
+      input.descriptor.byteLength,
+      "application/pdf",
+      undefined,
+    );
+    const actual = `sha-256=${encodeBase64(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))}`;
+    if (actual !== digest) {
+      throw new RemoteJobError("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true);
+    }
+  } catch (error) {
+    await bestEffortDelete(input);
+    throw error;
+  }
+  let acknowledged = false;
+  return {
+    blob,
+    digest,
+    async acknowledge() {
+      if (acknowledged) return;
+      await acknowledge(input, claimed.lease, input.signal);
+      acknowledged = true;
+    },
+  };
 }
 
 function defaultClickAnchor(input: { readonly href: string; readonly download: string }): void {

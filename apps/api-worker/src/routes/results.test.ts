@@ -102,6 +102,7 @@ async function runtime(job: LifecycleJob = succeededJob()): Promise<LifecycleRou
         contentType: job.outputMime ?? undefined,
         kind: "output",
         jobId,
+        sha256: `${"A".repeat(43)}=`,
       })),
       deleteInput: vi.fn(async () => undefined),
       deleteOutput: vi.fn(async () => undefined),
@@ -338,6 +339,7 @@ describe("authenticated job lifecycle routes", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("x-download-lease")).toBe(leaseToken);
+    expect(response.headers.get("digest")).toBe(`sha-256=${"A".repeat(43)}=`);
     expect(response.headers.get("location")).toBeNull();
     await expect(response.arrayBuffer()).resolves.toEqual(Uint8Array.of(1, 2).buffer);
   });

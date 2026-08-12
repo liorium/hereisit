@@ -2,12 +2,19 @@ import {
   IMAGE_OPTIMIZE_CONTRACT_ID,
   type ImageOptimizeCreateRequestV1,
 } from "@hereisit/tool-contracts/image-optimize";
+import {
+  PDF_OPTIMIZE_CONTRACT_ID,
+  type PdfOptimizeCreateRequestV1,
+} from "@hereisit/tool-contracts/pdf-optimize";
 import { TOOL_JOB_CONTRACT_ID } from "@hereisit/tool-contracts/tool-job";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createClientJobCredentials,
   createImageOptimizeJob,
+  createPdfOptimizeJob,
   getImageOptimizeStatus,
+  getPdfOptimizeStatus,
+  getPdfProcessingPolicy,
   getProcessingPolicy,
   RemoteJobError,
 } from "./api-client";
@@ -223,5 +230,108 @@ describe("remote API client", () => {
       message: "실패",
       retryable: true,
     });
+  });
+
+  it("uses strict PDF policy, create, and status schemas without sending a filename", async () => {
+    const credentials = createClientJobCredentials();
+    const pdfRequest: PdfOptimizeCreateRequestV1 = {
+      contract: TOOL_JOB_CONTRACT_ID,
+      toolContract: PDF_OPTIMIZE_CONTRACT_ID,
+      anonymousSessionId: credentials.jobToken,
+      ...credentials,
+      input: { byteLength: 100, mime: "application/pdf", pageCount: 1 },
+      spec: { version: 1, preset: "balanced" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          contract: TOOL_JOB_CONTRACT_ID,
+          toolContract: PDF_OPTIMIZE_CONTRACT_ID,
+          execution: "local",
+          reason: "SERVER_PROCESSING_DISABLED",
+          maintainer: false,
+          disclosure: {
+            upload: false,
+            inputDeletion: "not-uploaded",
+            resultDeletion: { mode: "not-uploaded" },
+          },
+          limits: { maxFiles: 1, maxBytesPerFile: 52_428_800, maxPagesPerFile: 100 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          contract: TOOL_JOB_CONTRACT_ID,
+          mode: "existing-job",
+          jobId,
+          state: "queued",
+          reservedWeightedUnits: 1,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          contract: TOOL_JOB_CONTRACT_ID,
+          jobId,
+          state: "queued",
+          phase: "queued",
+          phaseFraction: null,
+          sequence: 1,
+          attempt: 0,
+          updatedAt: "2026-08-12T00:00:00.000Z",
+        }),
+      );
+
+    await getPdfProcessingPolicy({
+      apiOrigin: "https://processing.example",
+      anonymousSessionId: credentials.jobToken,
+      forceRefresh: true,
+      fetch: fetchMock,
+    });
+    await createPdfOptimizeJob(pdfRequest, {
+      apiOrigin: "https://processing.example",
+      fetch: fetchMock,
+    });
+    await getPdfOptimizeStatus({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken: credentials.jobToken,
+      fetch: fetchMock,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls)).not.toContain("private.pdf");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(pdfRequest);
+  });
+
+  it("rejects a cross-tool status at the PDF boundary", async () => {
+    await expect(
+      getPdfOptimizeStatus({
+        apiOrigin: "https://processing.example",
+        jobId,
+        jobToken: createClientJobCredentials().jobToken,
+        fetch: async () =>
+          Response.json({
+            contract: TOOL_JOB_CONTRACT_ID,
+            jobId,
+            state: "succeeded",
+            phase: "completed",
+            phaseFraction: 1,
+            sequence: 1,
+            attempt: 0,
+            updatedAt: "2026-08-12T00:00:00.000Z",
+            result: {
+              kind: "download",
+              mime: "image/jpeg",
+              byteLength: 1,
+              width: 1,
+              height: 1,
+              engineBuildId: "private",
+              codecBuildId: "private",
+              warnings: [],
+              testedCandidates: 1,
+            },
+          }),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
   });
 });
