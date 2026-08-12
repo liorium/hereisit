@@ -461,6 +461,7 @@ async function installPdfServerDouble(
   jobId: string;
   releaseAcknowledgement(): void;
   releaseStatus(): void;
+  statusDelivered: Promise<void>;
 }> {
   const jobId = "123e4567-e89b-42d3-a456-426614174101";
   const lease = "a".repeat(43);
@@ -470,6 +471,10 @@ async function installPdfServerDouble(
   let releaseStatus = () => undefined;
   const statusGate = new Promise<void>((resolve) => {
     releaseStatus = resolve;
+  });
+  let markStatusDelivered = () => undefined;
+  const statusDelivered = new Promise<void>((resolve) => {
+    markStatusDelivered = resolve;
   });
   let releaseAcknowledgement = () => undefined;
   const acknowledgementGate = new Promise<void>((resolve) => {
@@ -574,6 +579,7 @@ async function installPdfServerDouble(
           result,
         },
       });
+      markStatusDelivered();
       return;
     }
     if (call === `GET /v1/jobs/${jobId}/result`) {
@@ -604,7 +610,14 @@ async function installPdfServerDouble(
     await route.abort("blockedbyclient");
   });
 
-  return { acknowledgementOutcomes, calls, jobId, releaseAcknowledgement, releaseStatus };
+  return {
+    acknowledgementOutcomes,
+    calls,
+    jobId,
+    releaseAcknowledgement,
+    releaseStatus,
+    statusDelivered,
+  };
 }
 
 async function uploadPdf(
@@ -1467,11 +1480,13 @@ test("replaces a pending remote job and ignores its late successful status", asy
     mimeType: "application/pdf",
     buffer: await createVectorPdf(1),
   });
-  server.releaseStatus();
-
-  await expect(page.getByText("replacement.pdf")).toBeVisible();
   await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/cancel`);
   await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
+  server.releaseStatus();
+  await server.statusDelivered;
+  await settleRenderedState(page);
+
+  await expect(page.getByText("replacement.pdf")).toBeVisible();
   await expect(page.getByText("pending-old.pdf")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
@@ -1573,6 +1588,7 @@ test.describe("rejected server-result acknowledgement cleanup", () => {
       await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
       await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
       await expect.poll(() => server.acknowledgementOutcomes).toEqual(["rejected"]);
+      await settleRenderedState(page);
       expect(await objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
 
       if (cleanup === "reset") {
