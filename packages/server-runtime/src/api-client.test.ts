@@ -237,7 +237,7 @@ describe("remote API client", () => {
     const pdfRequest: PdfOptimizeCreateRequestV1 = {
       contract: TOOL_JOB_CONTRACT_ID,
       toolContract: PDF_OPTIMIZE_CONTRACT_ID,
-      anonymousSessionId: credentials.jobToken,
+      anonymousSessionId: sessionId,
       ...credentials,
       input: { byteLength: 100, mime: "application/pdf", pageCount: 1 },
       spec: { version: 1, preset: "balanced" },
@@ -283,7 +283,7 @@ describe("remote API client", () => {
 
     await getPdfProcessingPolicy({
       apiOrigin: "https://processing.example",
-      anonymousSessionId: credentials.jobToken,
+      anonymousSessionId: sessionId,
       forceRefresh: true,
       fetch: fetchMock,
     });
@@ -301,6 +301,15 @@ describe("remote API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(String(fetchMock.mock.calls)).not.toContain("private.pdf");
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(pdfRequest);
+
+    await expect(
+      getPdfProcessingPolicy({
+        apiOrigin: "https://processing.example",
+        anonymousSessionId: credentials.jobToken,
+        fetch: fetchMock,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_REQUEST" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("rejects a cross-tool status at the PDF boundary", async () => {

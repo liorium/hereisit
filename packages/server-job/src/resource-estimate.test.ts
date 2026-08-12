@@ -42,7 +42,7 @@ const request: ImageOptimizeCreateRequestV1 = {
 const pdfRequest: PdfOptimizeCreateRequestV1 = {
   contract: "tool-job@1",
   toolContract: "pdf.optimize@1",
-  anonymousSessionId: "a".repeat(43),
+  anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
   clientRequestId: "7ba7b810-9dad-41d1-80b4-00c04fd430c8",
   jobToken: "b".repeat(43),
   input: {

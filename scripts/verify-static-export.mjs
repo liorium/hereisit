@@ -24,6 +24,7 @@ const PDF_WORKER_MARKER = "hereisit-pdf-worker";
 const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
 const PDF_TO_IMAGES_WORKER_MARKER = "hereisit-pdf-to-images-worker";
 const PDF_COMPRESS_SCANNED_WORKER_MARKER = "hereisit-pdf-compress-scanned-worker";
+const PDF_OPTIMIZE_VERIFY_WORKER_MARKER = "hereisit-pdf-optimize-verifier";
 const PDFJS_MARKER = "pdf.worker.min.mjs";
 const DEPLOYED_ORIGIN = "https://hereisit.app";
 const REMOTE_URL_PATTERN = /https?:\/\/[^"'`\s<>()\\]+/gi;
@@ -59,6 +60,7 @@ const ALL_PROCESSING_MARKERS = [
   PDF_INSPECTION_WORKER_MARKER,
   PDF_TO_IMAGES_WORKER_MARKER,
   PDF_COMPRESS_SCANNED_WORKER_MARKER,
+  PDF_OPTIMIZE_VERIFY_WORKER_MARKER,
   PDFJS_MARKER,
 ];
 const DISCOVERY_PROCESSING_MARKERS = [
@@ -93,8 +95,10 @@ const bundleProfileMarkers = {
   "pdf-organize": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER, PDFJS_MARKER],
   "pdf-to-images": [PDF_INSPECTION_WORKER_MARKER, PDF_TO_IMAGES_WORKER_MARKER, PDFJS_MARKER],
   "pdf-compress-scanned": [
+    IMAGE_SERVER_RUNTIME_MARKER,
     PDF_INSPECTION_WORKER_MARKER,
     PDF_COMPRESS_SCANNED_WORKER_MARKER,
+    PDF_OPTIMIZE_VERIFY_WORKER_MARKER,
     PDFJS_MARKER,
   ],
 };
@@ -314,6 +318,10 @@ assert.ok(
 assert.ok(
   scriptSources.some((source) => source.includes(PDF_COMPRESS_SCANNED_WORKER_MARKER)),
   "The static export must include the scanned PDF compression Worker bundle.",
+);
+assert.ok(
+  scriptSources.some((source) => source.includes(PDF_OPTIMIZE_VERIFY_WORKER_MARKER)),
+  "The static export must include the server PDF verification Worker bundle.",
 );
 assert.ok(
   scriptSources.some((source) => source.includes(PDFJS_MARKER)),

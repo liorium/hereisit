@@ -238,7 +238,7 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     sourceFileLimits: pdfSingleFileSourceLimits,
     eyebrow: "PDF COMPRESSOR",
     defaultSummary:
-      "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요.",
+      "먼저 이 기기에서 압축하고, 줄어들지 않을 때만 선택해서 처리 서버로 더 압축해요.",
     notices: [
       {
         tone: "warning",

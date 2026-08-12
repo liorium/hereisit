@@ -250,7 +250,7 @@ function pdfRequest(
   return {
     contract: "tool-job@1",
     toolContract: "pdf.optimize@1",
-    anonymousSessionId: "a".repeat(43),
+    anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
     clientRequestId: alternateClientRequestId,
     jobToken,
     input: {

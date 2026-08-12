@@ -12,7 +12,7 @@ import {
   pdfOptimizeStatusResponseSchema,
 } from "./pdf-optimize";
 
-const anonymousSessionId = "a".repeat(43);
+const anonymousSessionId = "123e4567-e89b-42d3-a456-426614174000";
 
 const serverPolicy = {
   contract: "tool-job@1",
@@ -273,6 +273,16 @@ describe("pdf.optimize@1 policy", () => {
     ).toBe(false);
     expect(
       pdfOptimizePolicyResponseSchema.safeParse({ ...serverPolicy, maintainer: false }).success,
+    ).toBe(false);
+  });
+
+  it("uses the existing browser processing session UUID", () => {
+    expect(
+      pdfOptimizePolicyRequestSchema.safeParse({
+        contract: "tool-job@1",
+        toolContract: "pdf.optimize@1",
+        anonymousSessionId: "a".repeat(43),
+      }).success,
     ).toBe(false);
   });
 });

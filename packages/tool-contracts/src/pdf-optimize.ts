@@ -15,7 +15,7 @@ export type PdfOptimizeMime = z.infer<typeof pdfOptimizeMimeSchema>;
 
 const positiveSafeIntegerSchema = z.number().finite().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const buildIdSchema = z.string().min(1);
-const anonymousSessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const anonymousSessionIdSchema = z.uuid();
 const jobTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 
 export const pdfOptimizeSpecV1Schema = z

@@ -59,7 +59,7 @@ function pdfCreateBody() {
   return {
     contract: "tool-job@1",
     toolContract: "pdf.optimize@1",
-    anonymousSessionId: "a".repeat(43),
+    anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
     clientRequestId,
     jobToken,
     input: { byteLength: 1_000, mime: "application/pdf", pageCount: 3 },
@@ -339,6 +339,18 @@ describe("POST /v1/jobs", () => {
 });
 
 describe("POST /v1/jobs for PDF", () => {
+  it("rejects a job-token-shaped value before PDF reservation", async () => {
+    const runtime = makeRuntime({
+      readJson: vi.fn(async () => ({
+        ...pdfCreateBody(),
+        anonymousSessionId: "a".repeat(43),
+      })),
+    });
+    const response = await routeCreateJobRequest(createRequest(), runtime);
+    expect(response.status).toBe(400);
+    expect(runtime.repository.reserveAndCreate).not.toHaveBeenCalled();
+  });
+
   it("creates one authenticated PDF reservation with the PDF resource class", async () => {
     const repository = {
       reserveAndCreate: vi.fn(async (input: PdfReserveAndCreateInput) => {
@@ -377,7 +389,10 @@ describe("POST /v1/jobs for PDF", () => {
         maintainerSessionHashes: new Set([
           Array.from(
             new Uint8Array(
-              await crypto.subtle.digest("SHA-256", new TextEncoder().encode("a".repeat(43))),
+              await crypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode("123e4567-e89b-42d3-a456-426614174000"),
+              ),
             ),
             (byte) => byte.toString(16).padStart(2, "0"),
           ).join(""),

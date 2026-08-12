@@ -9,10 +9,17 @@ import {
   supportsBrowserPdfCompressScannedRuntime,
 } from "@hereisit/browser-runtime/pdf-compress-scanned";
 import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
+import type { PdfOptimizeVerificationHandle } from "@hereisit/browser-runtime/pdf-optimize-verification";
+import { compressedPdfName } from "@hereisit/pdf-tool";
+import type { PdfOptimizeJobHandle, PdfOptimizeJobOutcome } from "@hereisit/server-runtime";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { downloadUrl, formatBytes } from "../lib/files";
+import {
+  getOrCreateAnonymousSessionId,
+  readProcessingClientConfig,
+} from "../lib/processing-config";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
@@ -31,7 +38,20 @@ if (PDF_COMPRESSION_NOTICE === undefined) {
 
 type Preset = PdfCompressScannedSpecV2["preset"];
 type CompressionStage = "select" | "inspecting" | "setup" | "processing" | "result";
-type PdfCompressScannedResultMetadata = Omit<PdfCompressScannedResultV2, "bytes">;
+type CompressionResult =
+  | ({ readonly source: "browser" } & Omit<PdfCompressScannedResultV2, "bytes">)
+  | {
+      readonly source: "server";
+      readonly sourceByteLength: number;
+      readonly byteLength: number;
+      readonly suggestedName: string;
+      readonly profile: "structural" | "image-optimized";
+    };
+
+type RemotePdfResult = Extract<PdfOptimizeJobOutcome, { status: "fulfilled" }>["value"];
+
+const SERVER_DISCLOSURE = "PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요.";
+const SERVER_RETRY_MESSAGE = "현재 처리 서버를 사용할 수 없어요. 잠시 후 다시 시도해 주세요.";
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || (file.type === "" && /\.pdf$/i.test(file.name));
@@ -77,12 +97,18 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const [message, setMessage] = useState(INITIAL_MESSAGE);
   const [preset, setPreset] = useState<Preset>("balanced");
   const [progress, setProgress] = useState<PdfCompressScannedProgress>();
-  const [result, setResult] = useState<PdfCompressScannedResultMetadata>();
+  const [result, setResult] = useState<CompressionResult>();
+  const [serverFallback, setServerFallback] = useState(false);
+  const [serverMode, setServerMode] = useState(false);
+  const [serverProgress, setServerProgress] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const stageHeadingRef = useRef<HTMLHeadingElement>(null);
   const inspectionHandleRef = useRef<PdfInspectionHandle | undefined>(undefined);
   const jobHandleRef = useRef<PdfCompressScannedJobHandle | undefined>(undefined);
+  const serverJobRef = useRef<PdfOptimizeJobHandle | undefined>(undefined);
+  const verificationRef = useRef<PdfOptimizeVerificationHandle | undefined>(undefined);
+  const remoteResultRef = useRef<RemotePdfResult | undefined>(undefined);
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
@@ -99,6 +125,16 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     }
   }, []);
 
+  const clearRemoteWork = useCallback(() => {
+    serverJobRef.current?.cancel();
+    serverJobRef.current = undefined;
+    verificationRef.current?.cancel();
+    verificationRef.current = undefined;
+    const remoteResult = remoteResultRef.current;
+    remoteResultRef.current = undefined;
+    if (remoteResult !== undefined) void remoteResult.dispose().catch(() => undefined);
+  }, []);
+
   const invalidateActiveWork = useCallback(
     (updateState = true) => {
       const runId = runRef.current + 1;
@@ -106,16 +142,20 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       inspectionHandleRef.current?.cancel();
       inspectionHandleRef.current = undefined;
       jobHandleRef.current?.cancel();
+      clearRemoteWork();
       productRunRef.current?.cancelled();
       jobHandleRef.current = undefined;
       clearResult(updateState);
       if (updateState) {
         setInspecting(false);
         setProcessing(false);
+        setServerFallback(false);
+        setServerMode(false);
+        setServerProgress(null);
       }
       return runId;
     },
-    [clearResult],
+    [clearRemoteWork, clearResult],
   );
 
   useEffect(() => {
@@ -271,7 +311,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         const blob = new Blob([bytes], { type: "application/pdf" });
         const url = URL.createObjectURL(blob);
         resultUrlRef.current = url;
-        setResult(resultMetadata);
+        setResult({ source: "browser", ...resultMetadata });
         setProgress({ phase: "finalizing", fraction: 1 });
         setMessage("압축 PDF를 준비했어요.");
       } else if (outcome.status === "cancelled") {
@@ -287,6 +327,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
           selectedPreset === "balanced"
             ? "균형 150DPI에서는 페이지가 너무 커요. 최소 용량 96DPI로 낮춰 다시 시도해 주세요."
             : "사용 가능한 최소 96DPI에서도 이 PDF를 안전하게 처리할 수 없어요. 원본을 그대로 사용하거나 페이지 크기나 페이지 수를 줄인 PDF를 다시 준비해 주세요.";
+        if (outcome.error.code === "NO_SIZE_REDUCTION") setServerFallback(true);
         setMessage(
           outcome.error.code === "NO_SIZE_REDUCTION"
             ? noReductionMessage
@@ -310,8 +351,151 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     }
   };
 
+  const startServerProcessing = async () => {
+    if (busy || file === undefined || inspection === undefined || !serverFallback) return;
+
+    const selectedFile = file;
+    const selectedInspection = inspection;
+    const selectedPreset = preset;
+    const runId = invalidateActiveWork();
+    setServerFallback(true);
+    setServerMode(true);
+    setServerProgress(null);
+    setProcessing(true);
+    setMessage("처리 서버에서 PDF를 압축하고 있어요.");
+
+    const config = readProcessingClientConfig();
+    if (config.apiOrigin === null) {
+      setProcessing(false);
+      setServerMode(false);
+      setMessage(SERVER_RETRY_MESSAGE);
+      return;
+    }
+
+    const productRun = startProductUsageRun(toolId);
+    productRunRef.current = productRun;
+    let remoteResult: RemotePdfResult | undefined;
+    let analyticsSettled = false;
+    try {
+      const [{ runPdfOptimizeJob }, { verifyPdfOptimizeResult }] = await Promise.all([
+        import("@hereisit/server-runtime"),
+        import("@hereisit/browser-runtime/pdf-optimize-verification"),
+      ]);
+      if (runRef.current !== runId) return;
+      const handle = runPdfOptimizeJob(
+        selectedFile,
+        { version: 1, preset: selectedPreset },
+        {
+          apiOrigin: config.apiOrigin,
+          anonymousSessionId: getOrCreateAnonymousSessionId(),
+          pageCount: selectedInspection.pageCount,
+          onProgress: (event) => {
+            if (runRef.current === runId) {
+              setServerProgress(event.fraction);
+              setMessage(
+                event.phase === "verifying"
+                  ? "처리 결과를 확인하고 있어요."
+                  : "처리 서버에서 PDF를 압축하고 있어요.",
+              );
+            }
+          },
+        },
+      );
+      serverJobRef.current = handle;
+      const outcome = await handle.result;
+      if (serverJobRef.current === handle) serverJobRef.current = undefined;
+      if (runRef.current !== runId) {
+        if (outcome.status === "fulfilled") await outcome.value.dispose().catch(() => undefined);
+        return;
+      }
+      if (outcome.status === "original-retained") {
+        productRun.succeeded();
+        analyticsSettled = true;
+        setMessage("처리 서버에서도 더 줄이지 못해 원본을 그대로 유지해요.");
+        return;
+      }
+      if (outcome.status === "cancelled") {
+        productRun.cancelled();
+        analyticsSettled = true;
+        setMessage("PDF 압축을 중단했어요.");
+        return;
+      }
+      if (outcome.status === "rejected") {
+        productRun.failed(outcome.error.code);
+        analyticsSettled = true;
+        setMessage(SERVER_RETRY_MESSAGE);
+        return;
+      }
+
+      remoteResult = outcome.value;
+      remoteResultRef.current = remoteResult;
+      setMessage("다운로드 전에 PDF 결과를 확인하고 있어요.");
+      const resultFile = new File([remoteResult.blob], "result.pdf", {
+        type: "application/pdf",
+      });
+      const verification = verifyPdfOptimizeResult(
+        selectedFile,
+        resultFile,
+        remoteResult.descriptor,
+      );
+      verificationRef.current = verification;
+      const verified = await verification.result;
+      if (verificationRef.current === verification) verificationRef.current = undefined;
+      if (runRef.current !== runId) {
+        if (remoteResultRef.current === remoteResult) {
+          await remoteResult.dispose().catch(() => undefined);
+          remoteResultRef.current = undefined;
+        }
+        return;
+      }
+      if (verified.status !== "fulfilled") {
+        if (verified.status === "cancelled") productRun.cancelled();
+        else productRun.failed(verified.error.code);
+        analyticsSettled = true;
+        await remoteResult.dispose().catch(() => undefined);
+        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
+        setMessage("PDF 결과를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.");
+        return;
+      }
+
+      const url = URL.createObjectURL(verified.value.blob);
+      resultUrlRef.current = url;
+      setResult({
+        source: "server",
+        sourceByteLength: verified.value.descriptor.sourceByteLength,
+        byteLength: verified.value.descriptor.byteLength,
+        suggestedName: compressedPdfName(selectedFile.name),
+        profile: verified.value.descriptor.profile,
+      });
+      productRun.succeeded();
+      analyticsSettled = true;
+      setMessage("압축 PDF를 준비했어요.");
+      try {
+        await remoteResult.acknowledge();
+        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
+      } catch {
+        // The verified local Blob remains downloadable; reset/unmount retries deletion.
+      }
+    } catch {
+      if (!analyticsSettled) productRun.failed("WORKER_CRASH");
+      if (remoteResult !== undefined) {
+        await remoteResult.dispose().catch(() => undefined);
+        if (remoteResultRef.current === remoteResult) remoteResultRef.current = undefined;
+      }
+      if (runRef.current === runId) setMessage(SERVER_RETRY_MESSAGE);
+    } finally {
+      if (productRunRef.current === productRun) productRunRef.current = null;
+      if (runRef.current === runId) {
+        setProcessing(false);
+        setServerMode(false);
+      }
+    }
+  };
+
   const cancelProcessing = () => {
+    const keepServerFallback = serverMode;
     invalidateActiveWork();
+    if (keepServerFallback) setServerFallback(true);
     setMessage("PDF 압축을 중단했어요.");
   };
 
@@ -341,8 +525,12 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
 
   const pageCount = inspection?.pageCount;
   const runLabel = pageCount === undefined ? "PDF 용량 줄이기" : `${pageCount}페이지 용량 줄이기`;
-  const progressText = progressLabel(progress);
-  const progressPercent = Math.round((progress?.fraction ?? 0) * 100);
+  const progressText = serverMode ? "처리 서버에서 압축 중" : progressLabel(progress);
+  const progressPercent = serverMode
+    ? serverProgress === null
+      ? undefined
+      : Math.round(serverProgress * 100)
+    : Math.round((progress?.fraction ?? 0) * 100);
   const savings =
     result === undefined
       ? undefined
@@ -363,7 +551,11 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   }, [stage]);
 
   return (
-    <section className={styles.shell} aria-labelledby="pdf-compress-workbench-title">
+    <section
+      className={styles.shell}
+      data-server-fallback="hereisit-server-runtime"
+      aria-labelledby="pdf-compress-workbench-title"
+    >
       <input
         ref={inputRef}
         className={styles.hiddenInput}
@@ -482,6 +674,19 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
 
           <p className={styles.compressionSetupWarning}>{PDF_COMPRESSION_NOTICE}</p>
 
+          {serverFallback ? (
+            <div className={styles.compressionServerFallback}>
+              <p>{SERVER_DISCLOSURE}</p>
+              <button
+                className={styles.mergePrimaryAction}
+                type="button"
+                onClick={() => void startServerProcessing()}
+              >
+                처리 서버에서 더 압축
+              </button>
+            </div>
+          ) : null}
+
           <footer className={styles.mergeSetupFooter}>
             <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
               {visibleMessage}
@@ -498,9 +703,9 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       ) : stage === "processing" ? (
         <section className={`${styles.mergeStage} ${styles.mergeProgress}`}>
           <h2 id="pdf-compress-workbench-title" ref={stageHeadingRef} tabIndex={-1}>
-            PDF 용량 줄이는 중
+            {serverMode ? "처리 서버에서 PDF 용량 줄이는 중" : "PDF 용량 줄이는 중"}
           </h2>
-          <p>{progressLabel(progress)}</p>
+          <p>{progressText}</p>
           <div
             className={styles.mergeProgressTrack}
             role="progressbar"
@@ -510,7 +715,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             aria-valuenow={progressPercent}
             aria-valuetext={progressText}
           >
-            <span style={{ width: `${progressPercent}%` }} />
+            <span style={{ width: `${progressPercent ?? 8}%` }} />
           </div>
           <p className={styles.mergeStatus} role="status" aria-live="polite" aria-atomic="true">
             {visibleMessage}
@@ -535,9 +740,13 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
           </strong>
           <p className={styles.compressionSavings}>{savings}% 줄었어요</p>
           <p className={styles.compressionResultNote}>
-            {result.mode === "structure-preserving"
-              ? "텍스트와 링크를 유지했어요."
-              : "스캔 페이지를 가볍게 다시 만들었어요."}
+            {result.source === "server"
+              ? result.profile === "structural"
+                ? "처리 서버에서 문서 구조를 유지하며 압축했어요."
+                : "처리 서버에서 이미지 품질과 용량을 조정했어요."
+              : result.mode === "structure-preserving"
+                ? "텍스트와 링크를 유지했어요."
+                : "스캔 페이지를 가볍게 다시 만들었어요."}
           </p>
           <button className={styles.mergePrimaryAction} type="button" onClick={downloadResult}>
             PDF 다운로드 ↓

@@ -28,7 +28,7 @@ function policyBody(sessionId = anonymousSessionId) {
   };
 }
 
-function pdfPolicyBody(sessionId = "a".repeat(43)) {
+function pdfPolicyBody(sessionId = "123e4567-e89b-42d3-a456-426614174000") {
   return {
     contract: "tool-job@1",
     toolContract: "pdf.optimize@1",
@@ -341,8 +341,21 @@ describe("deterministic image optimization policy", () => {
 });
 
 describe("deterministic PDF optimization policy", () => {
+  it("fails local before state lookup for a job-token-shaped PDF browser session", async () => {
+    const runtime = makeRuntime({
+      readJson: vi.fn(async () => pdfPolicyBody("a".repeat(43))),
+    });
+    const response = await routePolicyRequest(policyRequest(), runtime);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      toolContract: "image.optimize@1",
+      execution: "local",
+    });
+    expect(runtime.readState).not.toHaveBeenCalled();
+  });
+
   it("advertises the exact PDF limits only to maintainers", async () => {
-    const sessionId = "a".repeat(43);
+    const sessionId = "123e4567-e89b-42d3-a456-426614174000";
     const hash = Array.from(
       new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sessionId))),
       (byte) => byte.toString(16).padStart(2, "0"),

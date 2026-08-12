@@ -10,7 +10,7 @@ import { fetchPdfOptimizeResult } from "./download";
 import { runPdfOptimizeJob, sleepWithAbort } from "./run-pdf-optimize-job";
 
 const jobId = "123e4567-e89b-42d3-a456-426614174001";
-const session = createClientJobCredentials().jobToken;
+const session = "123e4567-e89b-42d3-a456-426614174000";
 const digest = "sha-256=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=";
 
 function policy(): PdfOptimizePolicyResponseV1 {
