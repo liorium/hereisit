@@ -28,6 +28,12 @@ export interface PdfOptimizeVerificationHandle {
   cancel(): void;
 }
 
+export type PdfOptimizeVerificationProgress = {
+  readonly phase: "source" | "result" | "comparing";
+  readonly fraction: number;
+  readonly page: number | null;
+};
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -42,7 +48,10 @@ export function verifyPdfOptimizeResult(
   sourceFile: File,
   resultFile: File,
   rawDescriptor: unknown,
-  options: { readonly timeoutMilliseconds?: number } = {},
+  options: {
+    readonly timeoutMilliseconds?: number;
+    readonly onProgress?: (event: PdfOptimizeVerificationProgress) => void;
+  } = {},
 ): PdfOptimizeVerificationHandle {
   let settle: (value: PdfOptimizeVerificationOutcome) => void = () => undefined;
   const result = new Promise<PdfOptimizeVerificationOutcome>((resolve) => {
@@ -53,6 +62,10 @@ export function verifyPdfOptimizeResult(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelRequested = false;
   let cancellationOutcome: PdfOptimizeVerificationOutcome = { status: "cancelled" };
+  let progressSequence = 0;
+  let progressPhase = -1;
+  let progressFraction = -1;
+  let progressPage = 0;
   const finish = (outcome: PdfOptimizeVerificationOutcome) => {
     if (settled) return;
     settled = true;
@@ -106,7 +119,7 @@ export function verifyPdfOptimizeResult(
       if (!isPlainRecord(message) || message.protocol !== 1 || typeof message.type !== "string")
         return;
       if (message.type === "ready" && exactKeys(message, ["protocol", "type"])) {
-        if (posted || settled || worker === undefined) return;
+        if (posted || settled || cancelRequested || worker === undefined) return;
         posted = true;
         worker.postMessage({
           protocol: 1,
@@ -128,6 +141,56 @@ export function verifyPdfOptimizeResult(
         return;
       }
       if (cancelRequested) return;
+      if (
+        message.type === "progress" &&
+        exactKeys(message, ["protocol", "type", "jobId", "sequence", "phase", "fraction", "page"])
+      ) {
+        const phase =
+          message.phase === "source"
+            ? 0
+            : message.phase === "result"
+              ? 1
+              : message.phase === "comparing"
+                ? 2
+                : -1;
+        if (
+          typeof message.sequence !== "number" ||
+          !Number.isSafeInteger(message.sequence) ||
+          message.sequence <= progressSequence ||
+          phase < 0 ||
+          phase < progressPhase ||
+          typeof message.fraction !== "number" ||
+          !Number.isFinite(message.fraction) ||
+          message.fraction < progressFraction ||
+          message.fraction < 0 ||
+          message.fraction > 1 ||
+          !(
+            message.page === null ||
+            (typeof message.page === "number" &&
+              Number.isSafeInteger(message.page) &&
+              message.page >= 1 &&
+              message.page <= 100)
+          ) ||
+          (phase === progressPhase && message.page !== null && message.page < progressPage)
+        ) {
+          return;
+        }
+        progressSequence = message.sequence;
+        if (phase > progressPhase) progressPage = 0;
+        progressPhase = phase;
+        progressFraction = message.fraction;
+        if (message.page !== null) progressPage = message.page;
+        try {
+          options.onProgress?.({
+            phase: message.phase as PdfOptimizeVerificationProgress["phase"],
+            fraction: message.fraction,
+            page: message.page,
+          });
+        } catch {
+          // Progress cannot own verification.
+        }
+        return;
+      }
       if (
         message.type === "complete" &&
         exactKeys(message, ["protocol", "type", "jobId", "descriptor", "blob"])

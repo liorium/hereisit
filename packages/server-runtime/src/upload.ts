@@ -41,7 +41,9 @@ export interface UploadImageInput {
   readonly now?: () => number;
 }
 
-export type UploadPdfInput = UploadImageInput;
+export interface UploadPdfInput extends UploadImageInput {
+  readonly digest: string;
+}
 
 function validateInput(
   input: UploadImageInput,
@@ -93,6 +95,7 @@ function validateInput(
 function uploadInput(
   input: UploadImageInput,
   schema: typeof imageOptimizeUploadDescriptorSchema | typeof pdfOptimizeUploadDescriptorSchema,
+  digest?: string,
 ): Promise<void> {
   if (input.signal?.aborted) {
     return Promise.reject(new RemoteJobError("CANCELLED", "업로드가 취소되었습니다.", false));
@@ -163,6 +166,7 @@ function uploadInput(
       xhr.timeout = validated.timeout;
       xhr.setRequestHeader("Authorization", `Bearer ${input.jobToken}`);
       xhr.setRequestHeader("Content-Type", validated.descriptor.contentType);
+      if (digest !== undefined) xhr.setRequestHeader("Digest", digest);
       xhr.send(input.file);
     } catch {
       finish(new RemoteJobError("STORAGE_FAILURE", "파일 업로드를 시작하지 못했습니다.", true));
@@ -175,5 +179,10 @@ export function uploadImageInput(input: UploadImageInput): Promise<void> {
 }
 
 export function uploadPdfInput(input: UploadPdfInput): Promise<void> {
-  return uploadInput(input, pdfOptimizeUploadDescriptorSchema);
+  if (!/^sha-256=[A-Za-z0-9+/]{43}=$/.test(input.digest)) {
+    return Promise.reject(
+      new RemoteJobError("INVALID_REQUEST", "PDF 업로드 정보가 올바르지 않습니다.", false),
+    );
+  }
+  return uploadInput(input, pdfOptimizeUploadDescriptorSchema, input.digest);
 }

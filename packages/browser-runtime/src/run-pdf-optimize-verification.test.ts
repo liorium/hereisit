@@ -95,6 +95,62 @@ describe("verifyPdfOptimizeResult", () => {
     expect(worker.terminateCount).toBe(1);
   });
 
+  it("never posts verification when cancelled before ready", async () => {
+    vi.stubGlobal("Worker", StubWorker);
+    const handle = verifyPdfOptimizeResult(file(100).file, file(90).file, descriptor);
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("worker");
+    handle.cancel();
+    worker.emit({ protocol: 1, type: "ready" });
+    expect(worker.messages).toHaveLength(1);
+    const cancel = worker.messages[0] as { jobId: string };
+    worker.emit({ protocol: 1, type: "cancelled", jobId: cancel.jobId });
+    await expect(handle.result).resolves.toEqual({ status: "cancelled" });
+  });
+
+  it("accepts only bounded monotonic progress with exact keys", async () => {
+    vi.stubGlobal("Worker", StubWorker);
+    const onProgress = vi.fn();
+    verifyPdfOptimizeResult(file(100).file, file(90).file, descriptor, { onProgress });
+    const worker = StubWorker.instances[0];
+    if (worker === undefined) throw new Error("worker");
+    worker.emit({ protocol: 1, type: "ready" });
+    const request = worker.messages[0] as { jobId: string };
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: request.jobId,
+      sequence: 1,
+      phase: "source",
+      fraction: 0.25,
+      page: 1,
+    });
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: request.jobId,
+      sequence: 0,
+      phase: "private",
+      fraction: 0.9,
+      page: null,
+    });
+    worker.emit({
+      protocol: 1,
+      type: "progress",
+      jobId: request.jobId,
+      sequence: 2,
+      phase: "result",
+      fraction: 0.75,
+      page: 1,
+      text: "secret",
+    });
+    expect(onProgress).toHaveBeenCalledExactlyOnceWith({
+      phase: "source",
+      fraction: 0.25,
+      page: 1,
+    });
+  });
+
   it("times out, handles messageerror, and never exposes a private Worker error", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("Worker", StubWorker);

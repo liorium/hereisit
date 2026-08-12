@@ -23,6 +23,7 @@ import {
   RemoteJobError,
 } from "./api-client";
 import { fetchPdfOptimizeResult, type RemotePdfResult } from "./download";
+import { digestPdfFile } from "./pdf-upload-digest";
 import { type UploadPdfInput, uploadPdfInput } from "./upload";
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled", "expired"]);
@@ -55,6 +56,7 @@ export interface PdfOptimizeRuntimeDependencies {
   readonly getPolicy?: typeof getPdfProcessingPolicy;
   readonly createJob?: typeof createPdfOptimizeJob;
   readonly upload?: (input: UploadPdfInput) => Promise<void>;
+  readonly digestFile?: typeof digestPdfFile;
   readonly getStatus?: typeof getPdfOptimizeStatus;
   readonly download?: typeof fetchPdfOptimizeResult;
   readonly cancel?: typeof cancelRemoteJob;
@@ -77,18 +79,19 @@ export interface RunPdfOptimizeJobOptions {
   readonly dependencies?: PdfOptimizeRuntimeDependencies;
 }
 
-function sleepWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void> {
+export function sleepWithAbort(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -134,6 +137,7 @@ async function poll(input: {
   let runningAt: number | undefined;
   let latest = -1;
   let latestRank = -1;
+  let latestStatus: PdfOptimizeStatusResponseV1 | undefined;
   for (let attempt = 0; ; attempt += 1) {
     const status = await input.dependencies.getStatus({
       apiOrigin: input.apiOrigin,
@@ -141,24 +145,31 @@ async function poll(input: {
       signal: input.signal,
       ...(input.dependencies.fetch === undefined ? {} : { fetch: input.dependencies.fetch }),
     });
-    if (status.sequence <= latest) continue;
-    const rank =
-      status.state === "created" || status.state === "uploading"
-        ? 0
-        : status.state === "queued"
-          ? 1
-          : status.state === "running"
-            ? 2
-            : 3;
-    if (rank < latestRank) {
-      throw new RemoteJobError("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true);
+    if (status.sequence > latest) {
+      const rank =
+        status.state === "created" || status.state === "uploading"
+          ? 0
+          : status.state === "queued"
+            ? 1
+            : status.state === "running"
+              ? 2
+              : 3;
+      if (rank < latestRank) {
+        throw new RemoteJobError(
+          "VERIFICATION_FAILED",
+          "PDF 처리 결과를 확인할 수 없습니다.",
+          true,
+        );
+      }
+      latest = status.sequence;
+      latestRank = rank;
+      latestStatus = status;
+      safeProgress(input.observer, status);
     }
-    latest = status.sequence;
-    latestRank = rank;
-    safeProgress(input.observer, status);
-    if (TERMINAL.has(status.state)) return status;
+    if (latestStatus === undefined) continue;
+    if (TERMINAL.has(latestStatus.state)) return latestStatus;
     const now = input.dependencies.now();
-    if (status.state === "running") {
+    if (latestStatus.state === "running") {
       runningAt ??= now;
       if (now - runningAt >= RUN_TIMEOUT) {
         throw new RemoteJobError(
@@ -171,7 +182,9 @@ async function poll(input: {
       throw new RemoteJobError("QUEUE_UNAVAILABLE", "처리 서버를 현재 사용할 수 없습니다.", true);
     }
     const base =
-      status.state === "running" ? 1_000 : Math.min(10_000, 2_000 * 2 ** Math.min(attempt, 3));
+      latestStatus.state === "running"
+        ? 1_000
+        : Math.min(10_000, 2_000 * 2 ** Math.min(attempt, 3));
     await input.dependencies.sleep(
       Math.round(base * (1 + Math.max(-0.1, Math.min(0.1, input.dependencies.jitter())))),
       input.signal,
@@ -190,6 +203,7 @@ export function runPdfOptimizeJob(
     getPolicy: supplied.getPolicy ?? getPdfProcessingPolicy,
     createJob: supplied.createJob ?? createPdfOptimizeJob,
     upload: supplied.upload ?? uploadPdfInput,
+    digestFile: supplied.digestFile ?? digestPdfFile,
     getStatus: supplied.getStatus ?? getPdfOptimizeStatus,
     download: supplied.download ?? fetchPdfOptimizeResult,
     cancel: supplied.cancel ?? cancelRemoteJob,
@@ -245,13 +259,16 @@ export function runPdfOptimizeJob(
         ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
       });
       identity = { jobId: created.jobId, jobToken: credentials.jobToken };
+      let sourceDigest: string | undefined;
       if (created.mode === "upload-required") {
+        sourceDigest = await dependencies.digestFile(file, controller.signal);
         try {
           await dependencies.upload({
             apiOrigin: options.apiOrigin,
             ...identity,
             descriptor: created.upload,
             file,
+            digest: sourceDigest,
             signal: controller.signal,
           });
         } catch (error) {
@@ -274,6 +291,7 @@ export function runPdfOptimizeJob(
               ...identity,
               descriptor: created.upload,
               file,
+              digest: sourceDigest,
               signal: controller.signal,
             });
           }
@@ -315,17 +333,16 @@ export function runPdfOptimizeJob(
         signal: controller.signal,
         ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
       });
-      let acknowledged = false;
+      let acknowledgement: Promise<void> | undefined;
       let disposed = false;
       keepResult = true;
       return {
         status: "fulfilled",
         value: {
           ...downloaded,
-          async acknowledge() {
-            if (acknowledged) return;
-            await downloaded.acknowledge();
-            acknowledged = true;
+          acknowledge() {
+            acknowledgement ??= downloaded.acknowledge();
+            return acknowledgement;
           },
           descriptor: terminal.result,
           async dispose() {

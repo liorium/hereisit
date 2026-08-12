@@ -30,7 +30,7 @@ import {
 import { routeUploadRequest, type UploadRouteRuntime } from "./routes/uploads";
 
 const ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
-const ALLOW_HEADERS = "authorization, content-type, x-download-lease";
+const ALLOW_HEADERS = "authorization, content-type, digest, x-download-lease";
 const EXPOSE_HEADERS =
   "content-length, content-type, digest, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope";
 const UPLOAD_PATH_PATTERN =

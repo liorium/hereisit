@@ -719,7 +719,7 @@ describe("exact routing and CORS", () => {
       "GET, POST, PUT, DELETE, OPTIONS",
     );
     expect(response.headers.get("access-control-allow-headers")).toBe(
-      "authorization, content-type, x-download-lease",
+      "authorization, content-type, digest, x-download-lease",
     );
     expect(response.headers.get("access-control-expose-headers")).toBe(
       "content-length, content-type, digest, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope",

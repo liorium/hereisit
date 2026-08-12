@@ -9,6 +9,8 @@ import {
 
 const INPUT_ID = "550e8400-e29b-41d4-a716-446655440000";
 const INPUT_KEY = `inputs/${INPUT_ID}`;
+const PDF_DIGEST = "sha-256=A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=";
+const OTHER_PDF_DIGEST = "sha-256=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=";
 
 function inputHead(overrides: Record<string, unknown> = {}) {
   return {
@@ -26,7 +28,17 @@ function pdfHead(overrides: Record<string, unknown> = {}) {
   return inputHead({
     size: 40 * 1024 * 1024,
     httpMetadata: { contentType: "application/pdf" },
+    customMetadata: { kind: "input", uploadVersion: "1", sha256: PDF_DIGEST },
     ...overrides,
+  });
+}
+
+function digestStream(digest: string) {
+  const sink = new WritableStream<ArrayBuffer | ArrayBufferView>();
+  return Object.assign(sink, {
+    digest: Promise.resolve(
+      Uint8Array.from(atob(digest.slice(8)), (value) => value.charCodeAt(0)).buffer,
+    ),
   });
 }
 
@@ -94,6 +106,7 @@ describe("R2 input invariants", () => {
         byteLength: 40 * 1024 * 1024,
         mime: "application/pdf",
         uploadVersion: 1,
+        expectedSha256: PDF_DIGEST,
       }),
     ).toMatchObject({ mime: "application/pdf", etag: "raw-etag" });
     expect(() =>
@@ -104,6 +117,38 @@ describe("R2 input invariants", () => {
         uploadVersion: 1,
       }),
     ).toThrow(ArtifactUploadError);
+  });
+
+  it("deletes a newly stored PDF when its received digest mismatches the declared digest", async () => {
+    const head = inputHead({
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: { kind: "input", uploadVersion: "1", sha256: PDF_DIGEST },
+    });
+    const bucket = {
+      put: vi.fn(async (_key: string, stream: ReadableStream<Uint8Array>) => {
+        for await (const _chunk of stream) {
+          // Drain the fixed-length stream.
+        }
+        return head;
+      }),
+      head: vi.fn(async () => head),
+      delete: vi.fn(async () => undefined),
+    };
+    await expect(
+      storeExactInputArtifact({
+        bucket,
+        source: bytes(1, 2, 3),
+        key: INPUT_KEY,
+        byteLength: 3,
+        mime: "application/pdf",
+        uploadVersion: 1,
+        deadlineAt: Date.now() + 10_000,
+        expectedSha256: PDF_DIGEST,
+        createFixedLengthStream: passthroughFixedLengthStream,
+        createDigestStream: () => digestStream(OTHER_PDF_DIGEST),
+      }),
+    ).rejects.toMatchObject({ code: "UPLOAD_MISMATCH" });
+    expect(bucket.delete).toHaveBeenCalledWith(INPUT_KEY);
   });
 
   it.each([

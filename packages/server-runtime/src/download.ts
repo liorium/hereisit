@@ -222,14 +222,13 @@ export async function fetchPdfOptimizeResult(
     await bestEffortDelete(input);
     throw error;
   }
-  let acknowledged = false;
+  let acknowledgement: Promise<void> | undefined;
   return {
     blob,
     digest,
-    async acknowledge() {
-      if (acknowledged) return;
-      await acknowledge(input, claimed.lease, input.signal);
-      acknowledged = true;
+    acknowledge() {
+      acknowledgement ??= acknowledge(input, claimed.lease, input.signal);
+      return acknowledgement;
     },
   };
 }

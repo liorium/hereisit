@@ -34,7 +34,7 @@ export interface ArtifactBucket {
     options: {
       onlyIf: Headers;
       httpMetadata: { contentType: ArtifactMime };
-      customMetadata: { kind: "input"; uploadVersion: string };
+      customMetadata: Readonly<Record<string, string>>;
     },
   ): Promise<ArtifactHead | null>;
   head(key: string): Promise<ArtifactHead | null>;
@@ -45,6 +45,10 @@ export interface FixedLengthStreamPair {
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<ArrayBuffer | ArrayBufferView>;
 }
+
+export type Sha256DigestStream = WritableStream<ArrayBuffer | ArrayBufferView> & {
+  readonly digest: Promise<ArrayBuffer>;
+};
 
 export interface VerifiedInputArtifact {
   readonly key: InputArtifactObjectKey;
@@ -110,15 +114,19 @@ async function pipeToFixedLengthStream(
   source: ReadableStream<Uint8Array>,
   destination: WritableStream<ArrayBuffer | ArrayBufferView>,
   signal: AbortSignal,
+  digestDestination?: WritableStream<ArrayBuffer | ArrayBufferView>,
 ): Promise<void> {
   const reader = source.getReader();
   const writer = destination.getWriter();
+  const digestWriter = digestDestination?.getWriter();
   let abortSettlement: Promise<void> | null = null;
   const abort = () => {
     const reason = signal.reason ?? new ArtifactUploadError("UPLOAD_MISMATCH");
-    abortSettlement = Promise.allSettled([reader.cancel(reason), writer.abort(reason)]).then(
-      () => undefined,
-    );
+    abortSettlement = Promise.allSettled([
+      reader.cancel(reason),
+      writer.abort(reason),
+      ...(digestWriter === undefined ? [] : [digestWriter.abort(reason)]),
+    ]).then(() => undefined);
   };
   signal.addEventListener("abort", abort, { once: true });
 
@@ -132,11 +140,17 @@ async function pipeToFixedLengthStream(
       const next = await reader.read();
       if (next.done) break;
       await writer.write(next.value);
+      await digestWriter?.write(next.value);
     }
     await writer.close();
+    await digestWriter?.close();
   } catch (error) {
     if (abortSettlement === null) {
-      await Promise.allSettled([reader.cancel(error), writer.abort(error)]);
+      await Promise.allSettled([
+        reader.cancel(error),
+        writer.abort(error),
+        ...(digestWriter === undefined ? [] : [digestWriter.abort(error)]),
+      ]);
     } else {
       await abortSettlement;
     }
@@ -145,6 +159,7 @@ async function pipeToFixedLengthStream(
     signal.removeEventListener("abort", abort);
     reader.releaseLock();
     writer.releaseLock();
+    digestWriter?.releaseLock();
   }
 }
 
@@ -165,6 +180,7 @@ export function verifyInputArtifactHead(
     readonly byteLength: number;
     readonly mime: string;
     readonly uploadVersion: number;
+    readonly expectedSha256?: string;
   },
 ): VerifiedInputArtifact {
   if (
@@ -186,9 +202,10 @@ export function verifyInputArtifactHead(
     head.size !== expected.byteLength ||
     head.httpMetadata?.contentType !== expected.mime ||
     metadata === undefined ||
-    Object.keys(metadata).length !== 2 ||
+    Object.keys(metadata).length !== (expected.expectedSha256 === undefined ? 2 : 3) ||
     metadata.kind !== "input" ||
     metadata.uploadVersion !== String(expected.uploadVersion) ||
+    (expected.expectedSha256 !== undefined && metadata.sha256 !== expected.expectedSha256) ||
     !SAFE_ETAG_PATTERN.test(head.etag)
   ) {
     throw new ArtifactUploadError("UPLOAD_MISMATCH");
@@ -240,6 +257,8 @@ export async function storeExactInputArtifact(input: {
   readonly deadlineAt: number;
   readonly now?: () => number;
   readonly createFixedLengthStream?: (expectedLength: number) => FixedLengthStreamPair;
+  readonly expectedSha256?: string;
+  readonly createDigestStream?: () => Sha256DigestStream;
 }): Promise<StoreExactInputArtifactResult> {
   const now = input.now ?? Date.now;
   if (
@@ -250,7 +269,9 @@ export async function storeExactInputArtifact(input: {
     input.byteLength > maximumBytes(input.mime) ||
     !Number.isSafeInteger(input.deadlineAt) ||
     !Number.isSafeInteger(input.uploadVersion) ||
-    input.uploadVersion < 1
+    input.uploadVersion < 1 ||
+    (input.expectedSha256 !== undefined &&
+      !/^sha-256=[A-Za-z0-9+/]{43}=$/.test(input.expectedSha256))
   ) {
     throw new ArtifactUploadError("INVALID_ARTIFACT_REQUEST");
   }
@@ -265,6 +286,14 @@ export async function storeExactInputArtifact(input: {
   );
   const mime = input.mime;
   const abortController = new AbortController();
+  const digestStream =
+    input.expectedSha256 === undefined
+      ? undefined
+      : (input.createDigestStream ?? (() => new DigestStream("SHA-256")))();
+  const digestObserved = digestStream?.digest.then(
+    (value) => ({ status: "fulfilled" as const, value }),
+    () => ({ status: "rejected" as const }),
+  );
   let deadlineExpired = false;
   let putRejectedFirst = false;
   let conditionalPutLost = false;
@@ -278,6 +307,7 @@ export async function storeExactInputArtifact(input: {
     input.source,
     fixedLengthStream.writable,
     abortController.signal,
+    digestStream,
   );
   const putPromise = Promise.resolve().then(() =>
     input.bucket.put(input.key, fixedLengthStream.readable, {
@@ -286,6 +316,7 @@ export async function storeExactInputArtifact(input: {
       customMetadata: {
         kind: "input",
         uploadVersion: String(input.uploadVersion),
+        ...(input.expectedSha256 === undefined ? {} : { sha256: input.expectedSha256 }),
       },
     }),
   );
@@ -348,6 +379,23 @@ export async function storeExactInputArtifact(input: {
       throw new ArtifactUploadError(
         errorCodeForPipelineFailure({ deadlineExpired, putRejectedFirst: true }),
       );
+    }
+  }
+
+  if (digestStream !== undefined && input.expectedSha256 !== undefined) {
+    const digest = await digestObserved;
+    if (digest?.status !== "fulfilled") {
+      await input.bucket.delete(input.key).catch(() => undefined);
+      throw new ArtifactUploadError("UPLOAD_MISMATCH");
+    }
+    let binary = "";
+    for (const byte of new Uint8Array(digest.value)) {
+      binary += String.fromCharCode(byte);
+    }
+    const actual = `sha-256=${btoa(binary)}`;
+    if (actual !== input.expectedSha256) {
+      await input.bucket.delete(input.key).catch(() => undefined);
+      throw new ArtifactUploadError("UPLOAD_MISMATCH");
     }
   }
 

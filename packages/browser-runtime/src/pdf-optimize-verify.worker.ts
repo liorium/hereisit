@@ -131,7 +131,7 @@ async function defaultInspect(
     throwOnInvalidObject: true,
     updateMetadata: false,
   });
-  const session = await openPdfRasterSession({ bytes: bytes.slice(0) }, { signal });
+  const session = await openPdfRasterSession({ bytes }, { signal });
   try {
     if (structure.getPageCount() !== session.pageCount) fail();
     const pages: PdfSemanticPage[] = [];
@@ -249,10 +249,12 @@ export function comparePdfVisualFingerprints(
   source: PdfVisualFingerprint,
   result: PdfVisualFingerprint,
 ): void {
+  const sourceBlank = source.nonWhiteFraction <= 0.001;
+  const resultBlank = result.nonWhiteFraction <= 0.001;
   if (
     source.samples.length < 1 ||
     source.samples.length !== result.samples.length ||
-    result.nonWhiteFraction <= 0.001 ||
+    (!sourceBlank && resultBlank) ||
     result.nonWhiteFraction < source.nonWhiteFraction * 0.35
   ) {
     fail();
@@ -292,47 +294,119 @@ async function readFile(file: File, expected: number): Promise<ArrayBuffer> {
   return bytes;
 }
 
+export type PdfVerificationProgress = {
+  readonly phase: "source" | "result" | "comparing";
+  readonly fraction: number;
+  readonly page: number | null;
+};
+
+type PdfVerificationSnapshot = {
+  readonly pages: readonly PdfSemanticPage[];
+  readonly visuals: ReadonlyMap<number, PdfVisualFingerprint>;
+};
+
+async function inspectFileSnapshot(input: {
+  readonly file: File;
+  readonly byteLength: number;
+  readonly pageCount: number;
+  readonly profile: "structural" | "image-optimized";
+  readonly phase: "source" | "result";
+  readonly dependencies: PdfVerificationDependencies;
+  readonly signal: AbortSignal;
+  readonly progress?: (event: PdfVerificationProgress) => void;
+}): Promise<PdfVerificationSnapshot> {
+  input.progress?.({
+    phase: input.phase,
+    fraction: input.phase === "source" ? 0.05 : 0.5,
+    page: null,
+  });
+  const bytes = await readFile(input.file, input.byteLength);
+  const inspection = await input.dependencies.inspect(bytes, input.signal);
+  try {
+    if (inspection.pages.length !== input.pageCount) fail();
+    const pages = inspection.pages.map((page) => ({
+      mediaBox: [...page.mediaBox] as [number, number, number, number],
+      cropBox: [...page.cropBox] as [number, number, number, number],
+      rotation: page.rotation,
+      textItemCount: page.textItemCount,
+      annotationClasses: [...page.annotationClasses],
+      operators: { ...page.operators },
+    }));
+    const visuals = new Map<number, PdfVisualFingerprint>();
+    if (input.profile === "image-optimized") {
+      const samples = deterministicPdfSamples(input.pageCount);
+      for (let index = 0; index < samples.length; index += 1) {
+        if (input.signal.aborted) fail();
+        const page = samples[index] as number;
+        const rendered = await input.dependencies.render(inspection, page);
+        visuals.set(page, {
+          samples: [...rendered.samples],
+          nonWhiteFraction: rendered.nonWhiteFraction,
+        });
+        const start = input.phase === "source" ? 0.1 : 0.55;
+        input.progress?.({
+          phase: input.phase,
+          fraction: start + ((index + 1) / samples.length) * 0.35,
+          page,
+        });
+      }
+    }
+    return { pages, visuals };
+  } finally {
+    await inspection.close();
+  }
+}
+
 export async function verifyPdfOptimizeFiles(
   sourceFile: File,
   resultFile: File,
   rawDescriptor: unknown,
   dependencies: PdfVerificationDependencies = defaultDependencies,
   signal = new AbortController().signal,
+  progress?: (event: PdfVerificationProgress) => void,
 ): Promise<{
   readonly descriptor: Extract<PdfOptimizeResultDescriptor, { kind: "download" }>;
   readonly blob: Blob;
 }> {
-  let source: PdfVerificationInspection | undefined;
-  let result: PdfVerificationInspection | undefined;
   try {
     const parsed = pdfOptimizeResultDescriptorSchema.safeParse(rawDescriptor);
     if (!parsed.success || parsed.data.kind !== "download") fail();
     const descriptor = parsed.data;
-    const sourceBytes = await readFile(sourceFile, descriptor.sourceByteLength);
-    const resultBytes = await readFile(resultFile, descriptor.byteLength);
     if (descriptor.pageCount < 1 || descriptor.pageCount > PDF_OPTIMIZE_MAX_PAGES) fail();
-    source = await dependencies.inspect(sourceBytes, signal);
-    result = await dependencies.inspect(resultBytes, signal);
-    if (
-      source.pages.length !== descriptor.pageCount ||
-      result.pages.length !== descriptor.pageCount
-    )
-      fail();
+    const source = await inspectFileSnapshot({
+      file: sourceFile,
+      byteLength: descriptor.sourceByteLength,
+      pageCount: descriptor.pageCount,
+      profile: descriptor.profile,
+      phase: "source",
+      dependencies,
+      signal,
+      ...(progress === undefined ? {} : { progress }),
+    });
+    const result = await inspectFileSnapshot({
+      file: resultFile,
+      byteLength: descriptor.byteLength,
+      pageCount: descriptor.pageCount,
+      profile: descriptor.profile,
+      phase: "result",
+      dependencies,
+      signal,
+      ...(progress === undefined ? {} : { progress }),
+    });
+    progress?.({ phase: "comparing", fraction: 0.95, page: null });
     comparePdfSemanticPages(source.pages, result.pages);
     if (descriptor.profile === "image-optimized") {
       for (const page of deterministicPdfSamples(descriptor.pageCount)) {
-        comparePdfVisualFingerprints(
-          await dependencies.render(source, page),
-          await dependencies.render(result, page),
-        );
+        const sourceVisual = source.visuals.get(page);
+        const resultVisual = result.visuals.get(page);
+        if (sourceVisual === undefined || resultVisual === undefined) fail();
+        comparePdfVisualFingerprints(sourceVisual, resultVisual);
       }
     }
     if (signal.aborted) fail();
     return { descriptor, blob: resultFile };
   } catch {
     return fail();
-  } finally {
-    await Promise.allSettled([Promise.resolve(source?.close()), Promise.resolve(result?.close())]);
   }
 }
 
@@ -382,12 +456,24 @@ if (workerScope !== undefined && typeof workerScope.postMessage === "function") 
     }
     const job = { jobId: message.jobId, controller: new AbortController() };
     active = job;
+    let progressSequence = 0;
     void verifyPdfOptimizeFiles(
       message.source as File,
       message.result as File,
       message.descriptor,
       defaultDependencies,
       job.controller.signal,
+      (progress) => {
+        if (active !== job || job.controller.signal.aborted) return;
+        progressSequence += 1;
+        workerScope.postMessage({
+          protocol: PROTOCOL,
+          type: "progress",
+          jobId: job.jobId,
+          sequence: progressSequence,
+          ...progress,
+        });
+      },
     )
       .then(
         (verified) => {

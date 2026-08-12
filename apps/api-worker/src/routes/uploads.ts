@@ -52,6 +52,7 @@ export interface UploadRouteRuntime {
     readonly mime: ArtifactMime;
     readonly uploadVersion: number;
     readonly deadlineAt: number;
+    readonly expectedSha256?: string;
   }) => Promise<StoreExactInputArtifactResult>;
   readonly deleteInput: (authorization: ArtifactDeletionAuthorization) => Promise<void>;
   readonly dispatchOutbox: (jobId: string, now: number) => Promise<boolean>;
@@ -150,9 +151,13 @@ function exactUploadHeadersMatch(
   if (request.headers.has("transfer-encoding")) {
     return false;
   }
+  const digest = request.headers.get("digest");
   return (
     request.headers.get("content-type") === job.declaredMime &&
-    parseContentLength(request.headers.get("content-length")) === job.declaredBytes
+    parseContentLength(request.headers.get("content-length")) === job.declaredBytes &&
+    (job.declaredMime === "application/pdf"
+      ? digest !== null && /^sha-256=[A-Za-z0-9+/]{43}=$/.test(digest)
+      : digest === null)
   );
 }
 
@@ -433,6 +438,7 @@ export async function routeUploadRequest(
 
   let stored: StoreExactInputArtifactResult;
   try {
+    const expectedSha256 = request.headers.get("digest");
     stored = await runtime.storeInput({
       source: request.body,
       key: job.inputKey,
@@ -440,6 +446,7 @@ export async function routeUploadRequest(
       mime: job.declaredMime,
       uploadVersion: job.uploadVersion,
       deadlineAt: job.uploadExpiresAt,
+      ...(expectedSha256 === null ? {} : { expectedSha256 }),
     });
   } catch (error) {
     const code = classifyArtifactFailure(error);

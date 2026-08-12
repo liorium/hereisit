@@ -7,7 +7,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import { createClientJobCredentials, RemoteJobError } from "./api-client";
 import { fetchPdfOptimizeResult } from "./download";
-import { runPdfOptimizeJob } from "./run-pdf-optimize-job";
+import { runPdfOptimizeJob, sleepWithAbort } from "./run-pdf-optimize-job";
 
 const jobId = "123e4567-e89b-42d3-a456-426614174001";
 const session = createClientJobCredentials().jobToken;
@@ -112,6 +112,7 @@ function dependencies(overrides: Record<string, unknown> = {}) {
     getPolicy: vi.fn(async () => policy()),
     createJob: vi.fn(async (_request: PdfOptimizeCreateRequestV1, _options: unknown) => created()),
     upload: vi.fn(async (_input: unknown) => undefined),
+    digestFile: vi.fn(async () => digest),
     getStatus: vi.fn(async (_input: unknown) => status()),
     download: vi.fn(async (_input: unknown) => ({
       blob: new Blob([new Uint8Array(90)], { type: "application/pdf" }),
@@ -128,6 +129,31 @@ function dependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe("runPdfOptimizeJob", () => {
+  it("removes abort listeners after every completed poll delay", async () => {
+    vi.useFakeTimers();
+    let listenerCount = 0;
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, "addEventListener").mockImplementation((...args) => {
+      listenerCount += 1;
+      return EventTarget.prototype.addEventListener.apply(controller.signal, args);
+    });
+    const remove = vi
+      .spyOn(controller.signal, "removeEventListener")
+      .mockImplementation((...args) => {
+        listenerCount -= 1;
+        return EventTarget.prototype.removeEventListener.apply(controller.signal, args);
+      });
+    for (let index = 0; index < 3; index += 1) {
+      const delay = sleepWithAbort(10, controller.signal);
+      await vi.advanceTimersByTimeAsync(10);
+      await delay;
+      expect(listenerCount).toBe(0);
+    }
+    expect(add).toHaveBeenCalledTimes(3);
+    expect(remove).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
   it("creates the exact versioned body, uploads once, polls monotonically, and never sends a filename", async () => {
     const deps = dependencies();
     vi.mocked(deps.getStatus)
@@ -159,6 +185,8 @@ describe("runPdfOptimizeJob", () => {
     });
     expect(JSON.stringify(request)).not.toContain(input.name);
     expect(deps.upload).toHaveBeenCalledOnce();
+    expect(deps.upload).toHaveBeenCalledWith(expect.objectContaining({ digest }));
+    expect(deps.digestFile).toHaveBeenCalledWith(input, expect.any(AbortSignal));
   });
 
   it("reuses the idempotent create request after an expired upload descriptor", async () => {
@@ -309,6 +337,32 @@ describe("runPdfOptimizeJob", () => {
     expect(deps.remove).toHaveBeenCalledOnce();
   });
 
+  it("backs off and applies the queue watchdog to repeated stale statuses", async () => {
+    let now = 0;
+    const deps = dependencies({
+      getStatus: vi.fn(async () => status("queued", 1)),
+      sleep: vi.fn(async () => {
+        now += 10 * 60_000;
+      }),
+      now: vi.fn(() => now),
+    });
+    const handle = runPdfOptimizeJob(
+      file(),
+      { version: 1, preset: "balanced" },
+      {
+        apiOrigin: "https://processing.example",
+        anonymousSessionId: session,
+        pageCount: 1,
+        dependencies: deps,
+      },
+    );
+    await expect(handle.result).resolves.toMatchObject({
+      status: "rejected",
+      error: { code: "QUEUE_UNAVAILABLE" },
+    });
+    expect(deps.sleep).toHaveBeenCalledTimes(2);
+  });
+
   it("checks exact download length, MIME, and SHA-256 before acknowledging", async () => {
     const bytes = new Uint8Array(90);
     const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -321,6 +375,10 @@ describe("runPdfOptimizeJob", () => {
       throw new Error("fixture");
     }
     const descriptor = succeeded.result;
+    let finishAcknowledge: () => void = () => undefined;
+    const acknowledgeResponse = new Promise<Response>((resolve) => {
+      finishAcknowledge = () => resolve(new Response(null, { status: 204 }));
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -333,7 +391,7 @@ describe("runPdfOptimizeJob", () => {
           },
         }),
       )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockReturnValueOnce(acknowledgeResponse);
     const result = await fetchPdfOptimizeResult({
       apiOrigin: "https://processing.example",
       jobId,
@@ -342,9 +400,14 @@ describe("runPdfOptimizeJob", () => {
       fetch: fetchMock,
     });
     expect(result.blob).toMatchObject({ size: 90, type: "application/pdf" });
-    await result.acknowledge();
-    await result.acknowledge();
+    const firstAcknowledge = result.acknowledge();
+    const secondAcknowledge = result.acknowledge();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    finishAcknowledge();
+    await expect(Promise.all([firstAcknowledge, secondAcknowledge])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
 
     await expect(
       fetchPdfOptimizeResult({
@@ -363,5 +426,37 @@ describe("runPdfOptimizeJob", () => {
           }),
       }),
     ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+  });
+
+  it("shares one in-flight acknowledgement across concurrent callers", async () => {
+    let finish: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const acknowledge = vi.fn(() => pending);
+    const deps = dependencies({
+      download: vi.fn(async () => ({
+        blob: new Blob([new Uint8Array(90)], { type: "application/pdf" }),
+        digest,
+        acknowledge,
+      })),
+    });
+    const handle = runPdfOptimizeJob(
+      file(),
+      { version: 1, preset: "balanced" },
+      {
+        apiOrigin: "https://processing.example",
+        anonymousSessionId: session,
+        pageCount: 1,
+        dependencies: deps,
+      },
+    );
+    const outcome = await handle.result;
+    if (outcome.status !== "fulfilled") throw new Error("fixture");
+    const first = outcome.value.acknowledge();
+    const second = outcome.value.acknowledge();
+    expect(acknowledge).toHaveBeenCalledOnce();
+    finish();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
   });
 });

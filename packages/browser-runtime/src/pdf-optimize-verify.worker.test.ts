@@ -74,10 +74,52 @@ describe("PDF optimize verification core", () => {
     ).toThrow();
     expect(() =>
       comparePdfVisualFingerprints(
+        { samples: [255, 255], nonWhiteFraction: 0 },
+        { samples: [255, 255], nonWhiteFraction: 0 },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      comparePdfVisualFingerprints(
         { samples: [20, 30, 40], nonWhiteFraction: 0.5 },
         { samples: [200, 220, 240], nonWhiteFraction: 0.5 },
       ),
     ).toThrow();
+  });
+
+  it("closes the source parser before reading and opening the result", async () => {
+    const order: string[] = [];
+    const source = pdfFile(100);
+    const result = pdfFile(90, "result.pdf");
+    vi.spyOn(source, "arrayBuffer").mockImplementation(async () => {
+      order.push("read-source");
+      return await new Blob([source]).arrayBuffer();
+    });
+    vi.spyOn(result, "arrayBuffer").mockImplementation(async () => {
+      order.push("read-result");
+      return await new Blob([result]).arrayBuffer();
+    });
+    let opened = 0;
+    const inspect = vi.fn(async () => {
+      opened += 1;
+      const label = opened === 1 ? "source" : "result";
+      order.push(`open-${label}`);
+      return {
+        pages: [page()],
+        close: () => {
+          order.push(`close-${label}`);
+        },
+      };
+    });
+    const { verifyPdfOptimizeFiles } = await import("./pdf-optimize-verify.worker");
+    await verifyPdfOptimizeFiles(source, result, descriptor, { inspect, render: vi.fn() });
+    expect(order).toEqual([
+      "read-source",
+      "open-source",
+      "close-source",
+      "read-result",
+      "open-result",
+      "close-result",
+    ]);
   });
 
   it("reads both Files inside verification and does no render work for structural output", async () => {
