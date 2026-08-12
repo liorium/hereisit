@@ -78,6 +78,8 @@ export interface OperationalConfig {
   maintainerSessionHashes: ReadonlySet<string>;
   engineInstanceName: "image-slot-0";
   engineImageDigest: string;
+  pdfEngineInstanceName: "pdf-slot-0";
+  pdfEngineImageDigest: string;
 }
 
 const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
@@ -366,6 +368,9 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
   if (env.ENGINE_INSTANCE_NAME !== "image-slot-0") {
     throw new TypeError("ENGINE_INSTANCE_NAME must be image-slot-0.");
   }
+  if (env.PDF_ENGINE_INSTANCE_NAME !== "pdf-slot-0") {
+    throw new TypeError("PDF_ENGINE_INSTANCE_NAME must be pdf-slot-0.");
+  }
 
   return {
     environment,
@@ -419,5 +424,10 @@ export async function parseOperationalConfig(env: Env): Promise<OperationalConfi
     maintainerSessionHashes: parseMaintainerHashes(env.MAINTAINER_SESSION_HASHES),
     engineInstanceName: "image-slot-0",
     engineImageDigest: parseNonemptySetting(env.ENGINE_IMAGE_DIGEST, "ENGINE_IMAGE_DIGEST"),
+    pdfEngineInstanceName: "pdf-slot-0",
+    pdfEngineImageDigest: parseNonemptySetting(
+      env.PDF_ENGINE_IMAGE_DIGEST,
+      "PDF_ENGINE_IMAGE_DIGEST",
+    ),
   };
 }

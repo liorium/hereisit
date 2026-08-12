@@ -11,6 +11,7 @@ import {
   imageOptimizeCreateRequestSchema,
   PDF_OPTIMIZE_MAX_PAGES,
   type PdfOptimizeCreateRequestV1,
+  type PdfOptimizeMime,
   pdfOptimizeCreateRequestSchema,
 } from "@hereisit/tool-contracts";
 
@@ -37,7 +38,7 @@ export interface ActualUsageSample {
   cpuMs: number;
   memoryByteMilliseconds: number;
   testedCandidates: number;
-  mime: ImageOptimizeMime;
+  mime: ImageOptimizeMime | PdfOptimizeMime;
 }
 
 export interface EngineAttemptCaps {
@@ -92,7 +93,8 @@ const contentCoefficient = {
   "image/jpeg": 2,
   "image/png": 3,
   "image/webp": 2,
-} as const satisfies Record<ImageOptimizeMime, number>;
+  "application/pdf": 1,
+} as const satisfies Record<ImageOptimizeMime | PdfOptimizeMime, number>;
 
 function createEngineAttemptCaps(
   cpuMs: number,
@@ -355,7 +357,7 @@ function calculateMeasuredWeightedUnits(sample: ActualUsageSample): number {
   assertNonNegativeSafeInteger(sample.testedCandidates, "testedCandidates");
 
   if (!Object.hasOwn(contentCoefficient, sample.mime)) {
-    throw new RangeError(`Unsupported image MIME: ${String(sample.mime)}.`);
+    throw new RangeError(`Unsupported processing MIME: ${String(sample.mime)}.`);
   }
 
   return checkedSum(

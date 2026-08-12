@@ -252,6 +252,7 @@ function pdfRequest(
     toolContract: "pdf.optimize@1",
     anonymousSessionId: "a".repeat(43),
     clientRequestId: alternateClientRequestId,
+    jobToken,
     input: {
       byteLength: 1_000_000,
       mime: "application/pdf",
@@ -308,7 +309,7 @@ async function pdfReservationInput(
   return {
     jobId: alternateJobId,
     clientRequestId: createRequest.clientRequestId,
-    tokenHash: await hashJobToken(alternateJobToken),
+    tokenHash: await hashJobToken(createRequest.jobToken),
     sessionHash: await hashAnonymousSessionId(createRequest.anonymousSessionId),
     networkHash,
     networkDailyQuotaHashes: [networkHash, previousNetworkHash],

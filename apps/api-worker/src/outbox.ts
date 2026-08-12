@@ -1,4 +1,4 @@
-import { type ImageJobMessage, imageJobMessageSchema } from "@hereisit/server-contracts";
+import { type ServerJobMessage, serverJobMessageSchema } from "@hereisit/server-contracts";
 
 const DEFAULT_DISPATCH_LIMIT = 10;
 const MAX_DISPATCH_LIMIT = 100;
@@ -41,12 +41,13 @@ interface OutboxDatabase {
 }
 
 interface OutboxQueue {
-  send(message: ImageJobMessage, options: { contentType: "json" }): Promise<unknown>;
+  send(message: ServerJobMessage, options: { contentType: "json" }): Promise<unknown>;
 }
 
 export interface OutboxEnvironment {
   readonly DB: OutboxDatabase;
   readonly IMAGE_JOBS: OutboxQueue;
+  readonly PDF_JOBS?: OutboxQueue;
 }
 
 function changedRows(result: D1RunResultLike): number {
@@ -100,7 +101,7 @@ function parseOutboxRow(value: unknown):
   return { kind: "valid", row: parsed };
 }
 
-function parsePayload(payload: string): ImageJobMessage | null {
+function parsePayload(payload: string): ServerJobMessage | null {
   if (new TextEncoder().encode(payload).byteLength > MAX_PAYLOAD_BYTES) return null;
   let value: unknown;
   try {
@@ -108,7 +109,7 @@ function parsePayload(payload: string): ImageJobMessage | null {
   } catch {
     return null;
   }
-  const parsed = imageJobMessageSchema.safeParse(value);
+  const parsed = serverJobMessageSchema.safeParse(value);
   if (!parsed.success) return null;
   if (
     !UUID_PATTERN.test(parsed.data.jobId) ||
@@ -227,7 +228,9 @@ async function dispatchSelectedRows(
     }
 
     try {
-      await env.IMAGE_JOBS.send(payload, { contentType: "json" });
+      const queue = payload.contractId === "pdf.optimize@1" ? env.PDF_JOBS : env.IMAGE_JOBS;
+      if (queue === undefined) throw new Error("PDF queue binding is unavailable.");
+      await queue.send(payload, { contentType: "json" });
     } catch {
       await markDispatchFailure(env.DB, row, now);
       continue;

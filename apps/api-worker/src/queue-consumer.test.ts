@@ -1,4 +1,9 @@
-import type { EngineJobStatus, ImageJobMessage } from "@hereisit/server-contracts";
+import type {
+  EngineJobStatus,
+  ImageJobMessage,
+  PdfEngineJobStatus,
+  PdfJobMessage,
+} from "@hereisit/server-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@cloudflare/containers", () => ({
@@ -11,6 +16,8 @@ import {
   classifyQueueFailure,
   consumeImageJob,
   consumeImageQueue,
+  consumePdfJob,
+  consumeProcessingQueue,
   EngineOomError,
   EngineTimeoutError,
   type QueueConsumerDependencies,
@@ -27,6 +34,19 @@ const message: ImageJobMessage = {
   inputEtag: "input-etag",
   outputKey: "outputs/22222222-2222-4222-8222-222222222222",
   resourceClass: "image-standard-v1",
+  attempt: 1,
+  queueEpoch: "33333333-3333-4333-8333-333333333333",
+  queueGeneration: 1,
+};
+
+const pdfMessage: PdfJobMessage = {
+  jobId,
+  contractId: "pdf.optimize@1",
+  specHash: "b".repeat(64),
+  inputKey: "inputs/11111111-1111-4111-8111-111111111111",
+  inputEtag: "pdf-etag",
+  outputKey: "outputs/22222222-2222-4222-8222-222222222222",
+  resourceClass: "pdf-standard-v1",
   attempt: 1,
   queueEpoch: "33333333-3333-4333-8333-333333333333",
   queueGeneration: 1,
@@ -55,6 +75,31 @@ const succeeded: EngineJobStatus = {
   measurements: {
     processedInputBytes: 3,
     processedPixels: 1,
+    cpuMs: 2,
+    memoryByteMilliseconds: 3,
+    peakMemoryBytes: 4,
+    testedCandidates: 1,
+    processingMs: 5,
+  },
+};
+
+const pdfSucceeded: PdfEngineJobStatus = {
+  protocol: 1,
+  jobId,
+  state: "succeeded",
+  phase: "preparing-output",
+  fraction: 1,
+  sequence: 2,
+  result: {
+    kind: "original-retained",
+    sourceByteLength: 3,
+    pageCount: 1,
+    engineBuildId: "pdf-engine-1",
+    warnings: ["ORIGINAL_RETAINED_UNMODIFIED"],
+  },
+  inspection: { verifiedInputMime: "application/pdf", verifiedPageCount: 1, encrypted: false },
+  measurements: {
+    processedInputBytes: 3,
     cpuMs: 2,
     memoryByteMilliseconds: 3,
     peakMemoryBytes: 4,
@@ -127,6 +172,54 @@ function dependencies(): QueueConsumerDependencies {
       }),
       run: vi.fn(async () => undefined),
       status: vi.fn(async () => succeeded),
+      output: vi.fn(async () => new Response(null, { status: 409 })),
+      cancel: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+    },
+  };
+}
+
+function pdfDependencies(): QueueConsumerDependencies {
+  const deps = dependencies();
+  const context = {
+    ...pdfMessage,
+    leaseToken: "44444444-4444-4444-8444-444444444444",
+    leaseExpiresAt: 31_000,
+    declaredBytes: 3,
+    declaredMime: "application/pdf" as const,
+    declaredPageCount: 1,
+    spec: {
+      version: 1 as const,
+      preset: "balanced" as const,
+    },
+    sessionHash: "b".repeat(64),
+    reservedUnits: 20_000_000,
+  };
+  if (deps.store === undefined || deps.artifacts === undefined) {
+    throw new Error("Expected configured PDF dependencies.");
+  }
+  vi.mocked(deps.store.claim).mockReset().mockResolvedValueOnce(context).mockResolvedValue(null);
+  vi.mocked(deps.artifacts.getInput).mockResolvedValue({
+    body: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Uint8Array.of(0x25, 0x50, 0x44));
+        controller.close();
+      },
+    }),
+    size: 3,
+    etag: "pdf-etag",
+    httpMetadata: { contentType: "application/pdf" },
+  });
+  return {
+    ...deps,
+    pdfEngine: {
+      create: vi.fn(async () => ({ coldStart: false, containerReadyMs: 1 })),
+      upload: vi.fn(async (_jobId, body) => {
+        const reader = body.getReader();
+        while (!(await reader.read()).done) {}
+      }),
+      run: vi.fn(async () => undefined),
+      status: vi.fn(async () => pdfSucceeded),
       output: vi.fn(async () => new Response(null, { status: 409 })),
       cancel: vi.fn(async () => undefined),
       remove: vi.fn(async () => undefined),
@@ -388,6 +481,26 @@ describe("image queue consumer", () => {
   });
 });
 
+describe("PDF queue consumer", () => {
+  it("uses only the PDF engine and settles an original-retained result", async () => {
+    const deps = pdfDependencies();
+
+    await expect(consumePdfJob(pdfMessage, {} as never, deps)).resolves.toBe("completed");
+
+    expect(deps.pdfEngine?.create).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: "pdf.optimize", resourceClass: "pdf-standard-v1" }),
+    );
+    expect(deps.engine?.create).not.toHaveBeenCalled();
+    expect(deps.store?.settleSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ contractId: "pdf.optimize@1" }),
+      pdfSucceeded,
+      1_000,
+    );
+    expect(deps.artifacts?.storeOutput).not.toHaveBeenCalled();
+    expect(deps.artifacts?.deleteInput).toHaveBeenCalledWith(pdfMessage.inputKey);
+  });
+});
+
 describe("Queue batch disposition", () => {
   function queueMessage(body: unknown) {
     return {
@@ -436,5 +549,82 @@ describe("Queue batch disposition", () => {
     expect(recordQueueOperations).toHaveBeenCalledWith(3);
     expect(item.ack).not.toHaveBeenCalled();
     expect(item.retry).toHaveBeenCalledWith({ delaySeconds: 10 });
+  });
+});
+
+describe("contract-isolated processing queue routing", () => {
+  function item(body: unknown) {
+    return {
+      id: "message-1",
+      timestamp: new Date(0),
+      body,
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn(),
+    };
+  }
+
+  function batch(queue: string, queueItem: ReturnType<typeof item>) {
+    return {
+      queue,
+      messages: [queueItem],
+      metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+      ackAll: vi.fn(),
+      retryAll: vi.fn(),
+    } as unknown as MessageBatch<ImageJobMessage | PdfJobMessage>;
+  }
+
+  it("routes each strict contract to exactly one matching consumer", async () => {
+    const imageItem = item(message);
+    const pdfItem = item(pdfMessage);
+    const consumeImage = vi.fn(async () => "completed" as const);
+    const consumePdf = vi.fn(async () => "completed" as const);
+    const env = {
+      IMAGE_JOBS_QUEUE_NAME: "image",
+      IMAGE_JOBS_DLQ_NAME: "image-dlq",
+      PDF_JOBS_QUEUE_NAME: "pdf",
+      PDF_JOBS_DLQ_NAME: "pdf-dlq",
+    } as never;
+
+    await consumeProcessingQueue(batch("image", imageItem), env, {
+      consumeImage,
+      consumePdf,
+      recordQueueOperations: vi.fn(async () => undefined),
+    });
+    await consumeProcessingQueue(batch("pdf", pdfItem), env, {
+      consumeImage,
+      consumePdf,
+      recordQueueOperations: vi.fn(async () => undefined),
+    });
+
+    expect(consumeImage).toHaveBeenCalledTimes(1);
+    expect(consumeImage).toHaveBeenCalledWith(message, env);
+    expect(consumePdf).toHaveBeenCalledTimes(1);
+    expect(consumePdf).toHaveBeenCalledWith(pdfMessage, env);
+    expect(imageItem.ack).toHaveBeenCalledOnce();
+    expect(pdfItem.ack).toHaveBeenCalledOnce();
+  });
+
+  it("acks cross-tool envelopes without contacting either engine path", async () => {
+    const unsafe = item({ ...pdfMessage, resourceClass: "image-standard-v1" });
+    const consumeImage = vi.fn();
+    const consumePdf = vi.fn();
+    await consumeProcessingQueue(
+      batch("pdf", unsafe),
+      {
+        IMAGE_JOBS_QUEUE_NAME: "image",
+        IMAGE_JOBS_DLQ_NAME: "image-dlq",
+        PDF_JOBS_QUEUE_NAME: "pdf",
+        PDF_JOBS_DLQ_NAME: "pdf-dlq",
+      } as never,
+      {
+        consumeImage,
+        consumePdf,
+        recordQueueOperations: vi.fn(async () => undefined),
+      },
+    );
+    expect(unsafe.ack).toHaveBeenCalledOnce();
+    expect(consumeImage).not.toHaveBeenCalled();
+    expect(consumePdf).not.toHaveBeenCalled();
   });
 });

@@ -1,9 +1,14 @@
-import { estimateImageOptimizeUnits } from "@hereisit/server-job";
+import { estimateResources } from "@hereisit/server-job";
 import {
   type ImageOptimizeCreateRequestV1,
   type ImageOptimizeCreateResponse,
   imageOptimizeCreateRequestSchema,
 } from "@hereisit/tool-contracts/image-optimize";
+import {
+  type PdfOptimizeCreateRequestV1,
+  type PdfOptimizeCreateResponse,
+  pdfOptimizeCreateRequestSchema,
+} from "@hereisit/tool-contracts/pdf-optimize";
 import type { ToolJobErrorCode } from "@hereisit/tool-contracts/tool-job";
 import {
   hashAnonymousSessionId,
@@ -12,9 +17,9 @@ import {
   sessionRolloutBucket,
 } from "../auth";
 import type {
-  JobRepository,
+  AnyReserveAndCreateInput,
+  PdfReservationJob,
   ReservationJob,
-  ReserveAndCreateInput,
   ReserveAndCreateResult,
 } from "../d1-job-repository";
 import type { OperationalConfig } from "../env";
@@ -40,10 +45,11 @@ type CreateConfig = Pick<
 
 export interface CreateJobLogEvent {
   readonly jobId: string;
-  readonly contractId: "image.optimize@1";
+  readonly contractId: "image.optimize@1" | "pdf.optimize@1";
   readonly byteCount: number;
-  readonly pixelCount: number;
-  readonly resourceClass: "image-standard-v1" | "image-large-v1";
+  readonly pixelCount?: number;
+  readonly pageCount?: number;
+  readonly resourceClass: "image-standard-v1" | "image-large-v1" | "pdf-standard-v1";
   readonly reservedWeightedUnits: number;
 }
 
@@ -53,7 +59,9 @@ export interface CreateJobRouteRuntime {
   readonly previousSecret: string;
   readonly networkRateLimiter: Pick<RateLimit, "limit">;
   readonly sessionRateLimiter: Pick<RateLimit, "limit">;
-  readonly repository: Pick<JobRepository, "reserveAndCreate">;
+  readonly repository: {
+    reserveAndCreate(input: AnyReserveAndCreateInput): Promise<AnyReserveResult>;
+  };
   readonly readJson: (request: Request, maximumBytes?: number) => Promise<unknown>;
   readonly now: () => Date;
   readonly randomUuid: () => string;
@@ -130,8 +138,24 @@ function utcDay(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-function uploadResponse(job: ReservationJob): ImageOptimizeCreateResponse {
-  return {
+type AnyReservationJob = ReservationJob | PdfReservationJob;
+type AnyCreateResponse = ImageOptimizeCreateResponse | PdfOptimizeCreateResponse;
+type AnyReserveResult =
+  | {
+      kind: "created";
+      mode: "upload-required";
+      job: AnyReservationJob;
+    }
+  | {
+      kind: "replayed";
+      mode: "upload-required" | "existing-job";
+      job: AnyReservationJob;
+    }
+  | Exclude<ReserveAndCreateResult, { kind: "created" | "replayed" }>;
+type AnyCreateRequest = ImageOptimizeCreateRequestV1 | PdfOptimizeCreateRequestV1;
+
+function uploadResponse(job: AnyReservationJob): AnyCreateResponse {
+  const payload = {
     contract: "tool-job@1",
     mode: "upload-required",
     jobId: job.jobId,
@@ -145,9 +169,12 @@ function uploadResponse(job: ReservationJob): ImageOptimizeCreateResponse {
     },
     reservedWeightedUnits: job.reservedWeightedUnits,
   };
+  return job.contractId === "pdf.optimize@1"
+    ? (payload as PdfOptimizeCreateResponse)
+    : (payload as ImageOptimizeCreateResponse);
 }
 
-function existingJobResponse(job: ReservationJob): ImageOptimizeCreateResponse {
+function existingJobResponse(job: AnyReservationJob): AnyCreateResponse {
   if (job.status === "created" || job.status === "uploading") {
     throw new TypeError("An existing-job response requires a queued or terminal job.");
   }
@@ -161,7 +188,7 @@ function existingJobResponse(job: ReservationJob): ImageOptimizeCreateResponse {
 }
 
 function successfulCreateResponse(
-  result: Extract<ReserveAndCreateResult, { kind: "created" | "replayed" }>,
+  result: Extract<AnyReserveResult, { kind: "created" | "replayed" }>,
 ): Response {
   const payload =
     result.mode === "upload-required"
@@ -177,7 +204,7 @@ function successfulCreateResponse(
 }
 
 function deniedReservationResponse(
-  result: Exclude<ReserveAndCreateResult, { kind: "created" | "replayed" | "job-id-collision" }>,
+  result: Exclude<AnyReserveResult, { kind: "created" | "replayed" | "job-id-collision" }>,
 ): Response {
   switch (result.kind) {
     case "idempotency-conflict":
@@ -207,8 +234,11 @@ function serverCohortAllowed(input: {
   rolloutPercent: number;
   maintainer: boolean;
   rolloutBucket: number;
+  toolContract?: AnyCreateRequest["toolContract"];
 }): boolean {
-  return input.maintainer || input.rolloutBucket < input.rolloutPercent;
+  return input.toolContract === "pdf.optimize@1"
+    ? input.maintainer
+    : input.maintainer || input.rolloutBucket < input.rolloutPercent;
 }
 
 function globalProcessingEnabled(config: CreateConfig): boolean {
@@ -220,7 +250,7 @@ function globalProcessingEnabled(config: CreateConfig): boolean {
 }
 
 function createReservationInput(input: {
-  request: ImageOptimizeCreateRequestV1;
+  request: AnyCreateRequest;
   runtime: CreateJobRouteRuntime;
   now: number;
   dayKey: string;
@@ -229,9 +259,9 @@ function createReservationInput(input: {
   networkBuckets: Awaited<ReturnType<typeof hashNetworkBuckets>>;
   specJson: string;
   specHash: string;
-}): ReserveAndCreateInput {
+}): AnyReserveAndCreateInput {
   const jobId = input.runtime.randomUuid();
-  return {
+  const common = {
     jobId,
     clientRequestId: input.request.clientRequestId,
     tokenHash: input.tokenHash,
@@ -240,13 +270,11 @@ function createReservationInput(input: {
     networkDailyQuotaHashes: input.networkBuckets.dailyQuotaHashes,
     networkPendingHashes: input.networkBuckets.pendingHashes,
     dayKey: input.dayKey,
-    request: input.request,
     specJson: input.specJson,
     specHash: input.specHash,
     inputKey: createOpaqueObjectKey("inputs", input.runtime.randomUuid()),
     outputKey: createOpaqueObjectKey("outputs", input.runtime.randomUuid()),
     queueEpoch: input.runtime.randomUuid(),
-    estimate: estimateImageOptimizeUnits(input.request),
     uploadExpiresAt: input.now + UPLOAD_DEADLINE_MILLISECONDS,
     now: input.now,
     accountDailyLimit: input.runtime.config.accountDailyWeightedUnitLimit,
@@ -256,6 +284,23 @@ function createReservationInput(input: {
     networkPendingJobLimit: input.runtime.config.networkPendingJobLimit,
     maximumQueuedAgeSeconds: input.runtime.config.maximumQueuedAgeSeconds,
   };
+  return input.request.toolContract === "pdf.optimize@1"
+    ? {
+        ...common,
+        request: input.request,
+        estimate: estimateResources(input.request) as Extract<
+          ReturnType<typeof estimateResources>,
+          { resourceClass: "pdf-standard-v1" }
+        >,
+      }
+    : {
+        ...common,
+        request: input.request,
+        estimate: estimateResources(input.request) as Extract<
+          ReturnType<typeof estimateResources>,
+          { resourceClass: "image-standard-v1" }
+        >,
+      };
 }
 
 export async function routeCreateJobRequest(
@@ -296,7 +341,13 @@ export async function routeCreateJobRequest(
   } catch {
     return toolErrorResponse(400, "INVALID_REQUEST", "요청 본문을 확인해 주세요.", false);
   }
-  const parsed = imageOptimizeCreateRequestSchema.safeParse(requestBody);
+  const parsed =
+    requestBody !== null &&
+    typeof requestBody === "object" &&
+    "toolContract" in requestBody &&
+    requestBody.toolContract === "pdf.optimize@1"
+      ? pdfOptimizeCreateRequestSchema.safeParse(requestBody)
+      : imageOptimizeCreateRequestSchema.safeParse(requestBody);
   if (!parsed.success) {
     return toolErrorResponse(400, "INVALID_REQUEST", "요청 형식이 올바르지 않습니다.", false);
   }
@@ -323,6 +374,7 @@ export async function routeCreateJobRequest(
       rolloutPercent: runtime.config.rolloutPercent,
       maintainer,
       rolloutBucket,
+      toolContract: parsed.data.toolContract,
     })
   ) {
     return processingDisabledResponse("LOCAL_FALLBACK_REQUIRED");
@@ -342,7 +394,7 @@ export async function routeCreateJobRequest(
       specJson,
       specHash,
     });
-    let result: ReserveAndCreateResult;
+    let result: AnyReserveResult;
     try {
       result = await runtime.repository.reserveAndCreate(reservation);
     } catch {
@@ -366,7 +418,9 @@ export async function routeCreateJobRequest(
           jobId: result.job.jobId,
           contractId: result.job.contractId,
           byteCount: result.job.declaredBytes,
-          pixelCount: result.job.declaredWidth * result.job.declaredHeight,
+          ...(result.job.contractId === "pdf.optimize@1"
+            ? { pageCount: result.job.declaredPageCount }
+            : { pixelCount: result.job.declaredWidth * result.job.declaredHeight }),
           resourceClass: result.job.resourceClass,
           reservedWeightedUnits: result.job.reservedWeightedUnits,
         });

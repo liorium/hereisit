@@ -10,7 +10,6 @@ import {
   type ImageOptimizeCreateRequestV1,
   imageOptimizeCreateRequestSchema,
   imageOptimizeMimeSchema,
-  imageOptimizePhaseSchema,
   imageOptimizeSpecV1Schema,
   imageOptimizeWarningCodeSchema,
 } from "@hereisit/tool-contracts/image-optimize";
@@ -21,6 +20,7 @@ import {
   pdfOptimizeCreateRequestSchema,
   pdfOptimizeMimeSchema,
   pdfOptimizeSpecV1Schema,
+  pdfOptimizeWarningCodeSchema,
 } from "@hereisit/tool-contracts/pdf-optimize";
 import { toolJobErrorCodeSchema } from "@hereisit/tool-contracts/tool-job";
 import { z } from "zod";
@@ -649,11 +649,8 @@ async function validateReservationInput(
   if (input.specHash !== actualSpecHash) {
     throw new TypeError("specHash does not match the canonical spec hash.");
   }
-  if (
-    parsedRequest.toolContract === "image.optimize@1" &&
-    input.tokenHash !== (await hashJobToken(parsedRequest.jobToken))
-  ) {
-    throw new TypeError("tokenHash does not match the parsed image request token.");
+  if (input.tokenHash !== (await hashJobToken(parsedRequest.jobToken))) {
+    throw new TypeError("tokenHash does not match the parsed request token.");
   }
   if (input.sessionHash !== actualSessionHash) {
     throw new TypeError("sessionHash does not match the parsed anonymous session.");
@@ -2205,17 +2202,32 @@ export function createD1JobRepository(database: D1Database): AnyJobRepository {
 const lifecycleJobRowSchema = z
   .object({
     id: canonicalUuidSchema,
+    contract_id: z.enum(["image.optimize@1", "pdf.optimize@1"]),
+    declared_bytes: positiveSafeIntegerSchema,
+    declared_page_count: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES).nullable(),
     status: jobStateSchema,
-    phase: imageOptimizePhaseSchema,
+    phase: z.enum([
+      "uploading",
+      "queued",
+      "validating",
+      "inspecting",
+      "normalizing",
+      "optimizing",
+      "verifying",
+      "preparing-output",
+      "completed",
+    ]),
     phase_fraction: z.number().finite().min(0).max(1).nullable(),
     phase_sequence: nonnegativeSafeIntegerSchema,
     attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     input_key: z.string().regex(INPUT_KEY_PATTERN),
     output_key: z.string().regex(OUTPUT_KEY_PATTERN),
     output_bytes: positiveSafeIntegerSchema.nullable(),
-    output_mime: imageOptimizeMimeSchema.nullable(),
+    output_mime: z.union([imageOptimizeMimeSchema, pdfOptimizeMimeSchema]).nullable(),
     output_width: positiveSafeIntegerSchema.nullable(),
     output_height: positiveSafeIntegerSchema.nullable(),
+    output_page_count: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES).nullable(),
+    pdf_profile: z.enum(["structural", "image-optimized"]).nullable(),
     result_kind: z.enum(["download", "original-retained"]).nullable(),
     engine_build_id: z.string().min(1).max(128).nullable(),
     codec_build_id: z.string().min(1).max(128).nullable(),
@@ -2238,6 +2250,9 @@ const lifecycleJobRowSchema = z
 
 const lifecycleColumns = `
   id,
+  contract_id,
+  declared_bytes,
+  declared_page_count,
   status,
   phase,
   phase_fraction,
@@ -2249,6 +2264,8 @@ const lifecycleColumns = `
   output_mime,
   output_width,
   output_height,
+  output_page_count,
+  pdf_profile,
   result_kind,
   engine_build_id,
   codec_build_id,
@@ -2268,7 +2285,10 @@ const lifecycleColumns = `
   updated_at
 `;
 
-function parseWarnings(value: string | null): LifecycleJob["warnings"] {
+function parseWarnings(
+  value: string | null,
+  contractId: LifecycleJob["contractId"],
+): LifecycleJob["warnings"] {
   if (value === null) return [];
   let parsed: unknown;
   try {
@@ -2276,7 +2296,14 @@ function parseWarnings(value: string | null): LifecycleJob["warnings"] {
   } catch {
     throw new RepositoryIntegrityError("Stored warning metadata is not valid JSON.");
   }
-  const warnings = z.array(imageOptimizeWarningCodeSchema).max(16).safeParse(parsed);
+  const warnings = z
+    .array(
+      contractId === "pdf.optimize@1"
+        ? pdfOptimizeWarningCodeSchema
+        : imageOptimizeWarningCodeSchema,
+    )
+    .max(16)
+    .safeParse(parsed);
   if (!warnings.success) {
     throw new RepositoryIntegrityError("Stored warning metadata is invalid.");
   }
@@ -2286,6 +2313,9 @@ function parseWarnings(value: string | null): LifecycleJob["warnings"] {
 function toLifecycleJob(row: z.infer<typeof lifecycleJobRowSchema>): LifecycleJob {
   return {
     jobId: row.id,
+    contractId: row.contract_id,
+    declaredBytes: row.declared_bytes,
+    declaredPageCount: row.declared_page_count,
     state: row.status,
     phase: row.phase,
     phaseFraction: row.phase_fraction,
@@ -2297,10 +2327,12 @@ function toLifecycleJob(row: z.infer<typeof lifecycleJobRowSchema>): LifecycleJo
     outputMime: row.output_mime,
     outputWidth: row.output_width,
     outputHeight: row.output_height,
+    outputPageCount: row.output_page_count,
+    pdfProfile: row.pdf_profile,
     resultKind: row.result_kind,
     engineBuildId: row.engine_build_id,
     codecBuildId: row.codec_build_id,
-    warnings: parseWarnings(row.warnings_json),
+    warnings: parseWarnings(row.warnings_json, row.contract_id),
     testedCandidates: row.tested_candidates,
     errorCode: row.error_code,
     errorGuidance: row.error_guidance,
@@ -2735,39 +2767,90 @@ export interface ClaimedQueueJob extends JobLease {
   cancelRequestedAt: number | null;
 }
 
-const claimedQueueJobRowSchema = z
+export interface ClaimedPdfQueueJob extends JobLease {
+  contractId: "pdf.optimize@1";
+  specJson: string;
+  specHash: string;
+  declaredBytes: number;
+  declaredMime: "application/pdf";
+  declaredPageCount: number;
+  inputKey: string;
+  inputEtag: string;
+  outputKey: string;
+  resourceClass: "pdf-standard-v1";
+  queueEpoch: string;
+  queueGeneration: number;
+  sessionHash: string;
+  networkHash: string;
+  dayKey: string;
+  reservedUnits: number;
+  accumulatedActualUnits: number;
+  processedInputBytes: number;
+  processedPixels: number;
+  cpuMs: number;
+  memoryByteMilliseconds: number;
+  peakMemoryBytes: number;
+  queuedAt: number;
+  startedAt: number;
+  createdAt: number;
+  cancelRequestedAt: number | null;
+}
+
+export type AnyClaimedQueueJob = ClaimedQueueJob | ClaimedPdfQueueJob;
+
+const claimedQueueJobCommonShape = {
+  id: canonicalUuidSchema,
+  spec_json: z.string().min(1).max(16_384),
+  spec_hash: hashSchema,
+  declared_bytes: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_FILE_BYTES),
+  input_key: z.string().regex(INPUT_KEY_PATTERN),
+  input_etag: storedObjectEtagSchema,
+  output_key: z.string().regex(OUTPUT_KEY_PATTERN),
+  attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  queue_epoch: canonicalUuidSchema,
+  queue_generation: nonnegativeSafeIntegerSchema,
+  lease_token: canonicalUuidSchema,
+  lease_expires_at: positiveSafeIntegerSchema,
+  session_hash: hashSchema,
+  network_hash: hashSchema,
+  day_key: dayKeySchema,
+  reserved_units: positiveSafeIntegerSchema,
+  actual_units: nonnegativeSafeIntegerSchema.nullable(),
+  processed_input_bytes: nonnegativeSafeIntegerSchema,
+  processed_pixels: nonnegativeSafeIntegerSchema,
+  cpu_ms: nonnegativeSafeIntegerSchema.nullable(),
+  memory_byte_milliseconds: nonnegativeSafeIntegerSchema.nullable(),
+  peak_memory_bytes: nonnegativeSafeIntegerSchema.nullable(),
+  queued_at: nonnegativeSafeIntegerSchema,
+  started_at: nonnegativeSafeIntegerSchema,
+  created_at: nonnegativeSafeIntegerSchema,
+  cancel_requested_at: nonnegativeSafeIntegerSchema.nullable(),
+};
+
+const claimedImageQueueJobRowSchema = z
   .object({
-    id: canonicalUuidSchema,
+    ...claimedQueueJobCommonShape,
     contract_id: z.literal("image.optimize@1"),
-    spec_json: z.string().min(1).max(16_384),
-    spec_hash: hashSchema,
-    declared_bytes: positiveSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
     declared_mime: imageOptimizeMimeSchema,
-    input_key: z.string().regex(INPUT_KEY_PATTERN),
-    input_etag: storedObjectEtagSchema,
-    output_key: z.string().regex(OUTPUT_KEY_PATTERN),
+    declared_page_count: z.null(),
     resource_class: z.enum(["image-standard-v1", "image-large-v1"]),
-    attempt: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-    queue_epoch: canonicalUuidSchema,
-    queue_generation: nonnegativeSafeIntegerSchema,
-    lease_token: canonicalUuidSchema,
-    lease_expires_at: positiveSafeIntegerSchema,
-    session_hash: hashSchema,
-    network_hash: hashSchema,
-    day_key: dayKeySchema,
-    reserved_units: positiveSafeIntegerSchema,
-    actual_units: nonnegativeSafeIntegerSchema.nullable(),
-    processed_input_bytes: nonnegativeSafeIntegerSchema,
-    processed_pixels: nonnegativeSafeIntegerSchema,
-    cpu_ms: nonnegativeSafeIntegerSchema.nullable(),
-    memory_byte_milliseconds: nonnegativeSafeIntegerSchema.nullable(),
-    peak_memory_bytes: nonnegativeSafeIntegerSchema.nullable(),
-    queued_at: nonnegativeSafeIntegerSchema,
-    started_at: nonnegativeSafeIntegerSchema,
-    created_at: nonnegativeSafeIntegerSchema,
-    cancel_requested_at: nonnegativeSafeIntegerSchema.nullable(),
   })
   .strict();
+
+const claimedPdfQueueJobRowSchema = z
+  .object({
+    ...claimedQueueJobCommonShape,
+    contract_id: z.literal("pdf.optimize@1"),
+    declared_mime: z.literal("application/pdf"),
+    declared_page_count: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES),
+    resource_class: z.literal("pdf-standard-v1"),
+  })
+  .strict();
+
+const claimedQueueJobRowSchema = z.discriminatedUnion("contract_id", [
+  claimedImageQueueJobRowSchema,
+  claimedPdfQueueJobRowSchema,
+]);
 
 const claimedQueueJobColumns = `
   id,
@@ -2776,6 +2859,7 @@ const claimedQueueJobColumns = `
   spec_hash,
   declared_bytes,
   declared_mime,
+  declared_page_count,
   input_key,
   input_etag,
   output_key,
@@ -2801,18 +2885,15 @@ const claimedQueueJobColumns = `
   cancel_requested_at
 `;
 
-function toClaimedQueueJob(row: z.infer<typeof claimedQueueJobRowSchema>): ClaimedQueueJob {
-  return {
+function toClaimedQueueJob(row: z.infer<typeof claimedQueueJobRowSchema>): AnyClaimedQueueJob {
+  const common = {
     jobId: row.id,
-    contractId: row.contract_id,
     specJson: row.spec_json,
     specHash: row.spec_hash,
     declaredBytes: row.declared_bytes,
-    declaredMime: row.declared_mime,
     inputKey: row.input_key,
     inputEtag: row.input_etag,
     outputKey: row.output_key,
-    resourceClass: row.resource_class,
     attempt: row.attempt,
     queueEpoch: row.queue_epoch,
     queueGeneration: row.queue_generation,
@@ -2833,6 +2914,20 @@ function toClaimedQueueJob(row: z.infer<typeof claimedQueueJobRowSchema>): Claim
     createdAt: row.created_at,
     cancelRequestedAt: row.cancel_requested_at,
   };
+  return row.contract_id === "pdf.optimize@1"
+    ? {
+        ...common,
+        contractId: row.contract_id,
+        declaredMime: row.declared_mime,
+        declaredPageCount: row.declared_page_count,
+        resourceClass: row.resource_class,
+      }
+    : {
+        ...common,
+        contractId: row.contract_id,
+        declaredMime: row.declared_mime,
+        resourceClass: row.resource_class,
+      };
 }
 
 function validateClaimInput(jobId: string, now: number): void {
@@ -2851,7 +2946,7 @@ export async function claimQueuedJobRecord(
   database: D1Database,
   jobId: string,
   now: number,
-): Promise<ClaimedQueueJob | null> {
+): Promise<AnyClaimedQueueJob | null> {
   validateClaimInput(jobId, now);
   const leaseToken = crypto.randomUUID();
   const leaseExpiresAt = now + 30_000;
@@ -2905,7 +3000,10 @@ export async function claimQueuedJobRecord(
   } catch {
     throw new RepositoryIntegrityError("Claimed queue spec is not valid JSON.");
   }
-  const parsedSpec = imageOptimizeSpecV1Schema.safeParse(spec);
+  const parsedSpec =
+    parsed.data.contract_id === "pdf.optimize@1"
+      ? pdfOptimizeSpecV1Schema.safeParse(spec)
+      : imageOptimizeSpecV1Schema.safeParse(spec);
   if (
     !parsedSpec.success ||
     JSON.stringify(parsedSpec.data) !== parsed.data.spec_json ||

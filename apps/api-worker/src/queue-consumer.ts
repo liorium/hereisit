@@ -1,4 +1,6 @@
 import {
+  type EngineCreateJobRequest,
+  type EngineCreatePdfJobRequest,
   type EngineInspectionSummary,
   type EngineJobStatus,
   type EngineMeasurements,
@@ -6,6 +8,13 @@ import {
   type ImageJobMessage,
   type ImageResourceClass,
   imageJobMessageSchema,
+  type PdfEngineInspectionSummary,
+  type PdfEngineJobStatus,
+  type PdfEngineMeasurements,
+  type PdfJobMessage,
+  pdfEngineJobStatusSchema,
+  pdfJobMessageSchema,
+  type ServerJobMessage,
 } from "@hereisit/server-contracts";
 import {
   calculateAttemptChargedUnits,
@@ -19,13 +28,19 @@ import {
   imageOptimizeSpecV1Schema,
   type ToolJobErrorCode,
 } from "@hereisit/tool-contracts";
+import {
+  type PdfOptimizeSpecV1,
+  pdfOptimizeSpecV1Schema,
+} from "@hereisit/tool-contracts/pdf-optimize";
 import { recordContainerActivity } from "./container-activity";
 import {
   createContainerEngineClient,
+  createContainerPdfEngineClient,
   type EngineClient,
   EngineCrashError,
   EngineHttpError,
   EngineProtocolError,
+  type PdfEngineClient,
 } from "./container-client";
 import { claimQueuedJobRecord } from "./d1-job-repository";
 import type { Env } from "./env";
@@ -124,7 +139,7 @@ export type QueueFailureClassification =
   | {
       retry: true;
       delaySeconds: 0 | 10 | 30 | 120;
-      nextResourceClass: ImageResourceClass;
+      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
     }
   | {
       retry: false;
@@ -140,7 +155,10 @@ function retryDelay(attempt: 1 | 2 | 3): 10 | 30 | 120 {
 
 export function classifyQueueFailure(
   error: unknown,
-  input: { attempt: 1 | 2 | 3; resourceClass?: ImageResourceClass } = { attempt: 1 },
+  input: {
+    attempt: 1 | 2 | 3;
+    resourceClass?: ImageResourceClass | "pdf-standard-v1";
+  } = { attempt: 1 },
 ): QueueFailureClassification {
   const currentClass = input.resourceClass ?? "image-standard-v1";
   if (error instanceof CodecCandidateTimeoutError) {
@@ -176,7 +194,8 @@ export function classifyQueueFailure(
       return {
         retry: true,
         delaySeconds: retryDelay(input.attempt),
-        nextResourceClass: "image-large-v1",
+        nextResourceClass:
+          currentClass === "pdf-standard-v1" ? "pdf-standard-v1" : "image-large-v1",
       };
     }
     return { retry: false, publicCode: "ENGINE_OOM" };
@@ -207,12 +226,23 @@ export function classifyQueueFailure(
   return { retry: false, publicCode: "ENGINE_CRASH" };
 }
 
-export interface QueueJobContext extends ImageJobMessage {
+export interface QueueJobContext {
+  jobId: string;
+  contractId: "image.optimize@1" | "pdf.optimize@1";
+  specHash: string;
+  inputKey: string;
+  inputEtag: string;
+  outputKey: string;
+  resourceClass: ImageResourceClass | "pdf-standard-v1";
+  attempt: 1 | 2 | 3;
+  queueEpoch: string;
+  queueGeneration: number;
   leaseToken: string;
   leaseExpiresAt: number;
   declaredBytes: number;
-  declaredMime: ImageOptimizeMime;
-  spec: ImageOptimizeSpecV1;
+  declaredMime: ImageOptimizeMime | "application/pdf";
+  declaredPageCount?: number;
+  spec: ImageOptimizeSpecV1 | PdfOptimizeSpecV1;
   sessionHash: string;
   networkHash?: string;
   dayKey?: string;
@@ -229,8 +259,29 @@ export interface QueueJobContext extends ImageJobMessage {
   cancelRequestedAt?: number | null;
 }
 
+type AnyEngineStatus = EngineJobStatus | PdfEngineJobStatus;
+type AnyEngineMeasurements = EngineMeasurements | PdfEngineMeasurements;
+type AnyEngineInspection = EngineInspectionSummary | PdfEngineInspectionSummary;
+interface ServerEngineClient {
+  create(request: EngineCreateJobRequest | EngineCreatePdfJobRequest): Promise<{
+    coldStart: boolean;
+    containerReadyMs: number;
+  }>;
+  upload(
+    jobId: string,
+    body: ReadableStream<Uint8Array>,
+    byteLength: number,
+    contentType: string,
+  ): Promise<void>;
+  run(jobId: string): Promise<void>;
+  status(jobId: string): Promise<AnyEngineStatus>;
+  output(jobId: string): Promise<Response>;
+  cancel(jobId: string): Promise<void>;
+  remove(jobId: string): Promise<void>;
+}
+
 export interface QueueJobStore {
-  claim(message: ImageJobMessage, now: number): Promise<QueueJobContext | null>;
+  claim(message: ServerJobMessage, now: number): Promise<QueueJobContext | null>;
   renew(context: QueueJobContext, now: number): Promise<boolean>;
   isCancellationRequested(context: QueueJobContext): Promise<boolean>;
   markEngineContact(context: QueueJobContext, now: number): Promise<boolean>;
@@ -241,12 +292,12 @@ export interface QueueJobStore {
   ): Promise<boolean>;
   mirrorProgress(
     context: QueueJobContext,
-    status: Extract<EngineJobStatus, { state: "running" }>,
+    status: Extract<AnyEngineStatus, { state: "running" }>,
     now: number,
   ): Promise<boolean>;
   settleSuccess(
     context: QueueJobContext,
-    status: Extract<EngineJobStatus, { state: "succeeded" }>,
+    status: Extract<AnyEngineStatus, { state: "succeeded" }>,
     now: number,
   ): Promise<boolean>;
   settleFailure(
@@ -254,24 +305,24 @@ export interface QueueJobStore {
     failure: {
       code: ToolJobErrorCode;
       guidance?: "TRY_BALANCED_PRESET" | undefined;
-      measurements?: EngineMeasurements | undefined;
-      inspection?: EngineInspectionSummary | null | undefined;
+      measurements?: AnyEngineMeasurements | undefined;
+      inspection?: AnyEngineInspection | null | undefined;
     },
     now: number,
   ): Promise<boolean>;
   scheduleRetry(
     context: QueueJobContext,
     input: {
-      nextResourceClass: ImageResourceClass;
+      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
       delaySeconds: 0 | 10 | 30 | 120;
-      measurements?: EngineMeasurements | undefined;
-      verifiedMime?: ImageOptimizeMime | undefined;
+      measurements?: AnyEngineMeasurements | undefined;
+      verifiedMime?: ImageOptimizeMime | "application/pdf" | undefined;
     },
     now: number,
   ): Promise<boolean | null>;
   adoptAuthoritativeDelivery(context: QueueJobContext, now: number): Promise<void>;
   releaseStale(context: QueueJobContext, now: number): Promise<void>;
-  quarantine(message: ImageJobMessage, now: number, attempts: number): Promise<void>;
+  quarantine(message: ServerJobMessage, now: number, attempts: number): Promise<void>;
 }
 
 export interface InputArtifact {
@@ -288,7 +339,7 @@ export interface OutputArtifactHead {
   readonly jobId: string | undefined;
   readonly sha256: string | undefined;
   readonly engineBuildId: string | undefined;
-  readonly recoveryStatus?: Extract<EngineJobStatus, { state: "succeeded" }> | null;
+  readonly recoveryStatus?: Extract<AnyEngineStatus, { state: "succeeded" }> | null;
 }
 
 export interface QueueArtifactStore {
@@ -298,11 +349,11 @@ export interface QueueArtifactStore {
     key: string;
     body: ReadableStream<Uint8Array>;
     byteLength: number;
-    mime: ImageOptimizeMime;
+    mime: ImageOptimizeMime | "application/pdf";
     digestHeader: string;
     jobId: string;
     engineBuildId: string;
-    recoveryStatus: Extract<EngineJobStatus, { state: "succeeded" }>;
+    recoveryStatus: Extract<AnyEngineStatus, { state: "succeeded" }>;
   }): Promise<void>;
   deleteInput(key: string): Promise<void>;
   deleteOutput(key: string): Promise<void>;
@@ -310,6 +361,7 @@ export interface QueueArtifactStore {
 
 export interface QueueConsumerDependencies {
   engine?: EngineClient;
+  pdfEngine?: PdfEngineClient;
   store?: QueueJobStore;
   artifacts?: QueueArtifactStore;
   now?: () => number;
@@ -333,14 +385,14 @@ function strictLimit(value: string, label: string): number {
 
 function sampleFromMeasurements(
   context: QueueJobContext,
-  measurements: EngineMeasurements,
+  measurements: AnyEngineMeasurements,
   outputBytes: number | null,
-  mime: ImageOptimizeMime = context.declaredMime,
+  mime: ImageOptimizeMime | "application/pdf" = context.declaredMime,
 ) {
   return {
     inputBytes: measurements.processedInputBytes,
     outputBytes,
-    pixels: measurements.processedPixels,
+    pixels: "processedPixels" in measurements ? measurements.processedPixels : 0,
     cpuMs: measurements.cpuMs,
     memoryByteMilliseconds: measurements.memoryByteMilliseconds,
     testedCandidates: measurements.testedCandidates,
@@ -351,10 +403,16 @@ function sampleFromMeasurements(
 class D1QueueJobStore implements QueueJobStore {
   constructor(private readonly env: Env) {}
 
-  async claim(message: ImageJobMessage, now: number): Promise<QueueJobContext | null> {
+  async claim(message: ServerJobMessage, now: number): Promise<QueueJobContext | null> {
     const row = await claimQueuedJobRecord(this.env.DB, message.jobId, now);
     if (row === null) return null;
-    const spec = imageOptimizeSpecV1Schema.parse(JSON.parse(row.specJson));
+    if (row.contractId !== message.contractId) {
+      throw new VerificationFailureError();
+    }
+    const spec =
+      row.contractId === "pdf.optimize@1"
+        ? pdfOptimizeSpecV1Schema.parse(JSON.parse(row.specJson))
+        : imageOptimizeSpecV1Schema.parse(JSON.parse(row.specJson));
     return {
       jobId: row.jobId,
       contractId: row.contractId,
@@ -370,6 +428,7 @@ class D1QueueJobStore implements QueueJobStore {
       leaseExpiresAt: row.leaseExpiresAt,
       declaredBytes: row.declaredBytes,
       declaredMime: row.declaredMime,
+      ...(row.contractId === "pdf.optimize@1" ? { declaredPageCount: row.declaredPageCount } : {}),
       spec,
       sessionHash: row.sessionHash,
       networkHash: row.networkHash,
@@ -450,7 +509,7 @@ class D1QueueJobStore implements QueueJobStore {
 
   async mirrorProgress(
     context: QueueJobContext,
-    status: Extract<EngineJobStatus, { state: "running" }>,
+    status: Extract<AnyEngineStatus, { state: "running" }>,
     now: number,
   ): Promise<boolean> {
     const result = await this.env.DB.prepare(
@@ -476,7 +535,7 @@ class D1QueueJobStore implements QueueJobStore {
 
   async settleSuccess(
     context: QueueJobContext,
-    status: Extract<EngineJobStatus, { state: "succeeded" }>,
+    status: Extract<AnyEngineStatus, { state: "succeeded" }>,
     now: number,
   ): Promise<boolean> {
     const outputBytes = status.result.kind === "download" ? status.result.byteLength : null;
@@ -490,23 +549,40 @@ class D1QueueJobStore implements QueueJobStore {
           status.inspection.verifiedInputMime,
         ),
       ]);
+    if (
+      (context.contractId === "pdf.optimize@1") !==
+      (status.inspection.verifiedInputMime === "application/pdf")
+    ) {
+      throw new VerificationFailureError();
+    }
+    const isPdf = context.contractId === "pdf.optimize@1";
+    const pdfResult = isPdf && "pageCount" in status.result ? status.result : null;
     return this.settleTerminal(context, {
       now,
       state: "succeeded",
       actualUnits,
       measurements: status.measurements,
       verifiedMime: status.inspection.verifiedInputMime,
-      inputHasAlpha: status.inspection.inputHasAlpha,
-      contentClass: status.inspection.contentClass,
+      inputHasAlpha: "inputHasAlpha" in status.inspection ? status.inspection.inputHasAlpha : null,
+      contentClass: "contentClass" in status.inspection ? status.inspection.contentClass : null,
       resultKind: status.result.kind,
       outputBytes,
       outputMime: status.result.kind === "download" ? status.result.mime : null,
-      outputWidth: status.result.kind === "download" ? status.result.width : null,
-      outputHeight: status.result.kind === "download" ? status.result.height : null,
+      outputWidth:
+        status.result.kind === "download" && "width" in status.result ? status.result.width : null,
+      outputHeight:
+        status.result.kind === "download" && "height" in status.result
+          ? status.result.height
+          : null,
+      outputPageCount: pdfResult?.pageCount ?? null,
+      pdfProfile: pdfResult?.kind === "download" ? pdfResult.profile : null,
       engineBuildId: status.result.engineBuildId,
-      codecBuildId: status.result.codecBuildId,
+      codecBuildId: "codecBuildId" in status.result ? status.result.codecBuildId : null,
       warningsJson: JSON.stringify(status.result.warnings),
-      testedCandidates: status.result.testedCandidates,
+      testedCandidates:
+        "testedCandidates" in status.result
+          ? status.result.testedCandidates
+          : status.measurements.testedCandidates,
       errorCode: null,
       errorGuidance: null,
     });
@@ -517,8 +593,8 @@ class D1QueueJobStore implements QueueJobStore {
     failure: {
       code: ToolJobErrorCode;
       guidance?: "TRY_BALANCED_PRESET";
-      measurements?: EngineMeasurements | undefined;
-      inspection?: EngineInspectionSummary | null | undefined;
+      measurements?: AnyEngineMeasurements | undefined;
+      inspection?: AnyEngineInspection | null | undefined;
     },
     now: number,
   ): Promise<boolean> {
@@ -538,13 +614,25 @@ class D1QueueJobStore implements QueueJobStore {
       actualUnits: (context.accumulatedActualUnits ?? 0) + measuredUnits,
       measurements: failure.measurements,
       verifiedMime: failure.inspection?.verifiedInputMime ?? null,
-      inputHasAlpha: failure.inspection?.inputHasAlpha ?? null,
-      contentClass: failure.inspection?.contentClass ?? null,
+      inputHasAlpha:
+        failure.inspection !== null &&
+        failure.inspection !== undefined &&
+        "inputHasAlpha" in failure.inspection
+          ? failure.inspection.inputHasAlpha
+          : null,
+      contentClass:
+        failure.inspection !== null &&
+        failure.inspection !== undefined &&
+        "contentClass" in failure.inspection
+          ? failure.inspection.contentClass
+          : null,
       resultKind: null,
       outputBytes: null,
       outputMime: null,
       outputWidth: null,
       outputHeight: null,
+      outputPageCount: null,
+      pdfProfile: null,
       engineBuildId: null,
       codecBuildId: null,
       warningsJson: null,
@@ -560,7 +648,7 @@ class D1QueueJobStore implements QueueJobStore {
       now: number;
       state: "succeeded" | "failed" | "cancelled";
       actualUnits: number;
-      measurements?: EngineMeasurements | undefined;
+      measurements?: AnyEngineMeasurements | undefined;
       verifiedMime: string | null;
       inputHasAlpha: boolean | null;
       contentClass: string | null;
@@ -569,6 +657,8 @@ class D1QueueJobStore implements QueueJobStore {
       outputMime: string | null;
       outputWidth: number | null;
       outputHeight: number | null;
+      outputPageCount: number | null;
+      pdfProfile: "structural" | "image-optimized" | null;
       engineBuildId: string | null;
       codecBuildId: string | null;
       warningsJson: string | null;
@@ -601,6 +691,7 @@ class D1QueueJobStore implements QueueJobStore {
                input_has_alpha = COALESCE(?, input_has_alpha),
                content_class = COALESCE(?, content_class),
                output_bytes = ?, output_mime = ?, output_width = ?, output_height = ?,
+               output_page_count = ?, pdf_profile = ?,
                result_kind = ?, actual_units = ?,
                cpu_ms = COALESCE(cpu_ms, 0) + ?,
                memory_byte_milliseconds = COALESCE(memory_byte_milliseconds, 0) + ?,
@@ -641,13 +732,17 @@ class D1QueueJobStore implements QueueJobStore {
         terminal.outputMime,
         terminal.outputWidth,
         terminal.outputHeight,
+        terminal.outputPageCount,
+        terminal.pdfProfile,
         terminal.resultKind,
         terminal.actualUnits,
         terminal.measurements?.cpuMs ?? 0,
         terminal.measurements?.memoryByteMilliseconds ?? 0,
         terminal.measurements?.peakMemoryBytes ?? 0,
         terminal.measurements?.processedInputBytes ?? 0,
-        terminal.measurements?.processedPixels ?? 0,
+        terminal.measurements !== undefined && "processedPixels" in terminal.measurements
+          ? terminal.measurements.processedPixels
+          : 0,
         terminal.engineBuildId,
         terminal.codecBuildId,
         terminal.warningsJson,
@@ -746,10 +841,10 @@ class D1QueueJobStore implements QueueJobStore {
   async scheduleRetry(
     context: QueueJobContext,
     input: {
-      nextResourceClass: ImageResourceClass;
+      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
       delaySeconds: 0 | 10 | 30 | 120;
-      measurements?: EngineMeasurements | undefined;
-      verifiedMime?: ImageOptimizeMime | undefined;
+      measurements?: AnyEngineMeasurements | undefined;
+      verifiedMime?: ImageOptimizeMime | "application/pdf" | undefined;
     },
     now: number,
   ): Promise<boolean | null> {
@@ -758,7 +853,10 @@ class D1QueueJobStore implements QueueJobStore {
     const nextGeneration = context.queueGeneration + 1;
     const extraReservation = estimateAttemptReservation({
       inputBytes: context.declaredBytes,
-      resourceClass: input.nextResourceClass,
+      resourceClass:
+        input.nextResourceClass === "pdf-standard-v1"
+          ? "image-standard-v1"
+          : input.nextResourceClass,
     });
     const chargedAttempt = input.measurements
       ? calculateAttemptChargedUnits(
@@ -773,18 +871,29 @@ class D1QueueJobStore implements QueueJobStore {
           testedCandidates: 0,
           mime: context.declaredMime,
         });
-    const nextMessage: ImageJobMessage = {
+    const messageCommon = {
       jobId: context.jobId,
-      contractId: context.contractId,
       specHash: context.specHash,
       inputKey: context.inputKey,
       inputEtag: context.inputEtag,
       outputKey: context.outputKey,
-      resourceClass: input.nextResourceClass,
       attempt: nextAttempt,
       queueEpoch: context.queueEpoch,
       queueGeneration: nextGeneration,
     };
+    const nextMessage: ServerJobMessage =
+      context.contractId === "pdf.optimize@1"
+        ? { ...messageCommon, contractId: context.contractId, resourceClass: "pdf-standard-v1" }
+        : {
+            ...messageCommon,
+            contractId: context.contractId,
+            resourceClass:
+              input.nextResourceClass === "pdf-standard-v1"
+                ? context.resourceClass === "pdf-standard-v1"
+                  ? "image-standard-v1"
+                  : context.resourceClass
+                : input.nextResourceClass,
+          };
     const accountLimit = strictLimit(
       this.env.ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT,
       "ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT",
@@ -827,7 +936,9 @@ class D1QueueJobStore implements QueueJobStore {
         input.measurements?.memoryByteMilliseconds ?? 0,
         input.measurements?.peakMemoryBytes ?? 0,
         input.measurements?.processedInputBytes ?? 0,
-        input.measurements?.processedPixels ?? 0,
+        input.measurements !== undefined && "processedPixels" in input.measurements
+          ? input.measurements.processedPixels
+          : 0,
         now,
         now,
         context.jobId,
@@ -905,7 +1016,10 @@ class D1QueueJobStore implements QueueJobStore {
       throw new StorageFailureError();
     }
     try {
-      await this.env.IMAGE_JOBS.send(nextMessage, {
+      await (context.contractId === "pdf.optimize@1"
+        ? this.env.PDF_JOBS
+        : this.env.IMAGE_JOBS
+      ).send(nextMessage, {
         contentType: "json",
         delaySeconds: input.delaySeconds,
       });
@@ -953,7 +1067,7 @@ class D1QueueJobStore implements QueueJobStore {
       .run();
   }
 
-  async quarantine(message: ImageJobMessage, now: number, attempts: number): Promise<void> {
+  async quarantine(message: ServerJobMessage, now: number, attempts: number): Promise<void> {
     await this.env.DB.prepare(
       `INSERT INTO job_quarantine (job_id, queue_name, attempt, error_code, quarantined_at)
        SELECT ?, ?, ?, 'QUEUE_RETRIES_EXHAUSTED', ?
@@ -964,7 +1078,15 @@ class D1QueueJobStore implements QueueJobStore {
          error_code = excluded.error_code,
          quarantined_at = excluded.quarantined_at`,
     )
-      .bind(message.jobId, this.env.IMAGE_JOBS_DLQ_NAME, Math.max(1, attempts), now, message.jobId)
+      .bind(
+        message.jobId,
+        message.contractId === "pdf.optimize@1"
+          ? this.env.PDF_JOBS_DLQ_NAME
+          : this.env.IMAGE_JOBS_DLQ_NAME,
+        Math.max(1, attempts),
+        now,
+        message.jobId,
+      )
       .run();
   }
 }
@@ -1009,11 +1131,18 @@ class R2QueueArtifactStore implements QueueArtifactStore {
     }
     if (head === null) return null;
     const encodedRecovery = head.customMetadata?.recoveryV1;
-    let recoveryStatus: Extract<EngineJobStatus, { state: "succeeded" }> | null | undefined;
+    let recoveryStatus: Extract<AnyEngineStatus, { state: "succeeded" }> | null | undefined;
     if (encodedRecovery !== undefined) {
       try {
-        const parsed = engineJobStatusSchema.safeParse(JSON.parse(encodedRecovery));
-        recoveryStatus = parsed.success && parsed.data.state === "succeeded" ? parsed.data : null;
+        const value: unknown = JSON.parse(encodedRecovery);
+        const image = engineJobStatusSchema.safeParse(value);
+        const pdf = pdfEngineJobStatusSchema.safeParse(value);
+        recoveryStatus =
+          image.success && image.data.state === "succeeded"
+            ? image.data
+            : pdf.success && pdf.data.state === "succeeded"
+              ? pdf.data
+              : null;
       } catch {
         recoveryStatus = null;
       }
@@ -1033,11 +1162,11 @@ class R2QueueArtifactStore implements QueueArtifactStore {
     key: string;
     body: ReadableStream<Uint8Array>;
     byteLength: number;
-    mime: ImageOptimizeMime;
+    mime: ImageOptimizeMime | "application/pdf";
     digestHeader: string;
     jobId: string;
     engineBuildId: string;
-    recoveryStatus: Extract<EngineJobStatus, { state: "succeeded" }>;
+    recoveryStatus: Extract<AnyEngineStatus, { state: "succeeded" }>;
   }): Promise<void> {
     const expectedDigest = parseDigestHeader(input.digestHeader);
     const recoveryV1 = JSON.stringify(input.recoveryStatus);
@@ -1134,7 +1263,7 @@ export function createR2QueueArtifactStore(bucket: R2Bucket): QueueArtifactStore
   return new R2QueueArtifactStore(bucket);
 }
 
-function messageMatchesContext(message: ImageJobMessage, context: QueueJobContext): boolean {
+function messageMatchesContext(message: ServerJobMessage, context: QueueJobContext): boolean {
   return (
     message.jobId === context.jobId &&
     message.contractId === context.contractId &&
@@ -1152,7 +1281,7 @@ function messageMatchesContext(message: ImageJobMessage, context: QueueJobContex
 function outputHeadMatchesTerminal(
   head: OutputArtifactHead,
   context: QueueJobContext,
-  terminal: Extract<EngineJobStatus, { state: "succeeded" }>,
+  terminal: Extract<AnyEngineStatus, { state: "succeeded" }>,
 ): boolean {
   return (
     terminal.result.kind === "download" &&
@@ -1167,7 +1296,7 @@ function outputHeadMatchesTerminal(
 }
 
 function olderMessageCanDriveAuthoritativeContext(
-  message: ImageJobMessage,
+  message: ServerJobMessage,
   context: QueueJobContext,
 ): boolean {
   return (
@@ -1178,7 +1307,7 @@ function olderMessageCanDriveAuthoritativeContext(
   );
 }
 
-function errorFromEngineStatus(status: Extract<EngineJobStatus, { state: "failed" }>): Error {
+function errorFromEngineStatus(status: Extract<AnyEngineStatus, { state: "failed" }>): Error {
   if (status.error.guidance === "TRY_BALANCED_PRESET") return new CodecCandidateTimeoutError();
   switch (status.error.code) {
     case "UNSUPPORTED_INPUT":
@@ -1248,15 +1377,116 @@ async function ensureLease(
   throw new StaleLeaseError();
 }
 
+function validPdfAttempt(
+  context: QueueJobContext,
+  status: Extract<PdfEngineJobStatus, { state: "succeeded" }>,
+): boolean {
+  const measurements = status.measurements;
+  return (
+    context.contractId === "pdf.optimize@1" &&
+    context.declaredPageCount === status.inspection.verifiedPageCount &&
+    measurements.processedInputBytes <= context.declaredBytes &&
+    measurements.cpuMs <= 45_000 &&
+    measurements.processingMs <= 45_000 &&
+    measurements.peakMemoryBytes <= 768 * 1024 * 1024 &&
+    measurements.memoryByteMilliseconds <= 768 * 1024 * 1024 * 45_000 &&
+    measurements.testedCandidates <= 2 &&
+    status.result.sourceByteLength === context.declaredBytes &&
+    status.result.pageCount === context.declaredPageCount
+  );
+}
+
+function validTerminalAttempt(
+  context: QueueJobContext,
+  status: Extract<AnyEngineStatus, { state: "succeeded" }>,
+): boolean {
+  if (context.contractId === "pdf.optimize@1") {
+    return status.inspection.verifiedInputMime === "application/pdf" && "pageCount" in status.result
+      ? validPdfAttempt(context, status as Extract<PdfEngineJobStatus, { state: "succeeded" }>)
+      : false;
+  }
+  if (status.inspection.verifiedInputMime === "application/pdf") return false;
+  if (context.resourceClass === "pdf-standard-v1") return false;
+  return validateEngineAttempt({
+    inputBytes: context.declaredBytes,
+    resourceClass: context.resourceClass,
+    measurements: status.measurements as EngineMeasurements,
+    result: status.result as Extract<EngineJobStatus, { state: "succeeded" }>["result"],
+  }).valid;
+}
+
+function engineCreateRequest(
+  context: QueueJobContext,
+): EngineCreateJobRequest | EngineCreatePdfJobRequest {
+  if (context.contractId === "pdf.optimize@1") {
+    if (context.declaredMime !== "application/pdf" || context.declaredPageCount === undefined) {
+      throw new VerificationFailureError();
+    }
+    return {
+      protocol: 1,
+      jobId: context.jobId,
+      attempt: context.attempt,
+      tool: "pdf.optimize",
+      toolVersion: 1,
+      spec: pdfOptimizeSpecV1Schema.parse(context.spec),
+      specHash: context.specHash,
+      input: {
+        byteLength: context.declaredBytes,
+        etag: context.inputEtag,
+        mimeHint: context.declaredMime,
+        pageCount: context.declaredPageCount,
+      },
+      resourceClass: "pdf-standard-v1",
+    };
+  }
+  if (context.declaredMime === "application/pdf" || context.resourceClass === "pdf-standard-v1") {
+    throw new VerificationFailureError();
+  }
+  return {
+    protocol: 1,
+    jobId: context.jobId,
+    attempt: context.attempt,
+    tool: "image.optimize",
+    toolVersion: 1,
+    spec: imageOptimizeSpecV1Schema.parse(context.spec),
+    specHash: context.specHash,
+    input: {
+      byteLength: context.declaredBytes,
+      etag: context.inputEtag,
+      mimeHint: context.declaredMime,
+    },
+    resourceClass: context.resourceClass,
+  };
+}
+
 export async function consumeImageJob(
   rawMessage: ImageJobMessage,
   env: Env,
   dependencies: QueueConsumerDependencies = {},
 ): Promise<"completed" | "retry-scheduled" | "duplicate"> {
-  const message = imageJobMessageSchema.parse(rawMessage);
+  return consumeServerJob(imageJobMessageSchema.parse(rawMessage), env, dependencies);
+}
+
+export async function consumePdfJob(
+  rawMessage: PdfJobMessage,
+  env: Env,
+  dependencies: QueueConsumerDependencies = {},
+): Promise<"completed" | "retry-scheduled" | "duplicate"> {
+  return consumeServerJob(pdfJobMessageSchema.parse(rawMessage), env, dependencies);
+}
+
+async function consumeServerJob(
+  message: ServerJobMessage,
+  env: Env,
+  dependencies: QueueConsumerDependencies,
+): Promise<"completed" | "retry-scheduled" | "duplicate"> {
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? defaultSleep;
-  const engine = dependencies.engine ?? createContainerEngineClient(env);
+  const engine = (
+    message.contractId === "pdf.optimize@1"
+      ? (dependencies.pdfEngine ?? createContainerPdfEngineClient(env))
+      : (dependencies.engine ?? createContainerEngineClient(env))
+  ) as ServerEngineClient;
   const store = dependencies.store ?? new D1QueueJobStore(env);
   const artifacts = dependencies.artifacts ?? new R2QueueArtifactStore(env.JOB_OBJECTS);
   const recordEngineActivity =
@@ -1283,8 +1513,8 @@ export async function consumeImageJob(
     dependencies.leaseHeartbeat === false
       ? { assertCurrent() {}, stop: async () => undefined }
       : startLeaseHeartbeat(context, store, now);
-  let measurements: EngineMeasurements | undefined;
-  let inspection: EngineInspectionSummary | null | undefined;
+  let measurements: AnyEngineMeasurements | undefined;
+  let inspection: AnyEngineInspection | null | undefined;
   let deleteInput = false;
   let deleteOutput = false;
   let workspaceMayExist = false;
@@ -1298,7 +1528,7 @@ export async function consumeImageJob(
       }
       if (!(await store.markEngineContact(context, now()))) throw new StaleLeaseError();
       workspaceMayExist = true;
-      let recoveredStatus: EngineJobStatus | null = existingOutput.recoveryStatus ?? null;
+      let recoveredStatus: AnyEngineStatus | null = existingOutput.recoveryStatus ?? null;
       if (recoveredStatus === null) {
         try {
           recoveredStatus = await contactEngine(() => engine.status(context.jobId));
@@ -1310,14 +1540,8 @@ export async function consumeImageJob(
         throw new VerificationFailureError();
       }
       if (recoveredStatus?.state === "succeeded") {
-        const validation = validateEngineAttempt({
-          inputBytes: context.declaredBytes,
-          resourceClass: context.resourceClass,
-          measurements: recoveredStatus.measurements,
-          result: recoveredStatus.result,
-        });
         if (
-          !validation.valid ||
+          !validTerminalAttempt(context, recoveredStatus) ||
           !outputHeadMatchesTerminal(existingOutput, context, recoveredStatus)
         ) {
           deleteOutput = true;
@@ -1343,23 +1567,7 @@ export async function consumeImageJob(
     heartbeat.assertCurrent();
     if (!(await store.markEngineContact(context, now()))) throw new StaleLeaseError();
     workspaceMayExist = true;
-    const startup = await contactEngine(() =>
-      engine.create({
-        protocol: 1,
-        jobId: context.jobId,
-        attempt: context.attempt,
-        tool: "image.optimize",
-        toolVersion: 1,
-        spec: context.spec,
-        specHash: context.specHash,
-        input: {
-          byteLength: context.declaredBytes,
-          etag: context.inputEtag,
-          mimeHint: context.declaredMime,
-        },
-        resourceClass: context.resourceClass,
-      }),
-    );
+    const startup = await contactEngine(() => engine.create(engineCreateRequest(context)));
     if (!(await store.recordStartup(context, now(), startup))) throw new StaleLeaseError();
     await ensureLease(context, store, now);
     await contactEngine(() =>
@@ -1368,7 +1576,7 @@ export async function consumeImageJob(
     await ensureLease(context, store, now);
     await contactEngine(() => engine.run(context.jobId));
 
-    let terminal: Extract<EngineJobStatus, { state: "succeeded" | "failed" | "cancelled" }> | null =
+    let terminal: Extract<AnyEngineStatus, { state: "succeeded" | "failed" | "cancelled" }> | null =
       null;
     for (let poll = 0; poll < MAX_POLL_COUNT; poll += 1) {
       await ensureLease(context, store, now);
@@ -1395,13 +1603,7 @@ export async function consumeImageJob(
     inspection = terminal.inspection;
     if (terminal.state === "failed") throw errorFromEngineStatus(terminal);
     if (terminal.state === "cancelled") throw new CancelledProcessingError();
-    const attemptValidation = validateEngineAttempt({
-      inputBytes: context.declaredBytes,
-      resourceClass: context.resourceClass,
-      measurements: terminal.measurements,
-      result: terminal.result,
-    });
-    if (!attemptValidation.valid) throw new VerificationFailureError();
+    if (!validTerminalAttempt(context, terminal)) throw new VerificationFailureError();
 
     if (terminal.result.kind === "download") {
       if (
@@ -1456,7 +1658,8 @@ export async function consumeImageJob(
         engineBuildId: terminal.result.engineBuildId,
         inputBytes: context.declaredBytes,
         outputBytes: terminal.result.kind === "download" ? terminal.result.byteLength : undefined,
-        pixels: terminal.measurements.processedPixels,
+        pixels:
+          "processedPixels" in terminal.measurements ? terminal.measurements.processedPixels : 0,
         processingMs: terminal.measurements.processingMs,
         peakMemoryBytes: terminal.measurements.peakMemoryBytes,
         reservedUnits: context.reservedUnits,
@@ -1518,7 +1721,7 @@ export async function consumeImageJob(
 }
 
 async function consumeDlqMessage(
-  message: ImageJobMessage,
+  message: ServerJobMessage,
   env: Env,
   attempts: number,
 ): Promise<void> {
@@ -1538,7 +1741,10 @@ async function consumeDlqMessage(
     await Promise.allSettled([
       env.JOB_OBJECTS.delete(message.inputKey),
       env.JOB_OBJECTS.delete(message.outputKey),
-      createContainerEngineClient(env).remove(message.jobId),
+      (message.contractId === "pdf.optimize@1"
+        ? createContainerPdfEngineClient(env)
+        : createContainerEngineClient(env)
+      ).remove(message.jobId),
     ]);
   }
 }
@@ -1584,6 +1790,57 @@ export async function consumeImageQueue(
       queueMessage.ack();
     } catch {
       queueMessage.retry({ delaySeconds: retryDelay(parsed.data.attempt) });
+    }
+  }
+}
+
+export async function consumeProcessingQueue(
+  batch: MessageBatch<ServerJobMessage>,
+  env: Env,
+  dependencies: {
+    consumeImage?: typeof consumeImageJob;
+    consumePdf?: typeof consumePdfJob;
+    quarantine?: typeof consumeDlqMessage;
+    recordQueueOperations?: (operations: number) => Promise<void>;
+  } = {},
+): Promise<void> {
+  const isImage =
+    batch.queue === env.IMAGE_JOBS_QUEUE_NAME || batch.queue === env.IMAGE_JOBS_DLQ_NAME;
+  const isPdf = batch.queue === env.PDF_JOBS_QUEUE_NAME || batch.queue === env.PDF_JOBS_DLQ_NAME;
+  const isDlq = batch.queue === env.IMAGE_JOBS_DLQ_NAME || batch.queue === env.PDF_JOBS_DLQ_NAME;
+  const schema = isPdf ? pdfJobMessageSchema : isImage ? imageJobMessageSchema : null;
+  const recordQueueOperations =
+    dependencies.recordQueueOperations ??
+    (async (operations: number) => {
+      const recordedAt = Date.now();
+      await env.DB.batch([
+        prepareOperationalCounter(env.DB, {
+          recordedAt,
+          queueOperations: operations,
+          d1RowsRead: 1,
+          d1RowsWritten: 1,
+        }),
+      ]);
+    });
+  if (batch.messages.length > 0) await recordQueueOperations(batch.messages.length * 3);
+  for (const queueMessage of batch.messages) {
+    const parsed = schema?.safeParse(queueMessage.body);
+    if (parsed === undefined || !parsed.success) {
+      queueMessage.ack();
+      continue;
+    }
+    const message = parsed.data as ServerJobMessage;
+    try {
+      if (isDlq) {
+        await (dependencies.quarantine ?? consumeDlqMessage)(message, env, queueMessage.attempts);
+      } else if (message.contractId === "pdf.optimize@1") {
+        await (dependencies.consumePdf ?? consumePdfJob)(message, env);
+      } else {
+        await (dependencies.consumeImage ?? consumeImageJob)(message, env);
+      }
+      queueMessage.ack();
+    } catch {
+      queueMessage.retry({ delaySeconds: retryDelay(message.attempt) });
     }
   }
 }

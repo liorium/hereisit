@@ -1,3 +1,4 @@
+import { pdfOptimizeStatusResponseSchema } from "@hereisit/tool-contracts/pdf-optimize";
 import { describe, expect, it, vi } from "vitest";
 import { hashJobToken } from "../auth";
 import { routeRequestWithDependencies } from "../router";
@@ -28,6 +29,9 @@ function request(path: string, init: RequestInit = {}): Request {
 function succeededJob(overrides: Partial<LifecycleJob> = {}): LifecycleJob {
   return {
     jobId,
+    contractId: "image.optimize@1",
+    declaredBytes: 3,
+    declaredPageCount: null,
     state: "succeeded",
     phase: "completed",
     phaseFraction: 1,
@@ -39,6 +43,8 @@ function succeededJob(overrides: Partial<LifecycleJob> = {}): LifecycleJob {
     outputMime: "image/png",
     outputWidth: 1,
     outputHeight: 1,
+    outputPageCount: null,
+    pdfProfile: null,
     resultKind: "download",
     engineBuildId: "engine-1",
     codecBuildId: "codec-1",
@@ -91,9 +97,9 @@ async function runtime(job: LifecycleJob = succeededJob()): Promise<LifecycleRou
             controller.close();
           },
         }),
-        size: 2,
+        size: job.outputBytes ?? 0,
         httpEtag: '"result-etag"',
-        contentType: "image/png",
+        contentType: job.outputMime ?? undefined,
         kind: "output",
         jobId,
       })),
@@ -108,6 +114,76 @@ async function runtime(job: LifecycleJob = succeededJob()): Promise<LifecycleRou
 }
 
 describe("authenticated job lifecycle routes", () => {
+  it("projects a strict PDF status and downloads only application/pdf", async () => {
+    const pdfJob = succeededJob({
+      contractId: "pdf.optimize@1",
+      declaredBytes: 1_000,
+      declaredPageCount: 3,
+      outputBytes: 900,
+      outputMime: "application/pdf",
+      outputWidth: null,
+      outputHeight: null,
+      outputPageCount: 3,
+      pdfProfile: "structural",
+      codecBuildId: null,
+      warnings: ["SIGNATURES_INVALIDATED"],
+      testedCandidates: 2,
+    });
+    const routeRuntime = await runtime(pdfJob);
+    const status = await routeJobStatusRequest(request(`/v1/jobs/${jobId}`), jobId, routeRuntime);
+    expect(pdfOptimizeStatusResponseSchema.parse(await status.json())).toMatchObject({
+      state: "succeeded",
+      result: {
+        kind: "download",
+        mime: "application/pdf",
+        sourceByteLength: 1_000,
+        byteLength: 900,
+        pageCount: 3,
+        profile: "structural",
+      },
+    });
+
+    const result = await routeJobResultRequest(
+      request(`/v1/jobs/${jobId}/result`),
+      jobId,
+      routeRuntime,
+    );
+    expect(result.status).toBe(200);
+    expect(result.headers.get("content-type")).toBe("application/pdf");
+    expect(result.headers.get("content-disposition")).toBe(
+      'attachment; filename="hereisit-compressed.pdf"',
+    );
+  });
+
+  it("projects the exact retryable PDF engine failure contract", async () => {
+    const pdfJob = succeededJob({
+      contractId: "pdf.optimize@1",
+      declaredPageCount: 1,
+      state: "failed",
+      phase: "optimizing",
+      phaseFraction: 0.5,
+      resultKind: null,
+      outputBytes: null,
+      outputMime: null,
+      outputWidth: null,
+      outputHeight: null,
+      resultExpiresAt: null,
+      errorCode: "ENGINE_TIMEOUT",
+    });
+    const routeRuntime = await runtime(pdfJob);
+
+    const response = await routeJobStatusRequest(request(`/v1/jobs/${jobId}`), jobId, routeRuntime);
+
+    expect(response.status).toBe(200);
+    expect(pdfOptimizeStatusResponseSchema.parse(await response.json())).toMatchObject({
+      state: "failed",
+      error: {
+        code: "ENGINE_TIMEOUT",
+        message: "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+        retryable: true,
+      },
+    });
+  });
   it("returns a strict status envelope after both rate-limit fences and token auth", async () => {
     const rt = await runtime();
     const response = await routeJobStatusRequest(request(`/v1/jobs/${jobId}`), jobId, rt);

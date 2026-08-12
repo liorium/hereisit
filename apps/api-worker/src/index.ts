@@ -1,6 +1,6 @@
-import type { ImageJobMessage } from "@hereisit/server-contracts";
+import type { ServerJobMessage } from "@hereisit/server-contracts";
 import type { Env } from "./env";
-import { consumeImageQueue } from "./queue-consumer";
+import { consumeProcessingQueue } from "./queue-consumer";
 import { routeRequest } from "./router";
 import { runScheduledMaintenance } from "./sweeper";
 import {
@@ -11,7 +11,7 @@ import {
   type UsageEnvironment,
 } from "./usage-analytics";
 
-export { ImageEngineContainer } from "./container-client";
+export { ImageEngineContainer, PdfEngineContainer } from "./container-client";
 
 function usageEnvironment(value: string): UsageEnvironment {
   if (value === "local" || value === "staging" || value === "production") return value;
@@ -52,7 +52,7 @@ export default {
         entrypoint: "queue",
         routeClass: "other",
       },
-      () => consumeImageQueue(batch, env),
+      () => consumeProcessingQueue(batch, env),
       () => "success",
     );
   },
@@ -72,4 +72,4 @@ export default {
       ),
     );
   },
-} satisfies ExportedHandler<Env, ImageJobMessage>;
+} satisfies ExportedHandler<Env, ServerJobMessage>;

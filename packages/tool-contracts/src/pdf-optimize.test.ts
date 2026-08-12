@@ -45,6 +45,7 @@ function createRequest(overrides: Record<string, unknown> = {}) {
     toolContract: "pdf.optimize@1",
     clientRequestId: crypto.randomUUID(),
     anonymousSessionId,
+    jobToken: "b".repeat(43),
     spec: { version: 1, preset: "minimum" },
     input: { byteLength: 1_000, mime: "application/pdf", pageCount: 3 },
     ...overrides,
@@ -73,6 +74,7 @@ describe("pdf.optimize@1", () => {
   it("accepts one bounded PDF create request", () => {
     expect(pdfOptimizeCreateRequestSchema.parse(createRequest())).toMatchObject({
       toolContract: "pdf.optimize@1",
+      jobToken: "b".repeat(43),
     });
   });
 

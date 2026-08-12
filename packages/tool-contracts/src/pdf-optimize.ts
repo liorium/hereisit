@@ -16,6 +16,7 @@ export type PdfOptimizeMime = z.infer<typeof pdfOptimizeMimeSchema>;
 const positiveSafeIntegerSchema = z.number().finite().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const buildIdSchema = z.string().min(1);
 const anonymousSessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const jobTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 
 export const pdfOptimizeSpecV1Schema = z
   .object({
@@ -40,6 +41,7 @@ export const pdfOptimizeCreateRequestSchema = z
     toolContract: z.literal(PDF_OPTIMIZE_CONTRACT_ID),
     anonymousSessionId: anonymousSessionIdSchema,
     clientRequestId: z.uuid(),
+    jobToken: jobTokenSchema,
     spec: pdfOptimizeSpecV1Schema,
     input: pdfOptimizeInputSchema,
   })

@@ -103,6 +103,7 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
 const recoveryRowSchema = z
   .object({
     id: z.string().regex(UUID_PATTERN),
+    contract_id: z.enum(["image.optimize@1", "pdf.optimize@1"]),
     status: z.enum(["queued", "running"]),
     lease_expires_at: z.number().int().min(0).nullable(),
     processing_deadline_at: z.number().int().min(0).nullable(),
@@ -284,10 +285,34 @@ async function requeueForRecovery(env: Env, jobId: string, now: number): Promise
   return changed === 1;
 }
 
-async function bestEffortWorkspaceCleanup(env: Env, jobId: string): Promise<void> {
+interface CleanupEngine {
+  cancel(jobId: string): Promise<void>;
+  remove(jobId: string): Promise<void>;
+}
+
+export function selectCleanupEngine(
+  contractId: "image.optimize@1" | "pdf.optimize@1",
+  factories: {
+    readonly image: () => CleanupEngine;
+    readonly pdf: () => CleanupEngine;
+  },
+): CleanupEngine {
+  return contractId === "pdf.optimize@1" ? factories.pdf() : factories.image();
+}
+
+async function bestEffortWorkspaceCleanup(
+  env: Env,
+  jobId: string,
+  contractId: "image.optimize@1" | "pdf.optimize@1",
+): Promise<void> {
   try {
-    const { createContainerEngineClient } = await import("./container-client");
-    const engine = createContainerEngineClient(env);
+    const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
+      "./container-client"
+    );
+    const engine = selectCleanupEngine(contractId, {
+      image: () => createContainerEngineClient(env),
+      pdf: () => createContainerPdfEngineClient(env),
+    });
     await engine.cancel(jobId).catch(() => undefined);
     await engine.remove(jobId).catch(() => undefined);
   } catch {
@@ -320,7 +345,7 @@ export async function recoverStaleLeasesAndLostQueueMessages(
   requireTime(now);
   requireLimit(limit);
   const selected = await env.DB.prepare(
-    `SELECT jobs.id, jobs.status, jobs.lease_expires_at, jobs.processing_deadline_at,
+    `SELECT jobs.id, jobs.contract_id, jobs.status, jobs.lease_expires_at, jobs.processing_deadline_at,
             jobs.cancel_requested_at, jobs.input_key, jobs.output_key
      FROM jobs
      LEFT JOIN job_outbox ON job_outbox.job_id = jobs.id
@@ -352,7 +377,7 @@ export async function recoverStaleLeasesAndLostQueueMessages(
           await Promise.allSettled([
             env.JOB_OBJECTS.delete(row.input_key),
             env.JOB_OBJECTS.delete(row.output_key),
-            bestEffortWorkspaceCleanup(env, row.id),
+            bestEffortWorkspaceCleanup(env, row.id, row.contract_id),
           ]);
           recovered += 1;
         }
@@ -364,7 +389,7 @@ export async function recoverStaleLeasesAndLostQueueMessages(
         await Promise.allSettled([
           env.JOB_OBJECTS.delete(terminal.job.inputKey),
           env.JOB_OBJECTS.delete(terminal.job.outputKey),
-          bestEffortWorkspaceCleanup(env, row.id),
+          bestEffortWorkspaceCleanup(env, row.id, row.contract_id),
         ]);
         recovered += 1;
       }
@@ -381,6 +406,7 @@ export async function recoverStaleLeasesAndLostQueueMessages(
 const sweepRowSchema = z
   .object({
     id: z.string().regex(UUID_PATTERN),
+    contract_id: z.enum(["image.optimize@1", "pdf.optimize@1"]),
     status: z.enum(["created", "uploading", "succeeded", "failed", "cancelled", "expired"]),
     input_key: z.string().regex(INPUT_KEY_PATTERN),
     output_key: z.string().regex(OUTPUT_KEY_PATTERN),
@@ -392,8 +418,8 @@ const sweepRowSchema = z
     terminal_record_expires_at: z.number().int().min(0).nullable(),
     session_hash: z.string().regex(/^[0-9a-f]{64}$/),
     declared_bytes: z.number().int().min(1),
-    declared_width: z.number().int().min(1),
-    declared_height: z.number().int().min(1),
+    declared_width: z.number().int().min(1).nullable(),
+    declared_height: z.number().int().min(1).nullable(),
     reserved_units: z.number().int().min(0),
     result_kind: z.enum(["download", "original-retained"]).nullable(),
   })
@@ -531,7 +557,7 @@ export async function sweepExpiredJobs(
   requireLimit(limit);
   await sweepTombstones(env, now, limit);
   const selected = await env.DB.prepare(
-    `SELECT id, status, input_key, output_key, upload_version, upload_expires_at,
+    `SELECT id, contract_id, status, input_key, output_key, upload_version, upload_expires_at,
             result_expires_at, download_acknowledged_at, download_lease_expires_at,
             terminal_record_expires_at, session_hash, declared_bytes,
             declared_width, declared_height, reserved_units, result_kind
@@ -588,7 +614,7 @@ export async function sweepExpiredJobs(
       if (decision.deleteInput) await env.JOB_OBJECTS.delete(row.input_key);
       if (decision.deleteOutput) await env.JOB_OBJECTS.delete(row.output_key);
       if (row.status !== "created" && row.status !== "uploading") {
-        await bestEffortWorkspaceCleanup(env, row.id);
+        await bestEffortWorkspaceCleanup(env, row.id, row.contract_id);
       }
       if (row.status === "succeeded") await lifecycle.completeResultDeletion(row.id, now);
       swept += 1;
@@ -599,9 +625,12 @@ export async function sweepExpiredJobs(
           event: "deletion",
           jobId: row.id,
           sessionHashPrefix: sessionHashPrefix(row.session_hash),
-          contractId: "image.optimize@1",
+          contractId: row.contract_id,
           inputBytes: row.declared_bytes,
-          pixels: row.declared_width * row.declared_height,
+          pixels:
+            row.declared_width === null || row.declared_height === null
+              ? 0
+              : row.declared_width * row.declared_height,
           reservedUnits: row.reserved_units,
           errorCode: "STORAGE_FAILURE",
         });

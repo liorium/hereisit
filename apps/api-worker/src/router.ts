@@ -299,6 +299,7 @@ export async function routeRequest(
         {
           DB: env.DB,
           IMAGE_JOBS: env.IMAGE_JOBS,
+          PDF_JOBS: env.PDF_JOBS,
         },
         jobId,
         now,
@@ -348,12 +349,24 @@ export async function routeRequest(
     },
     engine: {
       cancel: async (jobId) => {
-        const { createContainerEngineClient } = await import("./container-client");
-        await createContainerEngineClient(env).cancel(jobId);
+        const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
+          "./container-client"
+        );
+        const job = await lifecycleRepository.readJob(jobId);
+        await (job?.contractId === "pdf.optimize@1"
+          ? createContainerPdfEngineClient(env)
+          : createContainerEngineClient(env)
+        ).cancel(jobId);
       },
       remove: async (jobId) => {
-        const { createContainerEngineClient } = await import("./container-client");
-        await createContainerEngineClient(env).remove(jobId);
+        const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
+          "./container-client"
+        );
+        const job = await lifecycleRepository.readJob(jobId);
+        await (job?.contractId === "pdf.optimize@1"
+          ? createContainerPdfEngineClient(env)
+          : createContainerEngineClient(env)
+        ).remove(jobId);
       },
     },
   };
