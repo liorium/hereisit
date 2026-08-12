@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  type ArtifactHead,
   ArtifactUploadError,
   createOpaqueObjectKey,
   deleteAuthorizedArtifact,
@@ -28,8 +29,89 @@ function pdfHead(overrides: Record<string, unknown> = {}) {
   return inputHead({
     size: 40 * 1024 * 1024,
     httpMetadata: { contentType: "application/pdf" },
-    customMetadata: { kind: "input", uploadVersion: "1", sha256: PDF_DIGEST },
+    customMetadata: { kind: "input", uploadVersion: "1", verifiedSha256: PDF_DIGEST },
     ...overrides,
+  });
+}
+
+type StoredObject = ArtifactHead & { readonly body: Uint8Array };
+
+function pdfObject(
+  key: string,
+  body: Uint8Array,
+  customMetadata: Readonly<Record<string, string>>,
+  etag = `etag-${key}`,
+): StoredObject {
+  return {
+    key,
+    size: body.byteLength,
+    etag,
+    httpEtag: `"${etag}"`,
+    httpMetadata: { contentType: "application/pdf" },
+    customMetadata,
+    body,
+  };
+}
+
+function pdfBucket(
+  input: { readonly canonical?: StoredObject; readonly throwAfterCanonicalStore?: boolean } = {},
+) {
+  const objects = new Map<string, StoredObject>();
+  if (input.canonical !== undefined) objects.set(INPUT_KEY, input.canonical);
+  const deleted: string[] = [];
+  return {
+    objects,
+    deleted,
+    bucket: {
+      async put(
+        key: string,
+        stream: ReadableStream<Uint8Array>,
+        options: {
+          onlyIf: Headers;
+          httpMetadata: { contentType: "application/pdf" };
+          customMetadata: Readonly<Record<string, string>>;
+        },
+      ) {
+        const body = new Uint8Array(await new Response(stream).arrayBuffer());
+        if (objects.has(key)) return null;
+        const stored = pdfObject(key, body, options.customMetadata);
+        objects.set(key, stored);
+        if (key === INPUT_KEY && input.throwAfterCanonicalStore) {
+          throw new Error("lost canonical put response");
+        }
+        return stored;
+      },
+      async get(key: string) {
+        const stored = objects.get(key);
+        return stored === undefined ? null : { ...stored, body: bytes(...stored.body) };
+      },
+      async head(key: string) {
+        return objects.get(key) ?? null;
+      },
+      async delete(key: string) {
+        deleted.push(key);
+        objects.delete(key);
+      },
+    },
+  };
+}
+
+function storePdf(
+  bucket: ReturnType<typeof pdfBucket>["bucket"],
+  createDigestStream: () => ReturnType<typeof digestStream> = () => digestStream(PDF_DIGEST),
+) {
+  return storeExactInputArtifact({
+    bucket,
+    source: bytes(1, 2, 3),
+    key: INPUT_KEY,
+    byteLength: 3,
+    mime: "application/pdf",
+    uploadVersion: 1,
+    deadlineAt: Date.now() + 10_000,
+    expectedSha256: PDF_DIGEST,
+    createFixedLengthStream: passthroughFixedLengthStream,
+    createDigestStream,
+    randomUuid: () => "11111111-1111-4111-8111-111111111111",
   });
 }
 
@@ -119,36 +201,91 @@ describe("R2 input invariants", () => {
     ).toThrow(ArtifactUploadError);
   });
 
-  it("deletes a newly stored PDF when its received digest mismatches the declared digest", async () => {
-    const head = inputHead({
-      httpMetadata: { contentType: "application/pdf" },
-      customMetadata: { kind: "input", uploadVersion: "1", sha256: PDF_DIGEST },
+  it("recovers a verified PDF after its canonical put stores then loses the response", async () => {
+    const state = pdfBucket({ throwAfterCanonicalStore: true });
+    await expect(storePdf(state.bucket)).resolves.toMatchObject({
+      kind: "existing-authoritative",
+      artifact: { etag: `etag-${INPUT_KEY}` },
     });
-    const bucket = {
-      put: vi.fn(async (_key: string, stream: ReadableStream<Uint8Array>) => {
-        for await (const _chunk of stream) {
-          // Drain the fixed-length stream.
-        }
-        return head;
-      }),
-      head: vi.fn(async () => head),
-      delete: vi.fn(async () => undefined),
-    };
+    expect(state.objects.get(INPUT_KEY)?.customMetadata).toEqual({
+      kind: "input",
+      uploadVersion: "1",
+      verifiedSha256: PDF_DIGEST,
+    });
+    expect(state.deleted).toEqual([
+      `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`,
+    ]);
+  });
+
+  it("rejects a conditional loser against an unverified PDF winner without deleting it", async () => {
+    const unverified = pdfObject(INPUT_KEY, Uint8Array.of(1, 2, 3), {
+      kind: "input",
+      uploadVersion: "1",
+      sha256: PDF_DIGEST,
+    });
+    const state = pdfBucket({ canonical: unverified });
+    await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "UPLOAD_MISMATCH" });
+    expect(state.objects.get(INPUT_KEY)).toBe(unverified);
+    expect(state.deleted).not.toContain(INPUT_KEY);
+  });
+
+  it("does not delete a pending object owned by a conditional winner", async () => {
+    const pendingKey = `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`;
+    const pendingWinner = pdfObject(pendingKey, Uint8Array.of(9, 9, 9), {
+      kind: "pending-input",
+      uploadVersion: "1",
+    });
+    const state = pdfBucket();
+    state.objects.set(pendingKey, pendingWinner);
+    await expect(storePdf(state.bucket)).rejects.toMatchObject({ code: "UPLOAD_MISMATCH" });
+    expect(state.objects.get(pendingKey)).toBe(pendingWinner);
+    expect(state.deleted).not.toContain(pendingKey);
+  });
+
+  it("deletes only its pending PDF when digest computation rejects after storage", async () => {
+    const state = pdfBucket();
+    const failingDigest = () =>
+      Object.assign(new WritableStream<ArrayBuffer | ArrayBufferView>(), {
+        digest: Promise.reject(new Error("private digest failure")),
+      });
+    await expect(storePdf(state.bucket, failingDigest)).rejects.toMatchObject({
+      code: "UPLOAD_MISMATCH",
+    });
+    expect(state.deleted).toEqual([
+      `pending-inputs/${INPUT_ID}/11111111-1111-4111-8111-111111111111`,
+    ]);
+    expect(state.objects.has(INPUT_KEY)).toBe(false);
+  });
+
+  it("cannot delete a different verified winner during mismatch cleanup", async () => {
+    const winner = pdfObject(INPUT_KEY, Uint8Array.of(9, 9, 9), {
+      kind: "input",
+      uploadVersion: "1",
+      verifiedSha256: OTHER_PDF_DIGEST,
+    });
+    const state = pdfBucket({ canonical: winner });
     await expect(
-      storeExactInputArtifact({
-        bucket,
-        source: bytes(1, 2, 3),
-        key: INPUT_KEY,
-        byteLength: 3,
-        mime: "application/pdf",
-        uploadVersion: 1,
-        deadlineAt: Date.now() + 10_000,
-        expectedSha256: PDF_DIGEST,
-        createFixedLengthStream: passthroughFixedLengthStream,
-        createDigestStream: () => digestStream(OTHER_PDF_DIGEST),
-      }),
-    ).rejects.toMatchObject({ code: "UPLOAD_MISMATCH" });
-    expect(bucket.delete).toHaveBeenCalledWith(INPUT_KEY);
+      storePdf(state.bucket, () => digestStream(OTHER_PDF_DIGEST)),
+    ).rejects.toMatchObject({
+      code: "UPLOAD_MISMATCH",
+    });
+    expect(state.deleted).not.toContain(INPUT_KEY);
+    expect(state.objects.get(INPUT_KEY)).toBe(winner);
+  });
+
+  it("accepts an idempotent replay only when the existing PDF winner is verified and matching", async () => {
+    const winner = pdfObject(INPUT_KEY, Uint8Array.of(1, 2, 3), {
+      kind: "input",
+      uploadVersion: "1",
+      verifiedSha256: PDF_DIGEST,
+    });
+    const state = pdfBucket({ canonical: winner });
+    await expect(storePdf(state.bucket)).resolves.toMatchObject({
+      kind: "existing-authoritative",
+      artifact: { etag: `etag-${INPUT_KEY}` },
+    });
+    expect(state.objects.get(INPUT_KEY)).toBe(winner);
+    expect(state.deleted).not.toContain(INPUT_KEY);
   });
 
   it.each([

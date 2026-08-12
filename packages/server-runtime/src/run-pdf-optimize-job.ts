@@ -341,7 +341,13 @@ export function runPdfOptimizeJob(
         value: {
           ...downloaded,
           acknowledge() {
-            acknowledgement ??= downloaded.acknowledge();
+            if (acknowledgement === undefined) {
+              const current = downloaded.acknowledge();
+              acknowledgement = current;
+              void current.catch(() => {
+                if (acknowledgement === current) acknowledgement = undefined;
+              });
+            }
             return acknowledgement;
           },
           descriptor: terminal.result,

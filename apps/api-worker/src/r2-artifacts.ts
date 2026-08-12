@@ -37,6 +37,7 @@ export interface ArtifactBucket {
       customMetadata: Readonly<Record<string, string>>;
     },
   ): Promise<ArtifactHead | null>;
+  get?(key: string): Promise<(ArtifactHead & { readonly body: ReadableStream<Uint8Array> }) | null>;
   head(key: string): Promise<ArtifactHead | null>;
   delete(key: string): Promise<void>;
 }
@@ -62,8 +63,8 @@ export type StoreExactInputArtifactResult =
   | { readonly kind: "stored"; readonly artifact: VerifiedInputArtifact }
   | {
       /**
-       * A create-only put lost or its response was lost, and the authoritative R2 head matches only
-       * the immutable key/size/MIME/upload-version contract. This never proves source-body equality.
+       * A create-only put lost or its response was lost. Images match the immutable
+       * key/size/MIME/upload-version boundary; PDFs additionally require a server-verified digest.
        */
       readonly kind: "existing-authoritative";
       readonly artifact: VerifiedInputArtifact;
@@ -104,6 +105,13 @@ function isCanonicalInputKey(value: string): value is InputArtifactObjectKey {
 
 function isCanonicalArtifactKey(value: string): value is ArtifactObjectKey {
   return isCanonicalInputKey(value) || OUTPUT_KEY_PATTERN.test(value);
+}
+
+function pendingInputKey(inputKey: InputArtifactObjectKey, attemptId: string): string {
+  if (!UUID_PATTERN.test(attemptId)) {
+    throw new ArtifactUploadError("INVALID_ARTIFACT_REQUEST");
+  }
+  return `pending-${inputKey}/${attemptId}`;
 }
 
 function defaultFixedLengthStream(expectedLength: number): FixedLengthStreamPair {
@@ -205,7 +213,8 @@ export function verifyInputArtifactHead(
     Object.keys(metadata).length !== (expected.expectedSha256 === undefined ? 2 : 3) ||
     metadata.kind !== "input" ||
     metadata.uploadVersion !== String(expected.uploadVersion) ||
-    (expected.expectedSha256 !== undefined && metadata.sha256 !== expected.expectedSha256) ||
+    (expected.expectedSha256 !== undefined &&
+      metadata.verifiedSha256 !== expected.expectedSha256) ||
     !SAFE_ETAG_PATTERN.test(head.etag)
   ) {
     throw new ArtifactUploadError("UPLOAD_MISMATCH");
@@ -218,6 +227,133 @@ export function verifyInputArtifactHead(
     etag: head.etag,
     uploadVersion: expected.uploadVersion,
   };
+}
+
+async function readArtifactBody(
+  bucket: ArtifactBucket,
+  key: string,
+): Promise<(ArtifactHead & { readonly body: ReadableStream<Uint8Array> }) | null> {
+  if (bucket.get === undefined) throw new ArtifactUploadError("STORAGE_FAILURE");
+  try {
+    return await bucket.get(key);
+  } catch {
+    throw new ArtifactUploadError("STORAGE_FAILURE");
+  }
+}
+
+function encodeDigest(bytes: ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+  return `sha-256=${btoa(binary)}`;
+}
+
+async function storeVerifiedPdfArtifact(input: {
+  readonly bucket: ArtifactBucket;
+  readonly source: ReadableStream<Uint8Array>;
+  readonly key: InputArtifactObjectKey;
+  readonly byteLength: number;
+  readonly uploadVersion: number;
+  readonly deadlineAt: number;
+  readonly expectedSha256: string;
+  readonly now: () => number;
+  readonly createFixedLengthStream?: (expectedLength: number) => FixedLengthStreamPair;
+  readonly createDigestStream?: () => Sha256DigestStream;
+  readonly randomUuid: () => string;
+}): Promise<StoreExactInputArtifactResult> {
+  const remainingMilliseconds = input.deadlineAt - input.now();
+  if (remainingMilliseconds <= 0) throw new ArtifactUploadError("UPLOAD_EXPIRED");
+  const pendingKey = pendingInputKey(input.key, input.randomUuid());
+  const fixedLengthStream = (input.createFixedLengthStream ?? defaultFixedLengthStream)(
+    input.byteLength,
+  );
+  const digestStream = (input.createDigestStream ?? (() => new DigestStream("SHA-256")))();
+  const digestObserved = digestStream.digest.then(
+    (value) => ({ status: "fulfilled" as const, value }),
+    () => ({ status: "rejected" as const }),
+  );
+  const abortController = new AbortController();
+  let deadlineExpired = false;
+  const timeout = setTimeout(() => {
+    deadlineExpired = true;
+    abortController.abort(new ArtifactUploadError("UPLOAD_EXPIRED"));
+  }, remainingMilliseconds);
+  const producer = pipeToFixedLengthStream(
+    input.source,
+    fixedLengthStream.writable,
+    abortController.signal,
+    digestStream,
+  );
+  const pendingPut = Promise.resolve().then(() =>
+    input.bucket.put(pendingKey, fixedLengthStream.readable, {
+      onlyIf: new Headers({ "if-none-match": "*" }),
+      httpMetadata: { contentType: "application/pdf" },
+      customMetadata: {
+        kind: "pending-input",
+        uploadVersion: String(input.uploadVersion),
+      },
+    }),
+  );
+  let ownsPending = false;
+  try {
+    const [produced, storedPending] = await Promise.allSettled([producer, pendingPut]);
+    clearTimeout(timeout);
+    if (produced.status === "rejected" || storedPending.status === "rejected") {
+      throw new ArtifactUploadError(deadlineExpired ? "UPLOAD_EXPIRED" : "STORAGE_FAILURE");
+    }
+    if (storedPending.value === null) throw new ArtifactUploadError("UPLOAD_MISMATCH");
+    ownsPending = true;
+    const digest = await digestObserved;
+    if (digest.status === "rejected") {
+      throw new ArtifactUploadError("UPLOAD_MISMATCH");
+    }
+    const actualSha256 = encodeDigest(digest.value);
+    if (actualSha256 !== input.expectedSha256) {
+      throw new ArtifactUploadError("UPLOAD_MISMATCH");
+    }
+    const pending = await readArtifactBody(input.bucket, pendingKey);
+    if (
+      pending === null ||
+      pending.size !== input.byteLength ||
+      pending.httpMetadata?.contentType !== "application/pdf" ||
+      pending.customMetadata?.kind !== "pending-input" ||
+      pending.customMetadata.uploadVersion !== String(input.uploadVersion)
+    ) {
+      throw new ArtifactUploadError("UPLOAD_MISMATCH");
+    }
+    let canonicalPut: ArtifactHead | null;
+    let responseLost = false;
+    try {
+      canonicalPut = await input.bucket.put(input.key, pending.body, {
+        onlyIf: new Headers({ "if-none-match": "*" }),
+        httpMetadata: { contentType: "application/pdf" },
+        customMetadata: {
+          kind: "input",
+          uploadVersion: String(input.uploadVersion),
+          verifiedSha256: actualSha256,
+        },
+      });
+    } catch {
+      canonicalPut = null;
+      responseLost = true;
+    }
+    const head = await readArtifactHead(input.bucket, input.key);
+    const artifact = verifyInputArtifactHead(head, {
+      key: input.key,
+      byteLength: input.byteLength,
+      mime: "application/pdf",
+      uploadVersion: input.uploadVersion,
+      expectedSha256: input.expectedSha256,
+    });
+    return {
+      kind: canonicalPut === null || responseLost ? "existing-authoritative" : "stored",
+      artifact,
+    };
+  } finally {
+    clearTimeout(timeout);
+    abortController.abort(new ArtifactUploadError("UPLOAD_MISMATCH"));
+    await Promise.allSettled([producer, pendingPut]);
+    if (ownsPending) await input.bucket.delete(pendingKey).catch(() => undefined);
+  }
 }
 
 async function readArtifactHead(
@@ -245,7 +381,8 @@ function errorCodeForPipelineFailure(input: {
  *
  * A route handling a repository replay with an already committed input ETag must return its
  * idempotent acknowledgement without calling this function or consuming the repeated request body.
- * R2 is create-only and first-writer-wins; no client-supplied content identity is available here.
+ * R2 is create-only and first-writer-wins. PDFs are promoted from a unique pending object only
+ * after the received stream digest is authoritative; image uploads retain the original direct path.
  */
 export async function storeExactInputArtifact(input: {
   readonly bucket: ArtifactBucket;
@@ -259,6 +396,7 @@ export async function storeExactInputArtifact(input: {
   readonly createFixedLengthStream?: (expectedLength: number) => FixedLengthStreamPair;
   readonly expectedSha256?: string;
   readonly createDigestStream?: () => Sha256DigestStream;
+  readonly randomUuid?: () => string;
 }): Promise<StoreExactInputArtifactResult> {
   const now = input.now ?? Date.now;
   if (
@@ -281,19 +419,34 @@ export async function storeExactInputArtifact(input: {
     throw new ArtifactUploadError("UPLOAD_EXPIRED");
   }
 
+  if (input.mime === "application/pdf") {
+    if (input.expectedSha256 === undefined) {
+      throw new ArtifactUploadError("INVALID_ARTIFACT_REQUEST");
+    }
+    return await storeVerifiedPdfArtifact({
+      bucket: input.bucket,
+      source: input.source,
+      key: input.key,
+      byteLength: input.byteLength,
+      uploadVersion: input.uploadVersion,
+      deadlineAt: input.deadlineAt,
+      expectedSha256: input.expectedSha256,
+      now,
+      ...(input.createFixedLengthStream === undefined
+        ? {}
+        : { createFixedLengthStream: input.createFixedLengthStream }),
+      ...(input.createDigestStream === undefined
+        ? {}
+        : { createDigestStream: input.createDigestStream }),
+      randomUuid: input.randomUuid ?? crypto.randomUUID,
+    });
+  }
+
   const fixedLengthStream = (input.createFixedLengthStream ?? defaultFixedLengthStream)(
     input.byteLength,
   );
   const mime = input.mime;
   const abortController = new AbortController();
-  const digestStream =
-    input.expectedSha256 === undefined
-      ? undefined
-      : (input.createDigestStream ?? (() => new DigestStream("SHA-256")))();
-  const digestObserved = digestStream?.digest.then(
-    (value) => ({ status: "fulfilled" as const, value }),
-    () => ({ status: "rejected" as const }),
-  );
   let deadlineExpired = false;
   let putRejectedFirst = false;
   let conditionalPutLost = false;
@@ -307,7 +460,6 @@ export async function storeExactInputArtifact(input: {
     input.source,
     fixedLengthStream.writable,
     abortController.signal,
-    digestStream,
   );
   const putPromise = Promise.resolve().then(() =>
     input.bucket.put(input.key, fixedLengthStream.readable, {
@@ -316,7 +468,6 @@ export async function storeExactInputArtifact(input: {
       customMetadata: {
         kind: "input",
         uploadVersion: String(input.uploadVersion),
-        ...(input.expectedSha256 === undefined ? {} : { sha256: input.expectedSha256 }),
       },
     }),
   );
@@ -379,23 +530,6 @@ export async function storeExactInputArtifact(input: {
       throw new ArtifactUploadError(
         errorCodeForPipelineFailure({ deadlineExpired, putRejectedFirst: true }),
       );
-    }
-  }
-
-  if (digestStream !== undefined && input.expectedSha256 !== undefined) {
-    const digest = await digestObserved;
-    if (digest?.status !== "fulfilled") {
-      await input.bucket.delete(input.key).catch(() => undefined);
-      throw new ArtifactUploadError("UPLOAD_MISMATCH");
-    }
-    let binary = "";
-    for (const byte of new Uint8Array(digest.value)) {
-      binary += String.fromCharCode(byte);
-    }
-    const actual = `sha-256=${btoa(binary)}`;
-    if (actual !== input.expectedSha256) {
-      await input.bucket.delete(input.key).catch(() => undefined);
-      throw new ArtifactUploadError("UPLOAD_MISMATCH");
     }
   }
 

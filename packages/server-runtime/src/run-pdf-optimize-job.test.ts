@@ -428,6 +428,55 @@ describe("runPdfOptimizeJob", () => {
     ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
   });
 
+  it("retries a transient PDF acknowledgement and shares the simultaneous retry", async () => {
+    const bytes = new Uint8Array(90);
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    let binary = "";
+    for (const byte of hash) binary += String.fromCharCode(byte);
+    const expectedDigest = `sha-256=${btoa(binary)}`;
+    const token = createClientJobCredentials().jobToken;
+    const succeeded = status();
+    if (succeeded.state !== "succeeded" || succeeded.result.kind !== "download") {
+      throw new Error("fixture");
+    }
+    let finishRetry: () => void = () => undefined;
+    const retryResponse = new Promise<Response>((resolve) => {
+      finishRetry = () => resolve(new Response(null, { status: 204 }));
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(bytes, {
+          headers: {
+            "content-type": "application/pdf",
+            "content-length": "90",
+            "x-download-lease": token,
+            digest: expectedDigest,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockReturnValueOnce(retryResponse);
+    const downloaded = await fetchPdfOptimizeResult({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken: token,
+      descriptor: succeeded.result,
+      fetch: fetchMock,
+    });
+    await expect(downloaded.acknowledge()).rejects.toBeInstanceOf(RemoteJobError);
+    const firstRetry = downloaded.acknowledge();
+    const simultaneousRetry = downloaded.acknowledge();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    finishRetry();
+    await expect(Promise.all([firstRetry, simultaneousRetry])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    await downloaded.acknowledge();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("shares one in-flight acknowledgement across concurrent callers", async () => {
     let finish: () => void = () => undefined;
     const pending = new Promise<void>((resolve) => {
@@ -458,5 +507,46 @@ describe("runPdfOptimizeJob", () => {
     expect(acknowledge).toHaveBeenCalledOnce();
     finish();
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it("shares acknowledgement retries after a transient failure and permanently caches success", async () => {
+    let finishRetry: () => void = () => undefined;
+    const retry = new Promise<void>((resolve) => {
+      finishRetry = resolve;
+    });
+    const acknowledge = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("temporary acknowledgement failure"))
+      .mockReturnValueOnce(retry);
+    const deps = dependencies({
+      download: vi.fn(async () => ({
+        blob: new Blob([new Uint8Array(90)], { type: "application/pdf" }),
+        digest,
+        acknowledge,
+      })),
+    });
+    const handle = runPdfOptimizeJob(
+      file(),
+      { version: 1, preset: "balanced" },
+      {
+        apiOrigin: "https://processing.example",
+        anonymousSessionId: session,
+        pageCount: 1,
+        dependencies: deps,
+      },
+    );
+    const outcome = await handle.result;
+    if (outcome.status !== "fulfilled") throw new Error("fixture");
+    await expect(outcome.value.acknowledge()).rejects.toThrow("temporary acknowledgement failure");
+    const firstRetry = outcome.value.acknowledge();
+    const simultaneousRetry = outcome.value.acknowledge();
+    expect(acknowledge).toHaveBeenCalledTimes(2);
+    finishRetry();
+    await expect(Promise.all([firstRetry, simultaneousRetry])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    await outcome.value.acknowledge();
+    expect(acknowledge).toHaveBeenCalledTimes(2);
   });
 });

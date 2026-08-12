@@ -227,7 +227,13 @@ export async function fetchPdfOptimizeResult(
     blob,
     digest,
     acknowledge() {
-      acknowledgement ??= acknowledge(input, claimed.lease, input.signal);
+      if (acknowledgement === undefined) {
+        const current = acknowledge(input, claimed.lease, input.signal);
+        acknowledgement = current;
+        void current.catch(() => {
+          if (acknowledgement === current) acknowledgement = undefined;
+        });
+      }
       return acknowledgement;
     },
   };
