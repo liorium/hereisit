@@ -5,10 +5,14 @@ import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
 import {
   decodePDFRawStream,
+  PDFArray,
+  PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
+  PDFNumber,
   PDFRawStream,
+  PDFRef,
   PDFString,
   rgb,
   StandardFonts,
@@ -440,6 +444,105 @@ function occurrences(value, pattern) {
   return [...value.matchAll(pattern)].length;
 }
 
+function decodedText(value, label) {
+  if (!(value instanceof PDFString || value instanceof PDFHexString))
+    throw new TypeError(`${label} PDF probe failed`);
+  return value.decodeText();
+}
+
+function nameValue(value, label) {
+  if (!(value instanceof PDFName)) throw new TypeError(`${label} PDF probe failed`);
+  return value.decodeText();
+}
+
+function rectangleValue(value, label) {
+  if (!(value instanceof PDFArray) || value.size() !== 4)
+    throw new TypeError(`${label} PDF probe failed`);
+  return value.asArray().map((item) => {
+    if (!(item instanceof PDFNumber)) throw new TypeError(`${label} PDF probe failed`);
+    return item.asNumber();
+  });
+}
+
+function refValue(value, label) {
+  if (!(value instanceof PDFRef)) throw new TypeError(`${label} PDF probe failed`);
+  return value;
+}
+
+function refTags(value, label) {
+  if (!(value instanceof PDFArray)) throw new TypeError(`${label} PDF probe failed`);
+  return value.asArray().map((item) => refValue(item, label).tag);
+}
+
+function pageIndexForRef(document, ref, label) {
+  const index = document.getPages().findIndex((page) => page.ref.tag === ref.tag);
+  if (index < 0) throw new TypeError(`${label} PDF probe failed`);
+  return index;
+}
+
+let pdfjsPromise;
+async function pdfjs() {
+  pdfjsPromise ??= import(
+    pathToFileURL(
+      resolve("node_modules/.pnpm/pdfjs-dist@6.2.108/node_modules/pdfjs-dist/legacy/build/pdf.mjs"),
+    ).href
+  );
+  return pdfjsPromise;
+}
+
+function boundedPdfjsValue(value) {
+  if (ArrayBuffer.isView(value)) return [...value].map((item) => Number(item));
+  if (Array.isArray(value)) return value.map(boundedPdfjsValue);
+  if (value === null || ["string", "number", "boolean"].includes(typeof value)) return value;
+  return null;
+}
+
+async function pageMeaning(bytes) {
+  const module = await pdfjs();
+  const task = module.getDocument({
+    data: new Uint8Array(bytes),
+    isEvalSupported: false,
+    useSystemFonts: true,
+    stopEvent: true,
+  });
+  try {
+    const document = await task.promise;
+    if (document.numPages > MAX_PAGES) throw new RangeError("PDF page probe exceeds its limit");
+    const page = await document.getPage(1);
+    const [text, operators] = await Promise.all([page.getTextContent(), page.getOperatorList()]);
+    const extracted = text.items.map((item) => ("str" in item ? item.str : "")).join("\n");
+    if (extracted.length > 64 * 1024 || operators.fnArray.length > 100_000)
+      throw new RangeError("PDF page semantics exceed their limit");
+    const vector = operators.fnArray.flatMap((operation, index) =>
+      operation === module.OPS.constructPath
+        ? [[operation, boundedPdfjsValue(operators.argsArray[index])]]
+        : [],
+    );
+    const markedContent = operators.fnArray.flatMap((operation, index) => {
+      if (operation !== module.OPS.beginMarkedContentProps) return [];
+      const args = operators.argsArray[index];
+      const properties = Array.isArray(args) ? args[1] : null;
+      if (
+        !Array.isArray(args) ||
+        args[0] !== "OC" ||
+        typeof properties !== "object" ||
+        properties === null
+      )
+        return [];
+      return [{ type: properties.type, id: properties.id }];
+    });
+    return {
+      textDigest: digest(extracted),
+      textLength: extracted.length,
+      vectorDigest: digest(canonicalJson(vector)),
+      vectorOperators: vector.length,
+      markedContent,
+    };
+  } finally {
+    await task.destroy();
+  }
+}
+
 export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
   const raw = Buffer.from(bytes).toString("latin1");
   if (stratum === "corrupt") {
@@ -513,24 +616,51 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
     if (!condition) throw new TypeError(`${feature} PDF probe failed`);
     return { ...signature, kind: feature };
   };
-  if (stratum === "text-vector")
+  if (stratum === "text-vector") {
+    const meaning = await pageMeaning(bytes);
     return {
       ...requireFeature(textBlocks > 0 && /\b(?:m|l)\b/u.test(streams), "text-vector"),
       textBlocks,
+      textDigest: meaning.textDigest,
+      textLength: meaning.textLength,
+      vectorDigest: meaning.vectorDigest,
+      vectorOperators: meaning.vectorOperators,
     };
-  if (stratum === "link")
+  }
+  if (stratum === "link") {
+    const page = document.getPages()[0];
+    const annotationRef = refValue(page?.node.Annots()?.get(0), "link");
+    const annotation = document.context.lookup(annotationRef, PDFDict);
+    const action = annotation.lookup(PDFName.of("A"), PDFDict);
+    const uri = decodedText(action.get(PDFName.of("URI")), "link");
     return {
       ...requireFeature(
-        /\/Subtype\s*\/Link\b/u.test(objects) && /\/S\s*\/URI\b/u.test(objects),
+        nameValue(annotation.get(PDFName.of("Subtype")), "link") === "Link",
         "link",
       ),
       uriAnnotations: occurrences(objects, /\/Subtype\s*\/Link\b/gu),
+      uriDigest: digest(uri),
+      actionSubtype: nameValue(action.get(PDFName.of("S")), "link"),
+      rect: rectangleValue(annotation.lookup(PDFName.of("Rect")), "link"),
+      pageIndex: pageIndexForRef(document, page.ref, "link"),
     };
-  if (stratum === "annotation")
+  }
+  if (stratum === "annotation") {
+    const page = document.getPages()[0];
+    const annotationRef = refValue(page?.node.Annots()?.get(0), "annotation");
+    const annotation = document.context.lookup(annotationRef, PDFDict);
     return {
-      ...requireFeature(/\/Subtype\s*\/Text\b/u.test(objects), "annotation"),
+      ...requireFeature(
+        nameValue(annotation.get(PDFName.of("Subtype")), "annotation") === "Text",
+        "annotation",
+      ),
       textAnnotations: occurrences(objects, /\/Subtype\s*\/Text\b/gu),
+      subtype: "Text",
+      contentsDigest: digest(decodedText(annotation.get(PDFName.of("Contents")), "annotation")),
+      rect: rectangleValue(annotation.lookup(PDFName.of("Rect")), "annotation"),
+      pageIndex: pageIndexForRef(document, page.ref, "annotation"),
     };
+  }
   if (stratum === "form") {
     const textField = document.getForm().getTextField("generated_field");
     const value = textField.getText();
@@ -542,7 +672,21 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
       valueDigest: digest(value ?? ""),
     };
   }
-  if (stratum === "outline") return requireFeature(/\/Outlines\b/u.test(catalog), "outline");
+  if (stratum === "outline") {
+    const outlines = document.catalog.lookup(PDFName.of("Outlines"), PDFDict);
+    const first = outlines.lookup(PDFName.of("First"), PDFDict);
+    const destination = first.lookup(PDFName.of("Dest"), PDFArray);
+    const destinationRef = refValue(destination.get(0), "outline");
+    return {
+      ...requireFeature(outlines.get(PDFName.of("First")) !== undefined, "outline"),
+      titleDigest: digest(decodedText(first.get(PDFName.of("Title")), "outline")),
+      destinationPageIndex: pageIndexForRef(document, destinationRef, "outline"),
+      destinationMode: nameValue(destination.get(1), "outline"),
+      parentLinked:
+        first.get(PDFName.of("Parent"))?.toString() ===
+        document.catalog.get(PDFName.of("Outlines"))?.toString(),
+    };
+  }
   if (stratum === "attachment") {
     const content = embeddedContents.find((value) => value.includes(Buffer.from(token, "ascii")));
     return {
@@ -555,11 +699,37 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
       contentDigest: digest(content ?? ""),
     };
   }
-  if (stratum === "layer")
-    return requireFeature(
-      /\/OCProperties\b/u.test(catalog) && /\/Type\s*\/OCG\b/u.test(objects),
-      "layer",
+  if (stratum === "layer") {
+    const ocProperties = document.catalog.lookup(PDFName.of("OCProperties"), PDFDict);
+    const ocgRefs = refTags(ocProperties.lookup(PDFName.of("OCGs"), PDFArray), "layer");
+    const defaults = ocProperties.lookup(PDFName.of("D"), PDFDict);
+    const orderRefs = refTags(defaults.lookup(PDFName.of("Order"), PDFArray), "layer");
+    const onRefs = refTags(defaults.lookup(PDFName.of("ON"), PDFArray), "layer");
+    const page = document.getPages()[0];
+    const properties = page?.node.Resources()?.lookup(PDFName.of("Properties"), PDFDict);
+    const resourceRef = refValue(properties?.get(PDFName.of("GeneratedLayer")), "layer");
+    const ocgRef = refValue(ocProperties.lookup(PDFName.of("OCGs"), PDFArray).get(0), "layer");
+    const ocg = document.context.lookup(ocgRef, PDFDict);
+    const meaning = await pageMeaning(bytes);
+    const marked = meaning.markedContent.some(
+      (item) => item.type === "OCG" && item.id === `${resourceRef.objectNumber}R`,
     );
+    return {
+      ...requireFeature(
+        ocgRefs.length === 1 &&
+          canonicalJson(ocgRefs) === canonicalJson(orderRefs) &&
+          canonicalJson(ocgRefs) === canonicalJson(onRefs) &&
+          resourceRef.tag === ocgRef.tag &&
+          marked,
+        "layer",
+      ),
+      nameDigest: digest(decodedText(ocg.get(PDFName.of("Name")), "layer")),
+      membershipDigest: digest(canonicalJson({ ocgRefs, orderRefs, onRefs })),
+      resourceName: "GeneratedLayer",
+      pageIndex: pageIndexForRef(document, page.ref, "layer"),
+      markedContentAssociated: true,
+    };
+  }
   if (stratum === "duplicate-resource") {
     const duplicateStreams = occurrences(objects, /\/Subtype\s*\/Form\b/gu);
     const sourceFeature =

@@ -2,6 +2,16 @@ import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  decodePDFRawStream,
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFRawStream,
+  PDFString,
+  StandardFonts,
+} from "@cantoo/pdf-lib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createPdfCompressionCorpus,
@@ -17,6 +27,23 @@ async function root(label: string) {
   const path = join(tmpdir(), `hereisit-pdf-corpus-${label}-${crypto.randomUUID()}`);
   roots.push(path);
   return path;
+}
+
+async function mutatePdf(
+  bytes: Uint8Array,
+  mutate: (document: PDFDocument) => void | Promise<void>,
+) {
+  const document = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  await mutate(document);
+  return document.save({ useObjectStreams: false, updateFieldAppearances: false });
+}
+
+function objectWith(document: PDFDocument, key: string, value: string) {
+  for (const [, object] of document.context.enumerateIndirectObjects()) {
+    if (!(object instanceof PDFDict)) continue;
+    if (object.get(PDFName.of(key))?.toString() === value) return object;
+  }
+  throw new Error(`fixture object ${key}=${value} is missing`);
 }
 
 afterEach(async () => {
@@ -94,6 +121,110 @@ describe("generated PDF compression corpus", () => {
     expect(
       manifest.entries.find((entry) => entry.stratum === "attachment")?.probe.signature,
     ).toMatchObject({ contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  });
+
+  it.each([
+    [
+      "link URI",
+      "link",
+      (document: PDFDocument) => {
+        const annotation = objectWith(document, "Subtype", "/Link");
+        annotation
+          .lookup(PDFName.of("A"), PDFDict)
+          .set(PDFName.of("URI"), PDFString.of("urn:hereisit:mutated"));
+      },
+    ],
+    [
+      "annotation contents",
+      "annotation",
+      (document: PDFDocument) =>
+        objectWith(document, "Subtype", "/Text").set(
+          PDFName.of("Contents"),
+          PDFString.of("mutated"),
+        ),
+    ],
+    [
+      "outline title",
+      "outline",
+      (document: PDFDocument) => {
+        const outlines = objectWith(document, "Type", "/Outlines");
+        const item = outlines.lookup(PDFName.of("First"), PDFDict);
+        item.set(PDFName.of("Title"), PDFString.of("mutated"));
+      },
+    ],
+    [
+      "outline destination",
+      "outline",
+      (document: PDFDocument) => {
+        const outlines = objectWith(document, "Type", "/Outlines");
+        const item = outlines.lookup(PDFName.of("First"), PDFDict);
+        item.lookup(PDFName.of("Dest"), PDFArray).set(1, PDFName.of("XYZ"));
+      },
+    ],
+    [
+      "layer name",
+      "layer",
+      (document: PDFDocument) =>
+        objectWith(document, "Type", "/OCG").set(PDFName.of("Name"), PDFString.of("mutated")),
+    ],
+    [
+      "layer membership",
+      "layer",
+      (document: PDFDocument) => {
+        document.catalog
+          .lookup(PDFName.of("OCProperties"), PDFDict)
+          .lookup(PDFName.of("OCGs"), PDFArray)
+          .remove(0);
+      },
+    ],
+    [
+      "layer marked-content reference",
+      "layer",
+      (document: PDFDocument) => {
+        for (const [, object] of document.context.enumerateIndirectObjects()) {
+          if (!(object instanceof PDFRawStream)) continue;
+          const decoded = Buffer.from(decodePDFRawStream(object).decode());
+          if (!decoded.includes(Buffer.from("/GeneratedLayer", "ascii"))) continue;
+          object.updateContents(
+            Buffer.from(decoded.toString("ascii").replace("/GeneratedLayer", "/DetachedLayer")),
+          );
+        }
+      },
+    ],
+    [
+      "text page content",
+      "text-vector",
+      async (document: PDFDocument) => {
+        const font = await document.embedFont(StandardFonts.Helvetica);
+        const page = document.getPages()[0];
+        page?.drawText("Changed semantic text", { x: 20, y: 20, size: 10, font });
+      },
+    ],
+    [
+      "vector page operators",
+      "text-vector",
+      (document: PDFDocument) => {
+        const page = document.getPages()[0];
+        page?.drawLine({ start: { x: 1, y: 2 }, end: { x: 3, y: 4 }, thickness: 3 });
+      },
+    ],
+  ])("binds the actual %s while the catalog marker remains unchanged", async (_, stratum, mutate) => {
+    const output = await root(`actual-${stratum}`);
+    const manifest = await createPdfCompressionCorpus(output);
+    const entry = manifest.entries.find((item) => item.stratum === stratum);
+    if (entry === undefined) throw new Error("fixture entry is missing");
+    const source = await readFile(join(output, entry.artifact));
+    const changed = await mutatePdf(source, mutate);
+    const changedDocument = await PDFDocument.load(changed, { ignoreEncryption: true });
+    expect(changedDocument.catalog.get(PDFName.of("HereIsItProbe"))?.toString()).toBe(
+      `/${entry.probe.token}`,
+    );
+    const result = await probePdfCorpusFeature(changed, stratum, entry.safety).then(
+      (signature) => ({ accepted: true, signature }),
+      () => ({ accepted: false, signature: null }),
+    );
+    if (result.accepted) expect(result.signature).not.toEqual(entry.probe.signature);
+    else expect(result.accepted).toBe(false);
   });
 
   it("rejects duplicate, missing, tampered, extra, unsafe, or path-leaking manifest data", async () => {
