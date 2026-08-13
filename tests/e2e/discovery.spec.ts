@@ -1030,8 +1030,8 @@ test("does not leave a consumed image handoff for a different tool", async ({ pa
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
-  await page.getByRole("link", { name: "워크플로", exact: true }).click();
-  await expect(page).toHaveURL(/\/workflows\/?$/);
+  await page.getByRole("link", { name: "내 도구", exact: true }).click();
+  await expect(page).toHaveURL(/\/my-tools\/?$/);
   await page.evaluate(() => {
     (
       window as Window & { __hereisitEnableImageRuntime?: () => void }
@@ -1069,8 +1069,7 @@ test("exposes the desktop destinations and a bounded navigation disclosure", asy
   await expect(page.getByRole("link", { name: "HereIsIt 홈" })).toBeVisible();
   const allTools = page.getByRole("button", { name: "모든 도구", exact: true });
   await expect(allTools).toBeVisible();
-  await expect(page.getByRole("link", { name: "워크플로", exact: true })).toBeVisible();
-  await expect(page.getByText("준비 중", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "워크플로", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "내 도구", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "검색", exact: true })).toBeVisible();
   await expect(allTools).toHaveAttribute("aria-expanded", "false");
@@ -1092,10 +1091,7 @@ test("exposes the desktop destinations and a bounded navigation disclosure", asy
     "href",
     "/tools",
   );
-  await expect(mega.getByRole("link", { name: "워크플로 보기", exact: true })).toHaveAttribute(
-    "href",
-    "/workflows",
-  );
+  await expect(mega.getByRole("link", { name: "워크플로 보기", exact: true })).toHaveCount(0);
 
   const featuredLinks = mega.locator('[data-tool-section="featured"] [data-tool-link]');
   const recentLinks = mega.locator('[data-tool-section="recent"] [data-tool-link]');
