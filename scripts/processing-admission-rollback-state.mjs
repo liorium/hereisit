@@ -28,6 +28,13 @@ const snapshotSql = `SELECT
 FROM rollout_control AS control
 JOIN worker_version_attestations AS active ON active.kind = 'active'
 WHERE control.id = 1`;
+const exactTuplePredicate = `EXISTS (
+  SELECT 1 FROM worker_version_attestations AS target
+  WHERE target.version_id = ?
+    AND target.worker_module_sha256 = ?
+    AND target.generated_config_sha256 = ?
+    AND target.release_report_sha256 = ?
+)`;
 
 function validateSnapshot(value) {
   const snapshot = assertObject(value, "admission rollback snapshot");
@@ -118,11 +125,20 @@ export function createProcessingAdmissionRollbackBatch(snapshotValue, now) {
   const state = snapshot.state;
   return [
     {
-      sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE kind = ? AND version_id <> ?",
-      params: ["retired", now, "active", state.versionId],
+      sql: `UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE kind = ? AND version_id <> ? AND EXISTS (SELECT 1 FROM rollout_control WHERE id = 1) AND ${exactTuplePredicate}`,
+      params: [
+        "retired",
+        now,
+        "active",
+        state.versionId,
+        state.versionId,
+        state.workerModuleSha256,
+        state.generatedConfigSha256,
+        state.releaseReportSha256,
+      ],
     },
     {
-      sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = ?, retired_at = NULL WHERE version_id = ? AND worker_module_sha256 = ? AND generated_config_sha256 = ? AND release_report_sha256 = ?",
+      sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = ?, retired_at = NULL WHERE version_id = ? AND worker_module_sha256 = ? AND generated_config_sha256 = ? AND release_report_sha256 = ? AND EXISTS (SELECT 1 FROM rollout_control WHERE id = 1)",
       params: [
         "active",
         state.publicAdmissionAllowed,
@@ -133,8 +149,16 @@ export function createProcessingAdmissionRollbackBatch(snapshotValue, now) {
       ],
     },
     {
-      sql: "UPDATE rollout_control SET circuit_open = ?, reason = ?, opened_at = ? WHERE id = 1",
-      params: [state.circuitOpen, state.circuitReason, state.openedAt],
+      sql: `UPDATE rollout_control SET circuit_open = ?, reason = ?, opened_at = ? WHERE id = 1 AND ${exactTuplePredicate}`,
+      params: [
+        state.circuitOpen,
+        state.circuitReason,
+        state.openedAt,
+        state.versionId,
+        state.workerModuleSha256,
+        state.generatedConfigSha256,
+        state.releaseReportSha256,
+      ],
     },
   ];
 }
@@ -151,13 +175,16 @@ export async function restoreProcessingAdmissionRollbackState({
   const snapshot = validateSnapshot(snapshotValue);
   const endpoint = url(accountId, databaseId);
   const statements = createProcessingAdmissionRollbackBatch(snapshot, now);
-  await postD1Query({
+  const results = await postD1Query({
     url: endpoint,
     apiToken,
     body: { batch: statements },
     expectedCount: statements.length,
     fetchImpl,
   });
+  if (results[1]?.meta?.changes !== 1 || results[2]?.meta?.changes !== 1) {
+    throw new Error("admission rollback exact prior tuple prerequisite was not satisfied");
+  }
   const [result] = await postD1Query({
     url: endpoint,
     apiToken,

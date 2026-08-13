@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateProcessingReleaseReport } from "./create-processing-release-report.mjs";
 import {
+  assertExactKeys,
+  assertNonNegativeSafeInteger,
+  assertObject,
+  assertSha256,
   canonicalJson,
   parseCliArguments,
   sha256Bytes,
@@ -22,16 +26,66 @@ async function readJson(path, maximumBytes, label) {
   return { bytes, value };
 }
 
-function evidencePassed(value, reportSha256, label) {
+function commonReceipt(value, reportSha256, label, schema, keys) {
+  const receipt = assertObject(value, label);
+  assertExactKeys(receipt, ["schema", "version", "passed", "releaseReportSha256", ...keys], label);
   if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    value.passed !== true ||
-    value.releaseReportSha256 !== reportSha256
-  ) {
+    receipt.schema !== schema ||
+    receipt.version !== 1 ||
+    receipt.passed !== true ||
+    receipt.releaseReportSha256 !== reportSha256
+  )
     throw new TypeError(`${label} is not passed and bound to the exact release report`);
-  }
+  assertSha256(receipt.releaseReportSha256, `${label} release report hash`);
+  return receipt;
+}
+
+function deletionReceipt(value, reportSha256) {
+  const receipt = commonReceipt(
+    value,
+    reportSha256,
+    "deletion evidence",
+    "hereisit-pdf-deletion-receipt@1",
+    ["deleted", "sweepPassed"],
+  );
+  if (receipt.deleted !== true || receipt.sweepPassed !== true)
+    throw new TypeError("deletion evidence did not prove deletion and sweep");
+  return true;
+}
+
+function costReceipt(value, reportSha256) {
+  const receipt = commonReceipt(
+    value,
+    reportSha256,
+    "cost evidence",
+    "hereisit-pdf-cost-receipt@1",
+    ["projectedMonthlyCostMicrousd", "costPer1000JobsMicrousd"],
+  );
+  assertNonNegativeSafeInteger(receipt.projectedMonthlyCostMicrousd, "projected monthly cost");
+  assertNonNegativeSafeInteger(receipt.costPer1000JobsMicrousd, "cost per 1000 jobs");
+  if (receipt.projectedMonthlyCostMicrousd > 5_000_000 || receipt.costPer1000JobsMicrousd > 500_000)
+    throw new TypeError("cost evidence exceeds the release ceiling");
+  return true;
+}
+
+function rollbackReceipt(value, reportSha256) {
+  const keys = [
+    "workerRestored",
+    "imageEngineRestored",
+    "pdfEngineRestored",
+    "configRestored",
+    "policyRestored",
+    "queuesRestored",
+  ];
+  const receipt = commonReceipt(
+    value,
+    reportSha256,
+    "rollback evidence",
+    "hereisit-pdf-rollback-receipt@1",
+    keys,
+  );
+  if (keys.some((key) => receipt[key] !== true))
+    throw new TypeError("rollback evidence did not prove the exact release state");
   return true;
 }
 
@@ -58,20 +112,17 @@ export async function createPdfPublicAdmissionState({
     costPassed = false,
     rollbackPassed = false;
   if (reportReady) {
-    deletionPassed = evidencePassed(
+    deletionPassed = deletionReceipt(
       (await readJson(deletionEvidencePath, 1024 * 1024, "deletion evidence")).value,
       reportSha256,
-      "deletion evidence",
     );
-    costPassed = evidencePassed(
+    costPassed = costReceipt(
       (await readJson(costEvidencePath, 1024 * 1024, "cost evidence")).value,
       reportSha256,
-      "cost evidence",
     );
-    rollbackPassed = evidencePassed(
+    rollbackPassed = rollbackReceipt(
       (await readJson(rollbackEvidencePath, 1024 * 1024, "rollback evidence")).value,
       reportSha256,
-      "rollback evidence",
     );
   }
   const state = {

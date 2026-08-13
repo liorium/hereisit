@@ -60,7 +60,12 @@ export async function verifyDeploymentGateArtifacts(inputValue) {
     throw new Error("Worker version attestation hash does not match");
   }
   if (actualConfig !== expectedConfig) throw new Error("Wrangler config hash does not match");
-  return { verified: true };
+  return {
+    schema: "hereisit-processing-deployment-gate@1",
+    version: 1,
+    passed: true,
+    verified: true,
+  };
 }
 
 export async function runDeploymentGateArtifactCli(argv) {

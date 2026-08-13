@@ -70,12 +70,12 @@ describe("processing production workflow", () => {
     const bootstrap = workflow.indexOf(".artifacts/runtime/bootstrap-deploy.ndjson");
     const cleanup = workflow.indexOf("Restore the D1-attested Worker after failed canary mutation");
 
-    expect(attested).toBeGreaterThanOrEqual(0);
-    expect(reconcile).toBeGreaterThan(attested);
+    expect(strictResolution).toBeGreaterThanOrEqual(0);
+    expect(attested).toBeGreaterThan(strictResolution);
+    expect(arm).toBeGreaterThan(attested);
+    expect(reconcile).toBeGreaterThan(arm);
     expect(deploymentSnapshot).toBeGreaterThan(reconcile);
-    expect(strictResolution).toBeGreaterThan(deploymentSnapshot);
-    expect(arm).toBeGreaterThan(strictResolution);
-    expect(bootstrap).toBeGreaterThan(arm);
+    expect(bootstrap).toBeGreaterThan(deploymentSnapshot);
     expect(cleanup).toBeGreaterThan(bootstrap);
     expect(workflow).toContain(
       "if: always() && steps.worker-mutation.outputs.attempted == 'true' && (failure() || cancelled())",
@@ -215,8 +215,16 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
+      ".artifacts/deployment/pages-deployment-id.txt",
       ".artifacts/deployment/canary-smoke.json",
       ".artifacts/deployment/pdf-canary-smoke.json",
+      ".artifacts/deployment/pdf-deletion-receipt.json",
+      ".artifacts/deployment/pdf-cost-receipt.json",
+      ".artifacts/deployment/pdf-rollback-receipt.json",
+      ".artifacts/deployment/pdf-public-admission.json",
+      ".artifacts/deployment/processing-deployment-report.json",
+      ".artifacts/deployment/processing-deployment-report.sig",
+      ".artifacts/deployment/processing-deployment-report-verification.json",
       ".artifacts/deployment/resources-production.json",
       ".artifacts/deployment/authority/**",
     ]);

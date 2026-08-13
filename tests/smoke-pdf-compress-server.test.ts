@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  pdfOptimizeCreateResponseSchema,
+  pdfOptimizePolicyResponseSchema,
+  pdfOptimizeStatusResponseSchema,
+} from "../packages/tool-contracts/src/pdf-optimize";
+import {
   createPdfSmokeResult,
   runPdfSmokeLifecycle,
   validatePdfSmokeTrace,
@@ -111,17 +116,42 @@ describe("native PDF server smoke", () => {
       const path = new URL(typeof input === "string" ? input : input.url).pathname;
       const method = init?.method ?? "GET";
       calls.push({ method, path, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
-      if (path === "/v1/policy") return json({ maintainer: true, execution: "server" });
+      if (path === "/v1/policy")
+        return json({
+          contract: "tool-job@1",
+          toolContract: "pdf.optimize@1",
+          maintainer: true,
+          execution: "server",
+          reason: null,
+          limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
+          disclosure: {
+            upload: true,
+            inputDeletion: "terminal",
+            resultDeletion: {
+              mode: "server-temporary",
+              acknowledged: "immediate-delete-attempt",
+              unacknowledgedDueSeconds: 1800,
+              applicationSloSeconds: 2100,
+              lifecycleExpirationDays: 1,
+              exceptionalDelayPossible: true,
+            },
+          },
+        });
       if (path === "/v1/jobs" && method === "POST") {
         return json(
           {
+            contract: "tool-job@1",
             jobId,
             mode: "upload-required",
             upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
               path: `/v1/jobs/${jobId}/input`,
               byteLength: 1024,
               contentType: "application/pdf",
+              expiresAt: "2026-08-12T01:00:00.000Z",
             },
+            reservedWeightedUnits: 1024,
           },
           201,
         );
@@ -141,8 +171,14 @@ describe("native PDF server smoke", () => {
         return calls.some((call) => call.method === "DELETE")
           ? json({}, 404)
           : json({
+              contract: "tool-job@1",
+              jobId,
               state: "succeeded",
               sequence: 4,
+              attempt: 1,
+              phase: "completed",
+              phaseFraction: 1,
+              updatedAt: "2026-08-12T00:00:00.000Z",
               result: {
                 kind: "download",
                 mime: "application/pdf",
@@ -150,6 +186,8 @@ describe("native PDF server smoke", () => {
                 byteLength: resultBytes.byteLength,
                 pageCount: 1,
                 profile: "structural",
+                engineBuildId: "qpdf-12.2.0",
+                warnings: ["SIGNATURES_INVALIDATED"],
               },
             });
       }
@@ -174,6 +212,16 @@ describe("native PDF server smoke", () => {
       sweepPassed: true,
     });
     expect(JSON.stringify(calls)).not.toMatch(/filename|private|presigned|https?:/i);
+  });
+
+  it("uses the shared strict versioned schemas for every JSON control response", () => {
+    expect(pdfOptimizePolicyResponseSchema).toBeDefined();
+    expect(pdfOptimizeCreateResponseSchema).toBeDefined();
+    expect(pdfOptimizeStatusResponseSchema).toBeDefined();
+    const source = String(runPdfSmokeLifecycle);
+    expect(source).toContain("pdfOptimizePolicyResponseSchema.parse");
+    expect(source).toContain("pdfOptimizeCreateResponseSchema.parse");
+    expect(source).toContain("pdfOptimizeStatusResponseSchema.parse");
   });
 
   it.each([
@@ -230,17 +278,45 @@ describe("native PDF server smoke", () => {
                 },
         });
       };
-      if (path === "/v1/policy") return reply({ maintainer: true, execution: "server" }, 200);
+      if (path === "/v1/policy")
+        return reply(
+          {
+            contract: "tool-job@1",
+            toolContract: "pdf.optimize@1",
+            maintainer: true,
+            execution: "server",
+            reason: null,
+            limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
+            disclosure: {
+              upload: true,
+              inputDeletion: "terminal",
+              resultDeletion: {
+                mode: "server-temporary",
+                acknowledged: "immediate-delete-attempt",
+                unacknowledgedDueSeconds: 1800,
+                applicationSloSeconds: 2100,
+                lifecycleExpirationDays: 1,
+                exceptionalDelayPossible: true,
+              },
+            },
+          },
+          200,
+        );
       if (path === "/v1/jobs" && method === "POST") {
         return reply(
           {
+            contract: "tool-job@1",
             jobId,
             mode: "upload-required",
             upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
               path: `/v1/jobs/${jobId}/input`,
               byteLength: 1024,
               contentType: "application/pdf",
+              expiresAt: "2026-08-12T01:00:00.000Z",
             },
+            reservedWeightedUnits: 1024,
           },
           201,
         );

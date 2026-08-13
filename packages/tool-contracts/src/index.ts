@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-export * from "./image-optimize";
-export * from "./pdf-optimize";
-export * from "./product-usage";
-export * from "./tool-job";
+export * from "./image-optimize.ts";
+export * from "./pdf-optimize.ts";
+export * from "./product-usage.ts";
+export * from "./tool-job.ts";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;

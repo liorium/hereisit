@@ -58,7 +58,12 @@ describe("deployment gate artifact verification", () => {
         },
       );
 
-      expect(result).toEqual({ code: 0, stdout: '{"verified":true}\n', stderr: "" });
+      expect(result).toEqual({
+        code: 0,
+        stdout:
+          '{"schema":"hereisit-processing-deployment-gate@1","version":1,"passed":true,"verified":true}\n',
+        stderr: "",
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -83,7 +88,12 @@ describe("deployment gate artifact verification", () => {
           configFile,
           configSha256: sha256Bytes(config),
         }),
-      ).resolves.toEqual({ verified: true });
+      ).resolves.toEqual({
+        schema: "hereisit-processing-deployment-gate@1",
+        version: 1,
+        passed: true,
+        verified: true,
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

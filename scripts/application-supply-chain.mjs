@@ -552,7 +552,13 @@ async function verifySbom(scope, descriptor, policyState) {
   verifySyftTool(metadata);
   const source = assertObject(metadata.component, `${scope} SBOM source`);
   const sourceName = `hereisit-${scope}:sha256-${artifactSha256}`;
-  if (source.name !== sourceName) throw new TypeError(`${scope} SBOM source identity is invalid`);
+  const bound = Array.isArray(metadata.properties)
+    ? metadata.properties.some(
+        (value) => value?.name === "hereisit:artifact:sha256" && value.value === artifactSha256,
+      )
+    : false;
+  if (source.name !== sourceName && !bound)
+    throw new TypeError(`${scope} SBOM source identity is invalid`);
   if (!Array.isArray(sbom.components) || sbom.components.length > 100_000) {
     throw new TypeError(`${scope} SBOM components are invalid`);
   }

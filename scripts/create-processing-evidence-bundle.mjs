@@ -67,7 +67,15 @@ function validateApprovalReference(value, label) {
   } catch {
     throw new TypeError(`${label} URL is invalid`);
   }
-  if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.hash) {
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "approvals.example.test" ||
+    !/^\/reviews\/[1-9]\d*$/.test(url.pathname) ||
+    url.search !== "" ||
+    url.username ||
+    url.password ||
+    url.hash
+  ) {
     throw new TypeError(`${label} must contain a safe HTTPS URL`);
   }
 }

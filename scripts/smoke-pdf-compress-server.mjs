@@ -5,6 +5,11 @@ import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import {
+  pdfOptimizeCreateResponseSchema,
+  pdfOptimizePolicyResponseSchema,
+  pdfOptimizeStatusResponseSchema,
+} from "../packages/tool-contracts/src/pdf-optimize.ts";
+import {
   assertExactKeys,
   assertObject,
   canonicalJson,
@@ -372,7 +377,9 @@ export async function runPdfSmokeLifecycle(input) {
         anonymousSessionId: input.sessionId,
       }),
     });
-    const policy = await jsonResponse(policyResponse, 200, "policy");
+    const policy = pdfOptimizePolicyResponseSchema.parse(
+      await jsonResponse(policyResponse, 200, "policy"),
+    );
     trace.push(traceEntry("POST", "/v1/policy", policyResponse.status));
     if (policy.execution !== "server" || policy.maintainer !== (input.anonymous !== true)) {
       throw new TypeError("PDF smoke policy is not server enabled for the requested cohort");
@@ -390,7 +397,9 @@ export async function runPdfSmokeLifecycle(input) {
         spec: { version: 1, preset: "balanced" },
       }),
     });
-    const created = await jsonResponse(createResponse, 201, "create");
+    const created = pdfOptimizeCreateResponseSchema.parse(
+      await jsonResponse(createResponse, 201, "create"),
+    );
     trace.push(traceEntry("POST", "/v1/jobs", createResponse.status));
     jobId = created.jobId;
     const upload = assertObject(created.upload, "PDF smoke upload descriptor");
@@ -428,7 +437,9 @@ export async function runPdfSmokeLifecycle(input) {
         method: "GET",
         headers: { authorization: `Bearer ${jobToken}` },
       });
-      const status = await jsonResponse(statusResponse, 200, "status");
+      const status = pdfOptimizeStatusResponseSchema.parse(
+        await jsonResponse(statusResponse, 200, "status"),
+      );
       const rank = ["created", "uploading"].includes(status.state)
         ? 0
         : status.state === "queued"

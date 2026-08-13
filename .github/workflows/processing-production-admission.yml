@@ -100,6 +100,28 @@ jobs:
             --report .artifacts/canary/authority/processing-release-report.json \
             --expected-git-sha "$EXPECTED_HEAD_SHA" --expected-report-sha256 "$REPORT_SHA256" \
             > .artifacts/canary/release-authority-admission.json
+          node scripts/verify-processing-deployment-report.mjs \
+            --report .artifacts/canary/processing-deployment-report.json \
+            --signature .artifacts/canary/processing-deployment-report.sig \
+            --public-key .artifacts/canary/authority/evidence-public.pem \
+            --expected-git-sha "$EXPECTED_HEAD_SHA" \
+            --expected-release-report-sha256 "$REPORT_SHA256" \
+            --release-report .artifacts/canary/authority/processing-release-report.json \
+            --candidate .artifacts/canary/authority/processing-candidate.json \
+            --worker-attestation .artifacts/canary/worker-version.json \
+            --image-digest .artifacts/canary/cloudflare-image-digest.txt \
+            --pdf-digest .artifacts/canary/cloudflare-pdf-image-digest.txt \
+            --resources .artifacts/canary/resources-production.json \
+            --pages-deployment-id .artifacts/canary/pages-deployment-id.txt \
+            --image-canary .artifacts/canary/canary-smoke.json \
+            --pdf-canary .artifacts/canary/pdf-canary-smoke.json \
+            --deletion-receipt .artifacts/canary/pdf-deletion-receipt.json \
+            --cost-receipt .artifacts/canary/pdf-cost-receipt.json \
+            --rollback-receipt .artifacts/canary/pdf-rollback-receipt.json \
+            --admission .artifacts/canary/pdf-public-admission.json \
+            --gate .artifacts/canary/gate-results.json \
+            --policy .artifacts/canary/policy-smoke.json \
+            > .artifacts/canary/deployment-authority-admission.json
           ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-image-digest.txt)"
           PDF_ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-pdf-image-digest.txt)"
           [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
@@ -119,8 +141,8 @@ jobs:
           exact(canary, ["schema", "version", "passed", "rolloutPercent", "nonMaintainerLocal", "maintainerServer", "browserPreflight", "exactLengthUpload", "directDownload", "downloadAcknowledged", "sourceFilenameLeak"], "canary smoke");
           if (canary.schema !== "hereisit-processing-production-canary-smoke@1" || canary.version !== 1 || canary.passed !== true || canary.rolloutPercent !== 0 || canary.nonMaintainerLocal !== true || canary.maintainerServer !== true || canary.browserPreflight !== true || canary.exactLengthUpload !== true || canary.directDownload !== true || canary.downloadAcknowledged !== true || canary.sourceFilenameLeak !== false) throw new Error("canary smoke did not pass");
           const gate = await read("gate-results.json");
-          exact(gate, ["verified"], "canary gate");
-          if (gate.verified !== true) throw new Error("canary gate did not pass");
+          exact(gate, ["schema", "version", "passed", "verified"], "canary gate");
+          if (gate.schema !== "hereisit-processing-deployment-gate@1" || gate.version !== 1 || gate.passed !== true || gate.verified !== true) throw new Error("canary gate did not pass");
           const policy = await read("policy-smoke.json");
           exact(policy, ["schema", "passed", "execution", "reason", "upload", "queuesPaused"], "canary policy");
           if (policy.passed !== true || policy.execution !== "local" || policy.reason !== "LOCAL_FALLBACK_REQUIRED" || policy.upload !== false || policy.queuesPaused !== true) throw new Error("canary public policy is not local");
@@ -136,11 +158,13 @@ jobs:
           cp .artifacts/canary/cloudflare-pdf-image-digest.txt .artifacts/admission/cloudflare-pdf-image-digest.txt
           node scripts/create-pdf-public-admission-state.mjs \
             --report .artifacts/canary/authority/processing-release-report.json \
-            --deletion-evidence .artifacts/canary/pdf-canary-smoke.json \
-            --cost-evidence .artifacts/canary/pdf-cost-evidence.json \
-            --rollback-evidence .artifacts/canary/pdf-rollback-evidence.json \
+            --deletion-evidence .artifacts/canary/pdf-deletion-receipt.json \
+            --cost-evidence .artifacts/canary/pdf-cost-receipt.json \
+            --rollback-evidence .artifacts/canary/pdf-rollback-receipt.json \
             --output .artifacts/admission/pdf-public-admission.json \
             > .artifacts/runtime/pdf-public-admission-summary.json
+          cmp .artifacts/canary/pdf-public-admission.json \
+            .artifacts/admission/pdf-public-admission.json
           PDF_PUBLIC_ADMISSION_ENABLED="$(node -e 'const s=require(process.argv[1]);process.stdout.write(String(s.enabled))' .artifacts/admission/pdf-public-admission.json)"
           echo "PDF_PUBLIC_ADMISSION_ENABLED=$PDF_PUBLIC_ADMISSION_ENABLED" >> "$GITHUB_ENV"
           for name in transition-attestation gate-result policy-result public-smoke-result recovery-result; do
@@ -495,10 +519,28 @@ jobs:
           const body = await response.json();
           if (response.status !== 200 || body.execution !== "local" || body.disclosure?.upload !== false) process.exit(1);
           NODE
-          restore_queue image-primary "$QUEUE_NAME"
-          restore_queue image-dlq "$DLQ_NAME"
-          restore_queue pdf-primary "$PDF_QUEUE_NAME"
-          restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          ROLLBACK_PREREQUISITES_VERIFIED=false
+          if [[ "$CIRCUIT_RECOVERY" -eq 0 && "$VERSION_RECOVERY" -eq 0 && \
+            "$POLICY_RECOVERY" -eq 0 && "$POLICY_STATE_RECOVERY" -eq 0 ]]; then
+            ROLLBACK_PREREQUISITES_VERIFIED=true
+            restore_queue image-primary "$QUEUE_NAME"
+            restore_queue image-dlq "$DLQ_NAME"
+            restore_queue pdf-primary "$PDF_QUEUE_NAME"
+            restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          fi
+          if [[ "$QUEUE_RECOVERY" -ne 0 || "$ROLLBACK_PREREQUISITES_VERIFIED" != true ]]; then
+            ROLLBACK_PREREQUISITES_VERIFIED=false
+            node scripts/verify-processing-admission-state.mjs \
+              --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+              --database-id "$PRODUCTION_D1_DATABASE_ID" \
+              --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+              > .artifacts/runtime/rollback-restore-failed-circuit-open.json || true
+            for queue in "$QUEUE_NAME" "$DLQ_NAME" "$PDF_QUEUE_NAME" "$PDF_DLQ_NAME"; do
+              pnpm exec wrangler queues pause-delivery "$queue" || true
+              node scripts/verify-queue-delivery-state.mjs --queue "$queue" \
+                --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || true
+            done
+          fi
           node --input-type=module - "$QUEUE_RECOVERY" "$CIRCUIT_RECOVERY" "$VERSION_RECOVERY" "$POLICY_RECOVERY" "$POLICY_STATE_RECOVERY" <<'NODE'
           import { writeFile } from "node:fs/promises";
           const values = process.argv.slice(2).map(Number);
@@ -508,6 +550,7 @@ jobs:
           test "$VERSION_RECOVERY" -eq 0
           test "$POLICY_RECOVERY" -eq 0
           test "$POLICY_STATE_RECOVERY" -eq 0
+          test "$ROLLBACK_PREREQUISITES_VERIFIED" = true
           exit 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()

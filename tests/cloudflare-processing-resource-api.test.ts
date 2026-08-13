@@ -93,7 +93,14 @@ describe("Cloudflare processing resource API", () => {
       logpushR2SecretAccessKey: "secret-key",
     });
 
-    await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
+    await expect(api.readInventory()).resolves.toEqual({
+      d1: [],
+      r2: [],
+      queues: [],
+      logpush: [],
+      workers: [],
+      containers: [],
+    });
     expect(JSON.stringify(await api.readInventory())).not.toMatch(/token|access-key|secret-key/);
   });
 
@@ -140,7 +147,14 @@ describe("Cloudflare processing resource API", () => {
       logpushR2SecretAccessKey: "secret-key",
     });
 
-    await expect(api.readInventory()).resolves.toEqual({ d1: [], r2: [], queues: [], logpush: [] });
+    await expect(api.readInventory()).resolves.toEqual({
+      d1: [],
+      r2: [],
+      queues: [],
+      logpush: [],
+      workers: [],
+      containers: [],
+    });
   });
 
   it("reads exact Queue Worker consumer identities", async () => {

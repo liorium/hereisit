@@ -3,7 +3,7 @@ import {
   createToolJobCreateResponseSchema,
   createToolJobUploadDescriptorSchema,
   TOOL_JOB_CONTRACT_ID,
-} from "./tool-job";
+} from "./tool-job.ts";
 
 export const PDF_OPTIMIZE_CONTRACT_ID = "pdf.optimize@1" as const;
 export const PDF_OPTIMIZE_MAX_FILE_BYTES = 50 * 1024 * 1024;

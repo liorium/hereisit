@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   assertExactKeys,
@@ -33,6 +33,7 @@ async function readJson(path, label) {
 export async function normalizeProcessingSecurityEvidence({
   scope,
   artifactSha256,
+  expectedScannerArtifact,
   sbomInput,
   sbomOutput,
   trivyInput,
@@ -40,6 +41,8 @@ export async function normalizeProcessingSecurityEvidence({
 }) {
   if (!scopes.has(scope)) throw new TypeError("security evidence scope is invalid");
   assertSha256(artifactSha256, "security evidence artifact hash");
+  if (typeof expectedScannerArtifact !== "string" || expectedScannerArtifact.length < 1)
+    throw new TypeError("expected scanner artifact identity is required");
   const identity = `hereisit-${scope}:sha256-${artifactSha256}`;
 
   const sbom = assertObject(await readJson(sbomInput, "raw SBOM"), "raw SBOM");
@@ -48,7 +51,17 @@ export async function normalizeProcessingSecurityEvidence({
   }
   const metadata = assertObject(sbom.metadata, "raw SBOM metadata");
   const component = assertObject(metadata.component, "raw SBOM source");
-  metadata.component = { ...component, "bom-ref": identity, name: identity };
+  if (
+    component.name !== expectedScannerArtifact &&
+    component.name !== basename(expectedScannerArtifact)
+  )
+    throw new TypeError("raw SBOM scanner artifact identity is miswired");
+  const properties = metadata.properties ?? [];
+  if (!Array.isArray(properties)) throw new TypeError("raw SBOM properties are invalid");
+  metadata.properties = [
+    ...properties,
+    { name: "hereisit:artifact:sha256", value: artifactSha256 },
+  ];
 
   const trivy = assertObject(
     await readJson(trivyInput, "raw vulnerability report"),
@@ -58,9 +71,17 @@ export async function normalizeProcessingSecurityEvidence({
     throw new TypeError("raw vulnerability report identity is invalid");
   }
   const container = scope === "engine" || scope === "pdf-engine";
-  trivy.ArtifactName = identity;
-  trivy.ArtifactType = container ? "container_image" : "filesystem";
-  trivy.Metadata = container ? { ImageID: `sha256:${artifactSha256}`, RepoTags: [identity] } : {};
+  if (
+    trivy.ArtifactName !== expectedScannerArtifact ||
+    trivy.ArtifactType !== (container ? "container_image" : "filesystem")
+  )
+    throw new TypeError("raw Trivy scanner artifact identity is miswired");
+  if (container) {
+    const rawMetadata = assertObject(trivy.Metadata, "raw Trivy image metadata");
+    if (rawMetadata.ImageID !== `sha256:${artifactSha256}`)
+      throw new TypeError("raw Trivy image digest is miswired");
+  }
+  trivy.HereIsItArtifactSha256 = artifactSha256;
 
   await writeCanonicalJsonAtomic(resolve(sbomOutput), sbom, { refuseOverwrite: true, mode: 0o600 });
   await writeCanonicalJsonAtomic(resolve(trivyOutput), trivy, {
@@ -74,12 +95,21 @@ export async function runNormalizeProcessingSecurityEvidenceCli(argv, stdout = p
   const args = parseCliArguments(argv);
   assertExactKeys(
     args,
-    ["scope", "artifact-sha256", "sbom-input", "sbom-output", "trivy-input", "trivy-output"],
+    [
+      "scope",
+      "artifact-sha256",
+      "expected-scanner-artifact",
+      "sbom-input",
+      "sbom-output",
+      "trivy-input",
+      "trivy-output",
+    ],
     "security evidence normalization arguments",
   );
   const result = await normalizeProcessingSecurityEvidence({
     scope: args.scope,
     artifactSha256: args["artifact-sha256"],
+    expectedScannerArtifact: args["expected-scanner-artifact"],
     sbomInput: args["sbom-input"],
     sbomOutput: args["sbom-output"],
     trivyInput: args["trivy-input"],

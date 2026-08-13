@@ -1,25 +1,73 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeProcessingEvidenceBundle } from "./create-processing-evidence-bundle.mjs";
-import { parseCliArguments } from "./image-lab-common.mjs";
+import { validateHostedReviewDocument } from "./create-processing-hosted-check.mjs";
+import {
+  assertExactKeys,
+  assertObject,
+  assertSha256,
+  parseCliArguments,
+} from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
+
+const reportNames = [
+  "fullCorpusBenchmark",
+  "competitorComparison",
+  "blindedHumanReview",
+  "commercialReview",
+  "privacyReview",
+  "deviceMatrix",
+];
+
+export function validateHostedReviewReceipt(value, { name, gitSha, sourceSha256 }) {
+  const receipt = assertObject(value, `${name} hosted review receipt`);
+  assertExactKeys(
+    receipt,
+    [
+      "schema",
+      "version",
+      "reportName",
+      "passed",
+      "gitSha",
+      "sourceSha256",
+      "checkRunId",
+      "document",
+    ],
+    `${name} hosted review receipt`,
+  );
+  assertSha256(receipt.sourceSha256, `${name} hosted source hash`);
+  if (
+    receipt.schema !== "hereisit-processing-hosted-review@1" ||
+    receipt.version !== 1 ||
+    receipt.reportName !== name ||
+    receipt.passed !== true ||
+    receipt.gitSha !== gitSha ||
+    receipt.sourceSha256 !== sourceSha256 ||
+    !Number.isSafeInteger(receipt.checkRunId) ||
+    receipt.checkRunId < 1
+  )
+    throw new TypeError(`${name} hosted review is not an exact passed source receipt`);
+  return validateHostedReviewDocument(receipt.document, {
+    name,
+    gitSha,
+    sourceSha256,
+    checkRunId: receipt.checkRunId,
+  });
+}
 
 export async function prepareProcessingCiEvidence({
   candidatePath,
   releaseId,
   gitSha,
   output,
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: protected CI-only evidence is never cache input
-  serializedReports = process.env.PROCESSING_REVIEW_EVIDENCE_JSON,
+  hostedCheckRoot,
+  sourceSha256,
   now = new Date(),
 }) {
-  if (
-    typeof serializedReports !== "string" ||
-    serializedReports.length < 2 ||
-    serializedReports.length > 6 * 1024 * 1024
-  )
-    throw new TypeError("protected reviewed release evidence is required");
+  if (typeof hostedCheckRoot !== "string" || hostedCheckRoot.length < 1)
+    throw new TypeError("exact hosted review evidence is required");
+  assertSha256(sourceSha256, "hosted review source hash");
   const candidate = validateProcessingCandidate(
     JSON.parse(await readFile(resolve(candidatePath), "utf8")),
   );
@@ -29,12 +77,21 @@ export async function prepareProcessingCiEvidence({
     candidate.gitSha !== gitSha
   )
     throw new TypeError("candidate is not exact current @2 release");
-  let reports;
-  try {
-    reports = JSON.parse(serializedReports);
-  } catch {
-    throw new TypeError("reviewed release evidence is invalid JSON");
-  }
+  const reports = Object.fromEntries(
+    await Promise.all(
+      reportNames.map(async (name) => {
+        let receipt;
+        try {
+          receipt = JSON.parse(
+            await readFile(join(resolve(hostedCheckRoot), `${name}.json`), "utf8"),
+          );
+        } catch {
+          throw new TypeError(`${name} exact hosted review evidence is missing or invalid`);
+        }
+        return [name, validateHostedReviewReceipt(receipt, { name, gitSha, sourceSha256 })];
+      }),
+    ),
+  );
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1000).toISOString();
   await writeProcessingEvidenceBundle({
@@ -58,5 +115,7 @@ if (
     releaseId: a["release-id"],
     gitSha: a["git-sha"],
     output: a.output,
+    hostedCheckRoot: a["hosted-check-root"],
+    sourceSha256: a["source-sha256"],
   });
 }

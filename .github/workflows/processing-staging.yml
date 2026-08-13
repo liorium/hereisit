@@ -116,6 +116,26 @@ jobs:
         with:
           version: v0.34.1
           driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+      - name: Capture and arm the complete pre-mutation resource state
+        id: mutation-state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.STAGING_LOGPUSH_STATUS_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/capture-processing-mutation-state.mjs --mode capture \
+            --environment staging --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
+            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
+            --pdf-dlq-name "$PDF_DLQ_NAME" --output .artifacts/runtime/pre-mutation-state.json
+          node -e 'const s=require(process.argv[1]);if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
+          echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Bind CI-built engine, Worker, web, benchmark, cost, SBOM, Trivy, and license assets
         run: |
           set -euo pipefail
@@ -592,6 +612,24 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+      - name: Remove only resources absent before a failed or cancelled staging mutation
+        if: always() && steps.mutation-state.outputs.armed == 'true' && (failure() || cancelled())
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          node scripts/capture-processing-mutation-state.mjs --mode restore-absent \
+            --environment staging --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
+            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
+            --pdf-dlq-name "$PDF_DLQ_NAME" --input .artifacts/runtime/pre-mutation-state.json
       - name: Re-pause and verify both queues after any failed delivery attempt
         if: always() && steps.resume-attempt.outputs.attempted == 'true' && (failure() || cancelled())
         timeout-minutes: 5

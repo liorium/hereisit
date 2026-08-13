@@ -183,6 +183,82 @@ jobs:
             echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
             echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
           } >> "$GITHUB_ENV"
+      - name: Capture and arm the complete pre-mutation resource state
+        id: mutation-state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/capture-processing-mutation-state.mjs --mode capture \
+            --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
+            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
+            --pdf-dlq-name "$PDF_DLQ_NAME" --output .artifacts/runtime/pre-mutation-state.json
+          node -e 'const s=require(process.argv[1]);if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
+          echo "armed=true" >> "$GITHUB_OUTPUT"
+      - name: Capture and arm the exact prior release before any mutation
+        id: prior-release
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          PRODUCTION_D1_DATABASE_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.d1?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          PRIOR_IMAGE_APPLICATION_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.containers.image?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          PRIOR_PDF_APPLICATION_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.containers.pdf?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          test "$PRODUCTION_D1_DATABASE_ID" != none
+          test "$PRIOR_IMAGE_APPLICATION_ID" != none
+          test "$PRIOR_PDF_APPLICATION_ID" != none
+          PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --attestation-only true)"
+          test "$PREVIOUS_ACTIVE_VERSION_ID" != none
+          pnpm exec wrangler deployments status --name "$WORKER_SCRIPT_NAME" --json \
+            > .artifacts/runtime/prior-deployment.json
+          node --input-type=module - "$PREVIOUS_ACTIVE_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          verifyActiveWorkerDeployment(
+            JSON.parse(await readFile(".artifacts/runtime/prior-deployment.json", "utf8")),
+            process.argv[2],
+            "prior Worker",
+          );
+          NODE
+          pnpm exec wrangler versions view "$PREVIOUS_ACTIVE_VERSION_ID" \
+            --name "$WORKER_SCRIPT_NAME" --json > .artifacts/runtime/prior-worker-version.json
+          node scripts/capture-processing-queue-states.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
+            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
+            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+          node scripts/processing-admission-rollback-state.mjs \
+            --mode capture --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --file .artifacts/runtime/prior-admission-state.json
+          pnpm exec wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID" \
+            > .artifacts/runtime/prior-image-container.json
+          pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" \
+            > .artifacts/runtime/prior-pdf-container.json
+          PRIOR_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-image-container.json)"
+          PRIOR_PDF_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
+          [[ "$PRIOR_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
+          [[ "$PRIOR_PDF_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
+          {
+            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
+            echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
+            echo "PRIOR_IMAGE_APPLICATION_ID=$PRIOR_IMAGE_APPLICATION_ID"
+            echo "PRIOR_PDF_APPLICATION_ID=$PRIOR_PDF_APPLICATION_ID"
+            echo "PRIOR_IMAGE=$PRIOR_IMAGE"
+            echo "PRIOR_PDF_IMAGE=$PRIOR_PDF_IMAGE"
+          } >> "$GITHUB_ENV"
+          echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Provision isolated resources and deploy the bootstrap Worker
         id: worker-mutation
         env:
@@ -195,6 +271,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
           node scripts/ensure-cloudflare-processing-resources.mjs \
             --phase provision \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
@@ -211,8 +288,9 @@ jobs:
             --pdf-dlq-name "$PDF_DLQ_NAME" \
             --output .artifacts/runtime/resources-production.json
           cp .artifacts/runtime/resources-production.json .artifacts/deployment/resources-production.json
-          PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
+          PROVISIONED_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
             --file .artifacts/runtime/resources-production.json --field d1.databaseId)"
+          test "$PROVISIONED_D1_DATABASE_ID" = "$PRODUCTION_D1_DATABASE_ID"
           PRODUCTION_LOGPUSH_JOB_ID="$(node scripts/read-processing-provision-manifest.mjs \
             --file .artifacts/runtime/resources-production.json --field logpush.jobId)"
 
@@ -332,40 +410,6 @@ jobs:
             --deployment .artifacts/runtime/deployment-before.json)"
           test "$PREVIOUS_ACTIVE_VERSION_ID" = "$ATTESTED_ACTIVE_VERSION_ID"
           test "$PREVIOUS_ACTIVE_VERSION_ID" != none
-          pnpm exec wrangler versions view "$PREVIOUS_ACTIVE_VERSION_ID" --config "$WRANGLER_CONFIG" --json \
-            > .artifacts/runtime/prior-worker-version.json
-          node scripts/capture-processing-queue-states.mjs \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
-            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
-            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
-          node scripts/processing-admission-rollback-state.mjs \
-            --mode capture --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --database-id "$PRODUCTION_D1_DATABASE_ID" \
-            --file .artifacts/runtime/prior-admission-state.json
-          pnpm exec wrangler containers list --json > .artifacts/runtime/prior-container-inventory.json
-          PRIOR_IMAGE_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
-            --mode discover --input .artifacts/runtime/prior-container-inventory.json --environment production \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name ImageEngineContainer)"
-          PRIOR_PDF_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
-            --mode discover --input .artifacts/runtime/prior-container-inventory.json --environment production \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name PdfEngineContainer)"
-          pnpm exec wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID" > .artifacts/runtime/prior-image-container.json
-          pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" > .artifacts/runtime/prior-pdf-container.json
-          PRIOR_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-image-container.json)"
-          PRIOR_PDF_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
-          [[ "$PRIOR_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
-          [[ "$PRIOR_PDF_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
-          {
-            echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
-            echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
-            echo "PRIOR_IMAGE_APPLICATION_ID=$PRIOR_IMAGE_APPLICATION_ID"
-            echo "PRIOR_PDF_APPLICATION_ID=$PRIOR_PDF_APPLICATION_ID"
-            echo "PRIOR_IMAGE=$PRIOR_IMAGE"
-            echo "PRIOR_PDF_IMAGE=$PRIOR_PDF_IMAGE"
-          } >> "$GITHUB_ENV"
-          echo "attempted=true" >> "$GITHUB_OUTPUT"
           : > .artifacts/runtime/bootstrap-deploy.ndjson
           WRANGLER_OUTPUT_FILE_PATH=.artifacts/runtime/bootstrap-deploy.ndjson \
             pnpm exec wrangler deploy "$WORKER_MODULE" \
@@ -570,7 +614,7 @@ jobs:
             --event pages-deploy \
             --field deployment_id \
             --expected-pages-project hereisit \
-            --expected-branch main
+            --expected-branch main > .artifacts/deployment/pages-deployment-id.txt
           node scripts/verify-pages-alias.mjs \
             --pages-output .artifacts/runtime/pages-deploy.ndjson \
             --project hereisit \
@@ -600,7 +644,7 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 1
-      - name: Restore the D1-attested Worker after failed canary mutation
+      - name: Restore the D1-attested Worker after failed canary mutation (fail-closed recovery)
         if: always() && steps.worker-mutation.outputs.attempted == 'true' && (failure() || cancelled())
         timeout-minutes: 5
         env:
@@ -611,6 +655,18 @@ jobs:
           status=0
           PRODUCTION_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
             --file .artifacts/runtime/resources-production.json --field d1.databaseId)" || status=1
+          node scripts/verify-processing-admission-state.mjs \
+            --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/rollback-circuit-open.json || status=1
+          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || status=1
+          pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || status=1
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME" || status=1
+          pnpm exec wrangler queues pause-delivery "$PDF_DLQ_NAME" || status=1
+          node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          node scripts/verify-queue-delivery-state.mjs --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
           RESTORE_VERSION_ID="$PREVIOUS_ACTIVE_VERSION_ID"
           pnpm exec wrangler versions deploy "$RESTORE_VERSION_ID@100%" \
             --config "$WRANGLER_CONFIG" --yes || status=1
@@ -649,11 +705,48 @@ jobs:
             pnpm exec wrangler queues "$action" "$name" || status=1
             node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
           }
-          restore_queue image-primary "$QUEUE_NAME"
-          restore_queue image-dlq "$DLQ_NAME"
-          restore_queue pdf-primary "$PDF_QUEUE_NAME"
-          restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          if [[ "$status" -eq 0 ]]; then
+            ROLLBACK_PREREQUISITES_VERIFIED=true
+            restore_queue image-primary "$QUEUE_NAME"
+            restore_queue image-dlq "$DLQ_NAME"
+            restore_queue pdf-primary "$PDF_QUEUE_NAME"
+            restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          else
+            ROLLBACK_PREREQUISITES_VERIFIED=false
+          fi
+          if [[ "$status" -ne 0 ]]; then
+            ROLLBACK_PREREQUISITES_VERIFIED=false
+            node scripts/verify-processing-admission-state.mjs \
+              --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+              --database-id "$PRODUCTION_D1_DATABASE_ID" \
+              --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+              > .artifacts/runtime/rollback-restore-failed-circuit-open.json || true
+            for queue in "$QUEUE_NAME" "$DLQ_NAME" "$PDF_QUEUE_NAME" "$PDF_DLQ_NAME"; do
+              pnpm exec wrangler queues pause-delivery "$queue" || true
+              node scripts/verify-queue-delivery-state.mjs --queue "$queue" \
+                --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || true
+            done
+          fi
+          test "$ROLLBACK_PREREQUISITES_VERIFIED" = true
           exit "$status"
+      - name: Remove only resources absent before a failed or cancelled production mutation
+        if: always() && steps.mutation-state.outputs.armed == 'true' && (failure() || cancelled())
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN }}
+          LOGPUSH_STATUS_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+        run: |
+          node scripts/capture-processing-mutation-state.mjs --mode restore-absent \
+            --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
+            --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
+            --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
+            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
+            --pdf-dlq-name "$PDF_DLQ_NAME" --input .artifacts/runtime/pre-mutation-state.json
 
   smoke:
     name: Run production canary from a clean browser runner
@@ -695,6 +788,7 @@ jobs:
           test -f .artifacts/deployment/worker-version.json
           test -f .artifacts/deployment/gate-results.json
           test -f .artifacts/deployment/policy-smoke.json
+          test -f .artifacts/deployment/pages-deployment-id.txt
       - name: Install the isolated browser smoke runtime
         run: |
           pnpm install --frozen-lockfile
@@ -766,6 +860,71 @@ jobs:
             --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Seal report-bound PDF receipts and the final signed deployment projection
+        env:
+          PROCESSING_EVIDENCE_PRIVATE_KEY: ${{ secrets.PROCESSING_EVIDENCE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          REPORT_SHA256="$(shasum -a 256 .artifacts/deployment/authority/processing-release-report.json | cut -d' ' -f1)"
+          node scripts/create-pdf-deployment-receipts.mjs \
+            --report .artifacts/deployment/authority/processing-release-report.json \
+            --smoke .artifacts/deployment/pdf-canary-smoke.json \
+            --output .artifacts/deployment
+          node scripts/create-pdf-public-admission-state.mjs \
+            --report .artifacts/deployment/authority/processing-release-report.json \
+            --deletion-evidence .artifacts/deployment/pdf-deletion-receipt.json \
+            --cost-evidence .artifacts/deployment/pdf-cost-receipt.json \
+            --rollback-evidence .artifacts/deployment/pdf-rollback-receipt.json \
+            --output .artifacts/deployment/pdf-public-admission.json
+          node scripts/create-processing-deployment-report.mjs \
+            --release-report .artifacts/deployment/authority/processing-release-report.json \
+            --candidate .artifacts/deployment/authority/processing-candidate.json \
+            --worker-attestation .artifacts/deployment/worker-version.json \
+            --image-digest .artifacts/deployment/cloudflare-image-digest.txt \
+            --pdf-digest .artifacts/deployment/cloudflare-pdf-image-digest.txt \
+            --resources .artifacts/deployment/resources-production.json \
+            --pages-deployment-id .artifacts/deployment/pages-deployment-id.txt \
+            --image-canary .artifacts/deployment/canary-smoke.json \
+            --pdf-canary .artifacts/deployment/pdf-canary-smoke.json \
+            --deletion-receipt .artifacts/deployment/pdf-deletion-receipt.json \
+            --cost-receipt .artifacts/deployment/pdf-cost-receipt.json \
+            --rollback-receipt .artifacts/deployment/pdf-rollback-receipt.json \
+            --admission .artifacts/deployment/pdf-public-admission.json \
+            --gate .artifacts/deployment/gate-results.json \
+            --policy .artifacts/deployment/policy-smoke.json \
+            --created-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --output .artifacts/deployment/processing-deployment-report.json
+          PRIVATE_KEY_PATH="$RUNNER_TEMP/processing-deployment-private-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.pem"
+          trap 'rm -f -- "$PRIVATE_KEY_PATH"' EXIT
+          printf '%s' "$PROCESSING_EVIDENCE_PRIVATE_KEY" > "$PRIVATE_KEY_PATH"
+          chmod 0600 "$PRIVATE_KEY_PATH"
+          node scripts/processing-evidence-signature.mjs --mode sign \
+            --bundle .artifacts/deployment/processing-deployment-report.json \
+            --signature .artifacts/deployment/processing-deployment-report.sig \
+            --private-key "$PRIVATE_KEY_PATH" --repository-root .
+          node scripts/verify-processing-deployment-report.mjs \
+            --report .artifacts/deployment/processing-deployment-report.json \
+            --signature .artifacts/deployment/processing-deployment-report.sig \
+            --public-key .artifacts/deployment/authority/evidence-public.pem \
+            --expected-git-sha "$EXPECTED_HEAD_SHA" \
+            --expected-release-report-sha256 "$REPORT_SHA256" \
+            --release-report .artifacts/deployment/authority/processing-release-report.json \
+            --candidate .artifacts/deployment/authority/processing-candidate.json \
+            --worker-attestation .artifacts/deployment/worker-version.json \
+            --image-digest .artifacts/deployment/cloudflare-image-digest.txt \
+            --pdf-digest .artifacts/deployment/cloudflare-pdf-image-digest.txt \
+            --resources .artifacts/deployment/resources-production.json \
+            --pages-deployment-id .artifacts/deployment/pages-deployment-id.txt \
+            --image-canary .artifacts/deployment/canary-smoke.json \
+            --pdf-canary .artifacts/deployment/pdf-canary-smoke.json \
+            --deletion-receipt .artifacts/deployment/pdf-deletion-receipt.json \
+            --cost-receipt .artifacts/deployment/pdf-cost-receipt.json \
+            --rollback-receipt .artifacts/deployment/pdf-rollback-receipt.json \
+            --admission .artifacts/deployment/pdf-public-admission.json \
+            --gate .artifacts/deployment/gate-results.json \
+            --policy .artifacts/deployment/policy-smoke.json \
+            > .artifacts/deployment/processing-deployment-report-verification.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: processing-production-canary-${{ github.event.workflow_run.head_sha }}
@@ -777,8 +936,16 @@ jobs:
             .artifacts/deployment/worker-version.json
             .artifacts/deployment/gate-results.json
             .artifacts/deployment/policy-smoke.json
+            .artifacts/deployment/pages-deployment-id.txt
             .artifacts/deployment/canary-smoke.json
             .artifacts/deployment/pdf-canary-smoke.json
+            .artifacts/deployment/pdf-deletion-receipt.json
+            .artifacts/deployment/pdf-cost-receipt.json
+            .artifacts/deployment/pdf-rollback-receipt.json
+            .artifacts/deployment/pdf-public-admission.json
+            .artifacts/deployment/processing-deployment-report.json
+            .artifacts/deployment/processing-deployment-report.sig
+            .artifacts/deployment/processing-deployment-report-verification.json
             .artifacts/deployment/resources-production.json
             .artifacts/deployment/authority/**
           compression-level: 0
