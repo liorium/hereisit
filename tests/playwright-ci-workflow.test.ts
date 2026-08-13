@@ -34,6 +34,14 @@ describe("Playwright CI workflow", () => {
     expect(existsSync("scripts/test-playwright-webkit-container.mjs")).toBe(false);
   });
 
+  it("builds the browser fixture with its intercepted processing origin", () => {
+    expect(workflow).toContain(`- run: pnpm --filter @hereisit/web build
+        env:
+          ALLOW_LOCAL_PROCESSING_ORIGINS: "1"
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
+      - run: pnpm exec playwright install`);
+  });
+
   it("attempts WebKit after the first browser group and combines both statuses", () => {
     const firstGroup = workflow.indexOf("--project=mobile-firefox");
     const firstStatus = workflow.indexOf("primary_status=$?", firstGroup);
