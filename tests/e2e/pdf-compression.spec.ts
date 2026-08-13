@@ -599,12 +599,16 @@ async function installPdfServerDouble(
       await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
       await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
       if (input.acknowledgement === "hold") await acknowledgementGate;
-      await route.fulfill({ status: input.acknowledgement === "reject" ? 503 : 200 });
+      await route.fulfill({
+        status: input.acknowledgement === "reject" ? 503 : 200,
+        contentType: "text/plain",
+        body: "ok",
+      });
       acknowledgementOutcomes.push(input.acknowledgement === "reject" ? "rejected" : "succeeded");
       return;
     }
     if (call === `POST /v1/jobs/${jobId}/cancel` || call === `DELETE /v1/jobs/${jobId}`) {
-      await route.fulfill({ status: 200 });
+      await route.fulfill({ status: 200, contentType: "text/plain", body: "ok" });
       return;
     }
     await route.abort("blockedbyclient");
@@ -1518,7 +1522,7 @@ test("ignores late verifier completion after cancellation and deletes the result
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
 });
 
-test("deletes an unacknowledged result when reload navigation unmounts during acknowledgement", async ({
+test("deletes an unacknowledged result when reload navigation unmounts after acknowledgement fails", async ({
   page,
 }) => {
   await forceLocalNoReduction(page);
@@ -1527,7 +1531,7 @@ test("deletes an unacknowledged result when reload navigation unmounts during ac
   const server = await installPdfServerDouble(page, {
     source,
     output,
-    acknowledgement: "hold",
+    acknowledgement: "reject",
   });
 
   await openReadyPdfCompression(page);
@@ -1537,10 +1541,11 @@ test("deletes an unacknowledged result when reload navigation unmounts during ac
   await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
   await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+  await expect.poll(() => server.acknowledgementOutcomes).toEqual(["rejected"]);
+  await settleRenderedState(page);
 
   const reload = page.reload();
   await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
-  server.releaseAcknowledgement();
   await reload;
 });
 
