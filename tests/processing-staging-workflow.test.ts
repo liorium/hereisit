@@ -38,6 +38,7 @@ describe("processing staging workflow", () => {
     expect(workflow).toContain("group: processing-staging");
     expect(workflow).toContain("cancel-in-progress: true");
     expect(deploy).toContain("github.repository == 'liorium/hereisit'");
+    expect(deploy).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
     expect(deploy).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(deploy).toContain("github.event.workflow_run.event == 'push'");
     expect(deploy).toContain("github.event.workflow_run.head_branch == 'main'");
