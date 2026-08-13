@@ -38,7 +38,7 @@ jobs:
       - run: pnpm verify
 
   release-authority:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
     needs: [verify, browser]
     environment: processing-release-authority
     runs-on: ubuntu-24.04
