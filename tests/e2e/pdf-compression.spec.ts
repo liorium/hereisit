@@ -599,12 +599,12 @@ async function installPdfServerDouble(
       await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible();
       await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
       if (input.acknowledgement === "hold") await acknowledgementGate;
-      await route.fulfill({ status: input.acknowledgement === "reject" ? 503 : 204 });
+      await route.fulfill({ status: input.acknowledgement === "reject" ? 503 : 200 });
       acknowledgementOutcomes.push(input.acknowledgement === "reject" ? "rejected" : "succeeded");
       return;
     }
     if (call === `POST /v1/jobs/${jobId}/cancel` || call === `DELETE /v1/jobs/${jobId}`) {
-      await route.fulfill({ status: 204 });
+      await route.fulfill({ status: 200 });
       return;
     }
     await route.abort("blockedbyclient");

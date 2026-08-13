@@ -182,6 +182,11 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   );
 
   useEffect(() => {
+    window.addEventListener("pagehide", clearRemoteWork);
+    return () => window.removeEventListener("pagehide", clearRemoteWork);
+  }, [clearRemoteWork]);
+
+  useEffect(() => {
     if (result?.source !== "server") return;
     const remoteResult = remoteResultRef.current;
     const runId = remoteResultRunRef.current;
