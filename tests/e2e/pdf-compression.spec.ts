@@ -1522,9 +1522,7 @@ test("ignores late verifier completion after cancellation and deletes the result
   expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
 });
 
-test("deletes an unacknowledged result when reload navigation unmounts after acknowledgement fails", async ({
-  page,
-}) => {
+test("clears an unacknowledged result on reload after acknowledgement fails", async ({ page }) => {
   await forceLocalNoReduction(page);
   const source = await createCompressibleStructuredPdf();
   const output = await structurallyRewritePdf(source);
@@ -1544,9 +1542,10 @@ test("deletes an unacknowledged result when reload navigation unmounts after ack
   await expect.poll(() => server.acknowledgementOutcomes).toEqual(["rejected"]);
   await settleRenderedState(page);
 
-  const reload = page.reload();
-  await expect.poll(() => server.calls).toContain(`DELETE /v1/jobs/${server.jobId}`);
-  await reload;
+  await page.reload();
+  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
 });
 
 test("resets and deletes an unacknowledged result while acknowledgement is pending", async ({
