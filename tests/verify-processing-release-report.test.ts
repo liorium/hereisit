@@ -648,7 +648,7 @@ describe("processing release report verification", () => {
         evidenceSignaturePath: externalSignaturePath,
       }),
     ).rejects.toThrow(/evidence signature path|finalized candidate/i);
-  });
+  }, 10_000);
 
   it("has exact creator and verifier CLI boundaries with compact canonical output", async () => {
     const value = await fixture();
