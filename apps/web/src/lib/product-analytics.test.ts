@@ -73,4 +73,14 @@ describe("privacy-safe product analytics", () => {
     const fetcher = vi.fn(() => Promise.reject(new Error("offline")));
     expect(reportDownloadRequested("pdf.merge", { fetcher })).toBeUndefined();
   });
+
+  it("does not send analytics from the privacy browser fixture", () => {
+    vi.stubEnv("NEXT_PUBLIC_PROCESSING_API_ORIGIN", "http://127.0.0.1:4173");
+    vi.stubEnv("NEXT_PUBLIC_PRODUCT_ANALYTICS_DISABLED", "1");
+    const fetcher = vi.fn<typeof fetch>();
+
+    reportDownloadRequested("pdf.merge", { fetcher });
+
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });

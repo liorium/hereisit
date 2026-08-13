@@ -12,6 +12,7 @@ import {
   createClientJobCredentials,
   createImageOptimizeJob,
   createPdfOptimizeJob,
+  deleteRemoteJob,
   getImageOptimizeStatus,
   getPdfOptimizeStatus,
   getPdfProcessingPolicy,
@@ -159,6 +160,18 @@ describe("remote API client", () => {
     expect(String(url)).not.toContain(token);
     expect(init).toMatchObject({ cache: "no-store" });
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${token}`);
+  });
+
+  it("keeps job deletion alive during page teardown", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    await deleteRemoteJob({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken: createClientJobCredentials().jobToken,
+      fetch: fetchMock,
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "DELETE", keepalive: true });
   });
 
   it("deduplicates and briefly caches successful policy POST requests", async () => {

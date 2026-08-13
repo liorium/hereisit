@@ -48,6 +48,7 @@ export function classifyProductUsageFailure(code?: string): ProductUsageFailure 
 }
 
 function send(event: ProductUsageEventV1, fetcher: Fetcher): void {
+  if (process.env.NEXT_PUBLIC_PRODUCT_ANALYTICS_DISABLED === "1") return;
   const { apiOrigin } = readProcessingClientConfig();
   if (apiOrigin === null) return;
   try {

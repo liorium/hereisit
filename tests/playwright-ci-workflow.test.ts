@@ -39,6 +39,7 @@ describe("Playwright CI workflow", () => {
         env:
           ALLOW_LOCAL_PROCESSING_ORIGINS: "1"
           NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
+          NEXT_PUBLIC_PRODUCT_ANALYTICS_DISABLED: "1"
       - run: pnpm exec playwright install`);
   });
 

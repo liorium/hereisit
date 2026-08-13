@@ -441,6 +441,7 @@ async function authenticatedMutation(input: {
   readonly fetch?: typeof fetch;
   readonly signal?: AbortSignal;
   readonly headers?: HeadersInit;
+  readonly keepalive?: boolean;
 }): Promise<Response> {
   const match = /^\/v1\/jobs\/([^/]+)(?:\/(?:cancel|downloaded))?$/.exec(input.path);
   if (match?.[1] === undefined) {
@@ -459,6 +460,7 @@ async function authenticatedMutation(input: {
         headers,
         cache: "no-store",
         credentials: "omit",
+        ...(input.keepalive === undefined ? {} : { keepalive: input.keepalive }),
         signal: timed.signal,
       },
     );
@@ -490,7 +492,12 @@ export async function deleteRemoteJob(input: {
   readonly fetch?: typeof fetch;
   readonly signal?: AbortSignal;
 }): Promise<void> {
-  await authenticatedMutation({ ...input, path: `/v1/jobs/${input.jobId}`, method: "DELETE" });
+  await authenticatedMutation({
+    ...input,
+    path: `/v1/jobs/${input.jobId}`,
+    method: "DELETE",
+    keepalive: true,
+  });
 }
 
 export async function acknowledgeRemoteDownload(input: {
