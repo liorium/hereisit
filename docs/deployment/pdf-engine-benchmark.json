@@ -1,0 +1,1647 @@
+{
+  "identity": {
+    "corpusManifestSha256": "9d943eadac38a6d947ab67f20db6e810c3c9c8804c496e92472fa4b1a515fe89",
+    "engineImageDigest": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+    "engineImageId": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+    "localRunner": "pdf-lib-structural@2.7.1",
+    "qpdfVersion": "12.4.0",
+    "sourceLockSha256": "bfadff5727326fd2799129854b78cd4e621befd4b4f64c0d131a55bae4a6722c"
+  },
+  "limits": {
+    "maximumDiagnosticBytes": 4096,
+    "maximumOutputBytes": 52428800,
+    "maximumParserPixels": 20000000,
+    "maximumPeakRssBytes": 805306368,
+    "maximumSamples": 51,
+    "maximumSourceBytes": 52428800,
+    "maximumWallMs": 300000,
+    "repeats": 3
+  },
+  "records": [
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 168632320,
+        "medianDurationMs": 9.355,
+        "medianEffectiveBytes": 963,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 16.042,
+            "effectiveBytes": 963,
+            "peakRssBytes": 154984448,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 9.355,
+            "effectiveBytes": 963,
+            "peakRssBytes": 168239104,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 7.54,
+            "effectiveBytes": 963,
+            "peakRssBytes": 168632320,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 5189632,
+        "medianDurationMs": 2063.117,
+        "medianEffectiveBytes": 963,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2063.117,
+            "effectiveBytes": 963,
+            "peakRssBytes": 5189632,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2037.819,
+            "effectiveBytes": 963,
+            "peakRssBytes": 3354624,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2091.788,
+            "effectiveBytes": 963,
+            "peakRssBytes": 3379200,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 963,
+      "stratum": "text-vector"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 168632320,
+        "medianDurationMs": 3.085,
+        "medianEffectiveBytes": 1056,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.827,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 168632320,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.085,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 149848064,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.113,
+            "effectiveBytes": 1056,
+            "peakRssBytes": 151302144,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6447104,
+        "medianDurationMs": 3753.655,
+        "medianEffectiveBytes": 969,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3753.655,
+            "effectiveBytes": 969,
+            "peakRssBytes": 6447104,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3740.468,
+            "effectiveBytes": 969,
+            "peakRssBytes": 2564096,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3759.073,
+            "effectiveBytes": 969,
+            "peakRssBytes": 4521984,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.08238636363636363,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1056,
+      "stratum": "link"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 164802560,
+        "medianDurationMs": 2.301,
+        "medianEffectiveBytes": 1021,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.048,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 156676096,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.301,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 160477184,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.937,
+            "effectiveBytes": 1021,
+            "peakRssBytes": 164802560,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 4788224,
+        "medianDurationMs": 3768.582,
+        "medianEffectiveBytes": 942,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3768.582,
+            "effectiveBytes": 942,
+            "peakRssBytes": 3448832,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3759.502,
+            "effectiveBytes": 942,
+            "peakRssBytes": 4788224,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3770.488,
+            "effectiveBytes": 942,
+            "peakRssBytes": 3076096,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.07737512242899118,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1021,
+      "stratum": "annotation"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 174895104,
+        "medianDurationMs": 3.658,
+        "medianEffectiveBytes": 1596,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.658,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 164933632,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.732,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 168472576,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.64,
+            "effectiveBytes": 1596,
+            "peakRssBytes": 174895104,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 2940928,
+        "medianDurationMs": 4040.58,
+        "medianEffectiveBytes": 1467,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4052.451,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 2940928,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4027.833,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 2486272,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4040.58,
+            "effectiveBytes": 1467,
+            "peakRssBytes": 2678784,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.06729264475743349,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1917,
+      "stratum": "form"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 183021568,
+        "medianDurationMs": 1.943,
+        "medianEffectiveBytes": 1094,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.012,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 181186560,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.943,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 183021568,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.308,
+            "effectiveBytes": 1094,
+            "peakRssBytes": 183021568,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 10133504,
+        "medianDurationMs": 3742.779,
+        "medianEffectiveBytes": 981,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3742.779,
+            "effectiveBytes": 981,
+            "peakRssBytes": 3076096,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3737.251,
+            "effectiveBytes": 981,
+            "peakRssBytes": 10133504,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3746.354,
+            "effectiveBytes": 981,
+            "peakRssBytes": 2682880,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.10116383169203223,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1117,
+      "stratum": "outline"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 184201216,
+        "medianDurationMs": 1.742,
+        "medianEffectiveBytes": 1356,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.407,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 183152640,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.742,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 183939072,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.533,
+            "effectiveBytes": 1356,
+            "peakRssBytes": 184201216,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3457024,
+        "medianDurationMs": 4031.923,
+        "medianEffectiveBytes": 1176,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4036.601,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 2674688,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4030.194,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 3457024,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 4031.923,
+            "effectiveBytes": 1176,
+            "peakRssBytes": 3194880,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.13274336283185842,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1356,
+      "stratum": "attachment"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 202158080,
+        "medianDurationMs": 13.086,
+        "medianEffectiveBytes": 1178,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 18.67,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 190099456,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 13.086,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 199274496,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 6.337,
+            "effectiveBytes": 1178,
+            "peakRssBytes": 202158080,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3969024,
+        "medianDurationMs": 3760.157,
+        "medianEffectiveBytes": 1084,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3794.186,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 3399680,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3748.895,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 3969024,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3760.157,
+            "effectiveBytes": 1084,
+            "peakRssBytes": 3248128,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.07979626485568761,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1178,
+      "stratum": "layer"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 222867456,
+        "medianDurationMs": 5.715,
+        "medianEffectiveBytes": 91277,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 5.715,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 215527424,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.815,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 218017792,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 7.164,
+            "effectiveBytes": 91277,
+            "peakRssBytes": 222867456,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 5853184,
+        "medianDurationMs": 3758.464,
+        "medianEffectiveBytes": 1478,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3758.464,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 5853184,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3762.349,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 2961408,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3751.083,
+            "effectiveBytes": 1478,
+            "peakRssBytes": 2510848,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.9838075309223572,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 91277,
+      "stratum": "duplicate-resource"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 226275328,
+        "medianDurationMs": 2.534,
+        "medianEffectiveBytes": 1336,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.415,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 223391744,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.534,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 224571392,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.86,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 226275328,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3457024,
+        "medianDurationMs": 2326.169,
+        "medianEffectiveBytes": 1336,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2326.169,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 2301952,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2331.882,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 2822144,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2311.348,
+            "effectiveBytes": 1336,
+            "peakRssBytes": 3457024,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 1336,
+      "stratum": "flate-heavy"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 225263616,
+        "medianDurationMs": 1.201,
+        "medianEffectiveBytes": 1683,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.709,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 224739328,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.115,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 224739328,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.201,
+            "effectiveBytes": 1683,
+            "peakRssBytes": 225263616,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3420160,
+        "medianDurationMs": 3762.098,
+        "medianEffectiveBytes": 1501,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3762.68,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 2936832,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3762.098,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 3420160,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 3748.344,
+            "effectiveBytes": 1501,
+            "peakRssBytes": 3317760,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "reduced",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0.1081402257872846,
+      "repeatableNativeWins": 3,
+      "smallerOnly": true,
+      "sourceBytes": 1683,
+      "stratum": "jpeg-heavy"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 226574336,
+        "medianDurationMs": 1.604,
+        "medianEffectiveBytes": 1133,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.261,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 225263616,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.604,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 226574336,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.443,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 226574336,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6422528,
+        "medianDurationMs": 2327.389,
+        "medianEffectiveBytes": 1133,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2338.918,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 5660672,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2323.491,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 6422528,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2327.389,
+            "effectiveBytes": 1133,
+            "peakRssBytes": 3346432,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 1133,
+      "stratum": "non-jpeg-image"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 226836480,
+        "medianDurationMs": 1.407,
+        "medianEffectiveBytes": 984,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.178,
+            "effectiveBytes": 984,
+            "peakRssBytes": 226705408,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.407,
+            "effectiveBytes": 984,
+            "peakRssBytes": 226705408,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.036,
+            "effectiveBytes": 984,
+            "peakRssBytes": 226836480,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 6586368,
+        "medianDurationMs": 2038.487,
+        "medianEffectiveBytes": 984,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2044.937,
+            "effectiveBytes": 984,
+            "peakRssBytes": 2813952,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2038.487,
+            "effectiveBytes": 984,
+            "peakRssBytes": 2633728,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2032.978,
+            "effectiveBytes": 984,
+            "peakRssBytes": 6586368,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 984,
+      "stratum": "scan"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 233783296,
+        "medianDurationMs": 1.669,
+        "medianEffectiveBytes": 1274,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.404,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 226967552,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.871,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 229720064,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 1.669,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 233783296,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3383296,
+        "medianDurationMs": 2039.887,
+        "medianEffectiveBytes": 1274,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2039.887,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 3383296,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2037.62,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 2646016,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2044.145,
+            "effectiveBytes": 1274,
+            "peakRssBytes": 2744320,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 1274,
+      "stratum": "mixed"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 239550464,
+        "medianDurationMs": 3.549,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 1.489,
+            "effectiveBytes": null,
+            "peakRssBytes": 237715456,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 3.549,
+            "effectiveBytes": null,
+            "peakRssBytes": 238764032,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 5.301,
+            "effectiveBytes": null,
+            "peakRssBytes": 239550464,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 2347008,
+        "medianDurationMs": 373.623,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 357.901,
+            "effectiveBytes": null,
+            "peakRssBytes": 1122304,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 373.623,
+            "effectiveBytes": null,
+            "peakRssBytes": 258048,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 396.613,
+            "effectiveBytes": null,
+            "peakRssBytes": 2347008,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 1185,
+      "stratum": "encrypted"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 240992256,
+        "medianDurationMs": 0.524,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.81,
+            "effectiveBytes": null,
+            "peakRssBytes": 240467968,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.524,
+            "effectiveBytes": null,
+            "peakRssBytes": 240730112,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 0.457,
+            "effectiveBytes": null,
+            "peakRssBytes": 240992256,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 0,
+        "medianDurationMs": 43.677,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 43.677,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 68.839,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "UNSUPPORTED_INPUT",
+            "durationMs": 41.446,
+            "effectiveBytes": null,
+            "peakRssBytes": 0,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 72,
+      "stratum": "corrupt"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 1,
+        "maximumPeakRssBytes": 250167296,
+        "medianDurationMs": 2.902,
+        "medianEffectiveBytes": 423,
+        "samples": [
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.902,
+            "effectiveBytes": 423,
+            "peakRssBytes": 241647616,
+            "profile": "structural",
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 2.707,
+            "effectiveBytes": 423,
+            "peakRssBytes": 245841920,
+            "profile": "structural",
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          },
+          {
+            "candidateCount": 1,
+            "code": null,
+            "durationMs": 3.557,
+            "effectiveBytes": 423,
+            "peakRssBytes": 250167296,
+            "profile": "structural",
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-required"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 2,
+        "maximumPeakRssBytes": 3256320,
+        "medianDurationMs": 2086.219,
+        "medianEffectiveBytes": 423,
+        "samples": [
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2143.574,
+            "effectiveBytes": 423,
+            "peakRssBytes": 3256320,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2086.219,
+            "effectiveBytes": 423,
+            "peakRssBytes": 2686976,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 2,
+            "code": null,
+            "durationMs": 2074.326,
+            "effectiveBytes": 423,
+            "peakRssBytes": 2428928,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "passed",
+            "verdict": "original-retained",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 423,
+      "stratum": "expansion"
+    },
+    {
+      "local": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 250888192,
+        "medianDurationMs": 5.178,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 9.917,
+            "effectiveBytes": null,
+            "peakRssBytes": 250888192,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 3.633,
+            "effectiveBytes": null,
+            "peakRssBytes": 250888192,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INFLATED_LIMIT_EXCEEDED",
+            "durationMs": 5.178,
+            "effectiveBytes": null,
+            "peakRssBytes": 250888192,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "native": {
+        "maximumCandidateCount": 0,
+        "maximumPeakRssBytes": 7921664,
+        "medianDurationMs": 1657.249,
+        "medianEffectiveBytes": null,
+        "samples": [
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 1657.249,
+            "effectiveBytes": null,
+            "peakRssBytes": 7913472,
+            "profile": null,
+            "repeat": 0,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 1688.271,
+            "effectiveBytes": null,
+            "peakRssBytes": 7921664,
+            "profile": null,
+            "repeat": 1,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          },
+          {
+            "candidateCount": 0,
+            "code": "INPUT_LIMIT_EXCEEDED",
+            "durationMs": 1654.892,
+            "effectiveBytes": null,
+            "peakRssBytes": 7770112,
+            "profile": null,
+            "repeat": 2,
+            "semantic": "not-applicable",
+            "verdict": "rejected",
+            "visual": "not-applicable"
+          }
+        ]
+      },
+      "nativeAdvantageRatio": 0,
+      "repeatableNativeWins": 0,
+      "smallerOnly": true,
+      "sourceBytes": 41569,
+      "stratum": "decompression-bomb"
+    }
+  ],
+  "schema": "hereisit.pdf-engine-benchmark@2",
+  "summary": {
+    "maximumPeakRssBytes": 250888192,
+    "measuredSamples": 51,
+    "nativeWins": 7,
+    "passed": true,
+    "rejectedSafely": 3,
+    "strata": 17,
+    "visualProfilesMeasured": 0
+  }
+}

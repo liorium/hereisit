@@ -74,7 +74,7 @@ function dependencies(overrides: Partial<UsageLogImporterDependencies> = {}) {
     database: {} as D1Database,
     parserOptions: {
       scriptName: "hereisit-processing-staging",
-      allowedEntrypoints: new Set([""]),
+      allowedEntrypoints: new Set(["", "ImageEngineContainer", "PdfEngineContainer"]),
       createDigest: nodeDigest,
     },
     record: vi.fn(async () => ({
@@ -113,6 +113,47 @@ describe("private R2 usage-log importer", () => {
       }),
     );
     expect(deps.openCircuit).not.toHaveBeenCalled();
+  });
+
+  it("imports image and PDF container traces but fails closed for an unknown container", async () => {
+    const metadata = objectMetadata();
+    const accepted = gzipSync(
+      `${JSON.stringify(traceRecord({ Entrypoint: "ImageEngineContainer" }))}\n${JSON.stringify(
+        traceRecord({ Entrypoint: "PdfEngineContainer" }),
+      )}\n`,
+    );
+    const deps = dependencies({
+      bucket: {
+        list: vi.fn(async () => completeList([metadata])),
+        get: vi.fn(async () => ({ ...metadata, body: stream(accepted) }) as R2ObjectBody),
+      },
+    });
+    await expect(importUsageLogPage(deps, { observedAt, prefix: "logs/" })).resolves.toMatchObject({
+      kind: "complete",
+      importedObjects: 1,
+    });
+    expect(deps.record).toHaveBeenCalledWith(
+      deps.database,
+      expect.objectContaining({ parsed: expect.objectContaining({ invocationCount: 2 }) }),
+    );
+
+    const rejected = gzipSync(
+      `${JSON.stringify(traceRecord({ Entrypoint: "UnknownContainer" }))}\n`,
+    );
+    const rejectedDeps = dependencies({
+      bucket: {
+        list: vi.fn(async () => completeList([metadata])),
+        get: vi.fn(async () => ({ ...metadata, body: stream(rejected) }) as R2ObjectBody),
+      },
+    });
+    await expect(
+      importUsageLogPage(rejectedDeps, { observedAt, prefix: "logs/" }),
+    ).resolves.toMatchObject({ kind: "failed-closed" });
+    expect(rejectedDeps.openCircuit).toHaveBeenCalledWith(
+      rejectedDeps.database,
+      observedAt,
+      "USAGE_LOG_IMPORT_INVALID",
+    );
   });
 
   it("ignores Cloudflare's documented R2 ownership challenge object", async () => {

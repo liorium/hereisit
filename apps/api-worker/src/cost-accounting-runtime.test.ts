@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseCostAccountingRuntimeConfig } from "./cost-accounting-runtime";
+import {
+  PROCESSING_USAGE_LOG_ENTRYPOINTS,
+  parseCostAccountingRuntimeConfig,
+} from "./cost-accounting-runtime";
 import type { LiveCostModelV1 } from "./env";
 
 const operational = {
@@ -21,6 +24,14 @@ const settings = {
 };
 
 describe("cost accounting runtime configuration", () => {
+  it("allows only the Worker plus both processing container entrypoints", () => {
+    expect([...PROCESSING_USAGE_LOG_ENTRYPOINTS]).toEqual([
+      "",
+      "ImageEngineContainer",
+      "PdfEngineContainer",
+    ]);
+  });
+
   it("parses environment-bound provider identifiers", () => {
     expect(parseCostAccountingRuntimeConfig(settings, operational)).toMatchObject({
       accountId: settings.CLOUDFLARE_ACCOUNT_ID,

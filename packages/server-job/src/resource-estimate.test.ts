@@ -1,5 +1,9 @@
-import type { ImageOptimizeCreateRequestV1 } from "@hereisit/tool-contracts";
+import type {
+  ImageOptimizeCreateRequestV1,
+  PdfOptimizeCreateRequestV1,
+} from "@hereisit/tool-contracts";
 import { describe, expect, it } from "vitest";
+import * as resourceEstimateModule from "./resource-estimate";
 import {
   calculateActualWeightedUnits,
   calculateAttemptChargedUnits,
@@ -33,6 +37,20 @@ const request: ImageOptimizeCreateRequestV1 = {
     colorSpace: "srgb",
     minimumSavingsPercent: 1,
   },
+};
+
+const pdfRequest: PdfOptimizeCreateRequestV1 = {
+  contract: "tool-job@1",
+  toolContract: "pdf.optimize@1",
+  anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
+  clientRequestId: "7ba7b810-9dad-41d1-80b4-00c04fd430c8",
+  jobToken: "b".repeat(43),
+  input: {
+    byteLength: 1_000_000,
+    mime: "application/pdf",
+    pageCount: 3,
+  },
+  spec: { version: 1, preset: "balanced" },
 };
 
 const expectedAttemptCaps = {
@@ -168,6 +186,42 @@ describe("image optimize reservations", () => {
         } as ImageOptimizeCreateRequestV1),
       ).toThrow();
     }
+  });
+});
+
+describe("contract-discriminated reservations", () => {
+  const estimateResources = () =>
+    Reflect.get(resourceEstimateModule, "estimateResources") as
+      | ((request: ImageOptimizeCreateRequestV1 | PdfOptimizeCreateRequestV1) => unknown)
+      | undefined;
+
+  it("preserves the exact image reservation through the shared boundary", () => {
+    expect(estimateResources()?.(request)).toEqual(estimateImageOptimizeUnits(request));
+  });
+
+  it("reserves a bounded PDF with its own resource class", () => {
+    expect(estimateResources()?.(pdfRequest)).toEqual({
+      resourceClass: "pdf-standard-v1",
+      reservedWeightedUnits: 2_439_579_999,
+      inputBytes: 1_000_000,
+      reservationPageCeiling: 100,
+    });
+  });
+
+  it("rejects PDF page and byte limits at the shared boundary", () => {
+    const estimate = estimateResources();
+    expect(() =>
+      estimate?.({
+        ...pdfRequest,
+        input: { ...pdfRequest.input, pageCount: 101 },
+      } as PdfOptimizeCreateRequestV1),
+    ).toThrow();
+    expect(() =>
+      estimate?.({
+        ...pdfRequest,
+        input: { ...pdfRequest.input, byteLength: 50 * 1024 * 1024 + 1 },
+      } as PdfOptimizeCreateRequestV1),
+    ).toThrow();
   });
 });
 

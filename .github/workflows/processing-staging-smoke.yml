@@ -21,6 +21,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       QUEUE_NAME: hereisit-image-jobs-staging
       DLQ_NAME: hereisit-image-jobs-dlq-staging
+      PDF_QUEUE_NAME: hereisit-pdf-jobs-staging
+      PDF_DLQ_NAME: hereisit-pdf-jobs-dlq-staging
       STAGING_PAGES_ORIGIN: https://processing-staging.hereisit.pages.dev
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -38,12 +40,21 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Arm queue failure cleanup
         id: resume-attempt
-        run: echo "attempted=true" >> "$GITHUB_OUTPUT"
-      - name: Resume only primary delivery
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
-      - name: Verify primary resumed and DLQ remained paused
+        run: |
+          mkdir -p .artifacts/runtime
+          node scripts/capture-processing-queue-states.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
+            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
+            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+      - name: Resume image delivery for the image canary
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+      - name: Verify the image canary queue isolation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -51,7 +62,11 @@ jobs:
             --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-      - name: Run authenticated browser smoke
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run authenticated image browser smoke
         env:
           STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
         run: |
@@ -59,13 +74,54 @@ jobs:
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$STAGING_PAGES_ORIGIN" \
             --output .artifacts/deployment/smoke-result.json
-      - name: Re-pause and verify both queues after failure
-        if: failure() && steps.resume-attempt.outputs.attempted == 'true'
+      - name: Isolate and resume PDF delivery for the PDF canary
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
+          pnpm exec wrangler queues resume-delivery "$PDF_QUEUE_NAME"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Run authenticated PDF HTTP smoke
+        env:
+          STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
+        run: |
+          node scripts/smoke-pdf-compress-server.mjs \
+            --page-origin "$STAGING_PAGES_ORIGIN" \
+            --output .artifacts/deployment/pdf-smoke-result.json
+      - name: Restore image delivery and pause PDF delivery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
+          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
+          node scripts/verify-queue-delivery-state.mjs \
+            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Re-pause and verify both queues after failure
+        if: always() && steps.resume-attempt.outputs.attempted == 'true' && (failure() || cancelled())
+        timeout-minutes: 5
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_CLEANUP_API_TOKEN }}
+        run: |
+          set +e
+          status=0
+          restore_queue() {
+            key="$1"; name="$2"
+            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
+            if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
+            pnpm exec wrangler queues "$action" "$name" || status=1
+            node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          }
+          restore_queue image-primary "$QUEUE_NAME"
+          restore_queue image-dlq "$DLQ_NAME"
+          restore_queue pdf-primary "$PDF_QUEUE_NAME"
+          restore_queue pdf-dlq "$PDF_DLQ_NAME"
+          exit "$status"

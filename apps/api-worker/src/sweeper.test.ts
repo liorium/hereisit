@@ -3,11 +3,39 @@ import {
   nextArtifactCursor,
   resultDeletionDue,
   runScheduledMaintenanceWithDependencies,
+  selectCleanupEngine,
 } from "./sweeper";
 
 const now = Date.parse("2026-07-16T12:00:00.000Z");
 
 describe("scheduled maintenance policy", () => {
+  it("selects exactly one cleanup engine from the stored contract", () => {
+    const imageEngine = { cancel: vi.fn(), remove: vi.fn() };
+    const pdfEngine = { cancel: vi.fn(), remove: vi.fn() };
+    const createImage = vi.fn(() => imageEngine);
+    const createPdf = vi.fn(() => pdfEngine);
+
+    expect(
+      selectCleanupEngine("pdf.optimize@1", {
+        image: createImage,
+        pdf: createPdf,
+      }),
+    ).toBe(pdfEngine);
+    expect(createImage).not.toHaveBeenCalled();
+    expect(createPdf).toHaveBeenCalledOnce();
+
+    createImage.mockClear();
+    createPdf.mockClear();
+    expect(
+      selectCleanupEngine("image.optimize@1", {
+        image: createImage,
+        pdf: createPdf,
+      }),
+    ).toBe(imageEngine);
+    expect(createImage).toHaveBeenCalledOnce();
+    expect(createPdf).not.toHaveBeenCalled();
+  });
+
   it("keeps an active download lease across result expiry, then deletes after lease expiry", () => {
     expect(
       resultDeletionDue(

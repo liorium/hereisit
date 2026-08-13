@@ -11,6 +11,8 @@
     "releaseId",
     "gitSha",
     "engine",
+    "pdfEngine",
+    "pdfQuality",
     "web",
     "security",
     "providerUsage",
@@ -20,8 +22,8 @@
     "verificationSha256"
   ],
   "properties": {
-    "schema": { "const": "hereisit-processing-candidate@1" },
-    "version": { "const": 1 },
+    "schema": { "const": "hereisit-processing-candidate@2" },
+    "version": { "const": 2 },
     "state": { "enum": ["built", "finalized"] },
     "releaseId": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.[1-9]\\d*$" },
     "gitSha": { "$ref": "#/$defs/gitSha" },
@@ -33,6 +35,32 @@
         "loadedImage": { "type": "string", "pattern": "^hereisit-image-engine:[a-f0-9]{40}$" },
         "oci": { "$ref": "#/$defs/ociImageIdentity" },
         "docker": { "$ref": "#/$defs/dockerImageIdentity" }
+      }
+    },
+    "pdfEngine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loadedImage", "oci", "docker"],
+      "properties": {
+        "loadedImage": { "type": "string", "pattern": "^hereisit-pdf-engine:[a-f0-9]{40}$" },
+        "oci": { "$ref": "#/$defs/ociImageIdentity" },
+        "docker": { "$ref": "#/$defs/dockerImageIdentity" }
+      }
+    },
+    "pdfQuality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmarkSha256",
+        "releaseGateSha256",
+        "visualProfilesMeasured",
+        "publicAdmissionReady"
+      ],
+      "properties": {
+        "benchmarkSha256": { "$ref": "#/$defs/sha256" },
+        "releaseGateSha256": { "$ref": "#/$defs/sha256" },
+        "visualProfilesMeasured": { "type": "integer", "minimum": 0 },
+        "publicAdmissionReady": { "type": "boolean" }
       }
     },
     "web": { "$ref": "#/$defs/webIdentities" },
@@ -172,9 +200,10 @@
     "securityScopeArtifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
+      "required": ["engine", "pdfEngine", "webStaging", "webProduction", "worker", "lockfile"],
       "properties": {
         "engine": { "$ref": "#/$defs/securityEvidenceArtifact" },
+        "pdfEngine": { "$ref": "#/$defs/securityEvidenceArtifact" },
         "webStaging": { "$ref": "#/$defs/securityEvidenceArtifact" },
         "webProduction": { "$ref": "#/$defs/securityEvidenceArtifact" },
         "worker": { "$ref": "#/$defs/securityEvidenceArtifact" },
@@ -189,7 +218,7 @@
         "gates": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
+          "required": ["imageEngine", "pdfEngine", "applicationSupplyChain", "vulnerability"],
           "properties": {
             "imageEngine": {
               "allOf": [
@@ -199,6 +228,12 @@
                     "path": { "const": "security-image-engine-license-gate.json" }
                   }
                 }
+              ]
+            },
+            "pdfEngine": {
+              "allOf": [
+                { "$ref": "#/$defs/securityGateArtifact" },
+                { "properties": { "path": { "const": "security-pdf-engine-license-gate.json" } } }
               ]
             },
             "applicationSupplyChain": {
@@ -227,6 +262,9 @@
                 "engine": {
                   "properties": { "path": { "const": "security-sbom-engine.cdx.json" } }
                 },
+                "pdfEngine": {
+                  "properties": { "path": { "const": "security-sbom-pdf-engine.cdx.json" } }
+                },
                 "webStaging": {
                   "properties": { "path": { "const": "security-sbom-web-staging.cdx.json" } }
                 },
@@ -249,6 +287,9 @@
             {
               "properties": {
                 "engine": { "properties": { "path": { "const": "security-trivy-engine.json" } } },
+                "pdfEngine": {
+                  "properties": { "path": { "const": "security-trivy-pdf-engine.json" } }
+                },
                 "webStaging": {
                   "properties": { "path": { "const": "security-trivy-web-staging.json" } }
                 },
@@ -277,9 +318,30 @@
     "builtReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "worker", "web", "releaseInputs", "costModel", "security"],
+      "required": [
+        "engine",
+        "pdfEngine",
+        "pdfQuality",
+        "worker",
+        "web",
+        "releaseInputs",
+        "costModel",
+        "security"
+      ],
       "properties": {
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
+        "pdfEngine": { "$ref": "#/$defs/engineReleaseAssets" },
+        "pdfQuality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
+          "properties": {
+            "benchmark": { "$ref": "#/$defs/securityEvidenceArtifact" },
+            "benchmarkSchema": { "$ref": "#/$defs/securityGateArtifact" },
+            "releaseGate": { "$ref": "#/$defs/securityGateArtifact" },
+            "releaseGateSchema": { "$ref": "#/$defs/securityGateArtifact" }
+          }
+        },
         "worker": { "$ref": "#/$defs/artifact" },
         "web": { "$ref": "#/$defs/webReleaseAssets" },
         "releaseInputs": { "$ref": "#/$defs/artifact" },
@@ -293,6 +355,8 @@
       "required": [
         "report",
         "engine",
+        "pdfEngine",
+        "pdfQuality",
         "worker",
         "web",
         "releaseInputs",
@@ -303,6 +367,18 @@
       "properties": {
         "report": { "$ref": "#/$defs/artifact" },
         "engine": { "$ref": "#/$defs/engineReleaseAssets" },
+        "pdfEngine": { "$ref": "#/$defs/engineReleaseAssets" },
+        "pdfQuality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
+          "properties": {
+            "benchmark": { "$ref": "#/$defs/securityEvidenceArtifact" },
+            "benchmarkSchema": { "$ref": "#/$defs/securityGateArtifact" },
+            "releaseGate": { "$ref": "#/$defs/securityGateArtifact" },
+            "releaseGateSchema": { "$ref": "#/$defs/securityGateArtifact" }
+          }
+        },
         "worker": { "$ref": "#/$defs/artifact" },
         "web": { "$ref": "#/$defs/webReleaseAssets" },
         "releaseInputs": { "$ref": "#/$defs/artifact" },

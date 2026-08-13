@@ -3,10 +3,18 @@
 HereIsIt is deployed as a static Next.js export through Cloudflare Pages Git integration. Image
 processing, image text/logo watermarking, PDF page organization, rasterized PDF text watermarking, and
 PDF-page-to-image rendering remain in the browser; Pages serves only versioned static assets.
-Scan-oriented PDF compression also stays local: it rebuilds each page as JPEG and is intentionally
-destructive, while structure-preserving general PDF compression is not provided. The PDF raster paths use
+Scan-oriented PDF compression starts locally: it rebuilds each page as JPEG and is intentionally
+destructive. A structured or mixed local no-reduction result may expose one explicit qpdf server action;
+the upload never starts automatically. The PDF raster paths use
 self-hosted PDF.js 6.2.108 parser Worker, CMap, and standard-font files, with no CDN, WASM, upload, or
-server fallback.
+server fallback except that explicit compression action.
+
+The qpdf 12.4.0 Apache-2.0 container is separate from the image engine and has its own queue and DLQ.
+It accepts 1 byte–50MiB and 1–100 pages, runs at most two candidates within 45 seconds, 768MiB RSS,
+256MiB workspace, and a 50MiB output ceiling, then returns only an at-least-1%-smaller verified result.
+qpdf does not provide DPI-aware image downsampling. The generated benchmark gate and sanitized evidence
+are `pdf-quality-benchmark.yml` and `docs/deployment/pdf-engine-benchmark.json`; public admission waits
+for the Task 8 immutable canary, deletion, cost, and rollback gates.
 
 The official production web origin is `https://hereisit.app`; `https://www.hereisit.app` redirects to
 the apex, and `https://api.hereisit.app` is the production processing API. The legacy Pages and
@@ -173,6 +181,9 @@ with a proxy or disable the legacy compatibility origins in the same release.
 
 For a production release, run all four tracked smokes only after the current GitHub CI and Cloudflare
 Pages production deployment have succeeded for the exact merge SHA:
+
+The PDF benchmark is only structural evidence when `visualProfilesMeasured` is zero. In that state
+`publicAdmissionReady` remains false until Task 8 exercises image-optimized browser verification.
 
 ~~~bash
 node scripts/smoke-navigation.mjs https://hereisit.app

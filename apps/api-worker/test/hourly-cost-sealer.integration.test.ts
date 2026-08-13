@@ -316,4 +316,40 @@ describe("hourly cost sealing", () => {
       durable_object_active_milliseconds: 60_000,
     });
   });
+
+  it("sums independent engine unions while overlapping one engine only once", async () => {
+    await seedCompleteProviderRow(firstHourKey);
+    await env.DB.prepare(
+      `INSERT INTO container_activity_segments (id, engine_identity, started_at, billed_until_at)
+       VALUES
+         ('00000000-0000-4000-8000-000000000020', 'image:slot-0', ?, ?),
+         ('00000000-0000-4000-8000-000000000021', 'image:slot-0', ?, ?),
+         ('00000000-0000-4000-8000-000000000022', 'pdf:slot-0', ?, ?)`,
+    )
+      .bind(
+        firstHourStart + 1_000,
+        firstHourStart + 61_000,
+        firstHourStart + 31_000,
+        firstHourStart + 91_000,
+        firstHourStart + 1_000,
+        firstHourStart + 61_000,
+      )
+      .run();
+
+    await expect(
+      sealNextHourlyCost(env.DB, input(firstHourStart + 3_600_000 + 50 * 60_000)),
+    ).resolves.toMatchObject({ kind: "sealed" });
+    await expect(
+      env.DB.prepare(
+        `SELECT container_active_milliseconds, durable_object_active_milliseconds
+         FROM operational_cost_hourly
+         WHERE accounting_epoch = ? AND hour_key = ?`,
+      )
+        .bind(accountingEpoch, firstHourKey)
+        .first(),
+    ).resolves.toEqual({
+      container_active_milliseconds: 150_000,
+      durable_object_active_milliseconds: 150_000,
+    });
+  });
 });

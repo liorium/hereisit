@@ -35,7 +35,14 @@ async function readCanonicalBundle(path) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("processing evidence bundle must be an object");
   }
-  if (value.schema !== "hereisit-processing-evidence@1" || value.version !== 1) {
+  if (value.schema === "hereisit-processing-evidence@1" && value.version === 1) {
+    // The existing release verifier owns the complete evidence schema. This signer binds bytes.
+  } else if (value.schema === "hereisit-processing-deployment-report@1" && value.version === 1) {
+    const { validateProcessingDeploymentReport } = await import(
+      "./create-processing-deployment-report.mjs"
+    );
+    validateProcessingDeploymentReport(value);
+  } else {
     throw new TypeError("processing evidence bundle schema or version is invalid");
   }
   if (!bytes.equals(Buffer.from(canonicalJson(value)))) {

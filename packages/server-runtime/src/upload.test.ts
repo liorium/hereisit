@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClientJobCredentials } from "./api-client";
-import { uploadImageInput, type XhrLike } from "./upload";
+import { uploadImageInput, uploadPdfInput, type XhrLike } from "./upload";
 
 const jobId = "123e4567-e89b-42d3-a456-426614174001";
+const pdfDigest = "sha-256=A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=";
 
 class FakeXhr implements XhrLike {
   status = 204;
@@ -121,5 +122,64 @@ describe("remote input upload", () => {
     await expect(run(() => undefined, controller.signal)).rejects.toMatchObject({
       code: "CANCELLED",
     });
+  });
+});
+
+describe("PDF input upload", () => {
+  it("uploads the exact File as application/pdf without exposing its filename", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3)], "private.pdf", {
+      type: "application/pdf",
+    });
+    const xhr = new FakeXhr();
+    const jobToken = createClientJobCredentials().jobToken;
+    await uploadPdfInput({
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken,
+      descriptor: {
+        kind: "worker-stream-put",
+        method: "PUT",
+        path: `/v1/jobs/${jobId}/input`,
+        contentType: "application/pdf",
+        byteLength: file.size,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      file,
+      digest: pdfDigest,
+      xhrFactory: () => xhr,
+    });
+
+    expect(xhr.headers.get("Content-Type")).toBe("application/pdf");
+    expect(xhr.headers.get("Digest")).toBe(pdfDigest);
+    expect(xhr.send).toHaveBeenCalledWith(file);
+    expect(String(xhr.open.mock.calls)).not.toContain(file.name);
+  });
+
+  it("rejects a missing or malformed PDF digest before creating an XHR", async () => {
+    const file = new File([Uint8Array.of(1, 2, 3)], "private.pdf", {
+      type: "application/pdf",
+    });
+    const xhrFactory = vi.fn(() => new FakeXhr());
+    const common = {
+      apiOrigin: "https://processing.example",
+      jobId,
+      jobToken: createClientJobCredentials().jobToken,
+      descriptor: {
+        kind: "worker-stream-put" as const,
+        method: "PUT" as const,
+        path: `/v1/jobs/${jobId}/input` as const,
+        contentType: "application/pdf" as const,
+        byteLength: file.size,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      file,
+      xhrFactory,
+    };
+    await expect(
+      uploadPdfInput({ ...common, digest: "sha-256=private.pdf" }),
+    ).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+    expect(xhrFactory).not.toHaveBeenCalled();
   });
 });

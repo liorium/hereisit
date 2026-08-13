@@ -58,6 +58,7 @@ const egressRowSchema = z
   .strict();
 const activityRowSchema = z
   .object({
+    engine_identity: z.enum(["image:slot-0", "pdf:slot-0"]),
     started_at: nonnegativeInteger,
     billed_until_at: nonnegativeInteger,
   })
@@ -324,26 +325,36 @@ export async function sealNextHourlyCost(
   const hourStart = hourKey * 3_600_000;
   const activityResult = await session
     .prepare(
-      `SELECT started_at, billed_until_at
+      `SELECT engine_identity, started_at, billed_until_at
        FROM container_activity_segments
        WHERE started_at < ? AND billed_until_at > ?
        ORDER BY started_at, billed_until_at
-       LIMIT 129`,
+       LIMIT 257`,
     )
     .bind(hourEnd, hourStart)
     .all();
-  const activityRows = z.array(activityRowSchema).max(128).safeParse(activityResult.results);
+  const activityRows = z.array(activityRowSchema).max(256).safeParse(activityResult.results);
   let activityMilliseconds: number;
   try {
     if (!activityRows.success) throw new TypeError("Container activity set is invalid.");
-    activityMilliseconds = unionActivityMilliseconds(
-      activityRows.data.map((entry) => ({
-        startedAt: entry.started_at,
-        billedUntilAt: entry.billed_until_at,
-      })),
-      hourStart,
-      hourEnd,
-    );
+    const identities = [...new Set(activityRows.data.map((row) => row.engine_identity))];
+    activityMilliseconds = identities.reduce((total, engineIdentity) => {
+      const intervals = activityRows.data.filter(
+        (entry) => entry.engine_identity === engineIdentity,
+      );
+      if (intervals.length > 128) throw new TypeError("Container activity set is invalid.");
+      return (
+        total +
+        unionActivityMilliseconds(
+          intervals.map((entry) => ({
+            startedAt: entry.started_at,
+            billedUntilAt: entry.billed_until_at,
+          })),
+          hourStart,
+          hourEnd,
+        )
+      );
+    }, 0);
   } catch {
     return openCostCircuit(database, input.now, hourKey, "COST_ACTIVITY_INVALID");
   }

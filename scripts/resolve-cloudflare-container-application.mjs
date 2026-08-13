@@ -13,8 +13,10 @@ const maximumInputBytes = 1024 * 1024;
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const workerNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const digestImagePattern =
-  /^registry\.cloudflare\.com\/([0-9a-f]{32})\/hereisit-image-engine@sha256:([0-9a-f]{64})$/;
+const engineNames = Object.freeze({
+  ImageEngineContainer: "hereisit-image-engine",
+  PdfEngineContainer: "hereisit-pdf-engine",
+});
 const utcTimestampPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/;
 const acceptedStates = new Set(["provisioning", "ready", "active"]);
 
@@ -122,7 +124,10 @@ function validateIdentity(input) {
   ) {
     throw new TypeError("Container application Worker name is invalid");
   }
-  return `${input.workerScriptName}-ImageEngineContainer`.toLowerCase();
+  if (!Object.hasOwn(engineNames, input.containerClassName)) {
+    throw new TypeError("Container application class is invalid");
+  }
+  return `${input.workerScriptName}-${input.containerClassName}`.toLowerCase();
 }
 
 function sealApplication(input, application) {
@@ -147,7 +152,7 @@ export function resolveContainerApplicationId(inputValue) {
   const input = assertObject(inputValue, "Container application discovery input");
   assertExactKeys(
     input,
-    ["environment", "accountId", "workerScriptName", "applications"],
+    ["environment", "accountId", "workerScriptName", "containerClassName", "applications"],
     "Container application discovery input",
   );
   const expectedName = validateIdentity(input);
@@ -161,7 +166,11 @@ export function resolveContainerApplicationId(inputValue) {
     throw new TypeError("Container application inventory must contain exactly one expected app");
   }
   const application = matches[0];
-  if (digestImagePattern.exec(application.image)?.[1] !== input.accountId) {
+  const repository = engineNames[input.containerClassName];
+  const summaryImage = new RegExp(
+    `^registry\\.cloudflare\\.com/([0-9a-f]{32})/${repository}(?:@sha256:[0-9a-f]{64}|:[A-Za-z0-9._-]{1,128})$`,
+  ).exec(application.image);
+  if (summaryImage?.[1] !== input.accountId) {
     throw new TypeError("Container application summary image is outside the account registry");
   }
   if (!acceptedStates.has(application.state)) {
@@ -178,6 +187,7 @@ export function resolveContainerApplicationDetail(inputValue) {
       "environment",
       "accountId",
       "workerScriptName",
+      "containerClassName",
       "applicationId",
       "engineImage",
       "observedAt",
@@ -195,6 +205,7 @@ export function resolveContainerApplicationDetail(inputValue) {
     environment: input.environment,
     accountId: input.accountId,
     workerScriptName: input.workerScriptName,
+    containerClassName: input.containerClassName,
     engineImage: input.engineImage,
     observedAt: input.observedAt,
     applications: [application],
@@ -205,12 +216,25 @@ export function resolveContainerApplication(inputValue) {
   const input = assertObject(inputValue, "Container application resolution input");
   assertExactKeys(
     input,
-    ["environment", "accountId", "workerScriptName", "engineImage", "observedAt", "applications"],
+    [
+      "environment",
+      "accountId",
+      "workerScriptName",
+      "containerClassName",
+      "engineImage",
+      "observedAt",
+      "applications",
+    ],
     "Container application resolution input",
   );
   const expectedName = validateIdentity(input);
+  const repository = engineNames[input.containerClassName];
   const imageMatch =
-    typeof input.engineImage === "string" ? digestImagePattern.exec(input.engineImage) : null;
+    typeof input.engineImage === "string"
+      ? new RegExp(
+          `^registry\\.cloudflare\\.com/([0-9a-f]{32})/${repository}@sha256:([0-9a-f]{64})$`,
+        ).exec(input.engineImage)
+      : null;
   if (imageMatch?.[1] !== input.accountId) {
     throw new TypeError("Container application image is not an immutable account image");
   }
@@ -254,7 +278,14 @@ async function readBoundedJson(path) {
 
 export async function runContainerApplicationResolver(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
-  const commonKeys = ["mode", "input", "environment", "account-id", "worker-script-name"];
+  const commonKeys = [
+    "mode",
+    "input",
+    "environment",
+    "account-id",
+    "worker-script-name",
+    "container-class-name",
+  ];
   const expectedKeys =
     args.mode === "discover"
       ? new Set(commonKeys)
@@ -272,6 +303,7 @@ export async function runContainerApplicationResolver(argv, stdout = process.std
     environment: args.environment,
     accountId: args["account-id"],
     workerScriptName: args["worker-script-name"],
+    containerClassName: args["container-class-name"],
   };
   const document = await readBoundedJson(resolve(args.input));
   if (args.mode === "discover") {

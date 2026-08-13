@@ -175,12 +175,25 @@ function makeEnv(overrides: Record<string, unknown> = {}): Env {
     LIVE_COST_MODEL_SHA256: sha256Hex(canonicalJson(liveCostModel)),
     PROVIDER_USAGE_SCHEMA_SHA256: "2".repeat(64),
     RELEASE_REPORT_SHA256: "3".repeat(64),
+    PDF_PUBLIC_ADMISSION_JSON: canonicalJson({
+      schema: "hereisit-pdf-public-admission@1",
+      enabled: false,
+      releaseReportSha256: "3".repeat(64),
+      visualProfilesMeasured: 0,
+      deletionPassed: false,
+      costPassed: false,
+      rollbackPassed: false,
+    }),
     IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: "100",
     MAINTAINER_SESSION_HASHES: "[]",
     ENGINE_INSTANCE_NAME: "image-slot-0",
     ENGINE_IMAGE_DIGEST: "local-dockerfile",
+    PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
+    PDF_ENGINE_IMAGE_DIGEST: "local-dockerfile",
     IMAGE_JOBS_QUEUE_NAME: "hereisit-image-jobs-local",
     IMAGE_JOBS_DLQ_NAME: "hereisit-image-jobs-dlq-local",
+    PDF_JOBS_QUEUE_NAME: "hereisit-pdf-jobs-local",
+    PDF_JOBS_DLQ_NAME: "hereisit-pdf-jobs-dlq-local",
     ABUSE_HMAC_SECRET_CURRENT: currentSecret,
     ABUSE_HMAC_SECRET_PREVIOUS: previousSecret,
     ANALYTICS_READ_TOKEN: "non-working-read-token",
@@ -456,6 +469,69 @@ describe("strict operational configuration", () => {
     ]);
     expect(config.liveCostModel.arrivalProjection.steadyHourlyJobs).toHaveLength(24);
     expect(config.rolloutPercent).toBe(100);
+    expect(config.pdfPublicAdmissionEnabled).toBe(false);
+  });
+
+  it("enables public PDF admission only for complete evidence bound to the release report", async () => {
+    const config = await parseOperationalConfig(
+      makeEnv({
+        PDF_PUBLIC_ADMISSION_JSON: canonicalJson({
+          schema: "hereisit-pdf-public-admission@1",
+          enabled: true,
+          releaseReportSha256: "3".repeat(64),
+          visualProfilesMeasured: 1,
+          deletionPassed: true,
+          costPassed: true,
+          rollbackPassed: true,
+        }),
+      }),
+    );
+    expect(config.pdfPublicAdmissionEnabled).toBe(true);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "{"],
+    [
+      "report drift",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "4".repeat(64),
+        visualProfilesMeasured: 1,
+        deletionPassed: true,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+    [
+      "missing visual evidence",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "3".repeat(64),
+        visualProfilesMeasured: 0,
+        deletionPassed: true,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+    [
+      "missing deletion evidence",
+      canonicalJson({
+        schema: "hereisit-pdf-public-admission@1",
+        enabled: true,
+        releaseReportSha256: "3".repeat(64),
+        visualProfilesMeasured: 1,
+        deletionPassed: false,
+        costPassed: true,
+        rollbackPassed: true,
+      }),
+    ],
+  ])("rejects a %s PDF public-admission state", async (_label, state) => {
+    await expect(
+      parseOperationalConfig(makeEnv({ PDF_PUBLIC_ADMISSION_JSON: state })),
+    ).rejects.toThrow(/PDF|admission|JSON|canonical/i);
   });
 
   it("keeps production processing disabled when the account budget is absent", async () => {
@@ -652,6 +728,8 @@ describe("strict operational configuration", () => {
     ["RELEASE_REPORT_SHA256", "short"],
     ["ENGINE_INSTANCE_NAME", "image-slot-1"],
     ["ENGINE_IMAGE_DIGEST", ""],
+    ["PDF_ENGINE_INSTANCE_NAME", "pdf-slot-1"],
+    ["PDF_ENGINE_IMAGE_DIGEST", ""],
   ])("rejects malformed immutable release setting %s", async (name, value) => {
     await expect(parseOperationalConfig(makeEnv({ [name]: value }))).rejects.toThrow();
   });
@@ -706,6 +784,10 @@ describe("Wrangler source-of-truth and generated environment", () => {
         binding: "IMAGE_JOBS",
         queue: "hereisit-image-jobs-local",
       },
+      {
+        binding: "PDF_JOBS",
+        queue: "hereisit-pdf-jobs-local",
+      },
     ]);
     expect(config.queues?.consumers).toEqual([
       {
@@ -723,6 +805,21 @@ describe("Wrangler source-of-truth and generated environment", () => {
         max_retries: 0,
         max_concurrency: 1,
       },
+      {
+        queue: "hereisit-pdf-jobs-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 2,
+        dead_letter_queue: "hereisit-pdf-jobs-dlq-local",
+        max_concurrency: 1,
+      },
+      {
+        queue: "hereisit-pdf-jobs-dlq-local",
+        max_batch_size: 1,
+        max_batch_timeout: 1,
+        max_retries: 0,
+        max_concurrency: 1,
+      },
     ]);
     expect(config.containers).toEqual([
       {
@@ -734,12 +831,23 @@ describe("Wrangler source-of-truth and generated environment", () => {
         rollout_active_grace_period: 180,
         rollout_step_percentage: [100],
       },
+      {
+        class_name: "PdfEngineContainer",
+        image: "../pdf-engine/Dockerfile",
+        image_build_context: "../..",
+        instance_type: "standard-2",
+        max_instances: 1,
+        rollout_active_grace_period: 180,
+        rollout_step_percentage: [100],
+      },
     ]);
     expect(config.durable_objects?.bindings).toEqual([
       { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
+      { name: "PDF_ENGINE", class_name: "PdfEngineContainer" },
     ]);
     expect(config.migrations).toEqual([
       { tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] },
+      { tag: "pdf-engine-v1", new_sqlite_classes: ["PdfEngineContainer"] },
     ]);
     expect(config.ratelimits).toEqual([
       {

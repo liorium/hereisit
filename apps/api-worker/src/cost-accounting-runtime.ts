@@ -11,6 +11,12 @@ import { importUsageLogPage } from "./usage-log-importer";
 import { observeUsageLogHour } from "./usage-log-observer";
 import { createCloudflareSha256Digest } from "./usage-log-parser";
 
+export const PROCESSING_USAGE_LOG_ENTRYPOINTS: ReadonlySet<string> = new Set([
+  "",
+  "ImageEngineContainer",
+  "PdfEngineContainer",
+]);
+
 const nonnegativeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const targetRowSchema = z
   .object({
@@ -157,7 +163,7 @@ export function createCostAccountingRuntime(
           database: env.DB,
           parserOptions: {
             scriptName: config.workerScriptName,
-            allowedEntrypoints: new Set(["", "ImageEngineContainer"]),
+            allowedEntrypoints: PROCESSING_USAGE_LOG_ENTRYPOINTS,
             createDigest: createCloudflareSha256Digest,
           },
         },

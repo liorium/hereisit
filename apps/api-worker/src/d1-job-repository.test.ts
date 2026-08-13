@@ -2,23 +2,39 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { calculateSettledWeightedUnits, estimateImageOptimizeUnits } from "@hereisit/server-job";
 import type { ImageOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/image-optimize";
-import { describe, expect, it } from "vitest";
+import type { PdfOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/pdf-optimize";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
 import {
+  type BeginUploadResult,
   claimQueuedJob,
   createD1JobRepository,
   createD1LifecycleRepository,
+  type JobRepository,
+  type PdfBeginUploadResult,
+  type PdfJobRepository,
+  type PdfReserveAndCreateInput,
+  parseStoredJob,
   RepositoryIntegrityError,
   type ReserveAndCreateInput,
 } from "./d1-job-repository";
 
-const migration = [
+const baseMigration = [
   "0001_processing_jobs.sql",
+  "0002_worker_version_attestations.sql",
   "0003_circuit_breaker.sql",
+  "0004_live_cost_accounting.sql",
+  "0005_usage_log_ledger.sql",
+  "0006_container_provider_egress.sql",
   "0007_operational_counters.sql",
 ]
   .map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"))
   .join("\n");
+const pdfMigration = readFileSync(
+  new URL("../migrations/0008_pdf_processing_jobs.sql", import.meta.url),
+  "utf8",
+);
+const migration = `${baseMigration}\n${pdfMigration}`;
 const now = Date.parse("2026-07-16T00:10:00.000Z");
 const dayKey = "2026-07-16";
 const priorDayKey = "2026-07-15";
@@ -228,6 +244,25 @@ function request(
   };
 }
 
+function pdfRequest(
+  overrides: Partial<PdfOptimizeCreateRequestV1> = {},
+): PdfOptimizeCreateRequestV1 {
+  return {
+    contract: "tool-job@1",
+    toolContract: "pdf.optimize@1",
+    anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
+    clientRequestId: alternateClientRequestId,
+    jobToken,
+    input: {
+      byteLength: 1_000_000,
+      mime: "application/pdf",
+      pageCount: 3,
+    },
+    spec: { version: 1, preset: "balanced" },
+    ...overrides,
+  };
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -254,6 +289,44 @@ async function reservationInput(
     outputKey,
     queueEpoch,
     estimate: estimateImageOptimizeUnits(createRequest),
+    uploadExpiresAt: now + 10 * 60_000,
+    now,
+    accountDailyLimit: Number.MAX_SAFE_INTEGER,
+    anonymousDailyLimit: Number.MAX_SAFE_INTEGER,
+    networkDailyLimit: Number.MAX_SAFE_INTEGER,
+    accountPendingJobLimit: 10,
+    networkPendingJobLimit: 3,
+    maximumQueuedAgeSeconds: 600,
+    ...overrides,
+  };
+}
+
+async function pdfReservationInput(
+  overrides: Partial<PdfReserveAndCreateInput> = {},
+): Promise<PdfReserveAndCreateInput> {
+  const createRequest = overrides.request ?? pdfRequest();
+  const specJson = overrides.specJson ?? JSON.stringify(createRequest.spec);
+  return {
+    jobId: alternateJobId,
+    clientRequestId: createRequest.clientRequestId,
+    tokenHash: await hashJobToken(createRequest.jobToken),
+    sessionHash: await hashAnonymousSessionId(createRequest.anonymousSessionId),
+    networkHash,
+    networkDailyQuotaHashes: [networkHash, previousNetworkHash],
+    networkPendingHashes: [networkHash, previousNetworkHash, previousDayNetworkHash],
+    dayKey,
+    request: createRequest,
+    specJson,
+    specHash: overrides.specHash ?? (await sha256Hex(specJson)),
+    inputKey: "inputs/55555555-5555-4555-8555-555555555555",
+    outputKey: "outputs/66666666-6666-4666-8666-666666666666",
+    queueEpoch: "77777777-7777-4777-8777-777777777777",
+    estimate: {
+      resourceClass: "pdf-standard-v1",
+      reservedWeightedUnits: 2_439_579_999,
+      inputBytes: 1_000_000,
+      reservationPageCeiling: 100,
+    },
     uploadExpiresAt: now + 10 * 60_000,
     now,
     accountDailyLimit: Number.MAX_SAFE_INTEGER,
@@ -322,7 +395,330 @@ function seedQueuedJob(
     );
 }
 
+function applyPdfMigrationInTransaction(database: DatabaseSync): void {
+  expect(database.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+  database.exec("BEGIN");
+  try {
+    database.exec(pdfMigration);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function databaseWithMigratedImageAndPdfRows(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  database.exec(baseMigration);
+  database
+    .prepare(
+      `INSERT INTO anonymous_usage
+        (session_hash, day_key, created_at, updated_at)
+       VALUES ('invariant-session', ?, ?, ?)`,
+    )
+    .run(dayKey, now, now);
+  database
+    .prepare(
+      `INSERT INTO jobs (
+        id, client_request_id, token_hash, session_hash, day_key, status, phase,
+        contract_id, spec_json, spec_hash, declared_bytes, declared_mime,
+        declared_width, declared_height, input_key, output_key, reserved_units,
+        resource_class, queue_epoch, upload_expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'invariant-session', ?, 'created', 'uploading',
+        'image.optimize@1', ?, ?, 1000, 'image/png', 320, 200, ?, ?, 1,
+        'image-standard-v1', ?, ?, ?, ?)`,
+    )
+    .run(
+      jobId,
+      clientRequestId,
+      "a".repeat(64),
+      dayKey,
+      JSON.stringify(request().spec),
+      "b".repeat(64),
+      inputKey,
+      outputKey,
+      queueEpoch,
+      now + 10_000,
+      now,
+      now,
+    );
+
+  applyPdfMigrationInTransaction(database);
+  database
+    .prepare(
+      `INSERT INTO jobs (
+        id, client_request_id, token_hash, session_hash, day_key, status, phase,
+        contract_id, spec_json, spec_hash, declared_bytes, declared_mime,
+        declared_page_count, input_key, output_key, reserved_units, resource_class,
+        queue_epoch, upload_expires_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 'invariant-session', ?, 'created', 'uploading',
+        'pdf.optimize@1', ?, ?, 1000, 'application/pdf', 3, ?, ?, 1,
+        'pdf-standard-v1', ?, ?, ?, ?)`,
+    )
+    .run(
+      alternateJobId,
+      alternateClientRequestId,
+      "c".repeat(64),
+      dayKey,
+      JSON.stringify(pdfRequest().spec),
+      "d".repeat(64),
+      "inputs/55555555-5555-4555-8555-555555555555",
+      "outputs/66666666-6666-4666-8666-666666666666",
+      "77777777-7777-4777-8777-777777777777",
+      now + 10_000,
+      now,
+      now,
+    );
+  return database;
+}
+
+describe("PDF job migration", () => {
+  it("preserves the image row and every child row inside the migration transaction", () => {
+    const database = new DatabaseSync(":memory:");
+    database.exec(baseMigration);
+    database
+      .prepare(
+        `INSERT INTO anonymous_usage
+          (session_hash, day_key, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run("migration-session", dayKey, now, now);
+    database
+      .prepare(
+        `INSERT INTO jobs (
+          id, client_request_id, token_hash, session_hash, day_key, status, phase,
+          contract_id, spec_json, spec_hash, declared_bytes, declared_mime,
+          declared_width, declared_height, verified_input_mime, input_has_alpha,
+          content_class, input_key, input_etag, output_key, output_bytes, output_mime,
+          output_width, output_height, result_kind, reserved_units, actual_units,
+          resource_class, queue_epoch, upload_expires_at, result_expires_at,
+          engine_build_id, codec_build_id, warnings_json, tested_candidates,
+          queued_at, started_at, finished_at, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, 'succeeded', 'completed', 'image.optimize@1', ?, ?, ?,
+          'image/png', 320, 200, 'image/png', 1, 'flat-graphic', ?, ?, ?, 600,
+          'image/png', 320, 200, 'download', 123, 45, 'image-standard-v1', ?, ?, ?,
+          'engine-1', 'codec-1', '[]', 2, ?, ?, ?, ?, ?
+        )`,
+      )
+      .run(
+        jobId,
+        clientRequestId,
+        "a".repeat(64),
+        "migration-session",
+        dayKey,
+        JSON.stringify(request().spec),
+        "b".repeat(64),
+        1_000,
+        inputKey,
+        "raw-etag",
+        outputKey,
+        now + 10_000,
+        now + 20_000,
+        queueEpoch,
+        now - 3_000,
+        now - 2_000,
+        now - 1_000,
+        now - 4_000,
+        now,
+      );
+    database
+      .prepare(
+        `INSERT INTO usage_ledger
+          (job_id, session_hash, day_key, reserved_units, actual_units, outcome, settled_at, created_at)
+         VALUES (?, ?, ?, 123, 45, 'succeeded', ?, ?)`,
+      )
+      .run(jobId, "migration-session", dayKey, now - 1_000, now - 4_000);
+    database
+      .prepare(
+        `INSERT INTO job_outbox (job_id, payload, attempts, next_attempt_at, sent_at)
+         VALUES (?, '{}', 1, ?, ?)`,
+      )
+      .run(jobId, now - 3_000, now - 2_500);
+    database
+      .prepare(
+        `INSERT INTO job_quarantine
+          (job_id, queue_name, attempt, error_code, quarantined_at)
+         VALUES (?, 'image-jobs-dlq', 1, 'ENGINE_CRASH', ?)`,
+      )
+      .run(jobId, now - 2_000);
+    database
+      .prepare(
+        `INSERT INTO artifact_presence_audit (job_id, input_exists, output_exists, checked_at)
+         VALUES (?, 1, 1, ?)`,
+      )
+      .run(jobId, now);
+    const before = database.prepare("SELECT * FROM jobs").get() as Record<string, unknown>;
+    const childrenBefore = Object.fromEntries(
+      ["usage_ledger", "job_outbox", "job_quarantine", "artifact_presence_audit"].map((table) => [
+        table,
+        database.prepare(`SELECT * FROM ${table}`).all(),
+      ]),
+    );
+    const childSchemaBefore = database
+      .prepare(
+        `SELECT type, name, tbl_name, sql
+         FROM sqlite_schema
+         WHERE tbl_name IN (
+           'usage_ledger', 'job_outbox', 'job_quarantine', 'artifact_presence_audit'
+         )
+         ORDER BY type, name`,
+      )
+      .all();
+    applyPdfMigrationInTransaction(database);
+
+    const after = database.prepare("SELECT * FROM jobs").get() as Record<string, unknown>;
+    expect(Object.fromEntries(Object.keys(before).map((key) => [key, after[key]]))).toEqual(before);
+    expect(after).toMatchObject({
+      declared_page_count: null,
+      output_page_count: null,
+      pdf_profile: null,
+    });
+    expect(
+      Object.fromEntries(
+        Object.keys(childrenBefore).map((table) => [
+          table,
+          database.prepare(`SELECT * FROM ${table}`).all(),
+        ]),
+      ),
+    ).toEqual(childrenBefore);
+    expect(
+      database
+        .prepare(
+          `SELECT type, name, tbl_name, sql
+           FROM sqlite_schema
+           WHERE tbl_name IN (
+             'usage_ledger', 'job_outbox', 'job_quarantine', 'artifact_presence_audit'
+           )
+           ORDER BY type, name`,
+        )
+        .all(),
+    ).toEqual(childSchemaBefore);
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(
+      database
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND tbl_name = 'jobs'")
+        .all()
+        .map((row) => (row as { name: string }).name)
+        .sort(),
+    ).toEqual([
+      "jobs_client_request_idx",
+      "jobs_expiry_idx",
+      "jobs_health_window_idx",
+      "jobs_lease_idx",
+      "jobs_network_hash_expiry_idx",
+      "jobs_network_status_idx",
+      "jobs_terminal_record_idx",
+      "sqlite_autoindex_jobs_1",
+      "sqlite_autoindex_jobs_2",
+      "sqlite_autoindex_jobs_3",
+    ]);
+  });
+
+  it.each([
+    ["image width", jobId, "declared_width", null],
+    ["image height", jobId, "declared_height", null],
+    ["image page count", jobId, "declared_page_count", 1],
+    ["image output page count", jobId, "output_page_count", 1],
+    ["image PDF profile", jobId, "pdf_profile", "structural"],
+    ["PDF page count", alternateJobId, "declared_page_count", null],
+    ["PDF width", alternateJobId, "declared_width", 1],
+    ["PDF height", alternateJobId, "declared_height", 1],
+    ["PDF alpha flag", alternateJobId, "input_has_alpha", 1],
+    ["PDF image content class", alternateJobId, "content_class", "photo"],
+    ["PDF output width", alternateJobId, "output_width", 1],
+    ["PDF output height", alternateJobId, "output_height", 1],
+  ] as const)("rejects an invalid %s field combination", (_label, targetId, field, value) => {
+    const database = databaseWithMigratedImageAndPdfRows();
+    expect(() =>
+      database.prepare(`UPDATE jobs SET ${field} = ? WHERE id = ?`).run(value, targetId),
+    ).toThrow("CHECK constraint failed");
+  });
+});
+
 describe("atomic job reservation", () => {
+  it("persists a PDF reservation with pages and no image dimensions", async () => {
+    const database = new SqliteD1Database();
+    const repository = createD1JobRepository(database);
+
+    await expect(repository.reserveAndCreate(await pdfReservationInput())).resolves.toMatchObject({
+      kind: "created",
+      job: {
+        contractId: "pdf.optimize@1",
+        declaredMime: "application/pdf",
+        declaredPageCount: 3,
+        resourceClass: "pdf-standard-v1",
+      },
+    });
+
+    expect(database.sqlite.prepare("SELECT * FROM jobs").get()).toMatchObject({
+      contract_id: "pdf.optimize@1",
+      declared_mime: "application/pdf",
+      declared_width: null,
+      declared_height: null,
+      declared_page_count: 3,
+      resource_class: "pdf-standard-v1",
+    });
+
+    const pdfRepository: PdfJobRepository = repository;
+    expectTypeOf<ReturnType<JobRepository["beginUpload"]>>().toEqualTypeOf<
+      Promise<BeginUploadResult>
+    >();
+    expectTypeOf<ReturnType<PdfJobRepository["beginUpload"]>>().toEqualTypeOf<
+      Promise<PdfBeginUploadResult>
+    >();
+    await expect(
+      pdfRepository.beginUpload({ jobId: alternateJobId, now: now + 1 }),
+    ).resolves.toMatchObject({
+      kind: "ready",
+      declaredMime: "application/pdf",
+    });
+    await expect(
+      repository.commitStoredInput({
+        jobId: alternateJobId,
+        uploadVersion: 1,
+        inputEtag: "pdf-etag",
+        now: now + 2,
+      }),
+    ).resolves.toEqual({ kind: "queued" });
+    expect(
+      JSON.parse(
+        (
+          database.sqlite
+            .prepare("SELECT payload FROM job_outbox WHERE job_id = ?")
+            .get(alternateJobId) as { payload: string }
+        ).payload,
+      ),
+    ).toMatchObject({
+      contractId: "pdf.optimize@1",
+      resourceClass: "pdf-standard-v1",
+      inputEtag: "pdf-etag",
+    });
+  });
+
+  it("rejects cross-tool fields when reading persisted rows", async () => {
+    const database = new SqliteD1Database();
+    const repository = createD1JobRepository(database);
+    const input = await pdfReservationInput();
+
+    await repository.reserveAndCreate(input);
+    const row = database.sqlite.prepare("SELECT * FROM jobs WHERE id = ?").get(alternateJobId);
+    expect(() => parseStoredJob({ ...row, declared_width: 1 })).toThrow(RepositoryIntegrityError);
+    expect(() =>
+      database.sqlite.exec(`UPDATE jobs SET declared_width = 1 WHERE id = '${alternateJobId}'`),
+    ).toThrow("CHECK constraint failed");
+
+    const imageDatabase = new SqliteD1Database();
+    await createD1JobRepository(imageDatabase).reserveAndCreate(await reservationInput());
+    const imageRow = imageDatabase.sqlite.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId);
+    expect(() => parseStoredJob({ ...imageRow, declared_page_count: 1 })).toThrow(
+      RepositoryIntegrityError,
+    );
+    expect(() =>
+      imageDatabase.sqlite.exec(`UPDATE jobs SET declared_page_count = 1 WHERE id = '${jobId}'`),
+    ).toThrow("CHECK constraint failed");
+  });
+
   it("uses one first-primary batch and persists only canonical hashes and job fields", async () => {
     const database = new SqliteD1Database();
     const repository = createD1JobRepository(database);

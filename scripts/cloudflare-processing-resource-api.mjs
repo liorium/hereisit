@@ -35,6 +35,8 @@ function serviceForPath(path) {
   if (path.includes("/r2/")) return "R2";
   if (path.includes("/queues")) return "Queues";
   if (path.includes("/logpush/")) return "Logpush";
+  if (path.includes("/workers/scripts")) return "Workers";
+  if (path.includes("/containers/applications")) return "Containers";
   return "resource";
 }
 
@@ -208,15 +210,18 @@ export function createCloudflareProcessingResourceApi({
   };
 
   const readInventory = async () => {
-    const [d1Result, r2Result, queueResult, logpushResult] = await Promise.all([
-      request(
-        `${accountPath}/d1/database?name=${encodeURIComponent(config.databaseName)}&per_page=100`,
-        d1Token,
-      ),
-      request(`${accountPath}/r2/buckets`, resourceToken),
-      request(`${accountPath}/queues?page=1`, resourceToken),
-      request(`${accountPath}/logpush/jobs`, logsToken),
-    ]);
+    const [d1Result, r2Result, queueResult, logpushResult, workerResult, containerResult] =
+      await Promise.all([
+        request(
+          `${accountPath}/d1/database?name=${encodeURIComponent(config.databaseName)}&per_page=100`,
+          d1Token,
+        ),
+        request(`${accountPath}/r2/buckets`, resourceToken),
+        request(`${accountPath}/queues?page=1`, resourceToken),
+        request(`${accountPath}/logpush/jobs`, logsToken),
+        request(`${accountPath}/workers/scripts`, resourceToken),
+        request(`${accountPath}/containers/applications`, resourceToken),
+      ]);
     const databases = asArray(d1Result, "D1 inventory")
       .filter((entry) => asObject(entry, "D1 entry").name === config.databaseName)
       .map((entryValue) => {
@@ -276,7 +281,20 @@ export function createCloudflareProcessingResourceApi({
         samplingRate: output.sample_rate === 1 ? null : output.sample_rate,
       };
     });
-    return { d1: databases, r2, queues, logpush };
+    const workers = asArray(workerResult, "Workers inventory").map((entryValue) => {
+      const entry = asObject(entryValue, "Worker entry");
+      if (typeof entry.id !== "string") throw new TypeError("Worker identity is invalid");
+      return { name: entry.id };
+    });
+    const containers = resultArray(containerResult, "applications", "Containers inventory").map(
+      (entryValue) => {
+        const entry = asObject(entryValue, "Container application entry");
+        if (typeof entry.id !== "string" || typeof entry.name !== "string")
+          throw new TypeError("Container application identity is invalid");
+        return { id: entry.id, name: entry.name };
+      },
+    );
+    return { d1: databases, r2, queues, logpush, workers, containers };
   };
 
   const verifyLogpushStatus = async (jobId) => {
@@ -389,6 +407,38 @@ export function createCloudflareProcessingResourceApi({
         method: "PUT",
         body: { destination_conf: logpushDestination() },
       });
+      return;
+    }
+    if (action.type === "delete-logpush") {
+      await request(`${accountPath}/logpush/jobs/${action.id}`, logsToken, { method: "DELETE" });
+      return;
+    }
+    if (action.type === "delete-queue") {
+      await request(`${accountPath}/queues/${action.id}`, resourceToken, { method: "DELETE" });
+      return;
+    }
+    if (action.type === "delete-r2") {
+      await request(`${accountPath}/r2/buckets/${encodeURIComponent(action.name)}`, resourceToken, {
+        method: "DELETE",
+      });
+      return;
+    }
+    if (action.type === "delete-d1") {
+      await request(`${accountPath}/d1/database/${action.id}`, d1Token, { method: "DELETE" });
+      return;
+    }
+    if (action.type === "delete-container") {
+      await request(`${accountPath}/containers/applications/${action.id}`, resourceToken, {
+        method: "DELETE",
+      });
+      return;
+    }
+    if (action.type === "delete-worker") {
+      await request(
+        `${accountPath}/workers/scripts/${encodeURIComponent(action.name)}`,
+        resourceToken,
+        { method: "DELETE" },
+      );
       return;
     }
     throw new TypeError("unknown processing resource action");

@@ -2,6 +2,10 @@ import {
   type ImageOptimizeUploadDescriptor,
   imageOptimizeUploadDescriptorSchema,
 } from "@hereisit/tool-contracts/image-optimize";
+import {
+  type PdfOptimizeUploadDescriptor,
+  pdfOptimizeUploadDescriptorSchema,
+} from "@hereisit/tool-contracts/pdf-optimize";
 import { canonicalApiOrigin, RemoteJobError } from "./api-client";
 
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -37,15 +41,22 @@ export interface UploadImageInput {
   readonly now?: () => number;
 }
 
-function validateInput(input: UploadImageInput): {
-  readonly descriptor: ImageOptimizeUploadDescriptor;
+export interface UploadPdfInput extends UploadImageInput {
+  readonly digest: string;
+}
+
+function validateInput(
+  input: UploadImageInput,
+  schema: typeof imageOptimizeUploadDescriptorSchema | typeof pdfOptimizeUploadDescriptorSchema,
+): {
+  readonly descriptor: ImageOptimizeUploadDescriptor | PdfOptimizeUploadDescriptor;
   readonly url: string;
   readonly timeout: number;
 } {
   if (!JOB_ID_PATTERN.test(input.jobId) || !TOKEN_PATTERN.test(input.jobToken)) {
     throw new RemoteJobError("INVALID_REQUEST", "작업 업로드 정보가 올바르지 않습니다.", false);
   }
-  const parsed = imageOptimizeUploadDescriptorSchema.safeParse(input.descriptor);
+  const parsed = schema.safeParse(input.descriptor);
   if (!parsed.success) {
     throw new RemoteJobError("INVALID_REQUEST", "업로드 지시가 올바르지 않습니다.", false);
   }
@@ -81,13 +92,17 @@ function validateInput(input: UploadImageInput): {
   return { descriptor, url: url.href, timeout: Math.max(1, Math.floor(expiresAt - now)) };
 }
 
-export function uploadImageInput(input: UploadImageInput): Promise<void> {
+function uploadInput(
+  input: UploadImageInput,
+  schema: typeof imageOptimizeUploadDescriptorSchema | typeof pdfOptimizeUploadDescriptorSchema,
+  digest?: string,
+): Promise<void> {
   if (input.signal?.aborted) {
     return Promise.reject(new RemoteJobError("CANCELLED", "업로드가 취소되었습니다.", false));
   }
   let validated: ReturnType<typeof validateInput>;
   try {
-    validated = validateInput(input);
+    validated = validateInput(input, schema);
   } catch (error) {
     return Promise.reject(error);
   }
@@ -151,9 +166,23 @@ export function uploadImageInput(input: UploadImageInput): Promise<void> {
       xhr.timeout = validated.timeout;
       xhr.setRequestHeader("Authorization", `Bearer ${input.jobToken}`);
       xhr.setRequestHeader("Content-Type", validated.descriptor.contentType);
+      if (digest !== undefined) xhr.setRequestHeader("Digest", digest);
       xhr.send(input.file);
     } catch {
       finish(new RemoteJobError("STORAGE_FAILURE", "파일 업로드를 시작하지 못했습니다.", true));
     }
   });
+}
+
+export function uploadImageInput(input: UploadImageInput): Promise<void> {
+  return uploadInput(input, imageOptimizeUploadDescriptorSchema);
+}
+
+export function uploadPdfInput(input: UploadPdfInput): Promise<void> {
+  if (!/^sha-256=[A-Za-z0-9+/]{43}=$/.test(input.digest)) {
+    return Promise.reject(
+      new RemoteJobError("INVALID_REQUEST", "PDF 업로드 정보가 올바르지 않습니다.", false),
+    );
+  }
+  return uploadInput(input, pdfOptimizeUploadDescriptorSchema, input.digest);
 }

@@ -1,16 +1,23 @@
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import {
   type EngineCreateJobRequest,
+  type EngineCreatePdfJobRequest,
   type EngineJobStatus,
   engineCreateJobRequestSchema,
+  engineCreatePdfJobRequestSchema,
   engineJobStatusSchema,
+  type PdfEngineJobStatus,
+  pdfEngineJobStatusSchema,
 } from "@hereisit/server-contracts";
 import type { Env } from "./env";
 
 const ENGINE_ORIGIN = "http://image-engine";
+const PDF_ENGINE_ORIGIN = "http://pdf-engine";
 const MAX_STATUS_BYTES = 64 * 1024;
 const ENGINE_IMAGE_PATTERN =
   /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-image-engine@sha256:([0-9a-f]{64})$/;
+const PDF_ENGINE_IMAGE_PATTERN =
+  /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-pdf-engine@sha256:([0-9a-f]{64})$/;
 
 export function createImageEngineEnvironment(engineImage: string): Record<string, string> {
   const digest = ENGINE_IMAGE_PATTERN.exec(engineImage)?.[1];
@@ -26,8 +33,19 @@ export function createImageEngineEnvironment(engineImage: string): Record<string
   };
 }
 
-export interface EngineClient {
-  create(request: EngineCreateJobRequest): Promise<{
+export function createPdfEngineEnvironment(engineImage: string): Record<string, string> {
+  const digest = PDF_ENGINE_IMAGE_PATTERN.exec(engineImage)?.[1];
+  if (digest === undefined && engineImage !== "local-dockerfile") {
+    throw new TypeError("PDF engine image identity is invalid.");
+  }
+  return {
+    ENGINE_BUILD_ID: digest === undefined ? engineImage : `sha256:${digest}`,
+    QPDF_BUILD_ID: "qpdf-12.4.0",
+  };
+}
+
+interface TypedEngineClient<CreateRequest, Status> {
+  create(request: CreateRequest): Promise<{
     coldStart: boolean;
     containerReadyMs: number;
   }>;
@@ -38,11 +56,14 @@ export interface EngineClient {
     contentType: string,
   ): Promise<void>;
   run(jobId: string): Promise<void>;
-  status(jobId: string): Promise<EngineJobStatus>;
+  status(jobId: string): Promise<Status>;
   output(jobId: string): Promise<Response>;
   cancel(jobId: string): Promise<void>;
   remove(jobId: string): Promise<void>;
 }
+
+export type EngineClient = TypedEngineClient<EngineCreateJobRequest, EngineJobStatus>;
+export type PdfEngineClient = TypedEngineClient<EngineCreatePdfJobRequest, PdfEngineJobStatus>;
 
 export interface EngineContainerStub {
   getState(): Promise<{ readonly status: string; readonly lastChange: number }>;
@@ -97,9 +118,34 @@ export class ImageEngineContainer extends Container<Env> {
   }
 }
 
+export class PdfEngineContainer extends Container<Env> {
+  override defaultPort = 8080;
+  override requiredPorts = [8080];
+  override pingEndpoint = "/healthz";
+  override sleepAfter = "60s";
+  override enableInternet = false;
+
+  constructor(ctx: ConstructorParameters<typeof Container<Env>>[0], env: Env) {
+    super(ctx, env);
+    this.envVars = createPdfEngineEnvironment(env.PDF_ENGINE_IMAGE_DIGEST);
+  }
+
+  override onError(_error: unknown): void {}
+
+  override onStop(params: StopParams): void {
+    console.info({
+      event: "container-stop",
+      exitCode: Number.isSafeInteger(params.exitCode) ? params.exitCode : null,
+    });
+  }
+}
+
 type Assert<T extends true> = T;
 export type ImageEngineBindingTypeAssertion = Assert<
   Env["IMAGE_ENGINE"] extends DurableObjectNamespace<ImageEngineContainer> ? true : false
+>;
+export type PdfEngineBindingTypeAssertion = Assert<
+  Env["PDF_ENGINE"] extends DurableObjectNamespace<PdfEngineContainer> ? true : false
 >;
 
 function canonicalJobId(jobId: string): string {
@@ -116,7 +162,10 @@ async function expectOk(response: Response): Promise<void> {
   await response.body?.cancel();
 }
 
-async function readStrictStatus(response: Response): Promise<EngineJobStatus> {
+async function readStrictStatus<Status>(
+  response: Response,
+  schema: { safeParse(value: unknown): { success: boolean; data?: Status } },
+): Promise<Status> {
   if (!response.ok) {
     await response.body?.cancel();
     throw new EngineHttpError(response.status);
@@ -152,9 +201,9 @@ async function readStrictStatus(response: Response): Promise<EngineJobStatus> {
       buffer.subarray(0, byteLength),
     );
     const value: unknown = JSON.parse(serialized);
-    const parsed = engineJobStatusSchema.safeParse(value);
+    const parsed = schema.safeParse(value);
     if (!parsed.success) throw new EngineProtocolError();
-    return parsed.data as EngineJobStatus;
+    return parsed.data as Status;
   } catch {
     throw new EngineProtocolError();
   } finally {
@@ -174,18 +223,23 @@ function normalizePlatformFailure(error: unknown): never {
   throw new EngineCrashError();
 }
 
-export function createEngineClientFromStub(
+function createTypedEngineClientFromStub<CreateRequest, Status>(
   stub: EngineContainerStub,
+  options: {
+    origin: string;
+    createSchema: { parse(value: unknown): CreateRequest };
+    statusSchema: { safeParse(value: unknown): { success: boolean; data?: Status } };
+  },
   now: () => number = () => performance.now(),
-): EngineClient {
+): TypedEngineClient<CreateRequest, Status> {
   return {
     async create(rawRequest) {
-      const request = engineCreateJobRequestSchema.parse(rawRequest);
+      const request = options.createSchema.parse(rawRequest);
       try {
         const before = await stub.getState();
         const startedAt = now();
         await expectOk(
-          await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs`, {
+          await stub.fetch(`${options.origin}/v1/jobs`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(request),
@@ -207,7 +261,7 @@ export function createEngineClientFromStub(
       }
       try {
         await expectOk(
-          await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs/${jobId}/input`, {
+          await stub.fetch(`${options.origin}/v1/jobs/${jobId}/input`, {
             method: "PUT",
             headers: {
               "content-length": String(byteLength),
@@ -225,7 +279,7 @@ export function createEngineClientFromStub(
       const jobId = canonicalJobId(rawJobId);
       try {
         await expectOk(
-          await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs/${jobId}/run`, { method: "POST" }),
+          await stub.fetch(`${options.origin}/v1/jobs/${jobId}/run`, { method: "POST" }),
         );
       } catch (error) {
         normalizePlatformFailure(error);
@@ -235,7 +289,10 @@ export function createEngineClientFromStub(
     async status(rawJobId) {
       const jobId = canonicalJobId(rawJobId);
       try {
-        return await readStrictStatus(await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs/${jobId}`));
+        return await readStrictStatus(
+          await stub.fetch(`${options.origin}/v1/jobs/${jobId}`),
+          options.statusSchema,
+        );
       } catch (error) {
         normalizePlatformFailure(error);
       }
@@ -244,7 +301,7 @@ export function createEngineClientFromStub(
     async output(rawJobId) {
       const jobId = canonicalJobId(rawJobId);
       try {
-        return await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs/${jobId}/output`);
+        return await stub.fetch(`${options.origin}/v1/jobs/${jobId}/output`);
       } catch (error) {
         normalizePlatformFailure(error);
       }
@@ -253,7 +310,9 @@ export function createEngineClientFromStub(
     async cancel(rawJobId) {
       const jobId = canonicalJobId(rawJobId);
       try {
-        await expectOk(await stub.fetch(`${ENGINE_ORIGIN}/v1/jobs/${jobId}`, { method: "DELETE" }));
+        await expectOk(
+          await stub.fetch(`${options.origin}/v1/jobs/${jobId}`, { method: "DELETE" }),
+        );
       } catch (error) {
         normalizePlatformFailure(error);
       }
@@ -265,8 +324,44 @@ export function createEngineClientFromStub(
   };
 }
 
+export function createEngineClientFromStub(
+  stub: EngineContainerStub,
+  now?: () => number,
+): EngineClient {
+  return createTypedEngineClientFromStub(
+    stub,
+    {
+      origin: ENGINE_ORIGIN,
+      createSchema: engineCreateJobRequestSchema,
+      statusSchema: engineJobStatusSchema,
+    },
+    now,
+  ) as EngineClient;
+}
+
+export function createPdfEngineClientFromStub(
+  stub: EngineContainerStub,
+  now?: () => number,
+): PdfEngineClient {
+  return createTypedEngineClientFromStub(
+    stub,
+    {
+      origin: PDF_ENGINE_ORIGIN,
+      createSchema: engineCreatePdfJobRequestSchema,
+      statusSchema: pdfEngineJobStatusSchema,
+    },
+    now,
+  ) as PdfEngineClient;
+}
+
 export function createContainerEngineClient(env: Env): EngineClient {
   return createEngineClientFromStub(
     getContainer(env.IMAGE_ENGINE, env.ENGINE_INSTANCE_NAME) as EngineContainerStub,
+  );
+}
+
+export function createContainerPdfEngineClient(env: Env): PdfEngineClient {
+  return createPdfEngineClientFromStub(
+    getContainer(env.PDF_ENGINE, env.PDF_ENGINE_INSTANCE_NAME) as EngineContainerStub,
   );
 }

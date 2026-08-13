@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdtemp, open, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments, sha256Canonical } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
+import { validatePdfBenchmarkEvidence } from "./validate-pdf-benchmark-evidence.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
 import {
   inspectDockerImageArchive,
@@ -24,37 +25,49 @@ const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
 const sourceNames = Object.freeze({
   oci: "image-engine-linux-amd64.oci.tar",
   docker: "image-engine-linux-amd64.docker.tar",
+  pdfOci: "pdf-engine-linux-amd64.oci.tar",
+  pdfDocker: "pdf-engine-linux-amd64.docker.tar",
   worker: "api-worker.mjs",
   stagingWeb: "web-staging.tar",
   productionWeb: "web-production.tar",
   releaseInputs: "processing-release-inputs.json",
   costModel: "live-cost-model.json",
   imageEngineGate: "security-image-engine-license-gate.json",
+  pdfEngineGate: "security-pdf-engine-license-gate.json",
   applicationSupplyChainGate: "security-application-supply-chain-gate.json",
   vulnerabilityGate: "security-vulnerability-gate.json",
   sbomEngine: "security-sbom-engine.cdx.json",
+  sbomPdfEngine: "security-sbom-pdf-engine.cdx.json",
   sbomWebStaging: "security-sbom-web-staging.cdx.json",
   sbomWebProduction: "security-sbom-web-production.cdx.json",
   sbomWorker: "security-sbom-worker.cdx.json",
   sbomLockfile: "security-sbom-lockfile.cdx.json",
   trivyEngine: "security-trivy-engine.json",
+  trivyPdfEngine: "security-trivy-pdf-engine.json",
   trivyWebStaging: "security-trivy-web-staging.json",
   trivyWebProduction: "security-trivy-web-production.json",
   trivyWorker: "security-trivy-worker.json",
   trivyLockfile: "security-trivy-lockfile.json",
+  pdfBenchmark: "pdf-engine-benchmark.json",
+  pdfBenchmarkSchema: "pdf-engine-benchmark.schema.json",
+  pdfReleaseGate: "pdf-engine-release-gate.json",
+  pdfReleaseGateSchema: "pdf-engine-release-gate.schema.json",
 });
 const securityGateKeys = new Set([
   "imageEngineGate",
+  "pdfEngineGate",
   "applicationSupplyChainGate",
   "vulnerabilityGate",
 ]);
 const securityEvidenceKeys = new Set([
   "sbomEngine",
+  "sbomPdfEngine",
   "sbomWebStaging",
   "sbomWebProduction",
   "sbomWorker",
   "sbomLockfile",
   "trivyEngine",
+  "trivyPdfEngine",
   "trivyWebStaging",
   "trivyWebProduction",
   "trivyWorker",
@@ -231,7 +244,9 @@ export async function createBuiltProcessingCandidate({
           ? maximumSecurityEvidenceBytes
           : key === "releaseInputs" || key === "costModel"
             ? maximumProviderSchemaBytes
-            : maximumAssetBytes;
+            : key.startsWith("pdf") && !key.endsWith("Oci") && !key.endsWith("Docker")
+              ? maximumSecurityEvidenceBytes
+              : maximumAssetBytes;
       copied[key] = await copyAndHashRegularFile(
         join(canonicalSourceRoot, name),
         join(temporaryRoot, name),
@@ -257,6 +272,35 @@ export async function createBuiltProcessingCandidate({
     ) {
       throw new TypeError("OCI and Docker source archive identities do not match");
     }
+    const pdfLoadedImage = `hereisit-pdf-engine:${gitSha}`;
+    const pdfOci = await inspectOciImageArchive({
+      archivePath: join(temporaryRoot, sourceNames.pdfOci),
+      asset: copied.pdfOci,
+    });
+    const pdfDocker = await inspectDockerImageArchive({
+      archivePath: join(temporaryRoot, sourceNames.pdfDocker),
+      asset: copied.pdfDocker,
+      expectedRepoTag: pdfLoadedImage,
+    });
+    if (
+      pdfOci.configDigest !== pdfDocker.configDigest ||
+      pdfOci.diffIds.length !== pdfDocker.diffIds.length ||
+      pdfOci.diffIds.some((digest, index) => digest !== pdfDocker.diffIds[index])
+    ) {
+      throw new TypeError("PDF OCI and Docker source archive identities do not match");
+    }
+
+    const pdfQuality = await validatePdfBenchmarkEvidence({
+      report: JSON.parse(await readFile(join(temporaryRoot, sourceNames.pdfBenchmark), "utf8")),
+      gate: JSON.parse(await readFile(join(temporaryRoot, sourceNames.pdfReleaseGate), "utf8")),
+      benchmarkSchema: JSON.parse(
+        await readFile(join(temporaryRoot, sourceNames.pdfBenchmarkSchema), "utf8"),
+      ),
+      gateSchema: JSON.parse(
+        await readFile(join(temporaryRoot, sourceNames.pdfReleaseGateSchema), "utf8"),
+      ),
+      expectedEngineImageDigest: pdfDocker.configDigest,
+    });
 
     const stagingWeb = await verifyWebIdentity(
       join(temporaryRoot, sourceNames.stagingWeb),
@@ -289,18 +333,27 @@ export async function createBuiltProcessingCandidate({
       processingApiOrigin: identity.processingApiOrigin,
     });
     const payload = {
-      schema: "hereisit-processing-candidate@1",
-      version: 1,
+      schema: "hereisit-processing-candidate@2",
+      version: 2,
       state: "built",
       releaseId,
       gitSha,
       engine: { loadedImage, oci, docker },
+      pdfEngine: { loadedImage: pdfLoadedImage, oci: pdfOci, docker: pdfDocker },
+      pdfQuality,
       web: { staging: stagingWeb, production: productionWeb },
       security: { trivyDbDigest },
       providerUsage: { schemaSha256: providerUsageSchemaSha256 },
       ...financialInputs,
       releaseAssets: {
         engine: { oci: copied.oci, docker: copied.docker },
+        pdfEngine: { oci: copied.pdfOci, docker: copied.pdfDocker },
+        pdfQuality: {
+          benchmark: copied.pdfBenchmark,
+          benchmarkSchema: copied.pdfBenchmarkSchema,
+          releaseGate: copied.pdfReleaseGate,
+          releaseGateSchema: copied.pdfReleaseGateSchema,
+        },
         worker: copied.worker,
         releaseInputs: copied.releaseInputs,
         costModel: copied.costModel,
@@ -311,11 +364,13 @@ export async function createBuiltProcessingCandidate({
         security: {
           gates: {
             imageEngine: copied.imageEngineGate,
+            pdfEngine: copied.pdfEngineGate,
             applicationSupplyChain: copied.applicationSupplyChainGate,
             vulnerability: copied.vulnerabilityGate,
           },
           sboms: {
             engine: copied.sbomEngine,
+            pdfEngine: copied.sbomPdfEngine,
             webStaging: copied.sbomWebStaging,
             webProduction: copied.sbomWebProduction,
             worker: copied.sbomWorker,
@@ -323,6 +378,7 @@ export async function createBuiltProcessingCandidate({
           },
           vulnerabilityReports: {
             engine: copied.trivyEngine,
+            pdfEngine: copied.trivyPdfEngine,
             webStaging: copied.trivyWebStaging,
             webProduction: copied.trivyWebProduction,
             worker: copied.trivyWorker,

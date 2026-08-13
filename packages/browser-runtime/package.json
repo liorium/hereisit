@@ -9,6 +9,7 @@
     "./image-optimize": "./src/run-image-optimize-batch.ts",
     "./image-watermark": "./src/run-image-watermark-batch.ts",
     "./pdf": "./src/run-pdf-job.ts",
+    "./pdf-optimize-verification": "./src/run-pdf-optimize-verification.ts",
     "./pdf-inspection": "./src/run-pdf-inspection-job.ts",
     "./pdf-thumbnail": "./src/run-pdf-thumbnail-job.ts",
     "./pdf-compress-scanned": "./src/run-pdf-compress-scanned-job.ts",

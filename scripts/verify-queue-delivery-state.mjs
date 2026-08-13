@@ -54,7 +54,7 @@ function validateQueueIdentity(value, queueName) {
 
 export function verifyQueueDeliveryState({ document, expectedQueueId, queueName, expected }) {
   validateQueueName(queueName);
-  validateExpected(expected);
+  if (expected !== undefined) validateExpected(expected);
   if (typeof expectedQueueId !== "string" || !queueIdPattern.test(expectedQueueId)) {
     throw new TypeError("expected Queue ID is invalid");
   }
@@ -66,7 +66,7 @@ export function verifyQueueDeliveryState({ document, expectedQueueId, queueName,
     throw new TypeError("Queue delivery_paused state is missing");
   }
   const actual = settings.delivery_paused ? "paused" : "resumed";
-  if (actual !== expected)
+  if (expected !== undefined && actual !== expected)
     throw new Error(`Queue delivery state is ${actual}, expected ${expected}`);
   return { queue: queueName, state: actual, verified: true };
 }
@@ -128,7 +128,7 @@ export async function inspectQueueDeliveryState({
     throw new TypeError("Cloudflare account ID is invalid");
   }
   validateQueueName(queueName);
-  validateExpected(expected);
+  if (expected !== undefined) validateExpected(expected);
   if (
     typeof apiToken !== "string" ||
     apiToken.length < 1 ||

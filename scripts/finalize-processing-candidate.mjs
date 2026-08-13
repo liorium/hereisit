@@ -172,6 +172,20 @@ export async function finalizeProcessingCandidate({
     };
     const copiedOci = await copyBuilt(built.releaseAssets.engine.oci, "OCI asset");
     const copiedDocker = await copyBuilt(built.releaseAssets.engine.docker, "Docker asset");
+    const copiedPdfOci = await copyBuilt(built.releaseAssets.pdfEngine.oci, "PDF OCI asset");
+    const copiedPdfDocker = await copyBuilt(
+      built.releaseAssets.pdfEngine.docker,
+      "PDF Docker asset",
+    );
+    const copiedPdfQuality = {};
+    for (const [name, asset] of Object.entries(built.releaseAssets.pdfQuality)) {
+      copiedPdfQuality[name] = await copyBuilt(
+        asset,
+        `${name} PDF quality asset`,
+        "sha256",
+        maximumSecurityEvidenceBytes,
+      );
+    }
     const copiedWorker = await copyBuilt(built.releaseAssets.worker, "Worker asset");
     const copiedReleaseInputs = await copyBuilt(
       built.releaseAssets.releaseInputs,
@@ -216,6 +230,8 @@ export async function finalizeProcessingCandidate({
       releaseAssets: {
         report,
         engine: { oci: copiedOci, docker: copiedDocker },
+        pdfEngine: { oci: copiedPdfOci, docker: copiedPdfDocker },
+        pdfQuality: copiedPdfQuality,
         worker: copiedWorker,
         releaseInputs: copiedReleaseInputs,
         costModel: copiedCostModel,

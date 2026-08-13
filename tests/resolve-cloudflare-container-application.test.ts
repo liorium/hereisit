@@ -13,6 +13,7 @@ const input = {
   environment: "staging" as const,
   accountId,
   workerScriptName: "hereisit-processing-staging",
+  containerClassName: "ImageEngineContainer" as const,
   engineImage: image,
   observedAt: "2026-07-19T11:00:00.000Z",
 };
@@ -81,6 +82,7 @@ describe("Cloudflare Container application resolver", () => {
         environment: input.environment,
         accountId,
         workerScriptName: input.workerScriptName,
+        containerClassName: input.containerClassName,
         applications: [application({ image: previousImage })],
       }),
     ).toBe(applicationId);
@@ -123,5 +125,25 @@ describe("Cloudflare Container application resolver", () => {
     ["unexpected schema", [application({ owner: "unknown" })]],
   ])("rejects a %s application inventory", (_label, applications) => {
     expect(() => resolveContainerApplication({ ...input, applications })).toThrow();
+  });
+});
+
+it("selects the isolated PDF application and immutable PDF image", () => {
+  const pdfImage = `registry.cloudflare.com/${accountId}/hereisit-pdf-engine@sha256:${"e".repeat(64)}`;
+  const result = resolveContainerApplication({
+    ...input,
+    containerClassName: "PdfEngineContainer",
+    engineImage: pdfImage,
+    applications: [
+      application({
+        name: "hereisit-processing-staging-pdfenginecontainer",
+        image: pdfImage,
+      }),
+    ],
+  });
+
+  expect(result.application).toMatchObject({
+    name: "hereisit-processing-staging-pdfenginecontainer",
+    image: pdfImage,
   });
 });

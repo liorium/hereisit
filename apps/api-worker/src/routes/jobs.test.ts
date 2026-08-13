@@ -1,6 +1,12 @@
 import { imageOptimizeCreateResponseSchema } from "@hereisit/tool-contracts/image-optimize";
+import { pdfOptimizeCreateResponseSchema } from "@hereisit/tool-contracts/pdf-optimize";
 import { describe, expect, it, vi } from "vitest";
-import type { ReservationJob, ReserveAndCreateInput } from "../d1-job-repository";
+import type {
+  PdfReservationJob,
+  PdfReserveAndCreateInput,
+  ReservationJob,
+  ReserveAndCreateInput,
+} from "../d1-job-repository";
 import { routeRequestWithDependencies } from "../router";
 import { type CreateJobRouteRuntime, routeCreateJobRequest } from "./jobs";
 import type { PolicyRouteRuntime } from "./policy";
@@ -46,6 +52,18 @@ function createBody() {
       colorSpace: "srgb",
       minimumSavingsPercent: 1,
     },
+  } as const;
+}
+
+function pdfCreateBody() {
+  return {
+    contract: "tool-job@1",
+    toolContract: "pdf.optimize@1",
+    anonymousSessionId: "123e4567-e89b-42d3-a456-426614174000",
+    clientRequestId,
+    jobToken,
+    input: { byteLength: 1_000, mime: "application/pdf", pageCount: 3 },
+    spec: { version: 1, preset: "balanced" },
   } as const;
 }
 
@@ -105,6 +123,7 @@ function makeRuntime(overrides: Partial<CreateJobRouteRuntime> = {}): CreateJobR
       appOrigins: [new URL(allowedOrigin)],
       rolloutPercent: 100,
       maintainerSessionHashes: new Set<string>(),
+      pdfPublicAdmissionEnabled: false,
       accountDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
       anonymousDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
       networkDailyWeightedUnitLimit: Number.MAX_SAFE_INTEGER,
@@ -317,5 +336,153 @@ describe("POST /v1/jobs", () => {
       state: "queued",
     });
     expect(payload).not.toHaveProperty("upload");
+  });
+});
+
+describe("POST /v1/jobs for PDF", () => {
+  it("rejects a job-token-shaped value before PDF reservation", async () => {
+    const runtime = makeRuntime({
+      readJson: vi.fn(async () => ({
+        ...pdfCreateBody(),
+        anonymousSessionId: "a".repeat(43),
+      })),
+    });
+    const response = await routeCreateJobRequest(createRequest(), runtime);
+    expect(response.status).toBe(400);
+    expect(runtime.repository.reserveAndCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates one authenticated PDF reservation with the PDF resource class", async () => {
+    const repository = {
+      reserveAndCreate: vi.fn(async (input: PdfReserveAndCreateInput) => {
+        const job: PdfReservationJob = {
+          jobId: input.jobId,
+          status: "created",
+          contractId: "pdf.optimize@1",
+          specHash: input.specHash,
+          declaredBytes: input.request.input.byteLength,
+          declaredMime: "application/pdf",
+          declaredWidth: null,
+          declaredHeight: null,
+          declaredPageCount: input.request.input.pageCount,
+          inputKey: input.inputKey,
+          inputEtag: null,
+          uploadVersion: 0,
+          outputKey: input.outputKey,
+          reservedWeightedUnits: input.estimate.reservedWeightedUnits,
+          resourceClass: "pdf-standard-v1",
+          attempt: 1,
+          queueEpoch: input.queueEpoch,
+          queueGeneration: 1,
+          cancelRequestedAt: null,
+          uploadExpiresAt: input.uploadExpiresAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        };
+        return { kind: "created" as const, mode: "upload-required" as const, job };
+      }),
+    };
+    const runtime = makeRuntime({
+      repository: repository as never,
+      readJson: vi.fn(async () => pdfCreateBody()),
+      config: {
+        ...makeRuntime().config,
+        maintainerSessionHashes: new Set([
+          Array.from(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                new TextEncoder().encode("123e4567-e89b-42d3-a456-426614174000"),
+              ),
+            ),
+            (byte) => byte.toString(16).padStart(2, "0"),
+          ).join(""),
+        ]),
+      },
+    });
+
+    const response = await routeCreateJobRequest(createRequest(pdfCreateBody()), runtime);
+    expect(response.status).toBe(201);
+    expect(pdfOptimizeCreateResponseSchema.parse(await response.json())).toMatchObject({
+      mode: "upload-required",
+      upload: { contentType: "application/pdf", byteLength: 1_000 },
+    });
+    expect(repository.reserveAndCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ toolContract: "pdf.optimize@1" }),
+        estimate: expect.objectContaining({ resourceClass: "pdf-standard-v1" }),
+      }),
+    );
+    expect(runtime.logCreated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contractId: "pdf.optimize@1",
+        byteCount: 1_000,
+        pageCount: 3,
+        resourceClass: "pdf-standard-v1",
+      }),
+    );
+  });
+
+  it("creates a non-maintainer PDF reservation only when public admission is enabled", async () => {
+    const repository = {
+      reserveAndCreate: vi.fn(async (input: PdfReserveAndCreateInput) => ({
+        kind: "created" as const,
+        mode: "upload-required" as const,
+        job: {
+          jobId: input.jobId,
+          status: "created" as const,
+          contractId: "pdf.optimize@1" as const,
+          specHash: input.specHash,
+          declaredBytes: input.request.input.byteLength,
+          declaredMime: "application/pdf" as const,
+          declaredWidth: null,
+          declaredHeight: null,
+          declaredPageCount: input.request.input.pageCount,
+          inputKey: input.inputKey,
+          inputEtag: null,
+          uploadVersion: 0,
+          outputKey: input.outputKey,
+          reservedWeightedUnits: input.estimate.reservedWeightedUnits,
+          resourceClass: "pdf-standard-v1" as const,
+          attempt: 1,
+          queueEpoch: input.queueEpoch,
+          queueGeneration: 1,
+          cancelRequestedAt: null,
+          uploadExpiresAt: input.uploadExpiresAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+        },
+      })),
+    };
+    const runtime = makeRuntime({
+      repository: repository as never,
+      readJson: vi.fn(async () => pdfCreateBody()),
+      config: {
+        ...makeRuntime().config,
+        rolloutPercent: 100,
+        pdfPublicAdmissionEnabled: true,
+      },
+    });
+
+    const response = await routeCreateJobRequest(createRequest(pdfCreateBody()), runtime);
+    expect(response.status).toBe(201);
+    expect(repository.reserveAndCreate).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [0, 3],
+    [50 * 1024 * 1024 + 1, 3],
+    [1_000, 0],
+    [1_000, 101],
+  ])("rejects PDF byte/page bounds before D1 (%s bytes, %s pages)", async (byteLength, pageCount) => {
+    const runtime = makeRuntime({
+      readJson: vi.fn(async () => ({
+        ...pdfCreateBody(),
+        input: { byteLength, mime: "application/pdf", pageCount },
+      })),
+    });
+    const response = await routeCreateJobRequest(createRequest(), runtime);
+    expect(response.status).toBe(400);
+    expect(runtime.repository.reserveAndCreate).not.toHaveBeenCalled();
   });
 });

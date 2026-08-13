@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import type { ImageEngineJobStatus } from "./index";
 import {
+  anyEngineCreateJobRequestSchema,
   engineCreateJobRequestSchema,
   engineJobStatusSchema,
   imageContentClassSchema,
   imageJobMessageSchema,
+  serverEngineJobStatusSchema,
+  serverJobMessageSchema,
 } from "./index";
 
 const jobId = "018f47a2-65d4-7f31-a377-5afbb8f53f27";
@@ -628,5 +632,117 @@ describe("engine job status protocol", () => {
         },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("PDF engine contract branch", () => {
+  it("accepts a strict PDF create request without image fields", () => {
+    expect(
+      anyEngineCreateJobRequestSchema.safeParse({
+        protocol: 1,
+        jobId,
+        attempt: 1,
+        tool: "pdf.optimize",
+        toolVersion: 1,
+        spec: { version: 1, preset: "balanced" },
+        specHash,
+        input: {
+          byteLength: 1_000,
+          etag: "input-etag",
+          mimeHint: "application/pdf",
+          pageCount: 3,
+        },
+        resourceClass: "pdf-standard-v1",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a PDF terminal status and rejects image-only fields", () => {
+    const status = {
+      protocol: 1,
+      jobId,
+      state: "succeeded",
+      phase: "preparing-output",
+      fraction: 1,
+      sequence: 8,
+      result: {
+        kind: "download",
+        mime: "application/pdf",
+        sourceByteLength: 1_000,
+        byteLength: 990,
+        pageCount: 3,
+        profile: "structural",
+        engineBuildId: "qpdf-12.4.0",
+        warnings: ["SIGNATURES_INVALIDATED"],
+      },
+      measurements: {
+        processedInputBytes: 1_000,
+        cpuMs: 1000,
+        memoryByteMilliseconds: 512 * 1024 * 1024 * 1000,
+        peakMemoryBytes: 512 * 1024 * 1024,
+        testedCandidates: 1,
+        processingMs: 1100,
+      },
+      inspection: {
+        verifiedInputMime: "application/pdf",
+        verifiedPageCount: 3,
+        encrypted: false,
+      },
+    };
+
+    expect(serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status }).success).toBe(
+      true,
+    );
+    expect(
+      serverEngineJobStatusSchema.safeParse({
+        tool: "pdf.optimize",
+        status: { ...status, result: { ...status.result, width: 4000 } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires a matching tool discriminator around every server engine status", () => {
+    const pdfStatus = {
+      protocol: 1,
+      jobId,
+      state: "running",
+      phase: "optimizing",
+      fraction: 0.5,
+      sequence: 7,
+    };
+    const imageStatus = succeededStatus();
+
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status: pdfStatus }).success,
+    ).toBe(true);
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "image.optimize", status: imageStatus })
+        .success,
+    ).toBe(true);
+    expect(serverEngineJobStatusSchema.safeParse({ status: pdfStatus }).success).toBe(false);
+    expect(
+      serverEngineJobStatusSchema.safeParse({ tool: "pdf.optimize", status: imageStatus }).success,
+    ).toBe(false);
+  });
+
+  it("publishes only matching tagged engine status branches", () => {
+    type TaggedEngineStatus = ReturnType<typeof serverEngineJobStatusSchema.parse>;
+
+    // @ts-expect-error a PDF tag cannot contain an image status.
+    const mismatchedStatus: TaggedEngineStatus = {
+      tool: "pdf.optimize",
+      status: {} as ImageEngineJobStatus,
+    };
+    expect(mismatchedStatus).toBeDefined();
+  });
+
+  it("routes strict queue messages by the contract discriminator", () => {
+    expect(
+      serverJobMessageSchema.safeParse({
+        ...createMessage(),
+        contractId: "pdf.optimize@1",
+        resourceClass: "pdf-standard-v1",
+      }).success,
+    ).toBe(true);
   });
 });

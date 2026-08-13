@@ -544,7 +544,7 @@ export async function finalizeWorkerAdmissionFiles({
   return { attestation, batch: createWorkerAdmissionAttestationBatch(attestation) };
 }
 
-function validateWorkerVersionAttestation(value) {
+export function validateWorkerVersionAttestation(value) {
   const attestation = assertObject(value, "Worker version attestation");
   assertExactKeys(
     attestation,

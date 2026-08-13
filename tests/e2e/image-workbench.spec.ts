@@ -976,6 +976,9 @@ test("limits inspection to the first 20 files while counting invalid and overflo
     ).__hereisitInspectedNames = () => inspectedNames;
   });
   await page.goto("/image/compress");
+  await expect(page.getByTestId("image-workbench-status")).not.toHaveText(
+    "처리 방식을 확인하고 있어요.",
+  );
   await page.getByRole("button", { name: "이미지 선택" }).evaluate((picker) => {
     const transfer = new DataTransfer();
     for (let index = 0; index < 20; index += 1) {

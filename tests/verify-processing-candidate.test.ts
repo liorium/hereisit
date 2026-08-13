@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
+import { evaluatePdfEngineReleaseGate } from "../scripts/benchmark-pdf-engine.mjs";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
 import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import {
@@ -38,8 +39,22 @@ import {
 const releaseId = "2026-07-20.1";
 const gitSha = "a".repeat(40);
 const temporaryRoots: string[] = [];
-const securityScopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
-const securityKeys = ["engine", "webStaging", "webProduction", "worker", "lockfile"] as const;
+const securityScopes = [
+  "engine",
+  "pdf-engine",
+  "web-staging",
+  "web-production",
+  "worker",
+  "lockfile",
+] as const;
+const securityKeys = [
+  "engine",
+  "pdfEngine",
+  "webStaging",
+  "webProduction",
+  "worker",
+  "lockfile",
+] as const;
 type MutableSecurityGate = {
   artifactSha256: string;
   pnpmVersion: string;
@@ -162,6 +177,88 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   const dockerArchive = join(root, "image-engine-linux-amd64.docker.tar");
   await createDeterministicTreeArchive({ root: dockerTree, output: dockerArchive });
 
+  const pdfConfigBytes = Buffer.from(
+    canonicalJson({
+      architecture: "amd64",
+      os: "linux",
+      config: { Labels: { "app.hereisit.engine": "pdf" } },
+      rootfs: { type: "layers", diff_ids: [diffId] },
+    }),
+  );
+  const pdfConfigDigest = `sha256:${sha256Bytes(pdfConfigBytes)}`;
+  const pdfManifestBytes = Buffer.from(
+    canonicalJson({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: {
+        mediaType: "application/vnd.oci.image.config.v1+json",
+        digest: pdfConfigDigest,
+        size: pdfConfigBytes.byteLength,
+      },
+      layers: [
+        {
+          mediaType: distributionLayerMediaType,
+          digest: distributionLayerDigest,
+          size: distributionLayerBytes.byteLength,
+        },
+      ],
+    }),
+  );
+  const pdfManifestDigest = `sha256:${sha256Bytes(pdfManifestBytes)}`;
+  const pdfOciTree = join(build, "pdf-engine-oci");
+  await mkdir(join(pdfOciTree, "blobs", "sha256"), { recursive: true });
+  await writeFile(join(pdfOciTree, "oci-layout"), canonicalJson({ imageLayoutVersion: "1.0.0" }));
+  await writeFile(
+    join(pdfOciTree, "index.json"),
+    canonicalJson({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.index.v1+json",
+      manifests: [
+        {
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          digest: pdfManifestDigest,
+          size: pdfManifestBytes.byteLength,
+          platform: { os: "linux", architecture: "amd64" },
+        },
+      ],
+    }),
+  );
+  await writeFile(join(pdfOciTree, "blobs", "sha256", pdfConfigDigest.slice(7)), pdfConfigBytes);
+  await writeFile(
+    join(pdfOciTree, "blobs", "sha256", pdfManifestDigest.slice(7)),
+    pdfManifestBytes,
+  );
+  await writeFile(
+    join(pdfOciTree, "blobs", "sha256", distributionLayerDigest.slice(7)),
+    distributionLayerBytes,
+  );
+  const pdfOciArchive = join(root, "pdf-engine-linux-amd64.oci.tar");
+  await createDeterministicTreeArchive({ root: pdfOciTree, output: pdfOciArchive });
+
+  const pdfDockerTree = join(build, "pdf-engine-docker");
+  await mkdir(join(pdfDockerTree, "layer"), { recursive: true });
+  await writeFile(join(pdfDockerTree, "config.json"), pdfConfigBytes);
+  await writeFile(join(pdfDockerTree, "layer", "layer.tar"), layerBytes);
+  await writeFile(
+    join(pdfDockerTree, "manifest.json"),
+    canonicalJson([
+      {
+        Config: "config.json",
+        RepoTags: [`hereisit-pdf-engine:${gitSha}`],
+        Layers: ["layer/layer.tar"],
+      },
+    ]),
+  );
+  const pdfDockerArchive = join(root, "pdf-engine-linux-amd64.docker.tar");
+  await createDeterministicTreeArchive({ root: pdfDockerTree, output: pdfDockerArchive });
+
+  const pdfBenchmark = JSON.parse(
+    await readFile("docs/deployment/pdf-engine-benchmark.json", "utf8"),
+  );
+  pdfBenchmark.identity.engineImageId = pdfConfigDigest;
+  pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
+  const pdfReleaseGate = evaluatePdfEngineReleaseGate(pdfBenchmark);
+
   const fileBytes: Record<string, Buffer> = {
     "live-cost-model.json": Buffer.from(
       canonicalJson(
@@ -207,12 +304,23 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": await readFile(ociArchive),
     "image-engine-linux-amd64.docker.tar": await readFile(dockerArchive),
+    "pdf-engine-linux-amd64.oci.tar": await readFile(pdfOciArchive),
+    "pdf-engine-linux-amd64.docker.tar": await readFile(pdfDockerArchive),
+    "pdf-engine-benchmark.json": Buffer.from(canonicalJson(pdfBenchmark)),
+    "pdf-engine-benchmark.schema.json": await readFile(
+      "docs/deployment/pdf-engine-benchmark.schema.json",
+    ),
+    "pdf-engine-release-gate.json": Buffer.from(canonicalJson(pdfReleaseGate)),
+    "pdf-engine-release-gate.schema.json": await readFile(
+      "docs/deployment/pdf-engine-release-gate.schema.json",
+    ),
     "api-worker.mjs": Buffer.from("export default {};\n"),
     [`evidence-v1--${releaseId}--processing-evidence.json`]: Buffer.from('{"signed":true}\n'),
     [`evidence-v1--${releaseId}--processing-evidence.sig`]: Buffer.from("signature\n"),
   };
   const artifactHashes = {
     engine: configDigest.slice(7),
+    "pdf-engine": pdfConfigDigest.slice(7),
     "web-staging": staging.archiveSha256,
     "web-production": production.archiveSha256,
     worker: sha256Bytes(fileBytes["api-worker.mjs"]),
@@ -243,6 +351,18 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
       policySha256: "2".repeat(64),
       exceptionsSha256: "3".repeat(64),
       baseImagesSha256: "4".repeat(64),
+    }),
+  );
+  fileBytes["security-pdf-engine-license-gate.json"] = Buffer.from(
+    canonicalJson({
+      schema: "hereisit-pdf-engine-license-gate@1",
+      passed: true,
+      qpdfVersion: "12.4.0",
+      sourceSha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+      sourceLockSha256: "1".repeat(64),
+      policySha256: "2".repeat(64),
+      licenseSha256: "3".repeat(64),
+      noticeSha256: "4".repeat(64),
     }),
   );
   fileBytes["security-application-supply-chain-gate.json"] = Buffer.from(
@@ -311,8 +431,8 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   const stagingIdentity = webIdentity("staging", staging);
   const productionIdentity = webIdentity("production", production);
   const payload = {
-    schema: "hereisit-processing-candidate@1",
-    version: 1,
+    schema: "hereisit-processing-candidate@2",
+    version: 2,
     state: "finalized",
     releaseId,
     gitSha,
@@ -328,6 +448,24 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
         diffIds: [diffId],
       },
     },
+    pdfEngine: {
+      loadedImage: `hereisit-pdf-engine:${gitSha}`,
+      oci: {
+        configDigest: pdfConfigDigest,
+        distributionLayerDigests: [distributionLayerDigest],
+        diffIds: [diffId],
+      },
+      docker: {
+        configDigest: pdfConfigDigest,
+        diffIds: [diffId],
+      },
+    },
+    pdfQuality: {
+      benchmarkSha256: pdfReleaseGate.benchmarkSha256,
+      releaseGateSha256: sha256Bytes(Buffer.from(canonicalJson(pdfReleaseGate))),
+      visualProfilesMeasured: 0,
+      publicAdmissionReady: false,
+    },
     web: { staging: stagingIdentity, production: productionIdentity },
     security: { trivyDbDigest: `sha256:${"d".repeat(64)}` },
     providerUsage: { schemaSha256: "e".repeat(64) },
@@ -338,6 +476,16 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
       engine: {
         oci: artifact("image-engine-linux-amd64.oci.tar"),
         docker: artifact("image-engine-linux-amd64.docker.tar"),
+      },
+      pdfEngine: {
+        oci: artifact("pdf-engine-linux-amd64.oci.tar"),
+        docker: artifact("pdf-engine-linux-amd64.docker.tar"),
+      },
+      pdfQuality: {
+        benchmark: artifact("pdf-engine-benchmark.json"),
+        benchmarkSchema: artifact("pdf-engine-benchmark.schema.json"),
+        releaseGate: artifact("pdf-engine-release-gate.json"),
+        releaseGateSchema: artifact("pdf-engine-release-gate.schema.json"),
       },
       worker: artifact("api-worker.mjs"),
       releaseInputs: artifact("processing-release-inputs.json"),
@@ -357,6 +505,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
       security: {
         gates: {
           imageEngine: artifact("security-image-engine-license-gate.json"),
+          pdfEngine: artifact("security-pdf-engine-license-gate.json"),
           applicationSupplyChain: artifact("security-application-supply-chain-gate.json"),
           vulnerability: artifact("security-vulnerability-gate.json"),
         },
@@ -508,7 +657,7 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 23 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 32 });
   });
 
   it("finalizes through an exact content-free CLI boundary", async () => {
@@ -618,7 +767,7 @@ describe("processing candidate verifier", () => {
         requiredState: "built",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "built", assetCount: 20 });
+    ).resolves.toMatchObject({ state: "built", assetCount: 29 });
     await expect(lstat(join(outputRoot, "processing-release-report.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -885,7 +1034,7 @@ describe("processing candidate verifier", () => {
       gitSha,
       manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
       candidateVerificationSha256: fixture.candidate.verificationSha256,
-      assetCount: 23,
+      assetCount: 32,
       web: {
         staging: expect.objectContaining({ treeSha256: fixture.candidate.web.staging.treeSha256 }),
         production: expect.objectContaining({
@@ -908,7 +1057,7 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 23 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 32 });
   });
 
   it.each([
@@ -1250,7 +1399,7 @@ describe("processing candidate verifier", () => {
     const summary = JSON.parse(writes[0]);
     expect(summary).toMatchObject({
       state: "finalized",
-      assetCount: 23,
+      assetCount: 32,
       manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
       candidateVerificationSha256: fixture.candidate.verificationSha256,
     });

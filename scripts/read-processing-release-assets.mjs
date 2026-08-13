@@ -32,6 +32,7 @@ const webAssetFields = [
 ];
 const securityScopes = Object.freeze([
   ["engine", "engine"],
+  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -39,6 +40,7 @@ const securityScopes = Object.freeze([
 ]);
 const securityGates = Object.freeze([
   ["imageEngine", "security-image-engine-license-gate.json"],
+  ["pdfEngine", "security-pdf-engine-license-gate.json"],
   ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
   ["vulnerability", "security-vulnerability-gate.json"],
 ]);
@@ -96,25 +98,27 @@ function validateAsset(
   return { asset, assetId, sizeBytes };
 }
 
-function validateSecurityAssets(value, context) {
+function validateSecurityAssets(value, context, dual) {
   const security = assertObject(value, "security release assets");
   assertExactKeys(security, ["gates", "sboms", "vulnerabilityReports"], "security release assets");
   const gates = assertObject(security.gates, "security gate release assets");
   assertExactKeys(
     gates,
-    securityGates.map(([key]) => key),
+    securityGates.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
     "security gate release assets",
   );
-  const identities = securityGates.map(([key, path]) =>
-    validateAsset(
-      gates[key],
-      `${key} security gate asset`,
-      context,
-      `candidate-v1--${context.releaseId}--${path}`,
-      genericAssetFields,
-      MAXIMUM_SECURITY_GATE_BYTES,
-    ),
-  );
+  const identities = securityGates
+    .filter(([key]) => dual || key !== "pdfEngine")
+    .map(([key, path]) =>
+      validateAsset(
+        gates[key],
+        `${key} security gate asset`,
+        context,
+        `candidate-v1--${context.releaseId}--${path}`,
+        genericAssetFields,
+        MAXIMUM_SECURITY_GATE_BYTES,
+      ),
+    );
   for (const [groupName, prefix, suffix] of [
     ["sboms", "security-sbom-", ".cdx.json"],
     ["vulnerabilityReports", "security-trivy-", ".json"],
@@ -122,10 +126,10 @@ function validateSecurityAssets(value, context) {
     const group = assertObject(security[groupName], `security ${groupName} release assets`);
     assertExactKeys(
       group,
-      securityScopes.map(([key]) => key),
+      securityScopes.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
       `security ${groupName} release assets`,
     );
-    for (const [key, scope] of securityScopes) {
+    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
       identities.push(
         validateAsset(
           group[key],
@@ -175,6 +179,9 @@ function validateWebAsset(value, environment, context) {
 
 export function validateProcessingReleaseAssets(value) {
   const manifest = assertObject(value, "processing release asset manifest");
+  const dual = manifest.schema === "hereisit-processing-release-assets@2" && manifest.version === 2;
+  const legacy =
+    manifest.schema === "hereisit-processing-release-assets@1" && manifest.version === 1;
   assertExactKeys(
     manifest,
     [
@@ -186,6 +193,7 @@ export function validateProcessingReleaseAssets(value) {
       "candidate",
       "report",
       "engine",
+      ...(dual ? ["pdfEngine", "pdfQuality"] : []),
       "worker",
       "releaseInputs",
       "costModel",
@@ -196,7 +204,7 @@ export function validateProcessingReleaseAssets(value) {
     ],
     "processing release asset manifest",
   );
-  if (manifest.schema !== "hereisit-processing-release-assets@1" || manifest.version !== 1) {
+  if (!dual && !legacy) {
     throw new TypeError("processing release asset schema is invalid");
   }
   const apiOrigin = assertExactHttpsOrigin(manifest.apiOrigin, "GitHub API origin").origin;
@@ -245,6 +253,48 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `${prefix}image-engine-linux-amd64.docker.tar`,
   );
+  const pdfQualityIdentities = [];
+  let pdfEngineOci;
+  let pdfEngineDocker;
+  if (dual) {
+    const pdfEngine = assertObject(manifest.pdfEngine, "PDF engine release assets");
+    assertExactKeys(pdfEngine, ["oci", "docker"], "PDF engine release assets");
+    pdfEngineOci = validateAsset(
+      pdfEngine.oci,
+      "PDF engine OCI asset",
+      context,
+      `${prefix}pdf-engine-linux-amd64.oci.tar`,
+    );
+    pdfEngineDocker = validateAsset(
+      pdfEngine.docker,
+      "PDF engine Docker asset",
+      context,
+      `${prefix}pdf-engine-linux-amd64.docker.tar`,
+    );
+    const pdfQuality = assertObject(manifest.pdfQuality, "PDF quality release assets");
+    assertExactKeys(
+      pdfQuality,
+      ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
+      "PDF quality release assets",
+    );
+    for (const [key, path, maximumBytes] of [
+      ["benchmark", "pdf-engine-benchmark.json", MAXIMUM_SECURITY_EVIDENCE_BYTES],
+      ["benchmarkSchema", "pdf-engine-benchmark.schema.json", MAXIMUM_SECURITY_GATE_BYTES],
+      ["releaseGate", "pdf-engine-release-gate.json", MAXIMUM_SECURITY_GATE_BYTES],
+      ["releaseGateSchema", "pdf-engine-release-gate.schema.json", MAXIMUM_SECURITY_GATE_BYTES],
+    ]) {
+      pdfQualityIdentities.push(
+        validateAsset(
+          pdfQuality[key],
+          `PDF ${key} asset`,
+          context,
+          `${prefix}${path}`,
+          genericAssetFields,
+          maximumBytes,
+        ),
+      );
+    }
+  }
   const worker = validateAsset(
     manifest.worker,
     "Worker module asset",
@@ -285,13 +335,15 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `evidence-v1--${releaseId}--processing-evidence.sig`,
   );
-  const security = validateSecurityAssets(manifest.security, context);
+  const security = validateSecurityAssets(manifest.security, context, dual);
 
   const identities = [
     candidate,
     report,
     engineOci,
     engineDocker,
+    ...(dual ? [pdfEngineOci, pdfEngineDocker] : []),
+    ...pdfQualityIdentities,
     worker,
     releaseInputs,
     costModel,
@@ -339,6 +391,7 @@ async function readBoundedRegularFile(path, maximumBytes, label) {
 }
 
 async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
+  const dual = manifest.schema === "hereisit-processing-release-assets@2";
   if (typeof candidateRoot !== "string" || candidateRoot.length === 0) {
     throw new TypeError("candidate root is required");
   }
@@ -401,6 +454,17 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   assertAssetMatch(report, manifest.report, "release report");
   assertAssetMatch(engineOci, manifest.engine.oci, "engine OCI");
   assertAssetMatch(engineDocker, manifest.engine.docker, "engine Docker");
+  if (dual) {
+    assertAssetMatch(releaseAssets.pdfEngine.oci, manifest.pdfEngine.oci, "PDF engine OCI");
+    assertAssetMatch(
+      releaseAssets.pdfEngine.docker,
+      manifest.pdfEngine.docker,
+      "PDF engine Docker",
+    );
+    for (const key of ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"]) {
+      assertAssetMatch(releaseAssets.pdfQuality[key], manifest.pdfQuality[key], `PDF ${key}`);
+    }
+  }
   assertAssetMatch(worker, manifest.worker, "Worker");
   assertAssetMatch(releaseInputs, manifest.releaseInputs, "processing release inputs");
   assertAssetMatch(costModel, manifest.costModel, "live cost model");
@@ -416,11 +480,11 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   }
   assertAssetMatch(evidenceBundle, manifest.evidence.bundle, "release evidence bundle");
   assertAssetMatch(evidenceSignature, manifest.evidence.signature, "release evidence signature");
-  for (const [key] of securityGates) {
+  for (const [key] of securityGates.filter(([key]) => dual || key !== "pdfEngine")) {
     assertAssetMatch(candidateSecurity.gates[key], manifest.security.gates[key], `${key} gate`);
   }
   for (const groupName of ["sboms", "vulnerabilityReports"]) {
-    for (const [key, scope] of securityScopes) {
+    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
       assertAssetMatch(
         candidateSecurity[groupName][key],
         manifest.security[groupName][key],
@@ -444,6 +508,18 @@ const allowedFields = new Map([
     genericAssetFields.map((field) => [
       `engine.${format}.${field}`,
       (manifest) => manifest.engine[format][field],
+    ]),
+  ),
+  ...["oci", "docker"].flatMap((format) =>
+    genericAssetFields.map((field) => [
+      `pdfEngine.${format}.${field}`,
+      (manifest) => manifest.pdfEngine[format][field],
+    ]),
+  ),
+  ...["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"].flatMap((key) =>
+    genericAssetFields.map((field) => [
+      `pdfQuality.${key}.${field}`,
+      (manifest) => manifest.pdfQuality[key][field],
     ]),
   ),
   ...["staging", "production"].flatMap((environment) =>

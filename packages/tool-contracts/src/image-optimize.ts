@@ -1,11 +1,11 @@
 import { z } from "zod";
-import type { ToolErrorPayload, WorkerFileInput } from "./index";
+import type { ToolErrorPayload, WorkerFileInput } from "./index.ts";
 import {
   createToolJobCreateResponseSchema,
   createToolJobStatusEnvelopeSchema,
   createToolJobUploadDescriptorSchema,
   TOOL_JOB_CONTRACT_ID,
-} from "./tool-job";
+} from "./tool-job.ts";
 
 export const IMAGE_OPTIMIZE_CONTRACT_ID = "image.optimize@1" as const;
 export const IMAGE_OPTIMIZE_MAX_FILE_BYTES = 30 * 1024 * 1024;

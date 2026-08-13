@@ -1,15 +1,16 @@
-import type { ImageOptimizeMime } from "@hereisit/tool-contracts/image-optimize";
 import type { ToolJobErrorCode } from "@hereisit/tool-contracts/tool-job";
 import { hashJobToken, hashNetworkBuckets, verifyJobToken } from "../auth";
 import type {
   BeginUploadResult,
   CommitStoredInputResult,
   JobRepository,
+  PdfBeginUploadResult,
   PreEngineFailureInput,
   SettlePreEngineFailureResult,
 } from "../d1-job-repository";
 import type {
   ArtifactDeletionAuthorization,
+  ArtifactMime,
   ArtifactUploadErrorCode,
   InputArtifactObjectKey,
   StoreExactInputArtifactResult,
@@ -22,16 +23,21 @@ const CANONICAL_INPUT_KEY_PATTERN = new RegExp(
 );
 const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 
-type UploadJob = Extract<BeginUploadResult, { kind: "ready" }>;
+type UploadJob = Extract<BeginUploadResult | PdfBeginUploadResult, { kind: "ready" }>;
 
-export type UploadRouteRepository = Pick<
-  JobRepository,
-  | "loadExpectedTokenHash"
-  | "beginUpload"
-  | "commitStoredInput"
-  | "settlePreEngineFailure"
-  | "openInvariantCircuit"
->;
+export interface UploadRouteRepository
+  extends Pick<
+    JobRepository,
+    | "loadExpectedTokenHash"
+    | "commitStoredInput"
+    | "settlePreEngineFailure"
+    | "openInvariantCircuit"
+  > {
+  beginUpload(input: {
+    jobId: string;
+    now: number;
+  }): Promise<BeginUploadResult | PdfBeginUploadResult>;
+}
 
 export interface UploadRouteRuntime {
   readonly config: { readonly appOrigins: readonly URL[] };
@@ -43,9 +49,10 @@ export interface UploadRouteRuntime {
     readonly source: ReadableStream<Uint8Array>;
     readonly key: string;
     readonly byteLength: number;
-    readonly mime: ImageOptimizeMime;
+    readonly mime: ArtifactMime;
     readonly uploadVersion: number;
     readonly deadlineAt: number;
+    readonly expectedSha256?: string;
   }) => Promise<StoreExactInputArtifactResult>;
   readonly deleteInput: (authorization: ArtifactDeletionAuthorization) => Promise<void>;
   readonly dispatchOutbox: (jobId: string, now: number) => Promise<boolean>;
@@ -144,9 +151,13 @@ function exactUploadHeadersMatch(
   if (request.headers.has("transfer-encoding")) {
     return false;
   }
+  const digest = request.headers.get("digest");
   return (
     request.headers.get("content-type") === job.declaredMime &&
-    parseContentLength(request.headers.get("content-length")) === job.declaredBytes
+    parseContentLength(request.headers.get("content-length")) === job.declaredBytes &&
+    (job.declaredMime === "application/pdf"
+      ? digest !== null && /^sha-256=[A-Za-z0-9+/]{43}=$/.test(digest)
+      : digest === null)
   );
 }
 
@@ -385,7 +396,7 @@ export async function routeUploadRequest(
     return errorResponse(401, "INVALID_REQUEST", "작업 인증 정보가 올바르지 않습니다.", false);
   }
 
-  let begin: BeginUploadResult;
+  let begin: BeginUploadResult | PdfBeginUploadResult;
   try {
     begin = await runtime.repository.beginUpload({ jobId, now: startedAt });
   } catch {
@@ -427,6 +438,7 @@ export async function routeUploadRequest(
 
   let stored: StoreExactInputArtifactResult;
   try {
+    const expectedSha256 = request.headers.get("digest");
     stored = await runtime.storeInput({
       source: request.body,
       key: job.inputKey,
@@ -434,6 +446,7 @@ export async function routeUploadRequest(
       mime: job.declaredMime,
       uploadVersion: job.uploadVersion,
       deadlineAt: job.uploadExpiresAt,
+      ...(expectedSha256 === null ? {} : { expectedSha256 }),
     });
   } catch (error) {
     const code = classifyArtifactFailure(error);

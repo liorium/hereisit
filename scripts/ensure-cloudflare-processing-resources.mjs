@@ -51,6 +51,8 @@ function validateConfig(value) {
     usageAnalyticsDatasetName: `hereisit_processing_usage_${suffix}`,
     queueName: `hereisit-image-jobs-${suffix}`,
     dlqName: `hereisit-image-jobs-dlq-${suffix}`,
+    pdfQueueName: `hereisit-pdf-jobs-${suffix}`,
+    pdfDlqName: `hereisit-pdf-jobs-dlq-${suffix}`,
   };
   for (const [key, name] of Object.entries(expected)) {
     if (config[key] !== name) throw new TypeError(`${key} does not match ${suffix}`);
@@ -152,7 +154,7 @@ export function planProcessingResources({ config: configValue, inventory: invent
     else validateR2(bucket, config, lifecycleDays);
   }
 
-  for (const name of [config.dlqName, config.queueName]) {
+  for (const name of [config.dlqName, config.queueName, config.pdfDlqName, config.pdfQueueName]) {
     const queue = exactNamed(inventory.queues, name, "Queue");
     if (queue === null) {
       actions.push({ type: "create-queue", name, deliveryPaused: true });
@@ -252,8 +254,10 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
   const d1 = exactNamed(inventory.d1, config.databaseName, "D1");
   const jobsBucket = exactNamed(inventory.r2, config.bucketName, "R2");
   const usageBucket = exactNamed(inventory.r2, config.usageLogBucketName, "R2");
-  const primaryQueue = exactNamed(inventory.queues, config.queueName, "Queue");
-  const deadLetterQueue = exactNamed(inventory.queues, config.dlqName, "Queue");
+  const imagePrimaryQueue = exactNamed(inventory.queues, config.queueName, "Queue");
+  const imageDeadLetterQueue = exactNamed(inventory.queues, config.dlqName, "Queue");
+  const pdfPrimaryQueue = exactNamed(inventory.queues, config.pdfQueueName, "Queue");
+  const pdfDeadLetterQueue = exactNamed(inventory.queues, config.pdfDlqName, "Queue");
   const logpush = inventory.logpush.find(
     (entry) =>
       entry.dataset === "workers_trace_events" &&
@@ -263,8 +267,10 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
     d1 === null ||
     jobsBucket === null ||
     usageBucket === null ||
-    primaryQueue === null ||
-    deadLetterQueue === null ||
+    imagePrimaryQueue === null ||
+    imageDeadLetterQueue === null ||
+    pdfPrimaryQueue === null ||
+    pdfDeadLetterQueue === null ||
     logpush === undefined
   ) {
     throw new Error("resource inventory is incomplete after convergence");
@@ -282,8 +288,26 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
       usage: { name: usageBucket.name, lifecycleDays: usageBucket.lifecycleDays, private: true },
     },
     queues: {
-      primary: { id: primaryQueue.id, name: primaryQueue.name, deliveryPaused: true },
-      dlq: { id: deadLetterQueue.id, name: deadLetterQueue.name, deliveryPaused: true },
+      image: {
+        primary: {
+          id: imagePrimaryQueue.id,
+          name: imagePrimaryQueue.name,
+          deliveryPaused: true,
+        },
+        dlq: {
+          id: imageDeadLetterQueue.id,
+          name: imageDeadLetterQueue.name,
+          deliveryPaused: true,
+        },
+      },
+      pdf: {
+        primary: { id: pdfPrimaryQueue.id, name: pdfPrimaryQueue.name, deliveryPaused: true },
+        dlq: {
+          id: pdfDeadLetterQueue.id,
+          name: pdfDeadLetterQueue.name,
+          deliveryPaused: true,
+        },
+      },
     },
     analytics: { datasetName: config.usageAnalyticsDatasetName, state: "binding-deferred" },
     logpush: {
@@ -325,6 +349,8 @@ export async function runProcessingResourceProvisioner(
     "database-name",
     "queue-name",
     "dlq-name",
+    "pdf-queue-name",
+    "pdf-dlq-name",
     "output",
   ]);
   if (Object.keys(args).some((key) => !keys.has(key))) {
@@ -342,6 +368,8 @@ export async function runProcessingResourceProvisioner(
     databaseName: requiredArgument(args, "database-name"),
     queueName: requiredArgument(args, "queue-name"),
     dlqName: requiredArgument(args, "dlq-name"),
+    pdfQueueName: requiredArgument(args, "pdf-queue-name"),
+    pdfDlqName: requiredArgument(args, "pdf-dlq-name"),
   });
   const api = createCloudflareProcessingResourceApi({
     config,

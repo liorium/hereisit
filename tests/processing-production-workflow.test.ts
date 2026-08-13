@@ -70,23 +70,31 @@ describe("processing production workflow", () => {
     const bootstrap = workflow.indexOf(".artifacts/runtime/bootstrap-deploy.ndjson");
     const cleanup = workflow.indexOf("Restore the D1-attested Worker after failed canary mutation");
 
-    expect(attested).toBeGreaterThanOrEqual(0);
-    expect(reconcile).toBeGreaterThan(attested);
+    expect(strictResolution).toBeGreaterThanOrEqual(0);
+    expect(attested).toBeGreaterThan(strictResolution);
+    expect(arm).toBeGreaterThan(attested);
+    expect(reconcile).toBeGreaterThan(arm);
     expect(deploymentSnapshot).toBeGreaterThan(reconcile);
-    expect(strictResolution).toBeGreaterThan(deploymentSnapshot);
-    expect(arm).toBeGreaterThan(strictResolution);
-    expect(bootstrap).toBeGreaterThan(arm);
+    expect(bootstrap).toBeGreaterThan(deploymentSnapshot);
     expect(cleanup).toBeGreaterThan(bootstrap);
     expect(workflow).toContain(
       "if: always() && steps.worker-mutation.outputs.attempted == 'true' && (failure() || cancelled())",
     );
-    expect(workflow).toContain(
-      'RESTORE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs',
-    );
+    expect(workflow).toContain('RESTORE_VERSION_ID="$PREVIOUS_ACTIVE_VERSION_ID"');
     expect(workflow).toContain('versions deploy "$RESTORE_VERSION_ID@100%"');
     expect(workflow).toContain(
       'verifyActiveWorkerDeployment(deployment, process.argv[2], "restored Worker")',
     );
+    expect(workflow).toContain("CLOUDFLARE_CLEANUP_API_TOKEN");
+    expect(workflow).toContain("CLOUDFLARE_D1_CLEANUP_API_TOKEN");
+    expect(workflow).toContain("prior-worker-version.json");
+    expect(workflow).toContain("prior-admission-state.json");
+    expect(workflow).toContain("prior-queue-states.json");
+    expect(workflow).toContain('--engine-image "$PRIOR_IMAGE"');
+    expect(workflow).toContain('--engine-image "$PRIOR_PDF_IMAGE"');
+    for (const key of ["image-primary", "image-dlq", "pdf-primary", "pdf-dlq"]) {
+      expect(workflow).toContain(`restore_queue ${key}`);
+    }
   });
 
   it("keeps production isolated and admits only the maintainer canary", () => {
@@ -132,8 +140,9 @@ describe("processing production workflow", () => {
     expect(workflow).toContain('queues resume-delivery "$QUEUE_NAME"');
     expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
     expect(workflow).toContain('queues pause-delivery "$QUEUE_NAME"');
-    expect(workflow).toContain("if: failure() && steps.resume-attempt.outputs.attempted == 'true'");
-    expect(workflow).toContain('NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN"');
+    expect(workflow).toContain("(failure() || cancelled())");
+    expect(workflow).toContain("web-production.tar");
+    expect(workflow).not.toContain('NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN"');
     expect(workflow).toContain("PRODUCTION_API_ORIGIN: https://api.hereisit.app");
     expect(workflow.match(/PRODUCTION_PAGES_ORIGIN: https:\/\/hereisit\.app/g)).toHaveLength(2);
     expect(workflow).toContain("LEGACY_PRODUCTION_PAGES_ORIGIN: https://hereisit.pages.dev");
@@ -202,11 +211,22 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/source-sha.txt",
       ".artifacts/deployment/staging-run-id.txt",
       ".artifacts/deployment/cloudflare-image-digest.txt",
+      ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
+      ".artifacts/deployment/pages-deployment-id.txt",
       ".artifacts/deployment/canary-smoke.json",
+      ".artifacts/deployment/pdf-canary-smoke.json",
+      ".artifacts/deployment/pdf-deletion-receipt.json",
+      ".artifacts/deployment/pdf-cost-receipt.json",
+      ".artifacts/deployment/pdf-rollback-receipt.json",
+      ".artifacts/deployment/pdf-public-admission.json",
+      ".artifacts/deployment/processing-deployment-report.json",
+      ".artifacts/deployment/processing-deployment-report.sig",
+      ".artifacts/deployment/processing-deployment-report-verification.json",
       ".artifacts/deployment/resources-production.json",
+      ".artifacts/deployment/authority/**",
     ]);
   });
 

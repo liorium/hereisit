@@ -1,4 +1,4 @@
-import type { EngineCreateJobRequest } from "@hereisit/server-contracts";
+import type { EngineCreateJobRequest, EngineCreatePdfJobRequest } from "@hereisit/server-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@cloudflare/containers", () => ({
@@ -9,9 +9,12 @@ vi.mock("@cloudflare/containers", () => ({
 import {
   createEngineClientFromStub,
   createImageEngineEnvironment,
+  createPdfEngineClientFromStub,
+  createPdfEngineEnvironment,
   EngineCrashError,
   EngineProtocolError,
   ImageEngineContainer,
+  PdfEngineContainer,
 } from "./container-client";
 
 const jobId = "550e8400-e29b-41d4-a716-446655440000";
@@ -35,6 +38,23 @@ const request = {
   input: { byteLength: 3, etag: "etag-1", mimeHint: "image/png" },
   resourceClass: "image-standard-v1",
 } satisfies EngineCreateJobRequest;
+
+const pdfRequest = {
+  protocol: 1,
+  jobId,
+  attempt: 1,
+  tool: "pdf.optimize",
+  toolVersion: 1,
+  spec: { version: 1, preset: "balanced" },
+  specHash: "b".repeat(64),
+  input: {
+    byteLength: 1_000,
+    etag: "etag-pdf",
+    mimeHint: "application/pdf",
+    pageCount: 3,
+  },
+  resourceClass: "pdf-standard-v1",
+} satisfies EngineCreatePdfJobRequest;
 
 describe("fixed-slot engine client", () => {
   it("passes immutable build identities into every Cloudflare Container start", () => {
@@ -114,5 +134,53 @@ describe("fixed-slot engine client", () => {
     const error = await client.create(request).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EngineCrashError);
     expect(String(error)).not.toContain(secret);
+  });
+});
+
+describe("fixed-slot PDF engine client", () => {
+  it("uses a distinct immutable image identity and fixed environment", () => {
+    const digest = "e".repeat(64);
+    const image = `registry.cloudflare.com/${"a".repeat(32)}/hereisit-pdf-engine@sha256:${digest}`;
+    const container = new PdfEngineContainer(
+      {} as never,
+      { PDF_ENGINE_IMAGE_DIGEST: image } as never,
+    );
+    expect(container.envVars).toEqual({
+      ENGINE_BUILD_ID: `sha256:${digest}`,
+      QPDF_BUILD_ID: "qpdf-12.4.0",
+    });
+    expect(createPdfEngineEnvironment("local-dockerfile").ENGINE_BUILD_ID).toBe("local-dockerfile");
+    expect(() => createPdfEngineEnvironment("registry.example/pdf:latest")).toThrow(/identity/);
+    expect(() =>
+      createPdfEngineEnvironment(
+        `registry.cloudflare.com/${"a".repeat(32)}/hereisit-image-engine@sha256:${digest}`,
+      ),
+    ).toThrow(/identity/);
+  });
+
+  it("accepts only strict PDF requests and PDF status payloads", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(`/v1/jobs/${jobId}`)) {
+        return Response.json({
+          protocol: 1,
+          jobId,
+          state: "running",
+          phase: "optimizing",
+          fraction: 0.5,
+          sequence: 1,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    const client = createPdfEngineClientFromStub({
+      getState: vi.fn(async () => ({ status: "stopped", lastChange: 0 })),
+      fetch,
+    });
+    await expect(client.create(pdfRequest)).resolves.toMatchObject({ coldStart: true });
+    await expect(client.status(jobId)).resolves.toMatchObject({
+      state: "running",
+      phase: "optimizing",
+    });
+    await expect(client.create(request as never)).rejects.toBeInstanceOf(Error);
   });
 });

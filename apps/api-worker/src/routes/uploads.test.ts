@@ -16,6 +16,7 @@ const previousSecret = Buffer.from(Array.from({ length: 32 }, (_, index) => 255 
   "base64url",
 );
 const inputKey = "inputs/11111111-1111-4111-8111-111111111111";
+const pdfDigest = "sha-256=A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E=";
 
 function readyJob() {
   return {
@@ -112,6 +113,44 @@ function makePolicyRuntimeForRouter(uploadRuntime: UploadRouteRuntime): PolicyRo
 }
 
 describe("PUT /v1/jobs/:jobId/input", () => {
+  it("requires a canonical PDF digest and passes it to authoritative storage", async () => {
+    const storeInput = vi.fn(async () => ({
+      kind: "stored" as const,
+      artifact: {
+        key: inputKey as `inputs/${string}`,
+        byteLength: 3,
+        mime: "application/pdf" as const,
+        etag: "raw-etag",
+        uploadVersion: 1,
+      },
+    }));
+    const runtime = await makeRuntime({
+      repository: {
+        loadExpectedTokenHash: vi.fn(async () => hashJobToken(jobToken)),
+        beginUpload: vi.fn(async () => ({
+          kind: "ready" as const,
+          ...readyJob(),
+          declaredMime: "application/pdf" as const,
+        })),
+        commitStoredInput: vi.fn(async () => ({ kind: "queued" as const })),
+        settlePreEngineFailure: vi.fn(),
+        openInvariantCircuit: vi.fn(),
+      },
+      storeInput,
+    });
+    const missing = request();
+    missing.headers.set("content-type", "application/pdf");
+    expect((await routeUploadRequest(missing, jobId, runtime)).status).toBe(400);
+    expect(storeInput).not.toHaveBeenCalled();
+
+    const valid = request();
+    valid.headers.set("content-type", "application/pdf");
+    valid.headers.set("digest", pdfDigest);
+    expect((await routeUploadRequest(valid, jobId, runtime)).status).toBe(204);
+    expect(storeInput).toHaveBeenCalledWith(expect.objectContaining({ expectedSha256: pdfDigest }));
+    expect(JSON.stringify(storeInput.mock.calls)).not.toContain("private");
+  });
+
   it("requires an allowed browser Origin before network, D1, or body work", async () => {
     const runtime = await makeRuntime();
     const uploadRequest = request();

@@ -5,6 +5,13 @@ import {
   imageOptimizeStatusResponseSchema,
 } from "@hereisit/tool-contracts/image-optimize";
 import {
+  type PdfOptimizeMime,
+  type PdfOptimizePhase,
+  type PdfOptimizeWarningCode,
+  pdfOptimizeErrorPayloadSchema,
+  pdfOptimizeStatusResponseSchema,
+} from "@hereisit/tool-contracts/pdf-optimize";
+import {
   type ToolJobErrorCode,
   type ToolJobState,
   toolJobMutationAcknowledgementSchema,
@@ -18,22 +25,27 @@ const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 const DOWNLOAD_LEASE_MILLISECONDS = 2 * 60_000;
 
 export interface LifecycleJob {
+  readonly contractId: "image.optimize@1" | "pdf.optimize@1";
+  readonly declaredBytes: number;
+  readonly declaredPageCount: number | null;
   readonly jobId: string;
   readonly state: ToolJobState;
-  readonly phase: ImageOptimizePhase;
+  readonly phase: ImageOptimizePhase | PdfOptimizePhase;
   readonly phaseFraction: number | null;
   readonly sequence: number;
   readonly attempt: number;
   readonly inputKey: string;
   readonly outputKey: string;
   readonly outputBytes: number | null;
-  readonly outputMime: ImageOptimizeMime | null;
+  readonly outputMime: ImageOptimizeMime | PdfOptimizeMime | null;
   readonly outputWidth: number | null;
   readonly outputHeight: number | null;
+  readonly outputPageCount: number | null;
+  readonly pdfProfile: "structural" | "image-optimized" | null;
   readonly resultKind: "download" | "original-retained" | null;
   readonly engineBuildId: string | null;
   readonly codecBuildId: string | null;
-  readonly warnings: readonly ImageOptimizeWarningCode[];
+  readonly warnings: readonly (ImageOptimizeWarningCode | PdfOptimizeWarningCode)[];
   readonly testedCandidates: number | null;
   readonly errorCode: ToolJobErrorCode | null;
   readonly errorGuidance: "TRY_BALANCED_PRESET" | null;
@@ -95,6 +107,7 @@ export interface ResultArtifact {
   readonly contentType: string | undefined;
   readonly kind: string | undefined;
   readonly jobId: string | undefined;
+  readonly sha256: string | undefined;
 }
 
 export interface LifecycleRouteRuntime {
@@ -245,6 +258,38 @@ function publicError(job: LifecycleJob) {
     CANCELLED: "작업이 취소되었습니다.",
     EXPIRED: "작업이 만료되었습니다.",
   };
+  if (job.contractId === "pdf.optimize@1") {
+    const messages: Partial<Record<ToolJobErrorCode, string>> = {
+      UNSUPPORTED_INPUT: "이 PDF는 처리 서버에서 압축할 수 없습니다.",
+      UNSUPPORTED_FEATURE: "이 PDF 기능은 처리 서버에서 지원하지 않습니다.",
+      INPUT_LIMIT_EXCEEDED: "PDF가 처리 제한을 초과했습니다.",
+      SERVER_PROCESSING_DISABLED: "처리 서버를 현재 사용할 수 없습니다.",
+      LOCAL_FALLBACK_REQUIRED: "브라우저에서 원본 PDF를 유지합니다.",
+      UPLOAD_EXPIRED: "PDF 업로드 시간이 만료되었습니다.",
+      UPLOAD_MISMATCH: "업로드한 PDF를 확인할 수 없습니다.",
+      QUEUE_UNAVAILABLE: "처리 서버를 현재 사용할 수 없습니다.",
+      ENGINE_TIMEOUT: "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+      ENGINE_OOM: "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+      ENGINE_CRASH: "처리 서버에서 PDF 압축을 완료하지 못했습니다.",
+      STORAGE_FAILURE: "PDF 처리 결과를 저장할 수 없습니다.",
+      VERIFICATION_FAILED: "PDF 처리 결과를 확인할 수 없습니다.",
+      CANCELLED: "PDF 압축을 취소했습니다.",
+      EXPIRED: "PDF 압축 결과가 만료되었습니다.",
+    };
+    const safeCode = messages[code] === undefined ? "VERIFICATION_FAILED" : code;
+    return pdfOptimizeErrorPayloadSchema.parse({
+      code: safeCode,
+      message: messages[safeCode],
+      retryable: ![
+        "UNSUPPORTED_INPUT",
+        "UNSUPPORTED_FEATURE",
+        "INPUT_LIMIT_EXCEEDED",
+        "LOCAL_FALLBACK_REQUIRED",
+        "CANCELLED",
+        "EXPIRED",
+      ].includes(safeCode),
+    });
+  }
   return {
     code,
     message: messages[code],
@@ -254,6 +299,56 @@ function publicError(job: LifecycleJob) {
 }
 
 function statusPayload(job: LifecycleJob) {
+  if (job.contractId === "pdf.optimize@1") {
+    let result: Record<string, unknown> | undefined;
+    if (job.state === "succeeded" && job.resultKind === "download") {
+      if (
+        job.outputMime !== "application/pdf" ||
+        job.outputBytes === null ||
+        job.outputPageCount === null ||
+        job.pdfProfile === null ||
+        job.engineBuildId === null
+      ) {
+        throw new TypeError("Stored PDF download result is incomplete.");
+      }
+      result = {
+        kind: "download",
+        mime: job.outputMime,
+        sourceByteLength: job.declaredBytes,
+        byteLength: job.outputBytes,
+        pageCount: job.outputPageCount,
+        profile: job.pdfProfile,
+        engineBuildId: job.engineBuildId,
+        warnings: job.warnings,
+      };
+    } else if (job.state === "succeeded" && job.resultKind === "original-retained") {
+      if (job.declaredPageCount === null || job.engineBuildId === null) {
+        throw new TypeError("Stored PDF original-retained result is incomplete.");
+      }
+      result = {
+        kind: "original-retained",
+        sourceByteLength: job.declaredBytes,
+        pageCount: job.declaredPageCount,
+        engineBuildId: job.engineBuildId,
+        warnings: job.warnings,
+      };
+    }
+    return pdfOptimizeStatusResponseSchema.parse({
+      contract: "tool-job@1",
+      jobId: job.jobId,
+      state: job.state,
+      phase: job.phase,
+      phaseFraction: job.phaseFraction,
+      sequence: job.sequence,
+      attempt: job.attempt,
+      ...(result !== undefined ? { result } : {}),
+      ...(job.state === "failed" || job.state === "cancelled" || job.state === "expired"
+        ? { error: publicError(job) }
+        : {}),
+      ...(job.actualWeightedUnits !== null ? { actualWeightedUnits: job.actualWeightedUnits } : {}),
+      updatedAt: new Date(job.updatedAt).toISOString(),
+    });
+  }
   const finishedOrUpdated = job.finishedAt ?? job.updatedAt;
   const timing = {
     queueMs: duration(job.queuedAt, job.startedAt),
@@ -380,13 +475,16 @@ export async function routeJobCancelRequest(
 
 function validDownloadJob(job: LifecycleJob): job is LifecycleJob & {
   outputBytes: number;
-  outputMime: ImageOptimizeMime;
+  outputMime: ImageOptimizeMime | PdfOptimizeMime;
 } {
   return (
     job.state === "succeeded" &&
     job.resultKind === "download" &&
     job.outputBytes !== null &&
     job.outputMime !== null &&
+    (job.contractId === "pdf.optimize@1"
+      ? job.outputMime === "application/pdf"
+      : job.outputMime !== "application/pdf") &&
     job.downloadAcknowledgedAt === null
   );
 }
@@ -461,28 +559,34 @@ export async function routeJobResultRequest(
     artifact.contentType !== claimed.job.outputMime ||
     artifact.kind !== "output" ||
     artifact.jobId !== jobId ||
+    (claimed.job.outputMime === "application/pdf" &&
+      (artifact.sha256 === undefined || !/^[A-Za-z0-9+/]{43}=$/.test(artifact.sha256))) ||
     !/^"[\x20-\x7e]+"$/.test(artifact.httpEtag)
   ) {
     await artifact?.body.cancel().catch(() => undefined);
     return errorResponse(503, "VERIFICATION_FAILED", "결과 파일을 검증할 수 없습니다.", true);
   }
   const extension =
-    claimed.job.outputMime === "image/jpeg"
-      ? "jpg"
-      : claimed.job.outputMime === "image/png"
-        ? "png"
-        : "webp";
-  return new Response(artifact.body, {
-    headers: {
-      "cache-control": "private, no-store",
-      "content-disposition": `attachment; filename="hereisit-compressed.${extension}"`,
-      "content-length": String(artifact.size),
-      "content-type": claimed.job.outputMime,
-      etag: artifact.httpEtag,
-      "x-content-type-options": "nosniff",
-      "x-download-lease": leaseToken,
-    },
+    claimed.job.outputMime === "application/pdf"
+      ? "pdf"
+      : claimed.job.outputMime === "image/jpeg"
+        ? "jpg"
+        : claimed.job.outputMime === "image/png"
+          ? "png"
+          : "webp";
+  const headers = new Headers({
+    "cache-control": "private, no-store",
+    "content-disposition": `attachment; filename="hereisit-compressed.${extension}"`,
+    "content-length": String(artifact.size),
+    "content-type": claimed.job.outputMime,
+    etag: artifact.httpEtag,
+    "x-content-type-options": "nosniff",
+    "x-download-lease": leaseToken,
   });
+  if (claimed.job.outputMime === "application/pdf") {
+    headers.set("digest", `sha-256=${artifact.sha256 as string}`);
+  }
+  return new Response(artifact.body, { headers });
 }
 
 export async function routeJobDownloadedRequest(

@@ -31,6 +31,7 @@ export interface PrivacyObservation {
 }
 
 export interface PrivacyObserverOptions {
+  allowProcessingRequests?: boolean;
   fulfillProbePathPrefix?: string;
   origin?: string;
   productAnalyticsOrigin?: string;
@@ -415,6 +416,17 @@ export async function installPrivacyObserver(
       url.pathname === "/v1/analytics/events" &&
       url.search === "" &&
       request.method() === "POST";
+    const isProcessingRequest =
+      options.allowProcessingRequests === true &&
+      url.origin === origin &&
+      ((request.method() === "POST" && url.pathname === "/v1/policy") ||
+        (request.method() === "POST" && url.pathname === "/v1/jobs") ||
+        (request.method() === "PUT" && /^\/v1\/jobs\/[0-9a-f-]+\/input$/.test(url.pathname)) ||
+        (request.method() === "GET" &&
+          /^\/v1\/jobs\/[0-9a-f-]+(?:\/result)?$/.test(url.pathname)) ||
+        (request.method() === "POST" &&
+          /^\/v1\/jobs\/[0-9a-f-]+\/(?:cancel|downloaded)$/.test(url.pathname)) ||
+        (request.method() === "DELETE" && /^\/v1\/jobs\/[0-9a-f-]+$/.test(url.pathname)));
     requestCount += 1;
     if (requestBody !== null && sentinels.some((sentinel) => requestBody.includes(sentinel))) {
       leaks.push("request-body");
@@ -456,8 +468,10 @@ export async function installPrivacyObserver(
       externalRequests.push(`${request.method()} cross-origin`);
     }
     if (!["GET", "HEAD"].includes(request.method()) || requestBody !== null) {
-      if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
-      if (requestBody !== null) violations.push("request-body");
+      if (!isProcessingRequest && !["GET", "HEAD"].includes(request.method())) {
+        violations.push("write-method");
+      }
+      if (!isProcessingRequest && requestBody !== null) violations.push("request-body");
       writeRequests.push(
         `${request.method()} ${url.origin === origin ? "same-origin" : "cross-origin"}`,
       );

@@ -8,6 +8,11 @@ import {
   IMAGE_OPTIMIZE_MAX_PIXELS,
   type ImageOptimizeCreateRequestV1,
   type ImageOptimizeMime,
+  imageOptimizeCreateRequestSchema,
+  PDF_OPTIMIZE_MAX_PAGES,
+  type PdfOptimizeCreateRequestV1,
+  type PdfOptimizeMime,
+  pdfOptimizeCreateRequestSchema,
 } from "@hereisit/tool-contracts";
 
 export interface ResourceEstimate {
@@ -17,6 +22,15 @@ export interface ResourceEstimate {
   reservationPixelCeiling: 40_000_000;
 }
 
+export interface PdfResourceEstimate {
+  resourceClass: "pdf-standard-v1";
+  reservedWeightedUnits: number;
+  inputBytes: number;
+  reservationPageCeiling: 100;
+}
+
+export type ToolResourceEstimate = ResourceEstimate | PdfResourceEstimate;
+
 export interface ActualUsageSample {
   inputBytes: number;
   outputBytes: number | null;
@@ -24,7 +38,7 @@ export interface ActualUsageSample {
   cpuMs: number;
   memoryByteMilliseconds: number;
   testedCandidates: number;
-  mime: ImageOptimizeMime;
+  mime: ImageOptimizeMime | PdfOptimizeMime;
 }
 
 export interface EngineAttemptCaps {
@@ -79,7 +93,8 @@ const contentCoefficient = {
   "image/jpeg": 2,
   "image/png": 3,
   "image/webp": 2,
-} as const satisfies Record<ImageOptimizeMime, number>;
+  "application/pdf": 1,
+} as const satisfies Record<ImageOptimizeMime | PdfOptimizeMime, number>;
 
 function createEngineAttemptCaps(
   cpuMs: number,
@@ -308,6 +323,29 @@ export function estimateImageOptimizeUnits(
   };
 }
 
+export function estimatePdfOptimizeUnits(request: PdfOptimizeCreateRequestV1): PdfResourceEstimate {
+  const parsed = pdfOptimizeCreateRequestSchema.parse(request);
+  const inputBytes = parsed.input.byteLength;
+
+  return {
+    resourceClass: "pdf-standard-v1",
+    reservedWeightedUnits: estimateAttemptReservation({
+      inputBytes,
+      resourceClass: "image-standard-v1",
+    }),
+    inputBytes,
+    reservationPageCeiling: PDF_OPTIMIZE_MAX_PAGES,
+  };
+}
+
+export function estimateResources(
+  request: ImageOptimizeCreateRequestV1 | PdfOptimizeCreateRequestV1,
+): ToolResourceEstimate {
+  return request.toolContract === "pdf.optimize@1"
+    ? estimatePdfOptimizeUnits(request)
+    : estimateImageOptimizeUnits(imageOptimizeCreateRequestSchema.parse(request));
+}
+
 function calculateMeasuredWeightedUnits(sample: ActualUsageSample): number {
   assertNonNegativeSafeInteger(sample.inputBytes, "inputBytes");
   if (sample.outputBytes !== null) {
@@ -319,7 +357,7 @@ function calculateMeasuredWeightedUnits(sample: ActualUsageSample): number {
   assertNonNegativeSafeInteger(sample.testedCandidates, "testedCandidates");
 
   if (!Object.hasOwn(contentCoefficient, sample.mime)) {
-    throw new RangeError(`Unsupported image MIME: ${String(sample.mime)}.`);
+    throw new RangeError(`Unsupported processing MIME: ${String(sample.mime)}.`);
   }
 
   return checkedSum(

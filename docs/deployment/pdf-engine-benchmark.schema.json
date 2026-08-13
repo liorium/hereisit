@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/pdf-engine-benchmark.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "identity", "limits", "records", "summary"],
+  "properties": {
+    "schema": { "const": "hereisit.pdf-engine-benchmark@2" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engineImageId",
+        "engineImageDigest",
+        "qpdfVersion",
+        "corpusManifestSha256",
+        "sourceLockSha256",
+        "localRunner"
+      ],
+      "properties": {
+        "engineImageId": { "$ref": "#/$defs/digest" },
+        "engineImageDigest": { "$ref": "#/$defs/digest" },
+        "qpdfVersion": { "const": "12.4.0" },
+        "corpusManifestSha256": { "$ref": "#/$defs/sha" },
+        "sourceLockSha256": { "$ref": "#/$defs/sha" },
+        "localRunner": {
+          "type": "string",
+          "pattern": "^pdf-lib-structural@[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repeats",
+        "maximumSamples",
+        "maximumWallMs",
+        "maximumSourceBytes",
+        "maximumOutputBytes",
+        "maximumPeakRssBytes",
+        "maximumParserPixels",
+        "maximumDiagnosticBytes"
+      ],
+      "properties": {
+        "repeats": { "const": 3 },
+        "maximumSamples": { "const": 51 },
+        "maximumWallMs": { "const": 300000 },
+        "maximumSourceBytes": { "const": 52428800 },
+        "maximumOutputBytes": { "const": 52428800 },
+        "maximumPeakRssBytes": { "const": 805306368 },
+        "maximumParserPixels": { "const": 20000000 },
+        "maximumDiagnosticBytes": { "const": 4096 }
+      }
+    },
+    "records": {
+      "type": "array",
+      "minItems": 17,
+      "maxItems": 17,
+      "items": { "$ref": "#/$defs/record" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strata",
+        "measuredSamples",
+        "nativeWins",
+        "rejectedSafely",
+        "maximumPeakRssBytes",
+        "visualProfilesMeasured",
+        "passed"
+      ],
+      "properties": {
+        "strata": { "const": 17 },
+        "measuredSamples": { "const": 51 },
+        "nativeWins": { "type": "integer", "minimum": 0, "maximum": 17 },
+        "rejectedSafely": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "maximumPeakRssBytes": { "type": "integer", "minimum": 0, "maximum": 805306368 },
+        "visualProfilesMeasured": { "type": "integer", "minimum": 0, "maximum": 51 },
+        "passed": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repeat",
+        "verdict",
+        "effectiveBytes",
+        "durationMs",
+        "peakRssBytes",
+        "candidateCount",
+        "code",
+        "profile",
+        "semantic",
+        "visual"
+      ],
+      "properties": {
+        "repeat": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "verdict": { "enum": ["reduced", "original-retained", "rejected"] },
+        "effectiveBytes": { "type": ["integer", "null"], "minimum": 1, "maximum": 52428800 },
+        "durationMs": { "type": "number", "minimum": 0, "maximum": 300000 },
+        "peakRssBytes": { "type": "integer", "minimum": 0, "maximum": 805306368 },
+        "candidateCount": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "code": { "type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,48}$" },
+        "profile": { "enum": ["structural", "image-optimized", null] },
+        "semantic": { "enum": ["passed", "failed", "not-applicable"] },
+        "visual": { "enum": ["passed", "failed", "not-applicable", "not-required"] }
+      }
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "samples",
+        "medianEffectiveBytes",
+        "medianDurationMs",
+        "maximumPeakRssBytes",
+        "maximumCandidateCount"
+      ],
+      "properties": {
+        "samples": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/sample" }
+        },
+        "medianEffectiveBytes": { "type": ["integer", "null"], "minimum": 1, "maximum": 52428800 },
+        "medianDurationMs": { "type": "number", "minimum": 0, "maximum": 300000 },
+        "maximumPeakRssBytes": { "type": "integer", "minimum": 0, "maximum": 805306368 },
+        "maximumCandidateCount": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stratum",
+        "sourceBytes",
+        "local",
+        "native",
+        "smallerOnly",
+        "repeatableNativeWins",
+        "nativeAdvantageRatio"
+      ],
+      "properties": {
+        "stratum": {
+          "enum": [
+            "text-vector",
+            "link",
+            "annotation",
+            "form",
+            "outline",
+            "attachment",
+            "layer",
+            "duplicate-resource",
+            "flate-heavy",
+            "jpeg-heavy",
+            "non-jpeg-image",
+            "scan",
+            "mixed",
+            "encrypted",
+            "corrupt",
+            "expansion",
+            "decompression-bomb"
+          ]
+        },
+        "sourceBytes": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+        "local": { "$ref": "#/$defs/runner" },
+        "native": { "$ref": "#/$defs/runner" },
+        "smallerOnly": { "type": "boolean" },
+        "repeatableNativeWins": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "nativeAdvantageRatio": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    }
+  }
+}

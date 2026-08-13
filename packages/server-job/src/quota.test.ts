@@ -35,6 +35,17 @@ const otherwiseAllowedRetryReservation = {
 };
 
 describe("decideAdmission", () => {
+  it("applies the same exact quota boundary to PDF resource reservations", () => {
+    expect(
+      decideAdmission({
+        ...otherwiseAllowedAdmission,
+        accountDailyLimit: 2_439_579_999,
+        anonymousDailyLimit: 2_439_579_999,
+        networkDailyLimit: 2_439_579_999,
+        requestedUnits: 2_439_579_999,
+      }),
+    ).toEqual({ allowed: true });
+  });
   it("allows an admission exactly at every weighted-unit boundary", () => {
     expect(
       decideAdmission({

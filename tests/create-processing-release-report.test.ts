@@ -12,7 +12,14 @@ const names = [
   "privacyReview",
   "deviceMatrix",
 ] as const;
-const scopes = ["engine", "webStaging", "webProduction", "worker", "lockfile"] as const;
+const scopes = [
+  "engine",
+  "pdfEngine",
+  "webStaging",
+  "webProduction",
+  "worker",
+  "lockfile",
+] as const;
 
 function descriptor(path: string, digit: string) {
   return { path, sizeBytes: 10, sha256: digit.repeat(64) };
@@ -39,6 +46,7 @@ function inputs() {
       trivyDbDigest: `sha256:${"e".repeat(64)}`,
       gates: {
         imageEngine: descriptor("security-image-engine-license-gate.json", "1"),
+        pdfEngine: descriptor("security-pdf-engine-license-gate.json", "5"),
         applicationSupplyChain: descriptor("security-application-supply-chain-gate.json", "2"),
         vulnerability: descriptor("security-vulnerability-gate.json", "3"),
       },
@@ -63,6 +71,11 @@ function inputs() {
     },
     artifacts: {
       engineDockerConfigDigest: `sha256:${"f".repeat(64)}`,
+      pdfEngineDockerConfigDigest: `sha256:${"e".repeat(64)}`,
+      pdfBenchmarkSha256: "5".repeat(64),
+      pdfReleaseGateSha256: "6".repeat(64),
+      pdfVisualProfilesMeasured: 0,
+      pdfPublicAdmissionReady: false,
       webStagingArchiveSha256: "1".repeat(64),
       webProductionArchiveSha256: "2".repeat(64),
       workerSha256: "3".repeat(64),
@@ -73,8 +86,8 @@ function inputs() {
 
 function report() {
   const payload = canonicalize({
-    schema: "hereisit-processing-release-report@1",
-    version: 1,
+    schema: "hereisit-processing-release-report@2",
+    version: 2,
     passed: true,
     ...inputs(),
   });
@@ -102,8 +115,8 @@ describe("processing release report creation", () => {
       type: "object",
       additionalProperties: false,
       properties: {
-        schema: { const: "hereisit-processing-release-report@1" },
-        version: { const: 1 },
+        schema: { const: "hereisit-processing-release-report@2" },
+        version: { const: 2 },
         passed: { const: true },
       },
     });
@@ -131,8 +144,8 @@ describe("processing release report creation", () => {
 
     expect(first).toEqual(second);
     expect(first).toMatchObject({
-      schema: "hereisit-processing-release-report@1",
-      version: 1,
+      schema: "hereisit-processing-release-report@2",
+      version: 2,
       passed: true,
       releaseId: inputs().releaseId,
       gitSha: inputs().gitSha,

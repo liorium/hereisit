@@ -12,7 +12,7 @@ export interface SafeProcessingEvent {
   event: "job-phase" | "job-terminal" | "deletion" | "queue-retry";
   jobId: string;
   sessionHashPrefix: string;
-  contractId: "image.optimize@1";
+  contractId: "image.optimize@1" | "pdf.optimize@1";
   engineBuildId?: string | undefined;
   inputBytes: number;
   outputBytes?: number | undefined;
@@ -32,7 +32,7 @@ export const safeProcessingEventSchema: z.ZodType<SafeProcessingEvent> = z
     event: z.enum(["job-phase", "job-terminal", "deletion", "queue-retry"]),
     jobId: z.uuid(),
     sessionHashPrefix: z.string().regex(/^[0-9a-f]{12}$/),
-    contractId: z.literal("image.optimize@1"),
+    contractId: z.enum(["image.optimize@1", "pdf.optimize@1"]),
     engineBuildId: z.string().min(1).max(128).optional(),
     inputBytes: nonnegativeSafeInteger,
     outputBytes: nonnegativeSafeInteger.optional(),

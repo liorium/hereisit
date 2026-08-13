@@ -30,9 +30,9 @@ import {
 import { routeUploadRequest, type UploadRouteRuntime } from "./routes/uploads";
 
 const ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
-const ALLOW_HEADERS = "authorization, content-type, x-download-lease";
+const ALLOW_HEADERS = "authorization, content-type, digest, x-download-lease";
 const EXPOSE_HEADERS =
-  "content-length, content-type, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope";
+  "content-length, content-type, digest, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope";
 const UPLOAD_PATH_PATTERN =
   /^\/v1\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/input$/;
 const JOB_PATH_PATTERN =
@@ -299,6 +299,7 @@ export async function routeRequest(
         {
           DB: env.DB,
           IMAGE_JOBS: env.IMAGE_JOBS,
+          PDF_JOBS: env.PDF_JOBS,
         },
         jobId,
         now,
@@ -341,6 +342,7 @@ export async function routeRequest(
           contentType: object.httpMetadata?.contentType,
           kind: object.customMetadata?.kind,
           jobId: object.customMetadata?.jobId,
+          sha256: object.customMetadata?.sha256,
         };
       },
       deleteInput: (key) => env.JOB_OBJECTS.delete(key),
@@ -348,12 +350,24 @@ export async function routeRequest(
     },
     engine: {
       cancel: async (jobId) => {
-        const { createContainerEngineClient } = await import("./container-client");
-        await createContainerEngineClient(env).cancel(jobId);
+        const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
+          "./container-client"
+        );
+        const job = await lifecycleRepository.readJob(jobId);
+        await (job?.contractId === "pdf.optimize@1"
+          ? createContainerPdfEngineClient(env)
+          : createContainerEngineClient(env)
+        ).cancel(jobId);
       },
       remove: async (jobId) => {
-        const { createContainerEngineClient } = await import("./container-client");
-        await createContainerEngineClient(env).remove(jobId);
+        const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
+          "./container-client"
+        );
+        const job = await lifecycleRepository.readJob(jobId);
+        await (job?.contractId === "pdf.optimize@1"
+          ? createContainerPdfEngineClient(env)
+          : createContainerEngineClient(env)
+        ).remove(jobId);
       },
     },
   };

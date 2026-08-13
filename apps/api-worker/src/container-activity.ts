@@ -11,6 +11,7 @@ export interface ContainerActivityInterval {
 export interface RecordContainerActivityInput {
   readonly segmentId: string;
   readonly contactedAt: number;
+  readonly engineIdentity: "image:slot-0" | "pdf:slot-0";
 }
 
 function requireTimestamp(value: number, label: string): void {
@@ -80,28 +81,37 @@ export async function recordContainerActivity(
   await session.batch([
     session
       .prepare(
-        `INSERT INTO container_activity_segments (id, started_at, billed_until_at)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO container_activity_segments (id, engine_identity, started_at, billed_until_at)
+         VALUES (?, ?, ?, ?)`,
       )
-      .bind(input.segmentId, input.contactedAt, billedUntilAt),
+      .bind(input.segmentId, input.engineIdentity, input.contactedAt, billedUntilAt),
     session
       .prepare(
         `UPDATE container_activity_segments
          SET started_at = (
                SELECT MIN(started_at) FROM container_activity_segments
-               WHERE started_at <= ? AND billed_until_at >= ?
+               WHERE engine_identity = ? AND started_at <= ? AND billed_until_at >= ?
              ),
              billed_until_at = (
                SELECT MAX(billed_until_at) FROM container_activity_segments
-               WHERE started_at <= ? AND billed_until_at >= ?
+               WHERE engine_identity = ? AND started_at <= ? AND billed_until_at >= ?
              )
          WHERE id = ?`,
       )
-      .bind(billedUntilAt, input.contactedAt, billedUntilAt, input.contactedAt, input.segmentId),
+      .bind(
+        input.engineIdentity,
+        billedUntilAt,
+        input.contactedAt,
+        input.engineIdentity,
+        billedUntilAt,
+        input.contactedAt,
+        input.segmentId,
+      ),
     session
       .prepare(
         `DELETE FROM container_activity_segments
          WHERE id <> ?
+           AND engine_identity = ?
            AND started_at <= (
              SELECT billed_until_at FROM container_activity_segments WHERE id = ?
            )
@@ -109,7 +119,7 @@ export async function recordContainerActivity(
              SELECT started_at FROM container_activity_segments WHERE id = ?
            )`,
       )
-      .bind(input.segmentId, input.segmentId, input.segmentId),
+      .bind(input.segmentId, input.engineIdentity, input.segmentId, input.segmentId),
     prepareOperationalCounter(session, {
       recordedAt: input.contactedAt,
       durableObjectRequests: 1,

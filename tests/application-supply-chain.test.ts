@@ -9,7 +9,14 @@ import { runApplicationSupplyChain } from "../scripts/application-supply-chain.m
 const execFileAsync = promisify(execFile);
 const temporaryRoots: string[] = [];
 const sha = (character: string) => character.repeat(64);
-const scopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
+const scopes = [
+  "engine",
+  "pdf-engine",
+  "web-staging",
+  "web-production",
+  "worker",
+  "lockfile",
+] as const;
 const syftImage =
   "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d";
 const checkedInMit = `Copyright (c) 2020 Cloudflare, Inc. <wrangler@cloudflare.com>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the "Software"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n`;
@@ -315,6 +322,8 @@ describe("application supply-chain gate", () => {
         "@hereisit/web...",
         "--filter",
         "@hereisit/api-worker...",
+        "--filter",
+        "@hereisit/pdf-engine...",
       ],
       cwd: fixture.root,
       maxBuffer: 2 * 1024 * 1024,

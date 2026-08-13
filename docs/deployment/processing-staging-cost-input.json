@@ -4,7 +4,11 @@
     "containerVcpuSecond": "0.000020",
     "containerGibSecond": "0.000003",
     "containerDiskGbSecond": "0.000001",
-    "containerEgressRegion": { "APAC": "0.12", "EU": "0.09", "US": "0.08" },
+    "containerEgressRegion": {
+      "APAC": "0.12",
+      "EU": "0.09",
+      "US": "0.08"
+    },
     "workersMillionRequests": "0.30",
     "workersMillionCpuMs": "0.02",
     "durableObjectMillionRequests": "0.15",
@@ -28,19 +32,54 @@
     "containerInstanceMemoryGib": 6,
     "containerInstanceDiskGb": 12
   },
+  "pdfBenchmark": {
+    "evidenceSha256": "ce18221eef7d2dd04d30f6974819674db90be2b789b13d485667b601e56a91a1",
+    "engineImageDigest": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+    "engineImageId": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+    "maximumCandidates": 2,
+    "maximumInputBytes": 52428800,
+    "maximumMeasuredPeakRssBytes": 250888192,
+    "maximumOutputBytes": 52428800,
+    "maximumPages": 100,
+    "maximumWallMs": 45000
+  },
   "routeCpuBenchmark": {
     "version": 1,
     "sourceModuleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "toolchain": "workerd-test@1",
-    "margin": { "kind": "p99-plus-percent", "percent": 25 },
+    "margin": {
+      "kind": "p99-plus-percent",
+      "percent": 25
+    },
     "routes": {
-      "policy": { "p99Ms": 1, "samples": 100 },
-      "create": { "p99Ms": 2, "samples": 100 },
-      "upload": { "p99Ms": 3, "samples": 100 },
-      "read": { "p99Ms": 4, "samples": 100 },
-      "result": { "p99Ms": 5, "samples": 100 },
-      "maintenance": { "p99Ms": 6, "samples": 100 },
-      "queue": { "p99Ms": 7, "samples": 100 }
+      "policy": {
+        "p99Ms": 1,
+        "samples": 100
+      },
+      "create": {
+        "p99Ms": 2,
+        "samples": 100
+      },
+      "upload": {
+        "p99Ms": 3,
+        "samples": 100
+      },
+      "read": {
+        "p99Ms": 4,
+        "samples": 100
+      },
+      "result": {
+        "p99Ms": 5,
+        "samples": 100
+      },
+      "maintenance": {
+        "p99Ms": 6,
+        "samples": 100
+      },
+      "queue": {
+        "p99Ms": 7,
+        "samples": 100
+      }
     }
   },
   "projectedMonthlyJobs": 10000,

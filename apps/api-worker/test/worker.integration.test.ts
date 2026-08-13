@@ -156,7 +156,7 @@ describe("Worker control-plane bindings and routes", () => {
     const migration = await env.DB.prepare(
       "SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1",
     ).first<{ name: string }>();
-    expect(migration?.name).toBe("0007_operational_counters.sql");
+    expect(migration?.name).toBe("0009_container_activity_identity.sql");
 
     for (const [table, column] of primaryKeyColumns) {
       const schema = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<D1TableColumn>();
@@ -166,6 +166,12 @@ describe("Worker control-plane bindings and routes", () => {
         pk: 1,
       });
     }
+    await expect(
+      env.DB.prepare(
+        `SELECT dflt_value, "notnull" AS is_not_null FROM pragma_table_info('container_activity_segments')
+         WHERE name = 'engine_identity'`,
+      ).first(),
+    ).resolves.toEqual({ dflt_value: "'image:slot-0'", is_not_null: 1 });
   });
 
   it("opens the singleton circuit once for a hard deletion invariant", async () => {

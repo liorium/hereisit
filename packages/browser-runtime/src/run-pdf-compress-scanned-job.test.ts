@@ -955,6 +955,57 @@ describe("runPdfCompressScannedJob hostile progress and terminal boundary", () =
     expect(JSON.stringify(outcome)).not.toContain("PRIVATE_");
   });
 
+  it("accepts only a classified NO_SIZE_REDUCTION failure", async () => {
+    installSupportedRuntime();
+    const accepted = runPdfCompressScannedJob(fakePdfFile().file, balancedSpec, {
+      expectedPageCount: 1,
+    });
+    const acceptedWorker = latestWorker();
+    const acceptedRun = await waitForRun(acceptedWorker);
+    if (!isMessageType(acceptedRun.message, "run")) throw new Error("Expected a run request.");
+    acceptedWorker.emit({
+      protocol: 1,
+      type: "failed",
+      jobId: acceptedRun.message.jobId,
+      error: {
+        code: "NO_SIZE_REDUCTION",
+        message: "safe",
+        reason: "STRUCTURED_OR_MIXED",
+        retryable: false,
+      },
+    });
+    await expect(accepted.result).resolves.toEqual({
+      status: "rejected",
+      error: {
+        code: "NO_SIZE_REDUCTION",
+        message: "safe",
+        reason: "STRUCTURED_OR_MIXED",
+        retryable: false,
+      },
+    });
+
+    const rejected = runPdfCompressScannedJob(fakePdfFile().file, balancedSpec, {
+      expectedPageCount: 1,
+    });
+    const rejectedWorker = latestWorker();
+    const rejectedRun = await waitForRun(rejectedWorker);
+    if (!isMessageType(rejectedRun.message, "run")) throw new Error("Expected a run request.");
+    rejectedWorker.emit({
+      protocol: 1,
+      type: "failed",
+      jobId: rejectedRun.message.jobId,
+      error: { code: "NO_SIZE_REDUCTION", message: "safe", retryable: false },
+    });
+    await expect(rejected.result).resolves.toEqual({
+      status: "rejected",
+      error: {
+        code: "WORKER_CRASH",
+        message: "PDF 압축 작업기 응답을 확인하지 못했어요.",
+        retryable: true,
+      },
+    });
+  });
+
   it("captures progress phase and fraction once before notifying", async () => {
     installSupportedRuntime();
     const { file } = fakePdfFile();

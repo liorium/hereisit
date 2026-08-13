@@ -1,0 +1,10 @@
+.git
+.worktrees
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+coverage
+playwright-report
+test-results
+*.log

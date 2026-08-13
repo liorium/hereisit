@@ -146,4 +146,26 @@ describe("canonical live-cost model", () => {
       "regional container egress price binding",
     );
   });
+
+  it("binds PDF benchmark evidence to one exact engine image ID and digest", () => {
+    const digest = `sha256:${"d".repeat(64)}`;
+    const pdfBenchmark = {
+      evidenceSha256: "e".repeat(64),
+      engineImageId: digest,
+      engineImageDigest: digest,
+      maximumCandidates: 2,
+      maximumInputBytes: 52_428_800,
+      maximumMeasuredPeakRssBytes: 200_000_000,
+      maximumOutputBytes: 52_428_800,
+      maximumPages: 100,
+      maximumWallMs: 45_000,
+    };
+    expect(() => createLiveCostModel({ ...input, pdfBenchmark })).not.toThrow();
+    expect(() =>
+      createLiveCostModel({
+        ...input,
+        pdfBenchmark: { ...pdfBenchmark, engineImageDigest: `sha256:${"f".repeat(64)}` },
+      }),
+    ).toThrow(/image identity/i);
+  });
 });

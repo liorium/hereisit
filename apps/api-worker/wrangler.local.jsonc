@@ -43,6 +43,10 @@
       {
         "binding": "IMAGE_JOBS",
         "queue": "hereisit-image-jobs-local"
+      },
+      {
+        "binding": "PDF_JOBS",
+        "queue": "hereisit-pdf-jobs-local"
       }
     ],
     "consumers": [
@@ -60,6 +64,21 @@
         "max_batch_timeout": 1,
         "max_retries": 0,
         "max_concurrency": 1
+      },
+      {
+        "queue": "hereisit-pdf-jobs-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 2,
+        "dead_letter_queue": "hereisit-pdf-jobs-dlq-local",
+        "max_concurrency": 1
+      },
+      {
+        "queue": "hereisit-pdf-jobs-dlq-local",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 0,
+        "max_concurrency": 1
       }
     ]
   },
@@ -72,6 +91,15 @@
       "max_instances": 1,
       "rollout_active_grace_period": 180,
       "rollout_step_percentage": [100]
+    },
+    {
+      "class_name": "PdfEngineContainer",
+      "image": "../pdf-engine/Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-2",
+      "max_instances": 1,
+      "rollout_active_grace_period": 180,
+      "rollout_step_percentage": [100]
     }
   ],
   "durable_objects": {
@@ -79,6 +107,10 @@
       {
         "name": "IMAGE_ENGINE",
         "class_name": "ImageEngineContainer"
+      },
+      {
+        "name": "PDF_ENGINE",
+        "class_name": "PdfEngineContainer"
       }
     ]
   },
@@ -86,6 +118,10 @@
     {
       "tag": "image-engine-v1",
       "new_sqlite_classes": ["ImageEngineContainer"]
+    },
+    {
+      "tag": "pdf-engine-v1",
+      "new_sqlite_classes": ["PdfEngineContainer"]
     }
   ],
   "ratelimits": [
@@ -152,11 +188,16 @@
     "LIVE_COST_MODEL_SHA256": "f3d711d9d580e5576ed7deef7a848749edeaaf7a8eafbecbc7fa66179d5abf6f",
     "PROVIDER_USAGE_SCHEMA_SHA256": "cabac55c2f89b604777f03f6f82ee96a567a5f8380dfe4f1b0c33250c5df291d",
     "RELEASE_REPORT_SHA256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "PDF_PUBLIC_ADMISSION_JSON": "{\"costPassed\":false,\"deletionPassed\":false,\"enabled\":false,\"releaseReportSha256\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"rollbackPassed\":false,\"schema\":\"hereisit-pdf-public-admission@1\",\"visualProfilesMeasured\":0}\n",
     "IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT": "100",
     "MAINTAINER_SESSION_HASHES": "[]",
     "ENGINE_INSTANCE_NAME": "image-slot-0",
     "ENGINE_IMAGE_DIGEST": "local-dockerfile",
     "IMAGE_JOBS_QUEUE_NAME": "hereisit-image-jobs-local",
-    "IMAGE_JOBS_DLQ_NAME": "hereisit-image-jobs-dlq-local"
+    "IMAGE_JOBS_DLQ_NAME": "hereisit-image-jobs-dlq-local",
+    "PDF_ENGINE_INSTANCE_NAME": "pdf-slot-0",
+    "PDF_ENGINE_IMAGE_DIGEST": "local-dockerfile",
+    "PDF_JOBS_QUEUE_NAME": "hereisit-pdf-jobs-local",
+    "PDF_JOBS_DLQ_NAME": "hereisit-pdf-jobs-dlq-local"
   }
 }

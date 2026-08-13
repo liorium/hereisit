@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { imageCompressionProcessingManifest } from "./processing";
+import { imageCompressionProcessingManifest, pdfCompressionProcessingManifest } from "./processing";
 
 const forbiddenMetadataTokenPattern = /import\(|function|\bclass\b|worker|credential|filename/i;
 
@@ -108,6 +108,45 @@ describe("image compression processing manifest", () => {
     expect(Object.isFrozen(imageCompressionProcessingManifest.locations)).toBe(true);
     expect(Object.isFrozen(imageCompressionProcessingManifest.limits)).toBe(true);
     expect(Object.isFrozen(imageCompressionProcessingManifest.retention)).toBe(true);
+  });
+});
+
+describe("PDF compression processing manifest", () => {
+  it("declares the PDF-only server fallback", () => {
+    expect(pdfCompressionProcessingManifest).toEqual({
+      toolId: "pdf.compress",
+      contractId: "pdf.optimize@1",
+      accepts: ["application/pdf"],
+      emits: "application/pdf",
+      locations: ["server-native", "browser"],
+      limits: {
+        maxFiles: 1,
+        maxBytesPerFile: 50 * 1024 * 1024,
+        maxPagesPerFile: 100,
+        maxConcurrentPerAnonymousSession: 1,
+      },
+      resourceClass: "pdf-standard-v1",
+      retention: {
+        uploadDeadlineSeconds: 600,
+        resultDeadlineSeconds: 1800,
+        sweepSeconds: 300,
+        resultDeletionSloSeconds: 2100,
+        lifecycleExpirationDays: 1,
+        hardMaximum: false,
+      },
+      verifier: "pdf.optimize@1",
+      safeFallback: "browser.pdf-compress-scanned",
+      rolloutFlag: "pdf-compress-server",
+    });
+  });
+
+  it("contains immutable declarative metadata only", () => {
+    expectDeclarativeMetadata(pdfCompressionProcessingManifest);
+    expect(Object.isFrozen(pdfCompressionProcessingManifest)).toBe(true);
+    expect(Object.isFrozen(pdfCompressionProcessingManifest.accepts)).toBe(true);
+    expect(Object.isFrozen(pdfCompressionProcessingManifest.locations)).toBe(true);
+    expect(Object.isFrozen(pdfCompressionProcessingManifest.limits)).toBe(true);
+    expect(Object.isFrozen(pdfCompressionProcessingManifest.retention)).toBe(true);
   });
 });
 

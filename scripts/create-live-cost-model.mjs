@@ -107,10 +107,47 @@ export function createLiveCostModel(rawInput) {
       "routeCpuBenchmark",
       "projectedMonthlyJobs",
       "arrivalTraces",
+      ...(input.pdfBenchmark === undefined ? [] : ["pdfBenchmark"]),
     ],
     "live cost input",
   );
   if (input.version !== 1) throw new TypeError("live cost input version must be 1");
+  if (input.pdfBenchmark !== undefined) {
+    const pdfBenchmark = assertObject(input.pdfBenchmark, "pdfBenchmark");
+    assertExactKeys(
+      pdfBenchmark,
+      [
+        "evidenceSha256",
+        "engineImageId",
+        "engineImageDigest",
+        "maximumCandidates",
+        "maximumInputBytes",
+        "maximumMeasuredPeakRssBytes",
+        "maximumOutputBytes",
+        "maximumPages",
+        "maximumWallMs",
+      ],
+      "pdfBenchmark",
+    );
+    assertSha256(pdfBenchmark.evidenceSha256, "pdfBenchmark.evidenceSha256");
+    for (const field of ["engineImageId", "engineImageDigest"])
+      if (
+        typeof pdfBenchmark[field] !== "string" ||
+        !/^sha256:[a-f0-9]{64}$/u.test(pdfBenchmark[field])
+      )
+        throw new TypeError(`pdfBenchmark.${field} is invalid`);
+    if (pdfBenchmark.engineImageId !== pdfBenchmark.engineImageDigest)
+      throw new TypeError("pdfBenchmark image identity is inconsistent");
+    for (const field of [
+      "maximumCandidates",
+      "maximumInputBytes",
+      "maximumMeasuredPeakRssBytes",
+      "maximumOutputBytes",
+      "maximumPages",
+      "maximumWallMs",
+    ])
+      assertPositiveNumber(pdfBenchmark[field], `pdfBenchmark.${field}`);
+  }
   const prices = assertObject(input.pricesUsd, "pricesUsd");
   assertExactKeys(prices, priceFields, "pricesUsd");
   const resources = assertObject(input.resources, "resources");

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/pdf-engine-release-gate.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "benchmarkSha256",
+    "engineImageDigest",
+    "corpusManifestSha256",
+    "visualProfilesMeasured",
+    "publicAdmissionReady",
+    "passed",
+    "failures"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit.pdf-engine-release-gate@1" },
+    "benchmarkSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "engineImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "corpusManifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "visualProfilesMeasured": { "type": "integer", "minimum": 0, "maximum": 51 },
+    "publicAdmissionReady": { "type": "boolean" },
+    "passed": { "type": "boolean" },
+    "failures": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 100,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9:_-]{3,100}$" }
+    }
+  }
+}

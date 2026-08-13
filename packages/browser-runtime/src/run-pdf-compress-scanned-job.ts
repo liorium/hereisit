@@ -210,6 +210,7 @@ function decodeError(value: unknown): PdfCompressScannedErrorPayload | undefined
   if (!isPlainRecord(value)) return undefined;
   const code = value.code;
   const message = value.message;
+  const reason = value.reason;
   const retryable = value.retryable;
   if (
     typeof code !== "string" ||
@@ -219,8 +220,12 @@ function decodeError(value: unknown): PdfCompressScannedErrorPayload | undefined
   ) {
     return undefined;
   }
+  if (code === "NO_SIZE_REDUCTION") {
+    if (reason !== "STRUCTURED_OR_MIXED" && reason !== "IMAGE_ONLY_NO_SAVINGS") return undefined;
+    return { code, message, reason, retryable };
+  }
   return {
-    code: code as PdfCompressScannedErrorCode,
+    code: code as Exclude<PdfCompressScannedErrorCode, "NO_SIZE_REDUCTION">,
     message,
     retryable,
   };

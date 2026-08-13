@@ -14,6 +14,7 @@ import {
   sha256Bytes,
 } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
+import { validatePdfBenchmarkEvidence } from "./validate-pdf-benchmark-evidence.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
 import {
   verifyDockerImageArchive,
@@ -27,6 +28,7 @@ const gitShaPattern = /^[a-f0-9]{40}$/;
 const maximumSecurityGateBytes = 1024 * 1024;
 const securityScopes = Object.freeze([
   ["engine", "engine"],
+  ["pdf-engine", "pdfEngine"],
   ["web-staging", "webStaging"],
   ["web-production", "webProduction"],
   ["worker", "worker"],
@@ -96,6 +98,14 @@ function releaseAssetEntries(candidate) {
     [assets.worker, "Worker asset"],
     [assets.releaseInputs, "processing release inputs asset"],
     [assets.costModel, "live cost model asset"],
+    ...(candidate.pdfQuality === undefined
+      ? []
+      : [
+          [assets.pdfQuality.benchmark, "PDF benchmark asset"],
+          [assets.pdfQuality.benchmarkSchema, "PDF benchmark schema asset"],
+          [assets.pdfQuality.releaseGate, "PDF release gate asset"],
+          [assets.pdfQuality.releaseGateSchema, "PDF release gate schema asset"],
+        ]),
   ];
   if (candidate.state === "finalized") {
     entries.unshift([assets.report, "release report asset"]);
@@ -185,7 +195,35 @@ function validateImageEngineGate(gate, engineSha256) {
   assertValue(gate.artifactSha256, engineSha256, "image-engine license gate artifact");
 }
 
-function validateApplicationGate(gate, artifactHashes, sboms) {
+function validatePdfEngineGate(gate) {
+  assertExactKeys(
+    gate,
+    [
+      "schema",
+      "passed",
+      "qpdfVersion",
+      "sourceSha256",
+      "sourceLockSha256",
+      "policySha256",
+      "licenseSha256",
+      "noticeSha256",
+    ],
+    "PDF-engine license gate",
+  );
+  assertValue(gate.schema, "hereisit-pdf-engine-license-gate@1", "PDF-engine license gate");
+  assertTrue(gate.passed, "PDF-engine license gate");
+  assertValue(gate.qpdfVersion, "12.4.0", "PDF-engine qpdf version");
+  assertValue(
+    gate.sourceSha256,
+    "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+    "PDF-engine qpdf source",
+  );
+  for (const field of ["sourceLockSha256", "policySha256", "licenseSha256", "noticeSha256"]) {
+    assertSha256(gate[field], `PDF-engine license gate ${field}`);
+  }
+}
+
+function validateApplicationGate(gate, artifactHashes, sboms, scopesToValidate) {
   assertExactKeys(
     gate,
     [
@@ -223,10 +261,10 @@ function validateApplicationGate(gate, artifactHashes, sboms) {
   const scopes = assertObject(gate.scopes, "application supply-chain scopes");
   assertExactKeys(
     scopes,
-    securityScopes.map(([scope]) => scope),
+    scopesToValidate.map(([scope]) => scope),
     "application supply-chain scopes",
   );
-  for (const [scope, key] of securityScopes) {
+  for (const [scope, key] of scopesToValidate) {
     const value = assertObject(scopes[scope], `${scope} application supply-chain scope`);
     assertExactKeys(
       value,
@@ -242,7 +280,7 @@ function validateApplicationGate(gate, artifactHashes, sboms) {
   assertValue(scopes.lockfile.artifactSha256, gate.lockfileSha256, "application lockfile artifact");
 }
 
-function validateVulnerabilityGate(gate, candidate, artifactHashes) {
+function validateVulnerabilityGate(gate, candidate, artifactHashes, scopesToValidate) {
   assertExactKeys(
     gate,
     ["schemaVersion", "passed", "scanner", "exceptions", "scans"],
@@ -268,8 +306,8 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes) {
   assertExactKeys(exceptions, ["engineSha256", "applicationSha256"], "vulnerability exceptions");
   assertSha256(exceptions.engineSha256, "engine vulnerability exceptions hash");
   assertSha256(exceptions.applicationSha256, "application vulnerability exceptions hash");
-  if (!Array.isArray(gate.scans) || gate.scans.length !== securityScopes.length) {
-    throw new TypeError("vulnerability gate must contain exactly five scans");
+  if (!Array.isArray(gate.scans) || gate.scans.length !== scopesToValidate.length) {
+    throw new TypeError("vulnerability gate must contain the exact release scans");
   }
   const scans = new Map();
   for (const scanValue of gate.scans) {
@@ -286,7 +324,7 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes) {
       ],
       "vulnerability scan",
     );
-    if (!securityScopes.some(([scope]) => scope === scan.scope) || scans.has(scan.scope)) {
+    if (!scopesToValidate.some(([scope]) => scope === scan.scope) || scans.has(scan.scope)) {
       throw new TypeError("vulnerability scan scopes are invalid");
     }
     assertSha256(scan.artifactSha256, `${scan.scope} vulnerability artifact hash`);
@@ -296,7 +334,7 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes) {
     }
     scans.set(scan.scope, scan);
   }
-  for (const [scope, key] of securityScopes) {
+  for (const [scope, key] of scopesToValidate) {
     const scan = scans.get(scope);
     assertValue(scan.artifactSha256, artifactHashes[scope], `${scope} vulnerability artifact`);
     assertValue(
@@ -309,6 +347,9 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes) {
 
 async function verifySecurityGates(root, candidate) {
   const assets = candidate.releaseAssets.security;
+  const scopesToValidate = securityScopes.filter(
+    ([scope]) => scope !== "pdf-engine" || candidate.pdfEngine !== undefined,
+  );
   const application = await readCanonicalGate(
     root,
     assets.gates.applicationSupplyChain,
@@ -316,20 +357,29 @@ async function verifySecurityGates(root, candidate) {
   );
   const artifactHashes = {
     engine: candidate.engine.docker.configDigest.slice("sha256:".length),
+    ...(candidate.pdfEngine === undefined
+      ? {}
+      : { "pdf-engine": candidate.pdfEngine.docker.configDigest.slice("sha256:".length) }),
     "web-staging": candidate.web.staging.archiveSha256,
     "web-production": candidate.web.production.archiveSha256,
     worker: candidate.releaseAssets.worker.sha256,
     lockfile: application.lockfileSha256,
   };
-  validateApplicationGate(application, artifactHashes, assets.sboms);
+  validateApplicationGate(application, artifactHashes, assets.sboms, scopesToValidate);
   validateImageEngineGate(
     await readCanonicalGate(root, assets.gates.imageEngine, "image-engine license gate"),
     artifactHashes.engine,
   );
+  if (candidate.pdfEngine !== undefined) {
+    validatePdfEngineGate(
+      await readCanonicalGate(root, assets.gates.pdfEngine, "PDF-engine license gate"),
+    );
+  }
   validateVulnerabilityGate(
     await readCanonicalGate(root, assets.gates.vulnerability, "vulnerability gate"),
     candidate,
     artifactHashes,
+    scopesToValidate,
   );
 }
 
@@ -427,10 +477,45 @@ export async function verifyProcessingCandidate({
     expectedIdentity: candidate.engine.docker,
     expectedRepoTag: candidate.engine.loadedImage,
   });
+  if (candidate.pdfEngine !== undefined) {
+    await verifyOciImageArchive({
+      archivePath: join(canonicalRoot, candidate.releaseAssets.pdfEngine.oci.path),
+      asset: candidate.releaseAssets.pdfEngine.oci,
+      expectedIdentity: candidate.pdfEngine.oci,
+    });
+    await verifyDockerImageArchive({
+      archivePath: join(canonicalRoot, candidate.releaseAssets.pdfEngine.docker.path),
+      asset: candidate.releaseAssets.pdfEngine.docker,
+      expectedIdentity: candidate.pdfEngine.docker,
+      expectedRepoTag: candidate.pdfEngine.loadedImage,
+    });
+  }
 
   const entries = releaseAssetEntries(candidate);
   for (const [asset, label] of entries) await verifyAsset(canonicalRoot, asset, label);
   await verifySecurityGates(canonicalRoot, candidate);
+  if (candidate.pdfQuality !== undefined) {
+    const readQuality = async (asset, label) =>
+      JSON.parse(
+        await readBoundedRegularFile(join(canonicalRoot, asset.path), 8 * 1024 * 1024, label),
+      );
+    const quality = await validatePdfBenchmarkEvidence({
+      report: await readQuality(candidate.releaseAssets.pdfQuality.benchmark, "PDF benchmark"),
+      gate: await readQuality(candidate.releaseAssets.pdfQuality.releaseGate, "PDF release gate"),
+      benchmarkSchema: await readQuality(
+        candidate.releaseAssets.pdfQuality.benchmarkSchema,
+        "PDF benchmark schema",
+      ),
+      gateSchema: await readQuality(
+        candidate.releaseAssets.pdfQuality.releaseGateSchema,
+        "PDF release gate schema",
+      ),
+      expectedEngineImageDigest: candidate.pdfEngine.docker.configDigest,
+    });
+    if (canonicalJson(quality) !== canonicalJson(candidate.pdfQuality)) {
+      throw new TypeError("candidate PDF quality identity does not match verified evidence");
+    }
+  }
   const financialInputs = await verifyProcessingReleaseInputBindings({
     releaseInputsPath: join(canonicalRoot, candidate.releaseAssets.releaseInputs.path),
     liveCostModelPath: join(canonicalRoot, candidate.releaseAssets.costModel.path),
@@ -460,7 +545,7 @@ export async function verifyProcessingCandidate({
     gitSha: candidate.gitSha,
     manifestSha256: sha256Bytes(manifestBytes),
     candidateVerificationSha256: candidate.verificationSha256,
-    assetCount: entries.length + 4,
+    assetCount: entries.length + (candidate.pdfEngine === undefined ? 4 : 6),
     web: {
       staging: {
         archiveSha256: staging.archiveSha256,

@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-export * from "./image-optimize";
-export * from "./product-usage";
-export * from "./tool-job";
+export * from "./image-optimize.ts";
+export * from "./pdf-optimize.ts";
+export * from "./product-usage.ts";
+export * from "./tool-job.ts";
 
 export const WORKER_PROTOCOL_VERSION = 1 as const;
 export const IMAGE_TOOL_ID = "image.pipeline" as const;
@@ -1119,11 +1120,23 @@ export type PdfCompressScannedErrorCode =
   | "NO_SIZE_REDUCTION"
   | "WORKER_CRASH";
 
-export interface PdfCompressScannedErrorPayload {
-  code: PdfCompressScannedErrorCode;
+export type PdfCompressScannedNoSizeReductionReason =
+  | "STRUCTURED_OR_MIXED"
+  | "IMAGE_ONLY_NO_SAVINGS";
+
+interface PdfCompressScannedErrorPayloadBase {
   message: string;
   retryable: boolean;
 }
+
+export type PdfCompressScannedErrorPayload =
+  | (PdfCompressScannedErrorPayloadBase & {
+      code: "NO_SIZE_REDUCTION";
+      reason: PdfCompressScannedNoSizeReductionReason;
+    })
+  | (PdfCompressScannedErrorPayloadBase & {
+      code: Exclude<PdfCompressScannedErrorCode, "NO_SIZE_REDUCTION">;
+    });
 
 export type PdfCompressScannedProgress =
   | {

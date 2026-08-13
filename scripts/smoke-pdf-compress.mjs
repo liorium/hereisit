@@ -33,7 +33,7 @@ const SENTINELS = [
   SOURCE_METADATA.language,
 ];
 const BALANCED_NO_REDUCTION_MESSAGE =
-  "균형 150DPI 설정으로는 파일 용량을 1% 이상 줄이지 못했어요. 최소 용량 96DPI를 시도해 보세요.";
+  "텍스트와 링크를 유지하면서는 용량을 1% 이상 줄이지 못했어요. 원본을 그대로 사용하는 것을 권장해요.";
 const EXPECTED_CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'";
 const EXPECTED_PERMISSIONS_POLICY = "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
@@ -431,28 +431,32 @@ try {
     producer: "pdf-lib (https://github.com/Hopding/pdf-lib)",
   });
   await uploadPdf(page, `${SENTINELS[0]}.pdf`, source, 2);
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await page.getByText("압축 PDF 준비 완료").waitFor({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await page.getByRole("heading", { name: "용량 줄이기 완료" }).waitFor({ timeout: 60_000 });
   assert.equal(await createdObjectUrlCount(page), 1);
   const balanced = await downloadResult(page, 1, () => downloads);
   await assertCompressionResult(source, balanced, { width: 1_275, height: 1_650 });
   assertPageMarkerOrder(await inspectPageMarkerColors(page, balanced));
 
-  await page.getByRole("button", { name: "새 작업" }).click();
+  await page.getByRole("button", { name: "다른 PDF 압축" }).click();
   await uploadPdf(page, `${SENTINELS[0]}.pdf`, source, 2);
   await page.getByRole("radio", { name: /최소 용량 96DPI/ }).check();
-  await page.getByRole("button", { name: "2페이지 PDF 용량 줄이기 →" }).click();
-  await page.getByText("압축 PDF 준비 완료").waitFor({ timeout: 60_000 });
+  await page.getByRole("button", { name: "2페이지 용량 줄이기" }).click();
+  await page.getByRole("heading", { name: "용량 줄이기 완료" }).waitFor({ timeout: 60_000 });
   assert.equal(await createdObjectUrlCount(page), 2);
   const minimum = await downloadResult(page, 2, () => downloads);
   await assertCompressionResult(source, minimum, { width: 816, height: 1_056 });
   assertPageMarkerOrder(await inspectPageMarkerColors(page, minimum));
   assert.ok(minimum.byteLength < balanced.byteLength, "Minimum must be smaller than balanced.");
 
-  await page.getByRole("button", { name: "새 작업" }).click();
+  await page.getByRole("button", { name: "다른 PDF 압축" }).click();
   await uploadPdf(page, `${SENTINELS[0]}.pdf`, await createTinyVectorPdf(), 1);
-  await page.getByRole("button", { name: "1페이지 PDF 용량 줄이기 →" }).click();
+  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
   await page.getByText(BALANCED_NO_REDUCTION_MESSAGE).first().waitFor({ timeout: 60_000 });
+  await page
+    .getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요.")
+    .waitFor();
+  assert.equal(await page.getByRole("button", { name: "처리 서버에서 더 압축" }).count(), 1);
   assert.equal(await page.getByRole("button", { name: "PDF 다운로드 ↓" }).count(), 0);
   assert.equal(await createdObjectUrlCount(page), 2, "No-reduction must not create a result URL.");
   assert.equal(downloads, 2, "The no-reduction result must not download.");

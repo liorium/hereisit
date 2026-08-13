@@ -1,4 +1,5 @@
 import type { ImageOptimizeResultDescriptor } from "@hereisit/tool-contracts/image-optimize";
+import type { PdfOptimizeResultDescriptor } from "@hereisit/tool-contracts/pdf-optimize";
 import { describe, expect, it, vi } from "vitest";
 import { createClientJobCredentials } from "./api-client";
 import { createRemoteDownloadHandle } from "./download";
@@ -17,6 +18,17 @@ const descriptor: Extract<ImageOptimizeResultDescriptor, { kind: "download" }> =
   expiresAt: "2026-07-17T00:00:00.000Z",
 };
 
+const pdfDescriptor: Extract<PdfOptimizeResultDescriptor, { kind: "download" }> = {
+  kind: "download",
+  mime: "application/pdf",
+  sourceByteLength: 50 * 1024 * 1024,
+  byteLength: 40 * 1024 * 1024,
+  pageCount: 3,
+  profile: "structural",
+  engineBuildId: "qpdf-12.4.0",
+  warnings: ["SIGNATURES_INVALIDATED"],
+};
+
 function response() {
   return new Response(Uint8Array.of(0xff, 0xd8, 0xff), {
     headers: {
@@ -28,6 +40,24 @@ function response() {
 }
 
 describe("remote result download", () => {
+  it("accepts a bounded PDF descriptor without weakening the image result ceiling", () => {
+    expect(() =>
+      createRemoteDownloadHandle({
+        apiOrigin: "https://processing.example",
+        jobId,
+        jobToken: createClientJobCredentials().jobToken,
+        descriptor: pdfDescriptor,
+      } as never),
+    ).not.toThrow();
+    expect(() =>
+      createRemoteDownloadHandle({
+        apiOrigin: "https://processing.example",
+        jobId,
+        jobToken: createClientJobCredentials().jobToken,
+        descriptor: { ...descriptor, byteLength: 30 * 1024 * 1024 + 1 },
+      }),
+    ).toThrow();
+  });
   it("keeps the Blob URL alive long enough for the browser to accept the download", async () => {
     vi.useFakeTimers();
     const revokeObjectURL = vi.fn();

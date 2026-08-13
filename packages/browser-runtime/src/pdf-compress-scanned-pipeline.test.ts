@@ -571,7 +571,11 @@ describe("runPdfCompressScannedPipeline output", () => {
         assemblerFactory: factory,
         structureOptimizer: { optimize: async () => undefined },
       }),
-    ).rejects.toMatchObject({ code: "NO_SIZE_REDUCTION", retryable: false });
+    ).rejects.toMatchObject({
+      code: "NO_SIZE_REDUCTION",
+      reason: "STRUCTURED_OR_MIXED",
+      retryable: false,
+    });
     expect(raster.render).toBe(0);
     expect(assembler.create).toBe(0);
   });
@@ -691,7 +695,11 @@ describe("runPdfCompressScannedPipeline output", () => {
         rasterAdapter: adapter,
         assemblerFactory: factory,
       }),
-    ).rejects.toMatchObject({ code: "NO_SIZE_REDUCTION", retryable: false });
+    ).rejects.toMatchObject({
+      code: "NO_SIZE_REDUCTION",
+      reason: "IMAGE_ONLY_NO_SAVINGS",
+      retryable: false,
+    });
     expect(raster.documentCleanup).toBe(1);
     expect(assembler.destroy).toBe(1);
   });
@@ -1296,11 +1304,17 @@ describe("runPdfCompressScannedPipeline validation and failure mapping", () => {
   it("maps only bounded typed failures into public error payloads", () => {
     expect(
       toPdfCompressScannedErrorPayload(
-        new PdfCompressScannedPipelineError("NO_SIZE_REDUCTION", "더 작게 만들지 못했어요."),
+        new PdfCompressScannedPipelineError(
+          "NO_SIZE_REDUCTION",
+          "더 작게 만들지 못했어요.",
+          false,
+          "STRUCTURED_OR_MIXED",
+        ),
       ),
     ).toEqual({
       code: "NO_SIZE_REDUCTION",
       message: "더 작게 만들지 못했어요.",
+      reason: "STRUCTURED_OR_MIXED",
       retryable: false,
     });
     expect(toPdfCompressScannedErrorPayload(new Error("private filename and URL"))).toEqual({

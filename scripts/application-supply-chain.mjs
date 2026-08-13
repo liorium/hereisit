@@ -23,7 +23,7 @@ const PACKAGE_DIRECTORY_MAXIMUM_ENTRIES = 4096;
 const PACKAGE_LICENSE_MAXIMUM_FILES = 64;
 const NOTICES_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SBOM_MAXIMUM_BYTES = 4 * 1024 * 1024;
-const SCOPES = ["engine", "web-staging", "web-production", "worker", "lockfile"];
+const SCOPES = ["engine", "pdf-engine", "web-staging", "web-production", "worker", "lockfile"];
 const APPLICATION_SCOPES = new Set(["web-staging", "web-production", "worker"]);
 const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.3.2"];
 const PNPM_VERSION = "11.11.0";
@@ -66,6 +66,8 @@ const PNPM_REQUEST = Object.freeze({
     "@hereisit/web...",
     "--filter",
     "@hereisit/api-worker...",
+    "--filter",
+    "@hereisit/pdf-engine...",
   ],
   maxBuffer: INVENTORY_MAXIMUM_BYTES,
 });
@@ -550,7 +552,13 @@ async function verifySbom(scope, descriptor, policyState) {
   verifySyftTool(metadata);
   const source = assertObject(metadata.component, `${scope} SBOM source`);
   const sourceName = `hereisit-${scope}:sha256-${artifactSha256}`;
-  if (source.name !== sourceName) throw new TypeError(`${scope} SBOM source identity is invalid`);
+  const bound = Array.isArray(metadata.properties)
+    ? metadata.properties.some(
+        (value) => value?.name === "hereisit:artifact:sha256" && value.value === artifactSha256,
+      )
+    : false;
+  if (source.name !== sourceName && !bound)
+    throw new TypeError(`${scope} SBOM source identity is invalid`);
   if (!Array.isArray(sbom.components) || sbom.components.length > 100_000) {
     throw new TypeError(`${scope} SBOM components are invalid`);
   }

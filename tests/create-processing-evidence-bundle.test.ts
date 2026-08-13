@@ -221,6 +221,9 @@ describe("processing evidence bundle creation", () => {
       "http://approvals.example.test/42",
       "https://user:pass@approvals.example.test/42",
       "https://approvals.example.test/42#secret",
+      "https://approvals.example.test/reviews/42?token=private",
+      "https://other.example.test/reviews/42",
+      "https://approvals.example.test/not-reviews/42",
     ]) {
       expect(() =>
         createProcessingEvidenceBundle({

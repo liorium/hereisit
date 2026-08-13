@@ -17,6 +17,7 @@ const tagObjectSha = "b".repeat(40);
 const temporaryRoots: string[] = [];
 const securityScopes = [
   ["engine", "engine"],
+  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -24,6 +25,7 @@ const securityScopes = [
 ] as const;
 const securityPaths = [
   "security-image-engine-license-gate.json",
+  "security-pdf-engine-license-gate.json",
   "security-application-supply-chain-gate.json",
   "security-vulnerability-gate.json",
   ...securityScopes.map(([, scope]) => `security-sbom-${scope}.cdx.json`),
@@ -47,6 +49,7 @@ function securityAssets(files: Record<string, Uint8Array>) {
   return {
     gates: {
       imageEngine: descriptor("security-image-engine-license-gate.json"),
+      pdfEngine: descriptor("security-pdf-engine-license-gate.json"),
       applicationSupplyChain: descriptor("security-application-supply-chain-gate.json"),
       vulnerability: descriptor("security-vulnerability-gate.json"),
     },
@@ -83,6 +86,12 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": Buffer.from("canonical-oci\n"),
     "image-engine-linux-amd64.docker.tar": Buffer.from("loadable-docker\n"),
+    "pdf-engine-linux-amd64.oci.tar": Buffer.from("canonical-pdf-oci\n"),
+    "pdf-engine-linux-amd64.docker.tar": Buffer.from("loadable-pdf-docker\n"),
+    "pdf-engine-benchmark.json": Buffer.from('{"benchmark":true}\n'),
+    "pdf-engine-benchmark.schema.json": Buffer.from('{"schema":true}\n'),
+    "pdf-engine-release-gate.json": Buffer.from('{"passed":true}\n'),
+    "pdf-engine-release-gate.schema.json": Buffer.from('{"schema":true}\n'),
     "api-worker.mjs": Buffer.from('export default {fetch(){return new Response("ok")}};\n'),
     "processing-release-inputs.json": Buffer.from('{"release":true}\n'),
     "live-cost-model.json": Buffer.from('{"cost":true}\n'),
@@ -98,8 +107,8 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     sha256: sha256(files[path]),
   });
   const candidatePayload = {
-    schema: "hereisit-processing-candidate@1",
-    version: 1,
+    schema: "hereisit-processing-candidate@2",
+    version: 2,
     state: "finalized",
     releaseId,
     gitSha: targetSha,
@@ -114,6 +123,24 @@ async function createFixture({ wrongStagingTree = false } = {}) {
         configDigest: `sha256:${"7".repeat(64)}`,
         diffIds: [`sha256:${"9".repeat(64)}`],
       },
+    },
+    pdfEngine: {
+      loadedImage: `hereisit-pdf-engine:${targetSha}`,
+      oci: {
+        configDigest: `sha256:${"6".repeat(64)}`,
+        distributionLayerDigests: [`sha256:${"5".repeat(64)}`],
+        diffIds: [`sha256:${"4".repeat(64)}`],
+      },
+      docker: {
+        configDigest: `sha256:${"6".repeat(64)}`,
+        diffIds: [`sha256:${"4".repeat(64)}`],
+      },
+    },
+    pdfQuality: {
+      benchmarkSha256: "1".repeat(64),
+      releaseGateSha256: "2".repeat(64),
+      visualProfilesMeasured: 0,
+      publicAdmissionReady: false,
     },
     web: {
       staging: {
@@ -136,6 +163,16 @@ async function createFixture({ wrongStagingTree = false } = {}) {
       engine: {
         oci: identity("image-engine-linux-amd64.oci.tar"),
         docker: identity("image-engine-linux-amd64.docker.tar"),
+      },
+      pdfEngine: {
+        oci: identity("pdf-engine-linux-amd64.oci.tar"),
+        docker: identity("pdf-engine-linux-amd64.docker.tar"),
+      },
+      pdfQuality: {
+        benchmark: identity("pdf-engine-benchmark.json"),
+        benchmarkSchema: identity("pdf-engine-benchmark.schema.json"),
+        releaseGate: identity("pdf-engine-release-gate.json"),
+        releaseGateSchema: identity("pdf-engine-release-gate.schema.json"),
       },
       worker: identity("api-worker.mjs"),
       releaseInputs: identity("processing-release-inputs.json"),
@@ -203,6 +240,12 @@ async function startGitHubServer(
     "processing-release-report.json",
     "image-engine-linux-amd64.oci.tar",
     "image-engine-linux-amd64.docker.tar",
+    "pdf-engine-linux-amd64.oci.tar",
+    "pdf-engine-linux-amd64.docker.tar",
+    "pdf-engine-benchmark.json",
+    "pdf-engine-benchmark.schema.json",
+    "pdf-engine-release-gate.json",
+    "pdf-engine-release-gate.schema.json",
     "api-worker.mjs",
     "processing-release-inputs.json",
     "live-cost-model.json",
@@ -353,10 +396,10 @@ describe("GitHub release asset resolver", () => {
         token: "test-token",
       });
       expect(result).toMatchObject({
-        schema: "hereisit-processing-release-assets@1",
+        schema: "hereisit-processing-release-assets@2",
         repository,
         release: { id: 9001, tag: releaseTag, targetSha },
-        worker: { assetId: 105, sha256: fixture.candidate.releaseAssets.worker.sha256 },
+        worker: { assetId: 111, sha256: fixture.candidate.releaseAssets.worker.sha256 },
         web: {
           staging: { treeSha256: fixture.candidate.releaseAssets.web.staging.treeSha256 },
           production: { treeSha256: fixture.candidate.releaseAssets.web.production.treeSha256 },

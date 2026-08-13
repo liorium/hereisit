@@ -144,6 +144,9 @@ describe("tool implementation ownership", () => {
         ({ tone }) => tone === "warning",
       ),
     ).toEqual([{ tone: "warning", text: smartPdfCompressionNotice }]);
+    expect(getToolImplementation("pdf.compress-scanned").defaultSummary).toBe(
+      "먼저 이 기기에서 압축하고, 줄어들지 않을 때만 선택해서 처리 서버로 더 압축해요.",
+    );
   });
 
   it("keeps related tool navigation client-only without automatic prefetch", () => {

@@ -420,6 +420,10 @@ test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ 
   await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
     timeout: 60_000,
   });
+  await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toHaveCount(0);
+  await expect(
+    page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
+  ).toHaveCount(0);
   await expect(page.getByText("스캔 페이지를 가볍게 다시 만들었어요.")).toBeVisible();
   const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
   const saveBox = await save.boundingBox();
