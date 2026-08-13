@@ -14,7 +14,8 @@ export interface DetectedFileItem {
 export interface FileRecommendationGroup {
   kind: FileKind | "mixed";
   items: readonly DetectedFileItem[];
-  recommendations: readonly ToolRecommendation[];
+  primaryRecommendation: ToolRecommendation;
+  alternateRecommendations: readonly ToolRecommendation[];
 }
 
 export type FileRecommendationPlan =
@@ -40,10 +41,15 @@ function createGroup(
   items: readonly DetectedFileItem[],
   recommendations: readonly ToolRecommendation[],
 ): FileRecommendationGroup {
+  const primaryRecommendation = recommendations[0];
+  if (primaryRecommendation === undefined) {
+    throw new Error("A recommendation group requires at least one recommendation");
+  }
   return Object.freeze({
     kind,
     items: Object.freeze([...items]),
-    recommendations,
+    primaryRecommendation,
+    alternateRecommendations: Object.freeze(recommendations.slice(1)),
   });
 }
 

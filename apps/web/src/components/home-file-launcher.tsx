@@ -22,6 +22,7 @@ import {
   type FileDetectionItem,
   LauncherFileLimitError,
 } from "../lib/file-selection-detection";
+import { launcherStatusMessage } from "../lib/home-file-launcher-state";
 import { replacePendingToolSelection } from "../lib/pending-tool-selection";
 import styles from "./home-file-launcher.module.css";
 
@@ -160,14 +161,7 @@ export function HomeFileLauncher(): ReactNode {
     router.push(canonicalTool.route);
   }
 
-  const liveMessage =
-    state.mode === "detecting"
-      ? `${state.completed}/${state.total}개 형식 확인 중`
-      : state.mode === "result"
-        ? `${state.itemCount}개 파일 형식 확인 완료`
-        : state.mode === "error"
-          ? state.message
-          : "파일을 선택하면 기기 안에서 형식만 확인해요.";
+  const liveMessage = launcherStatusMessage(state);
 
   return (
     <section className={styles.section} aria-labelledby="file-launcher-title">
@@ -215,11 +209,17 @@ export function HomeFileLauncher(): ReactNode {
         </button>
       </fieldset>
 
-      <p aria-atomic="true" aria-live="polite" className={styles.status} role="status">
-        {liveMessage}
-      </p>
+      {liveMessage === null ? null : (
+        <p aria-atomic="true" aria-live="polite" className={styles.status} role="status">
+          {liveMessage}
+        </p>
+      )}
 
-      {state.mode === "error" ? <p className={styles.correction}>{state.message}</p> : null}
+      {state.mode === "error" ? (
+        <p className={styles.correction} role="alert">
+          {state.message}
+        </p>
+      ) : null}
 
       {state.mode === "result" ? (
         <div className={styles.results}>
@@ -235,25 +235,51 @@ export function HomeFileLauncher(): ReactNode {
                   <span>{group.items.length}개</span>
                 </div>
                 <div className={styles.recommendations}>
-                  {group.recommendations.map((recommendation) => (
-                    <article className={styles.recommendation} key={recommendation.tool.id}>
-                      <div>
-                        <strong>{recommendation.tool.name}</strong>
-                        <p>{recommendation.tool.shortDescription}</p>
-                        <small data-readiness={recommendation.readiness}>
-                          {readinessCopy(recommendation)}
-                        </small>
+                  <article className={styles.recommendation} data-primary="true">
+                    <div>
+                      <span className={styles.primaryLabel}>가장 잘 맞는 도구</span>
+                      <strong>{group.primaryRecommendation.tool.name}</strong>
+                      <p>{group.primaryRecommendation.tool.shortDescription}</p>
+                      <small data-readiness={group.primaryRecommendation.readiness}>
+                        {readinessCopy(group.primaryRecommendation)}
+                      </small>
+                    </div>
+                    <button
+                      aria-label={`${group.primaryRecommendation.tool.name} 도구 선택`}
+                      disabled={group.primaryRecommendation.readiness === "too-many"}
+                      onClick={() => chooseRecommendation(group, group.primaryRecommendation)}
+                      type="button"
+                    >
+                      이 도구로 시작
+                    </button>
+                  </article>
+
+                  {group.alternateRecommendations.length > 0 ? (
+                    <details className={styles.alternates}>
+                      <summary>다른 작업 {group.alternateRecommendations.length}개 보기</summary>
+                      <div className={styles.alternateList}>
+                        {group.alternateRecommendations.map((recommendation) => (
+                          <article className={styles.recommendation} key={recommendation.tool.id}>
+                            <div>
+                              <strong>{recommendation.tool.name}</strong>
+                              <p>{recommendation.tool.shortDescription}</p>
+                              <small data-readiness={recommendation.readiness}>
+                                {readinessCopy(recommendation)}
+                              </small>
+                            </div>
+                            <button
+                              aria-label={`${recommendation.tool.name} 도구 선택`}
+                              disabled={recommendation.readiness === "too-many"}
+                              onClick={() => chooseRecommendation(group, recommendation)}
+                              type="button"
+                            >
+                              도구 선택
+                            </button>
+                          </article>
+                        ))}
                       </div>
-                      <button
-                        aria-label={`${recommendation.tool.name} 도구 선택`}
-                        disabled={recommendation.readiness === "too-many"}
-                        onClick={() => chooseRecommendation(group, recommendation)}
-                        type="button"
-                      >
-                        도구 선택
-                      </button>
-                    </article>
-                  ))}
+                    </details>
+                  ) : null}
                 </div>
               </section>
             ))

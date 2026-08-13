@@ -92,7 +92,7 @@
 }
 
 .status {
-  color: var(--green);
+  color: color-mix(in srgb, var(--green) 82%, var(--ink));
   font-weight: 800;
 }
 
@@ -151,6 +151,19 @@
   border-radius: 12px;
 }
 
+.recommendation[data-primary="true"] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--yellow) 12%, var(--panel));
+}
+
+.primaryLabel {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--blue-dark);
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .recommendation > div {
   min-width: 0;
 }
@@ -191,6 +204,48 @@
 
 .recommendation button {
   flex: none;
+}
+
+.alternates {
+  border-top: 1px solid var(--line);
+}
+
+.alternates > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--blue-dark);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
+  list-style: none;
+}
+
+.alternates > summary::-webkit-details-marker {
+  display: none;
+}
+
+.alternates > summary::after {
+  content: "+";
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.alternates[open] > summary::after {
+  content: "−";
+}
+
+.alternates > summary:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid color-mix(in srgb, var(--blue) 50%, transparent);
+  outline-offset: 3px;
+}
+
+.alternateList {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
 }
 
 .recommendation button:disabled {

@@ -8,77 +8,186 @@
         "role": "neutral",
         "displayName": "종이",
         "canonical": "#f7f7f2",
-        "tonalRamp": ["oklch(15% 0.007 106.5)", "oklch(27% 0.007 106.5)", "oklch(39% 0.007 106.5)", "oklch(51% 0.007 106.5)", "oklch(63% 0.007 106.5)", "oklch(75% 0.007 106.5)", "oklch(87% 0.007 106.5)", "oklch(95% 0.007 106.5)"]
+        "tonalRamp": [
+          "oklch(15% 0.007 106.5)",
+          "oklch(27% 0.007 106.5)",
+          "oklch(39% 0.007 106.5)",
+          "oklch(51% 0.007 106.5)",
+          "oklch(63% 0.007 106.5)",
+          "oklch(75% 0.007 106.5)",
+          "oklch(87% 0.007 106.5)",
+          "oklch(95% 0.007 106.5)"
+        ]
       },
       "ink": {
         "role": "neutral",
         "displayName": "먹색",
         "canonical": "#17191f",
-        "tonalRamp": ["oklch(15% 0.012 270.8)", "oklch(27% 0.012 270.8)", "oklch(39% 0.012 270.8)", "oklch(51% 0.012 270.8)", "oklch(63% 0.012 270.8)", "oklch(75% 0.012 270.8)", "oklch(87% 0.012 270.8)", "oklch(95% 0.012 270.8)"]
+        "tonalRamp": [
+          "oklch(15% 0.012 270.8)",
+          "oklch(27% 0.012 270.8)",
+          "oklch(39% 0.012 270.8)",
+          "oklch(51% 0.012 270.8)",
+          "oklch(63% 0.012 270.8)",
+          "oklch(75% 0.012 270.8)",
+          "oklch(87% 0.012 270.8)",
+          "oklch(95% 0.012 270.8)"
+        ]
       },
       "muted": {
         "role": "neutral",
         "displayName": "절제된 회색",
         "canonical": "#6b6f7a",
-        "tonalRamp": ["oklch(15% 0.018 269.8)", "oklch(27% 0.018 269.8)", "oklch(39% 0.018 269.8)", "oklch(51% 0.018 269.8)", "oklch(63% 0.018 269.8)", "oklch(75% 0.018 269.8)", "oklch(87% 0.018 269.8)", "oklch(95% 0.018 269.8)"]
+        "tonalRamp": [
+          "oklch(15% 0.018 269.8)",
+          "oklch(27% 0.018 269.8)",
+          "oklch(39% 0.018 269.8)",
+          "oklch(51% 0.018 269.8)",
+          "oklch(63% 0.018 269.8)",
+          "oklch(75% 0.018 269.8)",
+          "oklch(87% 0.018 269.8)",
+          "oklch(95% 0.018 269.8)"
+        ]
       },
       "line": {
         "role": "neutral",
         "displayName": "구분선",
         "canonical": "#dadde3",
-        "tonalRamp": ["oklch(15% 0.009 264.5)", "oklch(27% 0.009 264.5)", "oklch(39% 0.009 264.5)", "oklch(51% 0.009 264.5)", "oklch(63% 0.009 264.5)", "oklch(75% 0.009 264.5)", "oklch(87% 0.009 264.5)", "oklch(95% 0.009 264.5)"]
+        "tonalRamp": [
+          "oklch(15% 0.009 264.5)",
+          "oklch(27% 0.009 264.5)",
+          "oklch(39% 0.009 264.5)",
+          "oklch(51% 0.009 264.5)",
+          "oklch(63% 0.009 264.5)",
+          "oklch(75% 0.009 264.5)",
+          "oklch(87% 0.009 264.5)",
+          "oklch(95% 0.009 264.5)"
+        ]
       },
       "action-blue": {
         "role": "primary",
         "displayName": "액션 블루",
         "canonical": "#3d5afe",
-        "tonalRamp": ["oklch(15% 0.243 268.8)", "oklch(27% 0.243 268.8)", "oklch(39% 0.243 268.8)", "oklch(51% 0.243 268.8)", "oklch(63% 0.243 268.8)", "oklch(75% 0.243 268.8)", "oklch(87% 0.243 268.8)", "oklch(95% 0.243 268.8)"]
+        "tonalRamp": [
+          "oklch(15% 0.243 268.8)",
+          "oklch(27% 0.243 268.8)",
+          "oklch(39% 0.243 268.8)",
+          "oklch(51% 0.243 268.8)",
+          "oklch(63% 0.243 268.8)",
+          "oklch(75% 0.243 268.8)",
+          "oklch(87% 0.243 268.8)",
+          "oklch(95% 0.243 268.8)"
+        ]
       },
       "action-blue-dark": {
         "role": "primary",
         "displayName": "깊은 액션 블루",
         "canonical": "#263dcc",
-        "tonalRamp": ["oklch(15% 0.219 268.0)", "oklch(27% 0.219 268.0)", "oklch(39% 0.219 268.0)", "oklch(51% 0.219 268.0)", "oklch(63% 0.219 268.0)", "oklch(75% 0.219 268.0)", "oklch(87% 0.219 268.0)", "oklch(95% 0.219 268.0)"]
+        "tonalRamp": [
+          "oklch(15% 0.219 268.0)",
+          "oklch(27% 0.219 268.0)",
+          "oklch(39% 0.219 268.0)",
+          "oklch(51% 0.219 268.0)",
+          "oklch(63% 0.219 268.0)",
+          "oklch(75% 0.219 268.0)",
+          "oklch(87% 0.219 268.0)",
+          "oklch(95% 0.219 268.0)"
+        ]
       },
       "highlighter-yellow": {
         "role": "secondary",
         "displayName": "형광 노랑",
         "canonical": "#ffd84d",
-        "tonalRamp": ["oklch(15% 0.157 93.0)", "oklch(27% 0.157 93.0)", "oklch(39% 0.157 93.0)", "oklch(51% 0.157 93.0)", "oklch(63% 0.157 93.0)", "oklch(75% 0.157 93.0)", "oklch(87% 0.157 93.0)", "oklch(95% 0.157 93.0)"]
+        "tonalRamp": [
+          "oklch(15% 0.157 93.0)",
+          "oklch(27% 0.157 93.0)",
+          "oklch(39% 0.157 93.0)",
+          "oklch(51% 0.157 93.0)",
+          "oklch(63% 0.157 93.0)",
+          "oklch(75% 0.157 93.0)",
+          "oklch(87% 0.157 93.0)",
+          "oklch(95% 0.157 93.0)"
+        ]
       },
       "safe-green": {
         "role": "tertiary",
         "displayName": "안전 그린",
         "canonical": "#16845b",
-        "tonalRamp": ["oklch(15% 0.114 161.8)", "oklch(27% 0.114 161.8)", "oklch(39% 0.114 161.8)", "oklch(51% 0.114 161.8)", "oklch(63% 0.114 161.8)", "oklch(75% 0.114 161.8)", "oklch(87% 0.114 161.8)", "oklch(95% 0.114 161.8)"]
+        "tonalRamp": [
+          "oklch(15% 0.114 161.8)",
+          "oklch(27% 0.114 161.8)",
+          "oklch(39% 0.114 161.8)",
+          "oklch(51% 0.114 161.8)",
+          "oklch(63% 0.114 161.8)",
+          "oklch(75% 0.114 161.8)",
+          "oklch(87% 0.114 161.8)",
+          "oklch(95% 0.114 161.8)"
+        ]
       },
       "warning-red": {
         "role": "tertiary",
         "displayName": "경고 레드",
         "canonical": "#c83b3b",
-        "tonalRamp": ["oklch(15% 0.178 25.0)", "oklch(27% 0.178 25.0)", "oklch(39% 0.178 25.0)", "oklch(51% 0.178 25.0)", "oklch(63% 0.178 25.0)", "oklch(75% 0.178 25.0)", "oklch(87% 0.178 25.0)", "oklch(95% 0.178 25.0)"]
+        "tonalRamp": [
+          "oklch(15% 0.178 25.0)",
+          "oklch(27% 0.178 25.0)",
+          "oklch(39% 0.178 25.0)",
+          "oklch(51% 0.178 25.0)",
+          "oklch(63% 0.178 25.0)",
+          "oklch(75% 0.178 25.0)",
+          "oklch(87% 0.178 25.0)",
+          "oklch(95% 0.178 25.0)"
+        ]
       },
       "panel": {
         "role": "neutral",
         "displayName": "패널 화이트",
         "canonical": "#ffffff",
-        "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(39% 0 0)", "oklch(51% 0 0)", "oklch(63% 0 0)", "oklch(75% 0 0)", "oklch(87% 0 0)", "oklch(95% 0 0)"]
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(39% 0 0)",
+          "oklch(51% 0 0)",
+          "oklch(63% 0 0)",
+          "oklch(75% 0 0)",
+          "oklch(87% 0 0)",
+          "oklch(95% 0 0)"
+        ]
       }
     },
     "typographyMeta": {
-      "display": { "displayName": "디스플레이", "purpose": "홈 히어로와 페이지의 가장 큰 약속 하나." },
+      "display": {
+        "displayName": "디스플레이",
+        "purpose": "홈 히어로와 페이지의 가장 큰 약속 하나."
+      },
       "headline": { "displayName": "헤드라인", "purpose": "섹션과 주요 작업 단계의 시작." },
       "title": { "displayName": "타이틀", "purpose": "도구 카드와 결과 그룹 제목." },
       "body": { "displayName": "본문", "purpose": "설명, 처리 조건과 안내." },
       "label": { "displayName": "라벨", "purpose": "버튼, 탐색, 상태와 짧은 눈썹 문구." }
     },
     "shadows": [
-      { "name": "tool-card-hover", "value": "5px 5px 0 var(--yellow)", "purpose": "일반 도구 카드의 포인터 호버 반응." },
-      { "name": "home-card-hover", "value": "7px 7px 0 var(--yellow)", "purpose": "홈의 큰 도구 카드 호버 반응." },
-      { "name": "floating-panel", "value": "0 18px 48px rgba(23, 25, 31, 0.16)", "purpose": "검색 결과와 떠 있는 메뉴." }
+      {
+        "name": "tool-card-hover",
+        "value": "5px 5px 0 var(--yellow)",
+        "purpose": "일반 도구 카드의 포인터 호버 반응."
+      },
+      {
+        "name": "home-card-hover",
+        "value": "7px 7px 0 var(--yellow)",
+        "purpose": "홈의 큰 도구 카드 호버 반응."
+      },
+      {
+        "name": "floating-panel",
+        "value": "0 18px 48px rgba(23, 25, 31, 0.16)",
+        "purpose": "검색 결과와 떠 있는 메뉴."
+      }
     ],
     "motion": [
-      { "name": "state-fast", "value": "160ms ease", "purpose": "호버, 테두리, 색상과 짧은 이동 상태. reduced-motion에서는 제거한다." }
+      {
+        "name": "state-fast",
+        "value": "160ms ease",
+        "purpose": "호버, 테두리, 색상과 짧은 이동 상태. reduced-motion에서는 제거한다."
+      }
     ],
     "breakpoints": [
       { "name": "narrow-card", "value": "420px" },
@@ -154,11 +263,31 @@
       "로컬 처리, 서버 전송과 상태를 숨기지 않는 시각 언어"
     ],
     "rules": [
-      { "name": "The Highlighter Rule", "body": "형광 노랑은 정보 배경이 아니라 한 번의 선택이나 움직임을 강조할 때만 사용한다.", "section": "colors" },
-      { "name": "The Honest State Rule", "body": "그린과 레드는 실제 성공·실패 상태에만 사용하며 장식용으로 소비하지 않는다.", "section": "colors" },
-      { "name": "The Korean First Rule", "body": "한국어는 억지로 쪼개지 않으며 `word-break: keep-all`과 균형 잡힌 줄바꿈을 우선한다.", "section": "typography" },
-      { "name": "The One Promise Rule", "body": "한 화면에서 가장 큰 제목은 사용자가 지금 끝낼 수 있는 작업 하나만 약속한다.", "section": "typography" },
-      { "name": "The Flat by Default Rule", "body": "정지 상태의 카드에는 그림자를 두지 않고, 그림자는 상호작용 또는 실제 레이어 관계를 설명할 때만 나타낸다.", "section": "elevation" }
+      {
+        "name": "The Highlighter Rule",
+        "body": "형광 노랑은 정보 배경이 아니라 한 번의 선택이나 움직임을 강조할 때만 사용한다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Honest State Rule",
+        "body": "그린과 레드는 실제 성공·실패 상태에만 사용하며 장식용으로 소비하지 않는다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Korean First Rule",
+        "body": "한국어는 억지로 쪼개지 않으며 `word-break: keep-all`과 균형 잡힌 줄바꿈을 우선한다.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Promise Rule",
+        "body": "한 화면에서 가장 큰 제목은 사용자가 지금 끝낼 수 있는 작업 하나만 약속한다.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat by Default Rule",
+        "body": "정지 상태의 카드에는 그림자를 두지 않고, 그림자는 상호작용 또는 실제 레이어 관계를 설명할 때만 나타낸다.",
+        "section": "elevation"
+      }
     ],
     "dos": [
       "Do 한 화면에서 사용자가 선택할 주요 행동을 하나만 가장 강하게 표시한다.",

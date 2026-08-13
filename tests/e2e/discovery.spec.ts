@@ -36,6 +36,13 @@ async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 3
   throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
 }
 
+async function revealAlternateFileTools(page: Page): Promise<void> {
+  await page
+    .locator('section[aria-labelledby="file-launcher-title"] summary')
+    .filter({ hasText: /^다른 작업 \d+개 보기$/ })
+    .click();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
@@ -730,6 +737,9 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
   });
   await expect(launcher.locator("img, canvas, [data-thumbnail]")).toHaveCount(0);
 
+  await expect(page.getByText("가장 잘 맞는 도구", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 합치기 도구 선택" })).not.toBeVisible();
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
   await expect(page.getByText(sentinelFilename, { exact: true })).toBeVisible();
@@ -864,8 +874,8 @@ test("rejects 101 launcher files before reading any bytes", async ({ page }) => 
   );
 
   const launcher = page.locator('section[aria-labelledby="file-launcher-title"]');
-  await expect(launcher.getByRole("status")).toContainText("최대 100개");
-  await expect(launcher.locator("p:not([role])").filter({ hasText: "최대 100개" })).toBeVisible();
+  await expect(launcher.getByRole("alert")).toHaveText(/최대 100개/);
+  await expect(launcher.getByRole("status")).toHaveCount(0);
   expect(
     await page.evaluate(
       () => (window as Window & { __hereisitLauncherReads?: number }).__hereisitLauncherReads,
@@ -888,6 +898,7 @@ test("keeps ready and needs-more recommendations actionable while disabling too-
   });
 
   await input.setInputFiles(pdfFixture("one.pdf"));
+  await revealAlternateFileTools(page);
   const merge = page.getByRole("button", { name: "PDF 합치기 도구 선택" });
   const split = page.getByRole("button", { name: "PDF 페이지 분할 도구 선택" });
   await expect(merge).toBeEnabled();
@@ -1045,6 +1056,7 @@ test("hands a needs-more recommendation through destination validation", async (
     buffer: Buffer.from("%PDF-1.7\n%%EOF"),
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
   await expect(page.getByText("needs-another.pdf", { exact: true })).toBeVisible();
