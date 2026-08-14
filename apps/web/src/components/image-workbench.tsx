@@ -29,7 +29,7 @@ import {
   resolveIfCurrent,
 } from "../lib/files";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
-import { getToolImplementation, type ToolImplementationConfig } from "../lib/tool-implementations";
+import { getToolImplementation } from "../lib/tool-implementations";
 import { usePendingToolFiles } from "../lib/use-pending-tool-files";
 import styles from "./image-workbench.module.css";
 
@@ -214,7 +214,7 @@ function isAcceptedKind(
 function getValidatedImageImplementation(
   toolId: AvailableToolId,
   intent: Exclude<ImageWorkbenchIntent, "general">,
-): ToolImplementationConfig {
+) {
   const implementation = getToolImplementation(toolId);
   if (
     implementation.bundleProfile !== "image" ||

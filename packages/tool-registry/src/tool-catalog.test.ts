@@ -3,6 +3,8 @@ import {
   IMAGE_TOOL_VERSION,
   IMAGE_WATERMARK_TOOL_ID,
   IMAGE_WATERMARK_TOOL_VERSION,
+  JSON_FORMAT_TOOL_ID,
+  JSON_FORMAT_TOOL_VERSION,
   PDF_COMPRESS_SCANNED_TOOL_ID,
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   PDF_IMAGES_TO_PDF_TOOL_ID,
@@ -31,6 +33,7 @@ import {
 } from "./tool-catalog";
 
 type ExpectedAvailableToolId =
+  | "data.json-format"
   | "image.compress"
   | "image.convert"
   | "image.resize"
@@ -44,6 +47,7 @@ type ExpectedAvailableToolId =
   | "pdf.watermark";
 
 const expectedAliases = {
+  "data.json-format": ["json 정리", "json 포맷", "json 검사", "json 축소"],
   "image.compress": ["사진 압축", "이미지 최적화", "용량 줄이기", "jpg 압축", "png 압축"],
   "image.resize": ["사진 크기", "리사이즈", "해상도 변경", "정사각형 자르기"],
   "image.convert": ["이미지 변환", "jpg 변환", "png 변환", "webp 변환", "heic 변환"],
@@ -58,6 +62,7 @@ const expectedAliases = {
 } as const satisfies Record<ExpectedAvailableToolId, readonly string[]>;
 
 const expectedRelatedToolIds = {
+  "data.json-format": ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
   "image.compress": ["image.resize", "image.convert", "image.watermark"],
   "image.resize": ["image.compress", "image.convert", "image.watermark"],
   "image.convert": ["image.compress", "image.resize", "pdf.image-to-pdf"],
@@ -72,6 +77,7 @@ const expectedRelatedToolIds = {
 } as const satisfies Record<ExpectedAvailableToolId, readonly [string, string, string]>;
 
 const expectedContracts = {
+  "data.json-format": [JSON_FORMAT_TOOL_ID, JSON_FORMAT_TOOL_VERSION],
   "image.compress": ["image.optimize", 1],
   "image.resize": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.convert": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
@@ -86,6 +92,11 @@ const expectedContracts = {
 } as const satisfies Record<AvailableToolId, readonly [string, number]>;
 
 const expectedCopy = {
+  "data.json-format": {
+    name: "JSON 정리·검사",
+    shortDescription:
+      "JSON 문법을 검사하고 읽기 좋게 정리하거나 공백을 줄이세요. 내용은 브라우저 밖으로 나가지 않습니다.",
+  },
   "image.compress": {
     name: "이미지 용량 줄이기",
     shortDescription:
@@ -152,8 +163,8 @@ function expectInvalidCatalog(
 }
 
 describe("tool catalog", () => {
-  it("publishes 11 real tools and one honest roadmap card", () => {
-    expect(availableToolEntries).toHaveLength(11);
+  it("publishes 12 real tools and one honest roadmap card", () => {
+    expect(availableToolEntries).toHaveLength(12);
     expect(plannedToolEntries.map((tool) => tool.id)).toEqual(["media.video-compress"]);
     expect(getAvailableToolById("image.compress")).toMatchObject({
       route: "/image/compress",
@@ -166,11 +177,19 @@ describe("tool catalog", () => {
       execution: "server",
     });
     expect(getAvailableToolById("pdf.organize").experience).toBe("workspace");
+    expect(getAvailableToolById("data.json-format")).toMatchObject({
+      route: "/data/json",
+      launcherInput: null,
+      outputKinds: ["application/json", "value/text"],
+      contract: { id: "json.format", version: 1 },
+      experience: "quick",
+      execution: "browser",
+    });
   });
 
   it("keeps IDs, routes, aliases, and intentional relations valid", () => {
     expect(new Set(toolCatalog.map((tool) => tool.id)).size).toBe(toolCatalog.length);
-    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(11);
+    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(12);
     expect(getRelatedAvailableTools("pdf.merge").map((tool) => tool.id)).toEqual([
       "pdf.split",
       "pdf.organize",
@@ -308,6 +327,7 @@ describe("tool catalog", () => {
       "pdf.to-image",
       "pdf.image-to-pdf",
       "pdf.watermark",
+      "data.json-format",
     ]);
 
     const imageKinds = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
@@ -335,6 +355,13 @@ describe("tool catalog", () => {
       ],
       "pdf.image-to-pdf": [["image/jpeg", "image/png"], 1, 100, true, ["application/pdf"]],
       "pdf.watermark": [["application/pdf"], 1, 1, false, ["application/pdf"]],
+      "data.json-format": [
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        ["application/json", "value/text"],
+      ],
     } as const;
 
     expect(

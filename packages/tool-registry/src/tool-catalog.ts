@@ -1,3 +1,5 @@
+import { JSON_FORMAT_TOOL_ID, JSON_FORMAT_TOOL_VERSION } from "@hereisit/tool-contracts";
+
 export type ToolId = `${string}.${string}`;
 export type DomainId = "image" | "document" | "media" | "data" | "text-ai" | "web-dev" | "everyday";
 export type DiscoveryDomainId = "all" | DomainId;
@@ -574,6 +576,25 @@ export const toolCatalog = defineToolCatalog([
     contract: { id: "pdf.watermark", version: 1 },
     featured: false,
     relatedToolIds: ["pdf.organize", "pdf.merge", "image.watermark"],
+  },
+  {
+    id: "data.json-format",
+    name: "JSON 정리·검사",
+    shortDescription:
+      "JSON 문법을 검사하고 읽기 좋게 정리하거나 공백을 줄이세요. 내용은 브라우저 밖으로 나가지 않습니다.",
+    domains: ["data", "web-dev"],
+    purposes: ["edit", "convert"],
+    searchAliases: ["json 정리", "json 포맷", "json 검사", "json 축소"],
+    rank: 10,
+    availability: "available",
+    route: "/data/json",
+    launcherInput: null,
+    outputKinds: ["application/json", "value/text"],
+    experience: "quick",
+    execution: "browser",
+    contract: { id: JSON_FORMAT_TOOL_ID, version: JSON_FORMAT_TOOL_VERSION },
+    featured: false,
+    relatedToolIds: ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
   },
   {
     id: "media.video-compress",

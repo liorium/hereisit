@@ -7,6 +7,7 @@ import { FavoriteToolButton } from "./favorite-tool-button";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 import { ToolCard } from "./tool-card";
+import { getToolWorkAreaPresentation } from "./tool-detail-experience";
 import styles from "./tool-detail-page.module.css";
 import { ToolVisitTracker } from "./tool-visit-tracker";
 
@@ -20,11 +21,7 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
   const implementation = getToolImplementation(toolId);
   const related = getRelatedAvailableTools(toolId);
 
-  if (tool.experience === "quick") {
-    throw new Error(`Quick detail shell is not implemented: ${toolId}`);
-  }
-
-  const workAreaLabel = tool.experience === "workspace" ? "편집 작업 공간" : "파일 작업 영역";
+  const workArea = getToolWorkAreaPresentation(tool.experience);
   const primaryDomain = tool.domains[0];
 
   return (
@@ -53,7 +50,11 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
           {tool.execution === "browser" ? (
             <section aria-label="처리 방식" className={styles.execution}>
               <strong>이 기기에서 처리</strong>
-              <span>파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.</span>
+              <span>
+                {tool.launcherInput === null
+                  ? "입력한 내용은 업로드되지 않으며 복사와 다운로드는 버튼을 눌러 직접 시작해요."
+                  : "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요."}
+              </span>
             </section>
           ) : null}
           {implementation.notices.map((notice) => (
@@ -66,10 +67,7 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
           ))}
         </header>
 
-        <section
-          aria-label={workAreaLabel}
-          className={tool.experience === "workspace" ? styles.workspace : styles.file}
-        >
+        <section aria-label={workArea.label} className={styles[workArea.style]}>
           {workbench}
         </section>
 

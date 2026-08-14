@@ -1,0 +1,159 @@
+.workbench {
+  box-sizing: border-box;
+  width: min(calc(100% - 32px), 760px);
+  min-width: 0;
+  margin-inline: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+
+.field {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.field + .field {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.fieldHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fieldHeading label {
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.fieldHeading span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 220px;
+  resize: vertical;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font:
+    0.875rem / 1.65 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  overflow-x: auto;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.field textarea:focus-visible {
+  border-color: var(--blue-dark);
+  outline: 3px solid color-mix(in srgb, var(--blue-dark) 22%, transparent);
+  outline-offset: 1px;
+}
+
+.actions,
+.resultActions {
+  display: flex;
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.actions button,
+.resultActions button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.actions .primary {
+  min-height: 48px;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.actions button:hover,
+.resultActions button:hover {
+  border-color: var(--blue-dark);
+  color: var(--blue-dark);
+}
+
+.actions .primary:hover {
+  background: var(--blue-dark);
+  color: var(--panel);
+}
+
+.actions button:focus-visible,
+.resultActions button:focus-visible,
+.error:focus-visible {
+  outline: 3px solid var(--blue-dark);
+  outline-offset: 3px;
+}
+
+.status,
+.error {
+  min-height: 24px;
+  margin: 14px 0 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.status {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--red);
+  font-weight: 700;
+}
+
+@media (max-width: 600px) {
+  .workbench {
+    width: calc(100% - 24px);
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .field textarea {
+    min-height: 180px;
+    padding: 12px;
+    font-size: 0.8125rem;
+  }
+
+  .actions button,
+  .resultActions button {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench * {
+    scroll-behavior: auto !important;
+  }
+}

@@ -88,6 +88,7 @@ const DISCOVERY_PROCESSING_MARKERS = [
   "-wasm-",
 ];
 const bundleProfileMarkers = {
+  "json-quick": [],
   image: [IMAGE_WORKER_MARKER],
   "image-compression-server": [IMAGE_SERVER_RUNTIME_MARKER, IMAGE_WORKER_MARKER],
   "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
