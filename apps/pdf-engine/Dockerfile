@@ -46,3 +46,5 @@ ENV NODE_ENV=production LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
 USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["node", "/app/dist/server.mjs"]
+
+FROM runtime AS production
