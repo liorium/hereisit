@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
+const pdfQualityWorkflow = readFileSync(".github/workflows/pdf-quality-benchmark.yml", "utf8");
 const config = readFileSync("playwright.config.ts", "utf8");
 
 describe("Playwright CI workflow", () => {
@@ -67,6 +68,28 @@ describe("Playwright CI workflow", () => {
     expect(workflow).toContain("test-results/");
     expect(workflow).toContain("playwright-report/");
     expect(workflow).toContain("retention-days: 7");
+  });
+
+  it("runs native PDF visual evidence only on hosted desktop browsers and removes raw inputs", () => {
+    for (const source of [workflow, pdfQualityWorkflow]) {
+      expect(source).toContain("tests/e2e/pdf-compression-visual-evidence.spec.ts");
+      expect(source).toContain("--visual-output .artifacts/pdf-visual-private");
+      expect(source).toContain("create-pdf-visual-browser-evidence.mjs");
+      expect(source).toContain("create-pdf-visual-hosted-reports.mjs");
+      expect(source).toContain("Remove private PDF visual inputs");
+      expect(source).toContain("if: always()");
+      expect(source).not.toMatch(/upload-artifact[\s\S]{0,500}pdf-visual-private/u);
+    }
+    for (const project of ["chromium", "firefox", "webkit"])
+      expect(pdfQualityWorkflow).toContain(`--project=${project}`);
+    for (const variable of [
+      "HEREISIT_PDF_VISUAL_INPUT",
+      "HEREISIT_PDF_VISUAL_RECEIPTS",
+      "HEREISIT_PDF_VISUAL_GIT_SHA",
+      "HEREISIT_PDF_VISUAL_SOURCE_SHA256",
+      "HEREISIT_PDF_VISUAL_CHECK_RUN_ID",
+    ])
+      expect(workflow).toContain(variable);
   });
 
   it("forwards project and grep options to Playwright", () => {
