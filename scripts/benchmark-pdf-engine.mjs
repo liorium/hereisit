@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,6 +48,7 @@ const STRUCTURED = new Set([
 const VERDICTS = new Set(["reduced", "original-retained", "rejected"]);
 const SEMANTIC_VERIFICATIONS = new Set(["passed", "failed", "not-applicable"]);
 const VISUAL_VERIFICATIONS = new Set(["passed", "failed", "not-applicable", "not-required"]);
+const VISUAL_INPUT_SCHEMA = "hereisit.pdf-browser-visual-input@1";
 
 function integer(value, minimum, maximum, label) {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum)
@@ -408,6 +409,156 @@ export async function runBenchmarkRepeats({ deadline, operation, now = Date.now 
   return results;
 }
 
+function hasPdfEnvelope(bytes) {
+  return (
+    bytes.byteLength >= 14 &&
+    Buffer.from(bytes).subarray(0, 5).toString("ascii") === "%PDF-" &&
+    Buffer.from(bytes).subarray(-1024).includes(Buffer.from("%%EOF"))
+  );
+}
+
+function validateVisualArtifact(raw, label, artifactPattern, extraKeys = []) {
+  const artifact = assertObject(raw, label);
+  assertExactKeys(artifact, ["artifact", "sha256", "byteLength", ...extraKeys], label);
+  safeString(artifact.artifact, artifactPattern, `${label} artifact`);
+  assertSha256(artifact.sha256, `${label} SHA-256`);
+  integer(artifact.byteLength, 1, MAX_OUTPUT_BYTES, `${label} byte length`);
+  return artifact;
+}
+
+export function validatePdfVisualInputManifest(raw) {
+  const manifest = assertObject(raw, "PDF visual input manifest");
+  assertExactKeys(
+    manifest,
+    [
+      "schema",
+      "version",
+      "engineImageDigest",
+      "corpusManifestSha256",
+      "stratum",
+      "source",
+      "results",
+    ],
+    "PDF visual input manifest",
+  );
+  if (
+    manifest.schema !== VISUAL_INPUT_SCHEMA ||
+    manifest.version !== 1 ||
+    manifest.stratum !== "jpeg-heavy"
+  )
+    throw new TypeError("PDF visual input identity is invalid");
+  safeString(manifest.engineImageDigest, /^sha256:[a-f0-9]{64}$/u, "visual engine digest");
+  assertSha256(manifest.corpusManifestSha256, "visual corpus SHA-256");
+  const source = validateVisualArtifact(manifest.source, "PDF visual source", /^source\.pdf$/u, [
+    "pageCount",
+  ]);
+  integer(source.pageCount, 1, 100, "PDF visual page count");
+  if (!Array.isArray(manifest.results) || manifest.results.length !== REPEATS)
+    throw new TypeError("PDF visual results are incomplete");
+  for (const [index, rawResult] of manifest.results.entries()) {
+    const result = assertObject(rawResult, "PDF visual result");
+    assertExactKeys(
+      result,
+      ["repeat", "artifact", "sha256", "byteLength", "profile", "semantic", "visual"],
+      "PDF visual result",
+    );
+    if (
+      result.repeat !== index ||
+      result.artifact !== `result-${index}.pdf` ||
+      result.profile !== "image-optimized" ||
+      result.semantic !== "passed" ||
+      result.visual !== "passed"
+    )
+      throw new TypeError("PDF visual result is invalid");
+    safeString(result.artifact, /^result-[012]\.pdf$/u, "PDF visual result artifact");
+    assertSha256(result.sha256, "PDF visual result SHA-256");
+    integer(result.byteLength, 1, MAX_OUTPUT_BYTES, "PDF visual result byte length");
+    if (result.byteLength > source.byteLength - Math.max(1, Math.ceil(source.byteLength / 100)))
+      throw new TypeError("PDF visual result is not smaller than its source");
+  }
+  return manifest;
+}
+
+export async function validatePdfVisualInputSchema(manifest, schema) {
+  assertClosedSchema(schema);
+  if (schema?.properties?.schema?.const !== VISUAL_INPUT_SCHEMA)
+    throw new TypeError("PDF visual input schema vocabulary is invalid");
+  validateJsonSchema(manifest, schema, schema);
+  validatePdfVisualInputManifest(manifest);
+}
+
+export async function writePdfVisualInputBundle({
+  output,
+  engineImageDigest,
+  corpusManifestSha256,
+  stratum,
+  source,
+  pageCount,
+  results,
+}) {
+  if (!(source instanceof Uint8Array) || !hasPdfEnvelope(source))
+    throw new TypeError("PDF visual source is invalid");
+  if (!Array.isArray(results) || results.length !== REPEATS)
+    throw new TypeError("PDF visual results are incomplete");
+  for (const [repeat, result] of results.entries()) {
+    if (
+      result.repeat !== repeat ||
+      result.verdict !== "reduced" ||
+      result.profile !== "image-optimized" ||
+      result.semantic !== "passed" ||
+      result.visual !== "passed" ||
+      !(result.output instanceof Uint8Array) ||
+      !hasPdfEnvelope(result.output)
+    )
+      throw new TypeError("PDF visual result is not verified image-optimized output");
+  }
+  const manifest = validatePdfVisualInputManifest({
+    schema: VISUAL_INPUT_SCHEMA,
+    version: 1,
+    engineImageDigest,
+    corpusManifestSha256,
+    stratum,
+    source: {
+      artifact: "source.pdf",
+      sha256: createHash("sha256").update(source).digest("hex"),
+      byteLength: source.byteLength,
+      pageCount,
+    },
+    results: results.map((result) => ({
+      repeat: result.repeat,
+      artifact: `result-${result.repeat}.pdf`,
+      sha256: createHash("sha256").update(result.output).digest("hex"),
+      byteLength: result.output.byteLength,
+      profile: result.profile,
+      semantic: result.semantic,
+      visual: result.visual,
+    })),
+  });
+  const root = resolve(output);
+  let created = false;
+  try {
+    await mkdir(root, { mode: 0o700 });
+    created = true;
+    await writeFile(join(root, manifest.source.artifact), source, { flag: "wx", mode: 0o600 });
+    await Promise.all(
+      manifest.results.map((result, index) =>
+        writeFile(join(root, result.artifact), results[index].output, {
+          flag: "wx",
+          mode: 0o600,
+        }),
+      ),
+    );
+    await writeFile(join(root, "manifest.json"), canonicalJson(manifest), {
+      flag: "wx",
+      mode: 0o600,
+    });
+    return manifest;
+  } catch (error) {
+    if (created) await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function resolveSchemaReference(root, reference) {
   if (typeof reference !== "string" || !reference.startsWith("#/") || reference.includes("~"))
     throw new TypeError("unsupported JSON Schema reference");
@@ -427,7 +578,7 @@ function schemaTypeMatches(value, type) {
   return typeof value === type;
 }
 
-function validateJsonSchema(value, schema, root, path = "$") {
+export function validateJsonSchema(value, schema, root, path = "$") {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema))
     throw new TypeError(`${path} schema is invalid`);
   if (schema.$ref !== undefined)
@@ -478,7 +629,7 @@ function validateJsonSchema(value, schema, root, path = "$") {
   }
 }
 
-function assertClosedSchema(schema, path = "$") {
+export function assertClosedSchema(schema, path = "$") {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return;
   if (schema.type === "object") {
     if (schema.additionalProperties !== false) throw new TypeError(`${path} schema must be closed`);
@@ -881,26 +1032,24 @@ function runnerRecord(runs, sourceBytes) {
   };
 }
 
-export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }) {
-  const manifest = validatePdfCorpusManifest(JSON.parse(await readFile(corpusPath, "utf8")));
-  const corpusRoot = dirname(resolve(corpusPath));
-  await verifyPdfCorpusFiles(manifest, corpusRoot);
-  const imageId = await docker(["image", "inspect", engineImage, "--format", "{{.Id}}"]);
-  safeString(imageId, /^sha256:[a-f0-9]{64}$/u, "engine image ID");
-  const sourceLockSha256 = createHash("sha256")
-    .update(await readFile("apps/pdf-engine/native/sources.lock.json"))
-    .digest("hex");
-  const containerName = `hereisit-pdf-benchmark-${randomUUID()}`;
-  const networkName = `hereisit-pdf-benchmark-${randomUUID()}`;
-  const startedAt = Date.now();
-  try {
-    await docker(["network", "create", "--internal", networkName]);
-    await docker([
+export function pdfBenchmarkDockerArguments({ containerName, networkName, engineImage }) {
+  return {
+    network: [
+      "network",
+      "create",
+      "--internal",
+      "--label",
+      "hereisit.pdf-benchmark=true",
+      networkName,
+    ],
+    container: [
       "run",
       "--detach",
       "--rm",
       "--name",
       containerName,
+      "--label",
+      "hereisit.pdf-benchmark=true",
       "--network",
       networkName,
       "--read-only",
@@ -917,7 +1066,31 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
       "--security-opt",
       "no-new-privileges",
       engineImage,
-    ]);
+    ],
+  };
+}
+
+export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath, visualOutput }) {
+  const manifest = validatePdfCorpusManifest(JSON.parse(await readFile(corpusPath, "utf8")));
+  const corpusRoot = dirname(resolve(corpusPath));
+  await verifyPdfCorpusFiles(manifest, corpusRoot);
+  const corpusManifestSha256 = createHash("sha256").update(canonicalJson(manifest)).digest("hex");
+  const imageId = await docker(["image", "inspect", engineImage, "--format", "{{.Id}}"]);
+  safeString(imageId, /^sha256:[a-f0-9]{64}$/u, "engine image ID");
+  const sourceLockSha256 = createHash("sha256")
+    .update(await readFile("apps/pdf-engine/native/sources.lock.json"))
+    .digest("hex");
+  const containerName = `hereisit-pdf-benchmark-${randomUUID()}`;
+  const networkName = `hereisit-pdf-benchmark-${randomUUID()}`;
+  const startedAt = Date.now();
+  try {
+    const dockerArguments = pdfBenchmarkDockerArguments({
+      containerName,
+      networkName,
+      engineImage,
+    });
+    await docker(dockerArguments.network);
+    await docker(dockerArguments.container);
     const address = await docker([
       "inspect",
       containerName,
@@ -942,6 +1115,7 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
     if (build.qpdf !== "12.4.0") throw new Error("native PDF qpdf version mismatch");
     const records = [];
     let measuredSamples = 0;
+    let visualInput;
     for (const entry of manifest.entries) {
       if (Date.now() - startedAt > MAX_WALL_MS)
         throw new Error("PDF benchmark wall limit exceeded");
@@ -999,6 +1173,23 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
       });
       localRuns.push(...pairs.map((pair) => pair.local));
       nativeRuns.push(...pairs.map((pair) => pair.native));
+      if (
+        entry.stratum === "jpeg-heavy" &&
+        nativeRuns.every(
+          (run) =>
+            run.verdict === "reduced" &&
+            run.profile === "image-optimized" &&
+            run.semantic === "passed" &&
+            run.visual === "passed" &&
+            run.output instanceof Uint8Array,
+        )
+      ) {
+        visualInput = {
+          source: bytes,
+          pageCount: entry.pageCount,
+          results: nativeRuns.map((run, repeat) => ({ ...run, repeat })),
+        };
+      }
       const local = runnerRecord(localRuns, bytes.byteLength);
       const native = runnerRecord(nativeRuns, bytes.byteLength);
       const smallerOnly = [...local.samples, ...native.samples].every(
@@ -1031,7 +1222,7 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
         engineImageId: imageId,
         engineImageDigest: imageId,
         qpdfVersion: build.qpdf,
-        corpusManifestSha256: createHash("sha256").update(canonicalJson(manifest)).digest("hex"),
+        corpusManifestSha256,
         sourceLockSha256,
         localRunner: `pdf-lib-structural@${pdfLibVersion}`,
       },
@@ -1084,6 +1275,17 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
       mode: 0o600,
     });
     if (!gate.passed) throw new Error(`PDF quality gate failed: ${gate.failures.join(",")}`);
+    if (visualOutput !== undefined) {
+      if (visualInput === undefined)
+        throw new Error("PDF benchmark did not produce three verified image-optimized results");
+      await writePdfVisualInputBundle({
+        output: visualOutput,
+        engineImageDigest: imageId,
+        corpusManifestSha256,
+        stratum: "jpeg-heavy",
+        ...visualInput,
+      });
+    }
     return { report, gate };
   } finally {
     await execute("docker", ["rm", "--force", containerName], {
@@ -1098,19 +1300,24 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath }
 }
 
 function help() {
-  return "Usage: node scripts/benchmark-pdf-engine.mjs --engine-image <local-image> --corpus <manifest.json> --output <report.json>\n";
+  return "Usage: node scripts/benchmark-pdf-engine.mjs --engine-image <local-image> --corpus <manifest.json> --output <report.json> [--visual-output <private-directory>]\n";
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   if (process.argv.includes("--help")) process.stdout.write(help());
   else {
     const args = parseCliArguments(process.argv.slice(2));
-    assertExactKeys(args, ["engine-image", "corpus", "output"], "PDF benchmark CLI arguments");
+    assertExactKeys(
+      args,
+      ["engine-image", "corpus", "output", ...(args["visual-output"] ? ["visual-output"] : [])],
+      "PDF benchmark CLI arguments",
+    );
     await mkdir(dirname(resolve(args.output)), { recursive: true, mode: 0o700 });
     const { gate } = await benchmarkPdfEngine({
       engineImage: args["engine-image"],
       corpusPath: args.corpus,
       outputPath: args.output,
+      visualOutput: args["visual-output"],
     });
     process.stdout.write(`${JSON.stringify({ ok: true, passed: gate.passed })}\n`);
   }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { deflateSync } from "node:zlib";
@@ -195,7 +196,7 @@ function addAnnotation(document, page, subtype, token, action) {
   page.node.addAnnot(document.context.register(document.context.obj(values)));
 }
 
-const JPEG = Buffer.from(
+const TINY_JPEG = Buffer.from(
   "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAIBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==",
   "base64",
 );
@@ -203,6 +204,34 @@ const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+let visualJpegPromise;
+function visualJpeg() {
+  visualJpegPromise ??= (async () => {
+    const width = 1_200;
+    const height = 1_600;
+    const pixels = Buffer.allocUnsafe(width * height * 3);
+    let state = 0x5eeda11;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+        const offset = (y * width + x) * 3;
+        const grid = x % 80 < 3 || y % 96 < 3 ? 42 : 0;
+        pixels[offset] = (x / 5 + grid + (state & 31)) & 255;
+        pixels[offset + 1] = (y / 7 + grid + ((state >>> 8) & 31)) & 255;
+        pixels[offset + 2] = ((x + y) / 11 + grid + ((state >>> 16) & 31)) & 255;
+      }
+    }
+    const require = createRequire(resolve("apps/image-engine/package.json"));
+    const sharp = require("sharp");
+    return Buffer.from(
+      await sharp(pixels, { raw: { width, height, channels: 3 } })
+        .jpeg({ quality: 98, chromaSubsampling: "4:4:4", progressive: false })
+        .toBuffer(),
+    );
+  })();
+  return visualJpegPromise;
+}
 
 async function generate(stratum, token) {
   if (stratum === "decompression-bomb") return decompressionBombPdf(token);
@@ -287,9 +316,10 @@ async function generate(stratum, token) {
       ),
     );
   } else if (["jpeg-heavy", "scan", "mixed"].includes(stratum)) {
-    const image = await document.embedJpg(JPEG);
-    for (let index = 0; index < (stratum === "jpeg-heavy" ? 12 : 1); index += 1)
-      page.drawImage(image, { x: 24 + index * 10, y: 24 + index * 6, width: 240, height: 160 });
+    const image = await document.embedJpg(
+      stratum === "jpeg-heavy" ? await visualJpeg() : TINY_JPEG,
+    );
+    page.drawImage(image, { x: 24, y: 24, width: 240, height: 160 });
   } else if (stratum === "non-jpeg-image") {
     const image = await document.embedPng(PNG);
     page.drawImage(image, { x: 24, y: 24, width: 240, height: 160 });
@@ -610,6 +640,12 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
   }
   const streams = decoded.join("\n");
   const imageCount = occurrences(objects, /\/Subtype\s*\/Image\b/gu);
+  const imageDimensions = rawStreams.flatMap((stream) => {
+    if (stream.dict.get(PDFName.of("Subtype"))?.toString() !== "/Image") return [];
+    const width = stream.dict.lookup(PDFName.of("Width"), PDFNumber).asNumber();
+    const height = stream.dict.lookup(PDFName.of("Height"), PDFNumber).asNumber();
+    return [{ width, height }];
+  });
   const textBlocks = occurrences(streams, /\bBT\b/gu);
   const signature = { pageCount, tokenDigest };
   const requireFeature = (condition, feature) => {
@@ -753,6 +789,8 @@ export async function probePdfCorpusFeature(bytes, stratum, safety = {}) {
       ...requireFeature(imageCount > 0 && /\/DCTDecode\b/u.test(objects), "jpeg-heavy"),
       imageCount,
       imageEncoding: "dct",
+      imageWidth: imageDimensions[0]?.width,
+      imageHeight: imageDimensions[0]?.height,
     };
   if (stratum === "non-jpeg-image")
     return {

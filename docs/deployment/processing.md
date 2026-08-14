@@ -14,10 +14,12 @@ through a bounded process output. The aggregate ceiling is the smaller of 100 Mi
 or 200 times the input size. Introspection/decode failures fail closed; only an observed output-limit event
 is classified as `INPUT_LIMIT_EXCEEDED`. Encrypted input is rejected without exposing feature detail.
 
-The current corpus selected only structural qpdf outputs, so `visualProfilesMeasured` is zero and
-`publicAdmissionReady` is false. The bounded image-optimized PDF.js pixel path exists but is not claimed as
-measured coverage; Task 8 browser admission must exercise it before public rollout.
+The current corpus selected `image-optimized` output for the 1,200×1,600 synthetic JPEG-heavy fixture in
+all three native repeats: 2,833,489 bytes became 447,013 bytes, with semantic and bounded PDF.js pixel
+verification passing each time. The benchmark therefore records `visualProfilesMeasured: 3` and
+`publicAdmissionReady: true`; this is local Node evidence, not hosted browser admission evidence.
 
-Task 8 must bind the exact benchmark, cost input, source SHA, Worker artifact, and both immutable engine
-digests. Keep PDF public admission local until staging canary, deletion, cost, and rollback evidence pass.
+The release authority must bind the exact benchmark, cost input, source SHA, Worker artifact, both immutable
+engine digests, and nine hosted browser visual measurements. Keep PDF public admission local until those
+checks plus staging canary, deletion, cost, and rollback evidence pass.
 Rollback restores the Worker and both engine digests together; image processing remains unchanged.

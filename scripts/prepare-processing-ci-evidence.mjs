@@ -1,13 +1,18 @@
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validatePdfBenchmarkReport } from "./benchmark-pdf-engine.mjs";
+import { validatePdfVisualBrowserEvidence } from "./create-pdf-visual-browser-evidence.mjs";
 import { writeProcessingEvidenceBundle } from "./create-processing-evidence-bundle.mjs";
 import { validateHostedReviewDocument } from "./create-processing-hosted-check.mjs";
 import {
   assertExactKeys,
   assertObject,
   assertSha256,
+  canonicalJson,
   parseCliArguments,
+  readBoundedRegularFile,
+  sha256Bytes,
 } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
@@ -56,6 +61,32 @@ export function validateHostedReviewReceipt(value, { name, gitSha, sourceSha256 
   });
 }
 
+export function validateHostedPdfCandidateBinding(reports, candidate, rawVisual, benchmark) {
+  const corpus = reports.fullCorpusBenchmark;
+  const device = reports.deviceMatrix;
+  const visual = validatePdfVisualBrowserEvidence(rawVisual);
+  if (
+    corpus.benchmarkSha256 !== candidate.pdfQuality.benchmarkSha256 ||
+    corpus.releaseGateSha256 !== candidate.pdfQuality.releaseGateSha256 ||
+    corpus.profilesMeasured !== candidate.pdfQuality.visualProfilesMeasured ||
+    corpus.engineImageDigest !== candidate.pdfEngine.oci.configDigest ||
+    device.pdfVisualProfilesMeasured !== corpus.profilesMeasured * 3 ||
+    device.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
+    visual.gitSha !== candidate.gitSha ||
+    visual.gitSha !== corpus.gitSha ||
+    visual.sourceSha256 !== corpus.sourceSha256 ||
+    visual.checkRunId !== corpus.checkRunId ||
+    visual.engineImageDigest !== corpus.engineImageDigest ||
+    visual.corpusManifestSha256 !== corpus.corpusSha256 ||
+    visual.visualProfilesMeasured !== device.pdfVisualProfilesMeasured ||
+    sha256Bytes(canonicalJson(benchmark)) !== candidate.pdfQuality.benchmarkSha256 ||
+    benchmark.identity.engineImageDigest !== corpus.engineImageDigest ||
+    benchmark.identity.corpusManifestSha256 !== corpus.corpusSha256
+  )
+    throw new TypeError("hosted PDF quality evidence does not match the exact candidate");
+  return reports;
+}
+
 export async function prepareProcessingCiEvidence({
   candidatePath,
   releaseId,
@@ -92,6 +123,33 @@ export async function prepareProcessingCiEvidence({
       }),
     ),
   );
+  let visual;
+  let benchmark;
+  try {
+    const visualBytes = await readBoundedRegularFile(
+      join(resolve(hostedCheckRoot), "pdfVisualBrowserEvidence.json"),
+      1024 * 1024,
+      "hosted PDF browser visual evidence",
+    );
+    visual = JSON.parse(visualBytes.toString("utf8"));
+    const benchmarkAsset = candidate.releaseAssets.pdfQuality.benchmark;
+    const benchmarkBytes = await readBoundedRegularFile(
+      join(dirname(resolve(candidatePath)), benchmarkAsset.path),
+      16 * 1024 * 1024,
+      "candidate PDF benchmark evidence",
+    );
+    if (
+      benchmarkBytes.byteLength !== benchmarkAsset.sizeBytes ||
+      benchmarkBytes.byteLength > 16 * 1024 * 1024 ||
+      sha256Bytes(benchmarkBytes) !== benchmarkAsset.sha256
+    ) {
+      throw new TypeError("candidate PDF benchmark asset identity is invalid");
+    }
+    benchmark = validatePdfBenchmarkReport(JSON.parse(benchmarkBytes.toString("utf8")));
+  } catch {
+    throw new TypeError("exact PDF browser and benchmark evidence is missing or invalid");
+  }
+  validateHostedPdfCandidateBinding(reports, candidate, visual, benchmark);
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1000).toISOString();
   await writeProcessingEvidenceBundle({

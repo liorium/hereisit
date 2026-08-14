@@ -48,6 +48,7 @@ describe("PDF engine supply-chain policy", () => {
     expect(dockerfile).toContain("USER 10001:10001");
     expect(dockerfile).toContain("/tmp/hereisit-pdf-engine");
     expect(dockerfile).not.toMatch(/ghostscript|mupdf|poppler|pdfcpu|python/u);
+    expect(dockerfile.trimEnd()).toMatch(/FROM runtime AS production$/);
     expect(supplyChain).toContain('"@hereisit/pdf-engine..."');
     expect(workflow).toContain("verify-pdf-engine-licenses.mjs");
   });

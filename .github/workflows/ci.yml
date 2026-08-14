@@ -106,9 +106,9 @@ jobs:
             --expected-archive-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").archiveSha256')" \
             --expected-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").treeSha256')" \
             --output .artifacts/runtime/web-production-scan
-          cp docs/deployment/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json
+          cp .artifacts/hosted-check/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json
           cp docs/deployment/pdf-engine-benchmark.schema.json .artifacts/release-source/pdf-engine-benchmark.schema.json
-          cp docs/deployment/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json
+          cp .artifacts/hosted-check/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json
           cp docs/deployment/pdf-engine-release-gate.schema.json .artifacts/release-source/pdf-engine-release-gate.schema.json
           cp docs/deployment/provider-usage-schema.v1.json .artifacts/runtime/provider-usage-schema.v1.json
       - name: Generate and verify both engine and application security evidence
@@ -197,7 +197,8 @@ jobs:
           node scripts/prepare-processing-ci-release-source.mjs \
             --source-root .artifacts/release-source --runtime-root .artifacts/runtime \
             --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
-            --source-archive .artifacts/runtime/exact-source.tar
+            --source-archive .artifacts/runtime/exact-source.tar \
+            --pdf-benchmark .artifacts/hosted-check/pdf-engine-benchmark.json
           node scripts/create-processing-candidate.mjs --source-root .artifacts/release-source \
             --output-root .artifacts/built-candidate --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
             --staging-processing-api-origin https://hereisit-processing-staging.liorium.workers.dev \
@@ -235,7 +236,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-24.04
     # Keep WebKit on one worker: its short-lived progress and download events become flaky under contention.
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -289,6 +290,77 @@ jobs:
           --grep analytics
         env:
           HEREISIT_E2E_PRODUCT_ANALYTICS: "1"
+      - name: Build exact native PDF visual inputs
+        run: |
+          set -euo pipefail
+          umask 077
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          git archive --format=tar "$GITHUB_SHA" > "$RUNNER_TEMP/pdf-visual-source.tar"
+          echo "HEREISIT_PDF_VISUAL_SOURCE_SHA256=$(sha256sum "$RUNNER_TEMP/pdf-visual-source.tar" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          docker build --file apps/pdf-engine/Dockerfile --target production \
+            --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
+            --tag hereisit-pdf-engine:visual-evidence .
+          mkdir -p .artifacts/pdf-visual-receipts .artifacts/hosted-reports
+          node scripts/create-pdf-compression-corpus.mjs --output .artifacts/pdf-corpus
+          node scripts/benchmark-pdf-engine.mjs \
+            --engine-image hereisit-pdf-engine:visual-evidence \
+            --corpus .artifacts/pdf-corpus/manifest.json \
+            --output .artifacts/pdf-visual-benchmark.json \
+            --visual-output .artifacts/pdf-visual-private
+          node scripts/validate-pdf-benchmark-evidence.mjs \
+            --report .artifacts/pdf-visual-benchmark.json \
+            --gate .artifacts/pdf-visual-benchmark-gate.json \
+            --benchmark-schema docs/deployment/pdf-engine-benchmark.schema.json \
+            --gate-schema docs/deployment/pdf-engine-release-gate.schema.json
+      - name: Verify native PDF visuals in desktop browsers
+        run: >-
+          pnpm test:e2e:ci
+          tests/e2e/pdf-compression-visual-evidence.spec.ts
+          --project=chromium
+          --project=firefox
+          --project=webkit
+          --workers=1
+          --output=test-results/pdf-visual
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/pdf-visual
+          HEREISIT_PDF_VISUAL_INPUT: .artifacts/pdf-visual-private
+          HEREISIT_PDF_VISUAL_RECEIPTS: .artifacts/pdf-visual-receipts
+          HEREISIT_PDF_VISUAL_GIT_SHA: ${{ github.sha }}
+          HEREISIT_PDF_VISUAL_SOURCE_SHA256: ${{ env.HEREISIT_PDF_VISUAL_SOURCE_SHA256 }}
+          HEREISIT_PDF_VISUAL_CHECK_RUN_ID: ${{ github.run_id }}
+      - name: Create sanitized PDF visual hosted reports
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          node scripts/create-pdf-visual-browser-evidence.mjs \
+            --input-root .artifacts/pdf-visual-private \
+            --receipt-root .artifacts/pdf-visual-receipts \
+            --output .artifacts/pdf-browser-visual-evidence.json \
+            --git-sha "$GITHUB_SHA" \
+            --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
+            --check-run-id "$GITHUB_RUN_ID"
+          node scripts/create-pdf-visual-hosted-reports.mjs \
+            --benchmark .artifacts/pdf-visual-benchmark.json \
+            --gate .artifacts/pdf-visual-benchmark-gate.json \
+            --visual-evidence .artifacts/pdf-browser-visual-evidence.json \
+            --output .artifacts/hosted-reports \
+            --git-sha "$GITHUB_SHA" \
+            --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
+            --check-run-id "$GITHUB_RUN_ID"
+      - name: Upload sanitized PDF visual evidence
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pdf-visual-evidence-${{ github.sha }}
+          path: |
+            .artifacts/pdf-visual-benchmark.json
+            .artifacts/pdf-visual-benchmark-gate.json
+            .artifacts/pdf-browser-visual-evidence.json
+            .artifacts/hosted-reports/fullCorpusBenchmark.json
+            .artifacts/hosted-reports/deviceMatrix.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
       - name: Seal genuine exact-main hosted review receipts
         if: github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
         run: |
@@ -299,6 +371,8 @@ jobs:
             --git-sha "$GITHUB_SHA" --source "$RUNNER_TEMP/exact-source.tar" \
             --check-run-id "$GITHUB_RUN_ID" --input .artifacts/hosted-reports \
             --output .artifacts/hosted-check
+          cp .artifacts/pdf-visual-benchmark.json .artifacts/hosted-check/pdf-engine-benchmark.json
+          cp .artifacts/pdf-visual-benchmark-gate.json .artifacts/hosted-check/pdf-engine-release-gate.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
         with:
@@ -308,6 +382,14 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7
+      - name: Remove private PDF visual inputs
+        if: always()
+        run: |
+          docker ps --all --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker rm --force
+          docker network ls --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker network rm
+          rm -rf -- .artifacts/pdf-corpus .artifacts/pdf-visual-private .artifacts/pdf-visual-receipts
+          rm -rf -- test-results/pdf-visual playwright-report/pdf-visual
+          docker image rm --force hereisit-pdf-engine:visual-evidence >/dev/null 2>&1 || true
       - name: Upload browser failure artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -7,6 +7,7 @@ import {
   validateLiveCostModelDocument,
 } from "../scripts/create-live-cost-model.mjs";
 import { createProcessingReleaseInputs } from "../scripts/create-processing-release-inputs.mjs";
+import * as releaseInputBindings from "../scripts/verify-processing-release-input-bindings.mjs";
 
 const routes = Object.fromEntries(
   ["policy", "create", "upload", "read", "result", "maintenance", "queue"].map((route, index) => [
@@ -167,5 +168,48 @@ describe("canonical live-cost model", () => {
         pdfBenchmark: { ...pdfBenchmark, engineImageDigest: `sha256:${"f".repeat(64)}` },
       }),
     ).toThrow(/image identity/i);
+  });
+
+  it("binds reviewed PDF cost ceilings to the measured benchmark and engine", () => {
+    const assertBinding = (
+      releaseInputBindings as unknown as {
+        assertReviewedPdfCostBinding: (
+          reviewed: unknown,
+          report: unknown,
+          benchmarkSha256: string,
+          engineImageDigest: string,
+        ) => void;
+      }
+    ).assertReviewedPdfCostBinding;
+    expect(typeof assertBinding).toBe("function");
+    const digest = `sha256:${"d".repeat(64)}`;
+    const reviewed = {
+      evidenceSha256: "e".repeat(64),
+      engineImageId: digest,
+      engineImageDigest: digest,
+      maximumCandidates: 2,
+      maximumInputBytes: 52_428_800,
+      maximumMeasuredPeakRssBytes: 200_000_000,
+      maximumOutputBytes: 52_428_800,
+      maximumPages: 100,
+      maximumWallMs: 300_000,
+    };
+    const report = {
+      limits: { maximumSourceBytes: 52_428_800, maximumOutputBytes: 52_428_800 },
+      summary: { maximumPeakRssBytes: 200_000_000 },
+      records: [{ native: { maximumCandidateCount: 2 } }],
+    };
+    expect(() => assertBinding(reviewed, report, reviewed.evidenceSha256, digest)).not.toThrow();
+    expect(() =>
+      assertBinding(
+        { ...reviewed, maximumMeasuredPeakRssBytes: 199_999_999 },
+        report,
+        reviewed.evidenceSha256,
+        digest,
+      ),
+    ).toThrow(/cost|benchmark|evidence/i);
+    expect(() => assertBinding(reviewed, report, "f".repeat(64), digest)).toThrow(
+      /cost|benchmark|evidence/i,
+    );
   });
 });

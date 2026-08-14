@@ -1,11 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validatePdfVisualBrowserEvidence } from "./create-pdf-visual-browser-evidence.mjs";
 import {
   assertExactKeys,
   assertObject,
   assertSha256,
   canonicalize,
+  canonicalJson,
   parseCliArguments,
   readBoundedRegularFile,
   sha256Bytes,
@@ -24,12 +26,23 @@ export const hostedReviewSchemas = Object.freeze({
 });
 
 const detailKeys = Object.freeze({
-  fullCorpusBenchmark: ["profilesMeasured", "corpusSha256"],
+  fullCorpusBenchmark: [
+    "profilesMeasured",
+    "corpusSha256",
+    "benchmarkSha256",
+    "releaseGateSha256",
+    "engineImageDigest",
+  ],
   competitorComparison: ["casesCompared", "baselineSha256"],
   blindedHumanReview: ["reviewers", "approval"],
   commercialReview: ["licenseGateSha256", "approval"],
   privacyReview: ["testsRun"],
-  deviceMatrix: ["projects", "productAnalytics"],
+  deviceMatrix: [
+    "projects",
+    "productAnalytics",
+    "pdfVisualEvidenceSha256",
+    "pdfVisualProfilesMeasured",
+  ],
 });
 
 const browserProjects = Object.freeze([
@@ -92,6 +105,10 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
     if (!Number.isSafeInteger(document.profilesMeasured) || document.profilesMeasured < 1)
       throw new TypeError("full corpus benchmark did not measure profiles");
     assertSha256(document.corpusSha256, "full corpus benchmark corpus hash");
+    assertSha256(document.benchmarkSha256, "full corpus benchmark hash");
+    assertSha256(document.releaseGateSha256, "full corpus release gate hash");
+    if (!/^sha256:[a-f0-9]{64}$/u.test(document.engineImageDigest))
+      throw new TypeError("full corpus benchmark engine digest is invalid");
   } else if (name === "competitorComparison") {
     if (!Number.isSafeInteger(document.casesCompared) || document.casesCompared < 1)
       throw new TypeError("competitor comparison did not compare cases");
@@ -114,6 +131,9 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
       document.projects.some((project, index) => project !== browserProjects[index])
     )
       throw new TypeError("device matrix is incomplete");
+    assertSha256(document.pdfVisualEvidenceSha256, "device matrix PDF visual evidence hash");
+    if (document.pdfVisualProfilesMeasured !== 9)
+      throw new TypeError("device matrix PDF visual coverage is incomplete");
   } else {
     throw new TypeError("hosted review name is invalid");
   }
@@ -151,10 +171,32 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
       checkRunId: parsedRunId,
     });
   }
+  let visual;
+  try {
+    const visualBytes = await readBoundedRegularFile(
+      join(resolve(input), "pdfVisualBrowserEvidence.json"),
+      1024 * 1024,
+      "PDF browser visual evidence",
+    );
+    visual = validatePdfVisualBrowserEvidence(JSON.parse(visualBytes.toString("utf8")));
+  } catch {
+    throw new TypeError("PDF browser visual evidence is missing or invalid");
+  }
+  if (
+    visual.gitSha !== gitSha ||
+    visual.sourceSha256 !== sourceSha256 ||
+    visual.checkRunId !== parsedRunId ||
+    visual.engineImageDigest !== documents.fullCorpusBenchmark.engineImageDigest ||
+    visual.corpusManifestSha256 !== documents.fullCorpusBenchmark.corpusSha256 ||
+    visual.visualProfilesMeasured !== documents.deviceMatrix.pdfVisualProfilesMeasured ||
+    documents.deviceMatrix.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual))
+  ) {
+    throw new TypeError("PDF browser visual evidence does not bind the exact hosted reviews");
+  }
   const root = resolve(output);
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await Promise.all(
-    Object.entries(documents).map(([reportName, document]) =>
+  await Promise.all([
+    ...Object.entries(documents).map(([reportName, document]) =>
       writeCanonicalJsonAtomic(
         join(root, `${reportName}.json`),
         canonicalize({
@@ -170,7 +212,11 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
         { refuseOverwrite: true, mode: 0o600 },
       ),
     ),
-  );
+    writeCanonicalJsonAtomic(join(root, "pdfVisualBrowserEvidence.json"), visual, {
+      refuseOverwrite: true,
+      mode: 0o600,
+    }),
+  ]);
   return { sourceSha256, checkRunId: parsedRunId };
 }
 

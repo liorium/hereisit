@@ -17,12 +17,14 @@ env:
 jobs:
   benchmark:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Require the exact main branch
+        run: test "$GITHUB_REF" = "refs/heads/main"
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -33,23 +35,70 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build the pinned native PDF engine
-        run: docker build --file apps/pdf-engine/Dockerfile --tag hereisit-pdf-engine:quality .
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          docker build --file apps/pdf-engine/Dockerfile --target production \
+            --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
+            --tag hereisit-pdf-engine:quality .
       - name: Generate and gate the bounded corpus
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p .artifacts
+          mkdir -p .artifacts/pdf-visual-receipts
+          git archive --format=tar "$GITHUB_SHA" > "$RUNNER_TEMP/exact-source.tar"
+          echo "HEREISIT_PDF_VISUAL_SOURCE_SHA256=$(sha256sum "$RUNNER_TEMP/exact-source.tar" | cut -d' ' -f1)" >> "$GITHUB_ENV"
           node scripts/create-pdf-compression-corpus.mjs --output .artifacts/pdf-corpus
           node scripts/benchmark-pdf-engine.mjs \
             --engine-image hereisit-pdf-engine:quality \
             --corpus .artifacts/pdf-corpus/manifest.json \
-            --output .artifacts/pdf-benchmark.json
+            --output .artifacts/pdf-benchmark.json \
+            --visual-output .artifacts/pdf-visual-private
           node scripts/validate-pdf-benchmark-evidence.mjs \
             --report .artifacts/pdf-benchmark.json \
             --gate .artifacts/pdf-benchmark-gate.json \
             --benchmark-schema docs/deployment/pdf-engine-benchmark.schema.json \
             --gate-schema docs/deployment/pdf-engine-release-gate.schema.json
           pnpm exec vitest run tests/create-pdf-compression-corpus.test.ts tests/benchmark-pdf-engine.test.ts
+      - name: Build hosted browser fixture
+        run: pnpm --filter @hereisit/web build
+        env:
+          ALLOW_LOCAL_PROCESSING_ORIGINS: "1"
+          NEXT_PUBLIC_PROCESSING_API_ORIGIN: http://127.0.0.1:4173
+          NEXT_PUBLIC_PRODUCT_ANALYTICS_DISABLED: "1"
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Verify native PDF visuals in desktop browsers
+        run: >-
+          pnpm test:e2e:ci
+          tests/e2e/pdf-compression-visual-evidence.spec.ts
+          --project=chromium
+          --project=firefox
+          --project=webkit
+          --workers=1
+          --output=test-results/pdf-visual
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/pdf-visual
+          HEREISIT_PDF_VISUAL_INPUT: .artifacts/pdf-visual-private
+          HEREISIT_PDF_VISUAL_RECEIPTS: .artifacts/pdf-visual-receipts
+          HEREISIT_PDF_VISUAL_GIT_SHA: ${{ github.sha }}
+          HEREISIT_PDF_VISUAL_SOURCE_SHA256: ${{ env.HEREISIT_PDF_VISUAL_SOURCE_SHA256 }}
+          HEREISIT_PDF_VISUAL_CHECK_RUN_ID: ${{ github.run_id }}
+      - name: Aggregate sanitized PDF visual evidence
+        run: |
+          node scripts/create-pdf-visual-browser-evidence.mjs \
+            --input-root .artifacts/pdf-visual-private \
+            --receipt-root .artifacts/pdf-visual-receipts \
+            --output .artifacts/pdf-browser-visual-evidence.json \
+            --git-sha "$GITHUB_SHA" \
+            --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
+            --check-run-id "$GITHUB_RUN_ID"
+      - name: Remove private PDF visual inputs
+        if: always()
+        run: |
+          docker ps --all --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker rm --force
+          docker network ls --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker network rm
+          rm -rf -- .artifacts/pdf-corpus .artifacts/pdf-visual-private .artifacts/pdf-visual-receipts
+          rm -rf -- test-results/pdf-visual playwright-report
+          docker image rm --force hereisit-pdf-engine:quality >/dev/null 2>&1 || true
       - name: Upload sanitized evidence only
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -58,6 +107,7 @@ jobs:
           path: |
             .artifacts/pdf-benchmark.json
             .artifacts/pdf-benchmark-gate.json
+            .artifacts/pdf-browser-visual-evidence.json
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14

@@ -1,18 +1,58 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   evaluatePdfEngineReleaseGate,
   fetchBeforeDeadline,
+  pdfBenchmarkDockerArguments,
   readBoundedPdfResponse,
   runBenchmarkRepeats,
   validatePdfBenchmarkReport,
   validatePdfEvidenceSchemas,
   validatePdfReleaseGate,
+  validatePdfVisualInputManifest,
+  validatePdfVisualInputSchema,
+  writePdfVisualInputBundle,
 } from "../scripts/benchmark-pdf-engine.mjs";
 import { REQUIRED_PDF_CORPUS_STRATA } from "../scripts/create-pdf-compression-corpus.mjs";
 
 const sha = (character: string) => character.repeat(64);
 const hostile = new Set(["encrypted", "corrupt", "decompression-bomb"]);
+
+function pdfBytes(label: string, padding = 0) {
+  return Buffer.from(`%PDF-1.7\n%${label}\n${"x".repeat(padding)}\n%%EOF\n`);
+}
+
+function visualInputManifest() {
+  const source = pdfBytes("source", 200);
+  return {
+    schema: "hereisit.pdf-browser-visual-input@1",
+    version: 1,
+    engineImageDigest: `sha256:${sha("a")}`,
+    corpusManifestSha256: sha("b"),
+    stratum: "jpeg-heavy",
+    source: {
+      artifact: "source.pdf",
+      sha256: createHash("sha256").update(source).digest("hex"),
+      byteLength: source.byteLength,
+      pageCount: 1,
+    },
+    results: [0, 1, 2].map((repeat) => {
+      const bytes = pdfBytes(`result-${repeat}`);
+      return {
+        repeat,
+        artifact: `result-${repeat}.pdf`,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        byteLength: bytes.byteLength,
+        profile: "image-optimized",
+        semantic: "passed",
+        visual: "passed",
+      };
+    }),
+  };
+}
 
 function sample(stratum: string, runner: "local" | "native", repeat: number) {
   const rejected = hostile.has(stratum);
@@ -105,6 +145,33 @@ function passingReport() {
 }
 
 describe("PDF native benchmark release gate", () => {
+  it("labels the exact Docker resources used by the benchmark", () => {
+    expect(
+      pdfBenchmarkDockerArguments({
+        containerName: "benchmark-container",
+        networkName: "benchmark-network",
+        engineImage: "pdf-engine:test",
+      }),
+    ).toMatchObject({
+      network: [
+        "network",
+        "create",
+        "--internal",
+        "--label",
+        "hereisit.pdf-benchmark=true",
+        "benchmark-network",
+      ],
+      container: expect.arrayContaining([
+        "--name",
+        "benchmark-container",
+        "--label",
+        "hereisit.pdf-benchmark=true",
+        "--network",
+        "benchmark-network",
+      ]),
+    });
+  });
+
   it("accepts only complete evidence derived from all three repeats", () => {
     const report = validatePdfBenchmarkReport(passingReport());
     expect(evaluatePdfEngineReleaseGate(report)).toMatchObject({
@@ -343,5 +410,107 @@ describe("PDF native benchmark release gate", () => {
     const gate = evaluatePdfEngineReleaseGate(valid);
     gate.engineImageDigest = `sha256:${sha("d")}`;
     expect(() => validatePdfReleaseGate(gate, valid)).toThrow(/image/i);
+  });
+});
+
+describe("private PDF browser visual inputs", () => {
+  it("accepts only three canonical image-optimized repeats bound to one engine and corpus", async () => {
+    const manifest = visualInputManifest();
+    expect(validatePdfVisualInputManifest(manifest)).toEqual(manifest);
+    await expect(
+      validatePdfVisualInputSchema(
+        manifest,
+        JSON.parse(await readFile("docs/deployment/pdf-visual-input.schema.json", "utf8")),
+      ),
+    ).resolves.toBeUndefined();
+
+    for (const mutate of [
+      (value: ReturnType<typeof visualInputManifest>) => value.results.pop(),
+      (value: ReturnType<typeof visualInputManifest>) => (value.results[2].repeat = 1),
+      (value: ReturnType<typeof visualInputManifest>) => (value.results[0].profile = "structural"),
+      (value: ReturnType<typeof visualInputManifest>) =>
+        (value.results[0].artifact = "/tmp/result.pdf"),
+      (value: ReturnType<typeof visualInputManifest>) =>
+        Object.assign(value.results[0], { diagnostic: "private" }),
+    ]) {
+      const changed = visualInputManifest();
+      mutate(changed);
+      expect(() => validatePdfVisualInputManifest(changed)).toThrow();
+    }
+  });
+
+  it("writes one private source and three verified results and refuses overwrite", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-visual-test-"));
+    const output = join(root, "bundle");
+    const source = pdfBytes("source", 200);
+    const results = [0, 1, 2].map((repeat) => ({
+      repeat,
+      output: pdfBytes(`result-${repeat}`),
+      verdict: "reduced",
+      profile: "image-optimized",
+      semantic: "passed",
+      visual: "passed",
+    }));
+    try {
+      const manifest = await writePdfVisualInputBundle({
+        output,
+        engineImageDigest: `sha256:${sha("a")}`,
+        corpusManifestSha256: sha("b"),
+        stratum: "jpeg-heavy",
+        source,
+        pageCount: 1,
+        results,
+      });
+      expect(validatePdfVisualInputManifest(manifest)).toEqual(manifest);
+      expect((await readdir(output)).toSorted()).toEqual([
+        "manifest.json",
+        "result-0.pdf",
+        "result-1.pdf",
+        "result-2.pdf",
+        "source.pdf",
+      ]);
+      await expect(
+        writePdfVisualInputBundle({
+          output,
+          engineImageDigest: `sha256:${sha("a")}`,
+          corpusManifestSha256: sha("b"),
+          stratum: "jpeg-heavy",
+          source,
+          pageCount: 1,
+          results,
+        }),
+      ).rejects.toThrow();
+      expect((await readdir(output)).toSorted()).toHaveLength(5);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a partial bundle when any result is not verified image-optimized output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-pdf-visual-test-"));
+    const output = join(root, "bundle");
+    try {
+      await expect(
+        writePdfVisualInputBundle({
+          output,
+          engineImageDigest: `sha256:${sha("a")}`,
+          corpusManifestSha256: sha("b"),
+          stratum: "jpeg-heavy",
+          source: pdfBytes("source", 200),
+          pageCount: 1,
+          results: [0, 1, 2].map((repeat) => ({
+            repeat,
+            output: pdfBytes(`result-${repeat}`),
+            verdict: "reduced",
+            profile: repeat === 2 ? "structural" : "image-optimized",
+            semantic: "passed",
+            visual: "passed",
+          })),
+        }),
+      ).rejects.toThrow();
+      await expect(readdir(output)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

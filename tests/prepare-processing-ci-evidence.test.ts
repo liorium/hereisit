@@ -47,6 +47,8 @@ describe("CI release evidence", () => {
           "mobile-webkit",
         ],
         productAnalytics: true,
+        pdfVisualEvidenceSha256: "c".repeat(64),
+        pdfVisualProfilesMeasured: 9,
       },
     };
     expect(validate(value, input)).toEqual(value.document);
@@ -70,6 +72,97 @@ describe("CI release evidence", () => {
         sourceSha256: "b".repeat(64),
       }),
     ).rejects.toThrow(/hosted review/);
+  });
+
+  it("binds hosted PDF benchmark and browser coverage to the exact candidate", () => {
+    const validate = (
+      ciEvidenceModule as unknown as {
+        validateHostedPdfCandidateBinding: (
+          reports: unknown,
+          candidate: unknown,
+          visual: unknown,
+          benchmark: unknown,
+        ) => unknown;
+      }
+    ).validateHostedPdfCandidateBinding;
+    const reports = {
+      fullCorpusBenchmark: {
+        gitSha: "a".repeat(40),
+        sourceSha256: "b".repeat(64),
+        checkRunId: 42,
+        benchmarkSha256: "1".repeat(64),
+        releaseGateSha256: "2".repeat(64),
+        profilesMeasured: 3,
+        engineImageDigest: `sha256:${"3".repeat(64)}`,
+        corpusSha256: "d".repeat(64),
+      },
+      deviceMatrix: { pdfVisualProfilesMeasured: 9 },
+    };
+    const candidate = {
+      gitSha: "a".repeat(40),
+      pdfQuality: {
+        benchmarkSha256: "1".repeat(64),
+        releaseGateSha256: "2".repeat(64),
+        visualProfilesMeasured: 3,
+      },
+      pdfEngine: { oci: { configDigest: `sha256:${"3".repeat(64)}` } },
+    };
+    const results = [0, 1, 2].map((repeat) => ({
+      repeat,
+      sha256: `${repeat + 4}`.repeat(64),
+      byteLength: repeat + 100,
+      verified: true,
+    }));
+    const visual = {
+      schema: "hereisit.pdf-browser-visual-evidence@1",
+      version: 1,
+      passed: true,
+      gitSha: "a".repeat(40),
+      sourceSha256: "b".repeat(64),
+      checkRunId: 42,
+      execution: "exact-main-hosted-pdf-visual",
+      inputManifestSha256: "c".repeat(64),
+      engineImageDigest: candidate.pdfEngine.oci.configDigest,
+      corpusManifestSha256: "d".repeat(64),
+      stratum: "jpeg-heavy",
+      projects: ["chromium", "firefox", "webkit"].map((project) => ({
+        project,
+        passed: true,
+        results,
+      })),
+      visualProfilesMeasured: 9,
+    };
+    const benchmark = {
+      identity: {
+        engineImageDigest: candidate.pdfEngine.oci.configDigest,
+        corpusManifestSha256: visual.corpusManifestSha256,
+      },
+    };
+    const benchmarkSha256 = sha256Canonical(benchmark);
+    reports.fullCorpusBenchmark.benchmarkSha256 = benchmarkSha256;
+    candidate.pdfQuality.benchmarkSha256 = benchmarkSha256;
+    reports.deviceMatrix.pdfVisualEvidenceSha256 = sha256Canonical(visual);
+    expect(validate(reports, candidate, visual, benchmark)).toBe(reports);
+    for (const changed of [
+      { ...candidate, pdfQuality: { ...candidate.pdfQuality, visualProfilesMeasured: 0 } },
+      {
+        ...candidate,
+        pdfEngine: { oci: { configDigest: `sha256:${"4".repeat(64)}` } },
+      },
+    ])
+      expect(() => validate(reports, changed, visual, benchmark)).toThrow(/exact candidate/i);
+    const drifted = structuredClone(visual);
+    drifted.projects[2].results[0].sha256 = "f".repeat(64);
+    expect(() => validate(reports, candidate, drifted, benchmark)).toThrow(
+      /browser|visual|candidate/i,
+    );
+    const reboundReports = structuredClone(reports);
+    const reboundCandidate = structuredClone(candidate);
+    reboundReports.fullCorpusBenchmark.benchmarkSha256 = "e".repeat(64);
+    reboundCandidate.pdfQuality.benchmarkSha256 = "e".repeat(64);
+    expect(() => validate(reboundReports, reboundCandidate, visual, benchmark)).toThrow(
+      /benchmark|candidate/i,
+    );
   });
 
   it("binds protected reviewed reports to the exact current @2 candidate", async () => {

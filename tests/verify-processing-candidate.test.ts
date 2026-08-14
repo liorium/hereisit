@@ -1,4 +1,4 @@
-import { readFileSync, watch } from "node:fs";
+import { watch } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -27,6 +27,7 @@ import {
   runProcessingCandidateFinalizer,
 } from "../scripts/finalize-processing-candidate.mjs";
 import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
+import { bindPdfBenchmarkCostInput } from "../scripts/prepare-processing-ci-release-source.mjs";
 import {
   inspectDockerImageArchive,
   inspectOciImageArchive,
@@ -258,15 +259,13 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   pdfBenchmark.identity.engineImageId = pdfConfigDigest;
   pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
   const pdfReleaseGate = evaluatePdfEngineReleaseGate(pdfBenchmark);
+  const costInput = bindPdfBenchmarkCostInput(
+    JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
+    pdfBenchmark,
+  );
 
   const fileBytes: Record<string, Buffer> = {
-    "live-cost-model.json": Buffer.from(
-      canonicalJson(
-        createLiveCostModel(
-          JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
-        ),
-      ),
-    ),
+    "live-cost-model.json": Buffer.from(canonicalJson(createLiveCostModel(costInput))),
     "processing-release-inputs.json": Buffer.from(
       canonicalJson(
         createProcessingReleaseInputs({
@@ -279,9 +278,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
             version: 1,
             artifactSha256: "3".repeat(64),
             modelInput: (() => {
-              const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
-                readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
-              );
+              const { routeCpuBenchmark: _route, ...modelInput } = costInput;
               return modelInput;
             })(),
           },
@@ -294,9 +291,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
           },
           routeCpuBenchmark: {
             artifactSha256: "4".repeat(64),
-            ...JSON.parse(
-              readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
-            ).routeCpuBenchmark,
+            ...costInput.routeCpuBenchmark,
           },
         }),
       ),
@@ -463,8 +458,8 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
     pdfQuality: {
       benchmarkSha256: pdfReleaseGate.benchmarkSha256,
       releaseGateSha256: sha256Bytes(Buffer.from(canonicalJson(pdfReleaseGate))),
-      visualProfilesMeasured: 0,
-      publicAdmissionReady: false,
+      visualProfilesMeasured: pdfReleaseGate.visualProfilesMeasured,
+      publicAdmissionReady: pdfReleaseGate.publicAdmissionReady,
     },
     web: { staging: stagingIdentity, production: productionIdentity },
     security: { trivyDbDigest: `sha256:${"d".repeat(64)}` },

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/pdf-visual-input.schema.json",
+  "title": "HereIsIt private PDF browser visual input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "engineImageDigest",
+    "corpusManifestSha256",
+    "stratum",
+    "source",
+    "results"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit.pdf-browser-visual-input@1" },
+    "version": { "const": 1 },
+    "engineImageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "corpusManifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "stratum": { "const": "jpeg-heavy" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "sha256", "byteLength", "pageCount"],
+      "properties": {
+        "artifact": { "const": "source.pdf" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+        "pageCount": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repeat", "artifact", "sha256", "byteLength", "profile", "semantic", "visual"],
+        "properties": {
+          "repeat": { "type": "integer", "minimum": 0, "maximum": 2 },
+          "artifact": { "type": "string", "pattern": "^result-[012]\\.pdf$" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "byteLength": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+          "profile": { "const": "image-optimized" },
+          "semantic": { "const": "passed" },
+          "visual": { "const": "passed" }
+        }
+      }
+    }
+  }
+}

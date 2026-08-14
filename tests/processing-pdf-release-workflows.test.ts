@@ -52,9 +52,27 @@ describe("native PDF processing release workflows", () => {
     expect(ci).not.toContain("PROCESSING_REVIEW_EVIDENCE_JSON");
     expect(ci).toContain(`processing-hosted-check-\${{ github.sha }}`);
     expect(ci).toContain("--input .artifacts/hosted-reports");
+    expect(ci).toContain("create-pdf-visual-hosted-reports.mjs");
+    expect(ci.indexOf("create-pdf-visual-hosted-reports.mjs")).toBeLessThan(
+      ci.indexOf("create-processing-hosted-check.mjs"),
+    );
+    expect(ci).not.toContain("cp .artifacts/pdf-browser-visual-evidence.json");
     expect(ci).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
     expect(ci).not.toContain('execution: "exact-main-hosted-check"');
     expect(ci).toContain("--hosted-check-root .artifacts/hosted-check");
+    expect(ci).toContain("--pdf-benchmark .artifacts/hosted-check/pdf-engine-benchmark.json");
+    expect(ci).toContain(
+      "cp .artifacts/hosted-check/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json",
+    );
+    expect(ci).toContain(
+      "cp .artifacts/hosted-check/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json",
+    );
+    expect(ci).not.toContain(
+      "cp docs/deployment/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json",
+    );
+    expect(ci).not.toContain(
+      "cp docs/deployment/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json",
+    );
     expect(ci).toContain(
       "if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'",
     );

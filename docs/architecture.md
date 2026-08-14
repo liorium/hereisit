@@ -163,10 +163,11 @@ after acknowledgement or the retention sweep. Rewriting invalidates electronic s
 
 The native engine is qpdf 12.4.0 under Apache-2.0. It can recompress streams, generate object streams,
 remove unreferenced resources, and optimize eligible JPEG objects, but it does not perform DPI-aware
-image downsampling and does not always reduce a PDF. The generated 17-stratum gate measured eight
-structured wins and three safe hostile rejections; exact sanitized evidence is in
-`docs/deployment/pdf-engine-benchmark.json`. Public rollout remains disabled until the Task 8 immutable
-release, canary, deletion, cost, and rollback gates pass.
+image downsampling and does not always reduce a PDF. The generated 17-stratum gate measured seven
+structured wins, three safe hostile rejections, and three local PDF.js visual passes for one
+image-optimized profile; exact sanitized evidence is in `docs/deployment/pdf-engine-benchmark.json`.
+Public rollout remains disabled until exact-SHA hosted browser, signed release, canary, deletion, cost,
+and rollback gates pass.
 
 ## Resource policy
 

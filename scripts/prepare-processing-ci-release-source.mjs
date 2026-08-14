@@ -2,9 +2,34 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validatePdfBenchmarkReport } from "./benchmark-pdf-engine.mjs";
 import { createLiveCostModel } from "./create-live-cost-model.mjs";
 import { createProcessingReleaseInputs } from "./create-processing-release-inputs.mjs";
-import { canonicalJson, parseCliArguments, sha256Bytes } from "./image-lab-common.mjs";
+import {
+  canonicalJson,
+  parseCliArguments,
+  readBoundedRegularFile,
+  sha256Bytes,
+} from "./image-lab-common.mjs";
+
+export function bindPdfBenchmarkCostInput(costInput, rawBenchmark) {
+  const benchmark = validatePdfBenchmarkReport(rawBenchmark);
+  return {
+    ...costInput,
+    pdfBenchmark: {
+      ...costInput.pdfBenchmark,
+      evidenceSha256: sha256Bytes(canonicalJson(benchmark)),
+      engineImageId: benchmark.identity.engineImageId,
+      engineImageDigest: benchmark.identity.engineImageDigest,
+      maximumCandidates: Math.max(
+        ...benchmark.records.map((record) => record.native.maximumCandidateCount),
+      ),
+      maximumInputBytes: benchmark.limits.maximumSourceBytes,
+      maximumMeasuredPeakRssBytes: benchmark.summary.maximumPeakRssBytes,
+      maximumOutputBytes: benchmark.limits.maximumOutputBytes,
+    },
+  };
+}
 
 export async function prepareProcessingCiReleaseSource({
   sourceRoot,
@@ -12,6 +37,7 @@ export async function prepareProcessingCiReleaseSource({
   releaseId,
   gitSha,
   sourceArchive,
+  pdfBenchmarkPath,
   // biome-ignore lint/suspicious/noUndeclaredEnvVars: GitHub injects this protected reviewer identity
   actor = process.env.GITHUB_ACTOR,
   reviewedAt = new Date().toISOString(),
@@ -24,7 +50,16 @@ export async function prepareProcessingCiReleaseSource({
   if (typeof actor !== "string" || actor.length < 1)
     throw new TypeError("protected release reviewer identity is missing");
   const priceBytes = await readFile("docs/deployment/processing-staging-cost-input.json");
-  const liveCostInput = JSON.parse(priceBytes.toString("utf8"));
+  const benchmarkBytes = await readBoundedRegularFile(
+    resolve(pdfBenchmarkPath),
+    16 * 1024 * 1024,
+    "exact PDF benchmark",
+  );
+  const liveCostInput = bindPdfBenchmarkCostInput(
+    JSON.parse(priceBytes.toString("utf8")),
+    JSON.parse(benchmarkBytes.toString("utf8")),
+  );
+  const costModel = createLiveCostModel(liveCostInput);
   const { routeCpuBenchmark, ...modelInput } = liveCostInput;
   const sourceSha256 = sha256Bytes(await readFile(resolve(sourceArchive)));
   const inputs = createProcessingReleaseInputs({
@@ -33,7 +68,11 @@ export async function prepareProcessingCiReleaseSource({
     baseSourceSha256: sourceSha256,
     reviewedAt,
     reviewerIdHash: createHash("sha256").update(actor).digest("hex"),
-    pricesAndResources: { version: 1, artifactSha256: sha256Bytes(priceBytes), modelInput },
+    pricesAndResources: {
+      version: 1,
+      artifactSha256: sha256Bytes(canonicalJson(liveCostInput)),
+      modelInput,
+    },
     ceilings: {
       maxCostPer1000JobsMicrousd: 500000,
       maxLiveMedianOutputRatioBps: 8500,
@@ -50,11 +89,10 @@ export async function prepareProcessingCiReleaseSource({
     flag: "wx",
     mode: 0o600,
   });
-  await writeFile(
-    resolve(sourceRoot, "live-cost-model.json"),
-    canonicalJson(createLiveCostModel(liveCostInput)),
-    { flag: "wx", mode: 0o600 },
-  );
+  await writeFile(resolve(sourceRoot, "live-cost-model.json"), canonicalJson(costModel), {
+    flag: "wx",
+    mode: 0o600,
+  });
   await writeFile(
     resolve(runtimeRoot, "release-review.json"),
     canonicalJson({
@@ -79,5 +117,6 @@ if (
     releaseId: args["release-id"],
     gitSha: args["git-sha"],
     sourceArchive: args["source-archive"],
+    pdfBenchmarkPath: args["pdf-benchmark"],
   });
 }

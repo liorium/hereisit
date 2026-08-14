@@ -12,9 +12,11 @@ server fallback except that explicit compression action.
 The qpdf 12.4.0 Apache-2.0 container is separate from the image engine and has its own queue and DLQ.
 It accepts 1 byte–50MiB and 1–100 pages, runs at most two candidates within 45 seconds, 768MiB RSS,
 256MiB workspace, and a 50MiB output ceiling, then returns only an at-least-1%-smaller verified result.
-qpdf does not provide DPI-aware image downsampling. The generated benchmark gate and sanitized evidence
-are `pdf-quality-benchmark.yml` and `docs/deployment/pdf-engine-benchmark.json`; public admission waits
-for the Task 8 immutable canary, deletion, cost, and rollback gates.
+qpdf does not provide DPI-aware page downsampling. Its eligible embedded-image optimization produced an
+`image-optimized` result in all three local benchmark repeats, with PDF.js semantic and pixel verification.
+The generated benchmark gate and sanitized evidence are `pdf-quality-benchmark.yml` and
+`docs/deployment/pdf-engine-benchmark.json`; public admission still waits for exact-SHA Chromium, Firefox,
+and WebKit evidence plus the immutable canary, deletion, cost, rollback, and signed release gates.
 
 The official production web origin is `https://hereisit.app`; `https://www.hereisit.app` redirects to
 the apex, and `https://api.hereisit.app` is the production processing API. The legacy Pages and
@@ -182,8 +184,10 @@ with a proxy or disable the legacy compatibility origins in the same release.
 For a production release, run all four tracked smokes only after the current GitHub CI and Cloudflare
 Pages production deployment have succeeded for the exact merge SHA:
 
-The PDF benchmark is only structural evidence when `visualProfilesMeasured` is zero. In that state
-`publicAdmissionReady` remains false until Task 8 exercises image-optimized browser verification.
+The canonical PDF benchmark records three local PDF.js visual measurements and therefore derives
+`publicAdmissionReady: true` for the benchmark itself. Production remains fail-closed until hosted
+Chromium, Firefox, and WebKit each verify all three native results and the separate signed rollout receipts
+authorize the exact release.
 
 ~~~bash
 node scripts/smoke-navigation.mjs https://hereisit.app
