@@ -308,7 +308,7 @@ test("formats JSON locally without changing value tokens", async ({ page }) => {
 
   await input.fill("{");
   await page.getByRole("button", { name: "정리하기", exact: true }).click();
-  const alert = page.getByRole("alert");
+  const alert = page.locator("#json-format-feedback");
   await expect(alert).toHaveText(
     "올바른 JSON 형식이 아니에요. 괄호, 쉼표와 따옴표를 확인해 주세요.",
   );

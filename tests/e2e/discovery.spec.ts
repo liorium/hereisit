@@ -199,8 +199,8 @@ test("recovers invalid catalog values and resets an empty AND-filtered result", 
   await page.getByRole("button", { name: "모든 필터 초기화" }).click();
   await expect(page).toHaveURL(/\/tools$/);
   await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
-  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(11);
-  await expect(page.getByText("검색 결과 11개", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(12);
+  await expect(page.getByText("검색 결과 12개", { exact: true })).toBeVisible();
 });
 
 test("resets through client navigation without losing memory-only favorites", async ({ page }) => {
@@ -907,6 +907,7 @@ test("keeps ready and needs-more recommendations actionable while disabling too-
   await expect(page).toHaveURL(/\/$/);
 
   await input.setInputFiles([pdfFixture("first.pdf"), pdfFixture("second.pdf")]);
+  await revealAlternateFileTools(page);
   await expect(merge).toBeEnabled();
   await expect(split).toBeDisabled();
   await expect(split.locator("..")).toContainText("최대 1개");
@@ -923,6 +924,7 @@ test("hands a chosen file to the canonical destination without auto-processing",
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByText(/handoff\.png · 68B/)).toBeVisible();
@@ -941,6 +943,7 @@ test("revalidates detected bytes instead of filename hints at the destination bo
   });
 
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByText(/revalidate-at-destination\.bin · 68B/)).toBeVisible();
@@ -955,6 +958,7 @@ test("consumes a handoff only once during client navigation", async ({ page }) =
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page.getByText(/one-use-handoff\.png · 68B/)).toBeVisible();
   await page.getByRole("link", { name: "HereIsIt 홈" }).click();
@@ -975,6 +979,7 @@ test("shows the ordinary selector after a handed-off destination reload", async 
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page.getByText(/reload-clears-handoff\.png · 68B/)).toBeVisible();
   await page.reload();
@@ -998,6 +1003,7 @@ test("inspects a pending image handoff without OffscreenCanvas", async ({ page }
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
@@ -1027,6 +1033,7 @@ test("does not leave a consumed image handoff for a different tool", async ({ pa
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
