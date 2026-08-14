@@ -8,6 +8,7 @@ import {
   PDFDict,
   PDFDocument,
   PDFName,
+  PDFNumber,
   PDFRawStream,
   PDFString,
   StandardFonts,
@@ -71,6 +72,45 @@ describe("generated PDF compression corpus", () => {
         entry.probe.signature,
       );
     }
+  });
+
+  it("generates a realistic deterministic JPEG stratum for image optimization", async () => {
+    const firstRoot = await root("visual-first");
+    const secondRoot = await root("visual-second");
+    const first = await createPdfCompressionCorpus(firstRoot);
+    const second = await createPdfCompressionCorpus(secondRoot);
+    const firstJpeg = first.entries.find((entry) => entry.stratum === "jpeg-heavy");
+    const secondJpeg = second.entries.find((entry) => entry.stratum === "jpeg-heavy");
+
+    expect(firstJpeg).toBeDefined();
+    expect(secondJpeg).toBeDefined();
+    expect(firstJpeg).toEqual(secondJpeg);
+    expect(firstJpeg?.probe.signature).toMatchObject({
+      imageCount: 1,
+      imageEncoding: "dct",
+      imageWidth: 1_200,
+      imageHeight: 1_600,
+    });
+    expect(firstJpeg?.byteLength).toBeGreaterThan(100_000);
+    expect(firstJpeg?.byteLength).toBeLessThanOrEqual(first.limits.maximumFileBytes);
+
+    if (firstJpeg === undefined) throw new Error("visual JPEG fixture is missing");
+    const source = await readFile(join(firstRoot, firstJpeg.artifact));
+    const changed = await mutatePdf(source, (document) => {
+      for (const [, object] of document.context.enumerateIndirectObjects()) {
+        if (
+          object instanceof PDFRawStream &&
+          object.dict.get(PDFName.of("Subtype"))?.toString() === "/Image"
+        ) {
+          object.dict.set(PDFName.of("Height"), PDFNumber.of(1_599));
+          return;
+        }
+      }
+      throw new Error("visual JPEG image object is missing");
+    });
+    await expect(
+      probePdfCorpusFeature(changed, "jpeg-heavy", firstJpeg.safety),
+    ).resolves.not.toEqual(firstJpeg.probe.signature);
   });
 
   it("rejects swapped labels when the bytes do not contain that stratum's defining feature", async () => {
