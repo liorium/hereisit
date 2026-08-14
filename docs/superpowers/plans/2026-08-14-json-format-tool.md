@@ -4,7 +4,7 @@
 
 **Goal:** 값 표현을 바꾸지 않고 JSON을 검사·정리·축소하는 첫 브라우저 전용 `quick` 도구를 `/data/json`에 제공한다.
 
-**Architecture:** 네이티브 `JSON.parse()`는 문법 검증에만 사용하고, 별도의 단일 순회 변환기가 문자열 밖 공백과 구조 문자만 다시 배치한다. 기존 카탈로그와 상세 페이지를 최소 확장하고, 전용 React workbench가 입력·결과·복사·다운로드 상태만 소유한다. 입력 1 MiB, 중첩 100단계, 출력 4 MiB를 fail-closed로 제한한다.
+**Architecture:** 네이티브 `JSON.parse()`는 문법 검증에만 사용하고, 제한된 선형 순회가 문자열 밖 공백과 구조 문자만 다시 배치한다. 기존 카탈로그와 상세 페이지를 최소 확장하고, 전용 React workbench가 입력·결과·복사·다운로드 상태만 소유한다. 입력 1 MiB, 중첩 100단계, 출력 4 MiB를 fail-closed로 제한한다.
 
 **Tech Stack:** TypeScript 6, React 19, Next.js 16 App Router, Vitest 4, hosted Playwright, CSS Modules, pnpm 11.
 

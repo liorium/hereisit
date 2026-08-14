@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 
 const DEFAULT_BASE_URL = "https://hereisit.app";
-const ROUTE_PATHS = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/pdf/organize"];
+const ROUTE_PATHS = [
+  "/",
+  "/tools",
+  "/my-tools",
+  "/workflows",
+  "/image/compress",
+  "/pdf/organize",
+  "/data/json",
+];
 const EXPECTED_CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'";
 const EXPECTED_PERMISSIONS_POLICY = "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
@@ -61,8 +69,8 @@ async function assertHeader(page) {
   );
   assert.equal(
     await navigation.getByRole("link", { name: "워크플로", exact: true }).count(),
-    1,
-    "header: workflows",
+    0,
+    "header: no unfinished workflow destination",
   );
   assert.equal(
     await navigation.getByRole("link", { name: "내 도구", exact: true }).count(),
@@ -114,14 +122,19 @@ async function assertHome(page) {
     0,
     "home: no workspace workbench",
   );
+  assert.equal(
+    await page.getByRole("region", { name: "빠른 작업 영역" }).count(),
+    0,
+    "home: no quick workbench",
+  );
   console.log("[assertion] home launcher, tabs, and processor-free state");
 }
 
 async function assertAvailableCatalog(page) {
   const available = page.getByRole("region", { name: "사용 가능한 도구" });
   await available.waitFor({ state: "visible" });
-  assert.equal(await available.locator("article").count(), 11, "catalog: eleven available tools");
-  console.log("[assertion] available catalog has 11 tools");
+  assert.equal(await available.locator("article").count(), 12, "catalog: twelve available tools");
+  console.log("[assertion] available catalog has 12 tools");
 }
 
 async function assertPlannedCatalog(page, baseUrl) {
@@ -248,6 +261,13 @@ try {
     "/pdf/merge",
     "/pdf/split",
     "/pdf/watermark",
+  ]);
+
+  await gotoRoute(page, baseUrl, "/data/json");
+  await assertDetailShell(page, "JSON 정리·검사", "빠른 작업 영역", "이 기기에서 처리", [
+    "/image/convert",
+    "/pdf/to-image",
+    "/pdf/image-to-pdf",
   ]);
 
   assert.deepEqual(violations, [], "network: read-only same-origin requests");

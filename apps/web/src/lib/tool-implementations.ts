@@ -1,5 +1,5 @@
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
-import { JSON_FORMAT_LIMITS } from "./json-format";
+import { JSON_FORMAT_LIMITS } from "./json-format.ts";
 
 export type ToolBundleProfile =
   | "json-quick"

@@ -1,9 +1,10 @@
 # HereIsIt
 
-HereIsIt is a fast, private, local-first toolbox for everyday file work. It provides browser-only image
-resize, crop, conversion, compression, and text/logo watermarking plus PDF merge, split, page extraction,
-page organization, text watermarking, PDF-page-to-JPG/PNG conversion, scan-oriented PDF raster
-compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers without uploads.
+HereIsIt is a fast, private, local-first toolbox for everyday browser work. It provides browser-only JSON
+validation and formatting, image resize, crop, conversion, compression, and text/logo watermarking plus
+PDF merge, split, page extraction, page organization, text watermarking, PDF-page-to-JPG/PNG conversion,
+scan-oriented PDF raster compression, and JPG/PNG-to-PDF tools. File processing runs in Web Workers
+without uploads; pasted JSON stays in the current tab.
 
 ## Discovery and local state
 
@@ -13,10 +14,10 @@ searchable and filterable catalog. Favorites and recent tools store only version
 browser, with an in-memory fallback when local storage is unavailable; file contents and filenames are
 never preference data.
 
-Every available processor has a catalog-driven detail page. `file` shells expose a focused file work
-area, while `workspace` shells expose editing controls such as PDF page organization. Each route imports
-only its own workbench, shows the local-execution disclosure, and links to exactly three catalog-owned next
-actions.
+Every available tool has a catalog-driven detail page. `quick` shells expose a focused text action,
+`file` shells expose a focused file work area, and `workspace` shells expose editing controls such as PDF
+page organization. Each route imports only its own workbench, shows the local-execution disclosure, and
+links to exactly three catalog-owned next actions.
 
 ## Development
 
@@ -78,6 +79,10 @@ checklist.
 
 ## Current limits
 
+- `json.format@1` accepts up to 1MiB of pasted UTF-8 JSON with at most 100 nesting levels and produces at
+  most 4MiB. It validates syntax with the browser parser but preserves the original spelling of strings,
+  numbers, literals and duplicate keys while changing only JSON whitespace. It does not accept JSON5,
+  comments or trailing commas and does not repair malformed input, sort keys or save history.
 - The size-only preset returns files only when they are at least 1% smaller than the source. Files that
   cannot meet the target are marked as already optimized and are not added to downloads.
 - The size-only preset in `image.pipeline@2` keeps inspected JPG, PNG, and WebP formats and pixel

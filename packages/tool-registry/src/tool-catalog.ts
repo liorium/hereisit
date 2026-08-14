@@ -1,5 +1,3 @@
-import { JSON_FORMAT_TOOL_ID, JSON_FORMAT_TOOL_VERSION } from "@hereisit/tool-contracts";
-
 export type ToolId = `${string}.${string}`;
 export type DomainId = "image" | "document" | "media" | "data" | "text-ai" | "web-dev" | "everyday";
 export type DiscoveryDomainId = "all" | DomainId;
@@ -592,7 +590,7 @@ export const toolCatalog = defineToolCatalog([
     outputKinds: ["application/json", "value/text"],
     experience: "quick",
     execution: "browser",
-    contract: { id: JSON_FORMAT_TOOL_ID, version: JSON_FORMAT_TOOL_VERSION },
+    contract: { id: "json.format", version: 1 },
     featured: false,
     relatedToolIds: ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
   },

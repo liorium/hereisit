@@ -20,7 +20,7 @@ async function expectRelatedLinks(
 async function expectCatalogShell(
   page: import("@playwright/test").Page,
   title: string,
-  workAreaLabel: "파일 작업 영역" | "편집 작업 공간",
+  workAreaLabel: "빠른 작업 영역" | "파일 작업 영역" | "편집 작업 공간",
   execution: "local" | "automatic" = "local",
 ): Promise<void> {
   const breadcrumb = page.getByRole("navigation", { name: "현재 위치" });
@@ -36,7 +36,9 @@ async function expectCatalogShell(
   if (execution === "local") {
     await expect(disclosure.getByText("이 기기에서 처리", { exact: true })).toBeVisible();
     await expect(disclosure).toContainText(
-      "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.",
+      workAreaLabel === "빠른 작업 영역"
+        ? "입력한 내용은 업로드되지 않으며 복사와 다운로드는 버튼을 눌러 직접 시작해요."
+        : "파일은 업로드되지 않으며 다운로드는 버튼을 눌러 직접 시작해요.",
     );
     expect(
       await disclosure.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
@@ -50,6 +52,13 @@ async function expectCatalogShell(
     await expect(page.getByText(copy, { exact: true })).toHaveCount(0);
   }
 }
+
+test("renders JSON formatting in the catalog-driven quick shell", async ({ page }) => {
+  await page.goto("/data/json");
+
+  await expectCatalogShell(page, "JSON 정리·검사", "빠른 작업 영역");
+  await expectRelatedLinks(page, ["/image/convert", "/pdf/to-image", "/pdf/image-to-pdf"]);
+});
 
 test("renders the image compressor in the catalog-driven file shell", async ({ page }) => {
   await page.goto("/image/compress");
