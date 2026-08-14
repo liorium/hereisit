@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { canonicalJson, sha256Bytes } from "../scripts/image-lab-common.mjs";
 import { prepareProcessingCiReleaseSource } from "../scripts/prepare-processing-ci-release-source.mjs";
+import { assertReviewedPdfCostBinding } from "../scripts/verify-processing-release-input-bindings.mjs";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true }))));
@@ -15,10 +17,18 @@ describe("CI release source preparation", () => {
     const sourceRoot = join(root, "source");
     const runtimeRoot = join(root, "runtime");
     const archive = join(root, "source.tar");
+    const benchmarkPath = join(root, "pdf-engine-benchmark.json");
+    const benchmark = JSON.parse(
+      await readFile("docs/deployment/pdf-engine-benchmark.json", "utf8"),
+    );
+    const freshEngineDigest = `sha256:${"f".repeat(64)}`;
+    benchmark.identity.engineImageId = freshEngineDigest;
+    benchmark.identity.engineImageDigest = freshEngineDigest;
     await Promise.all([
       mkdir(sourceRoot),
       mkdir(runtimeRoot),
       writeFile(archive, "exact source bytes"),
+      writeFile(benchmarkPath, canonicalJson(benchmark)),
     ]);
     await prepareProcessingCiReleaseSource({
       sourceRoot,
@@ -26,6 +36,7 @@ describe("CI release source preparation", () => {
       releaseId: "2026-08-12.1",
       gitSha: "a".repeat(40),
       sourceArchive: archive,
+      pdfBenchmarkPath: benchmarkPath,
       actor: "protected-reviewer",
       reviewedAt: "2026-08-12T00:00:00.000Z",
     });
@@ -38,5 +49,19 @@ describe("CI release source preparation", () => {
     expect(inputs.baseSourceSha256).not.toBe(
       createHash("sha256").update("a".repeat(40)).digest("hex"),
     );
+    const reviewed = inputs.pricesAndResources.modelInput.pdfBenchmark;
+    expect(reviewed).toMatchObject({
+      evidenceSha256: sha256Bytes(canonicalJson(benchmark)),
+      engineImageId: freshEngineDigest,
+      engineImageDigest: freshEngineDigest,
+    });
+    expect(() =>
+      assertReviewedPdfCostBinding(
+        reviewed,
+        benchmark,
+        sha256Bytes(canonicalJson(benchmark)),
+        freshEngineDigest,
+      ),
+    ).not.toThrow();
   });
 });

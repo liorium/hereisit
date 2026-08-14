@@ -60,6 +60,7 @@ describe("native PDF processing release workflows", () => {
     expect(ci).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
     expect(ci).not.toContain('execution: "exact-main-hosted-check"');
     expect(ci).toContain("--hosted-check-root .artifacts/hosted-check");
+    expect(ci).toContain("--pdf-benchmark .artifacts/hosted-check/pdf-engine-benchmark.json");
     expect(ci).toContain(
       "cp .artifacts/hosted-check/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json",
     );

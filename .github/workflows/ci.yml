@@ -197,7 +197,8 @@ jobs:
           node scripts/prepare-processing-ci-release-source.mjs \
             --source-root .artifacts/release-source --runtime-root .artifacts/runtime \
             --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
-            --source-archive .artifacts/runtime/exact-source.tar
+            --source-archive .artifacts/runtime/exact-source.tar \
+            --pdf-benchmark .artifacts/hosted-check/pdf-engine-benchmark.json
           node scripts/create-processing-candidate.mjs --source-root .artifacts/release-source \
             --output-root .artifacts/built-candidate --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
             --staging-processing-api-origin https://hereisit-processing-staging.liorium.workers.dev \

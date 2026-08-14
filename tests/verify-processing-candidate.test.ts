@@ -27,6 +27,7 @@ import {
   runProcessingCandidateFinalizer,
 } from "../scripts/finalize-processing-candidate.mjs";
 import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
+import { bindPdfBenchmarkCostInput } from "../scripts/prepare-processing-ci-release-source.mjs";
 import {
   inspectDockerImageArchive,
   inspectOciImageArchive,
@@ -258,24 +259,10 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   pdfBenchmark.identity.engineImageId = pdfConfigDigest;
   pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
   const pdfReleaseGate = evaluatePdfEngineReleaseGate(pdfBenchmark);
-  const costInput = JSON.parse(
-    await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
+  const costInput = bindPdfBenchmarkCostInput(
+    JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
+    pdfBenchmark,
   );
-  costInput.pdfBenchmark = {
-    ...costInput.pdfBenchmark,
-    evidenceSha256: sha256Bytes(canonicalJson(pdfBenchmark)),
-    engineImageId: pdfConfigDigest,
-    engineImageDigest: pdfConfigDigest,
-    maximumCandidates: Math.max(
-      ...pdfBenchmark.records.map(
-        (record: { native: { maximumCandidateCount: number } }) =>
-          record.native.maximumCandidateCount,
-      ),
-    ),
-    maximumInputBytes: pdfBenchmark.limits.maximumSourceBytes,
-    maximumMeasuredPeakRssBytes: pdfBenchmark.summary.maximumPeakRssBytes,
-    maximumOutputBytes: pdfBenchmark.limits.maximumOutputBytes,
-  };
 
   const fileBytes: Record<string, Buffer> = {
     "live-cost-model.json": Buffer.from(canonicalJson(createLiveCostModel(costInput))),
