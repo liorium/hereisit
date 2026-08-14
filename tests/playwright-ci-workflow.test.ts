@@ -75,11 +75,23 @@ describe("Playwright CI workflow", () => {
       expect(source).toContain("tests/e2e/pdf-compression-visual-evidence.spec.ts");
       expect(source).toContain("--visual-output .artifacts/pdf-visual-private");
       expect(source).toContain("create-pdf-visual-browser-evidence.mjs");
-      expect(source).toContain("create-pdf-visual-hosted-reports.mjs");
       expect(source).toContain("Remove private PDF visual inputs");
       expect(source).toContain("if: always()");
+      expect(source).toContain("label=hereisit.pdf-benchmark=true");
       expect(source).not.toMatch(/upload-artifact[\s\S]{0,500}pdf-visual-private/u);
     }
+    expect(workflow).toContain("create-pdf-visual-hosted-reports.mjs");
+    expect(pdfQualityWorkflow).not.toContain("create-pdf-visual-hosted-reports.mjs");
+    expect(pdfQualityWorkflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
+    expect(pdfQualityWorkflow).not.toContain("fullCorpusBenchmark.json");
+    expect(pdfQualityWorkflow).not.toContain("deviceMatrix.json");
+    const sanitizedUpload = workflow.indexOf("Upload sanitized PDF visual evidence");
+    const protectedSeal = workflow.indexOf("Seal genuine exact-main hosted review receipts");
+    expect(sanitizedUpload).toBeGreaterThan(-1);
+    expect(protectedSeal).toBeGreaterThan(sanitizedUpload);
+    expect(workflow.slice(sanitizedUpload, protectedSeal)).not.toContain(
+      "PROCESSING_HOSTED_REVIEWS_READY",
+    );
     for (const project of ["chromium", "firefox", "webkit"])
       expect(pdfQualityWorkflow).toContain(`--project=${project}`);
     for (const variable of [

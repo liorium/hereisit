@@ -51,6 +51,7 @@ export async function createPdfVisualHostedReports({
   const benchmark = validatePdfBenchmarkReport(benchmarkFile.value);
   const gate = validatePdfReleaseGate(gateFile.value, benchmark);
   const visual = validatePdfVisualBrowserEvidence(visualFile.value);
+  const visualBytes = Buffer.from(canonicalJson(visual));
   if (
     !gate.publicAdmissionReady ||
     gate.visualProfilesMeasured !== 3 ||
@@ -86,7 +87,7 @@ export async function createPdfVisualHostedReports({
       ...common,
       projects,
       productAnalytics: true,
-      pdfVisualEvidenceSha256: sha256Bytes(visualFile.bytes),
+      pdfVisualEvidenceSha256: sha256Bytes(visualBytes),
       pdfVisualProfilesMeasured: visual.visualProfilesMeasured,
     },
   };
@@ -99,6 +100,10 @@ export async function createPdfVisualHostedReports({
       mode: 0o600,
     });
   }
+  await writeCanonicalJsonAtomic(join(root, "pdfVisualBrowserEvidence.json"), visual, {
+    refuseOverwrite: true,
+    mode: 0o600,
+  });
   return documents;
 }
 

@@ -1,4 +1,4 @@
-import { readFileSync, watch } from "node:fs";
+import { watch } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -258,15 +258,27 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   pdfBenchmark.identity.engineImageId = pdfConfigDigest;
   pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
   const pdfReleaseGate = evaluatePdfEngineReleaseGate(pdfBenchmark);
-
-  const fileBytes: Record<string, Buffer> = {
-    "live-cost-model.json": Buffer.from(
-      canonicalJson(
-        createLiveCostModel(
-          JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
-        ),
+  const costInput = JSON.parse(
+    await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
+  );
+  costInput.pdfBenchmark = {
+    ...costInput.pdfBenchmark,
+    evidenceSha256: sha256Bytes(canonicalJson(pdfBenchmark)),
+    engineImageId: pdfConfigDigest,
+    engineImageDigest: pdfConfigDigest,
+    maximumCandidates: Math.max(
+      ...pdfBenchmark.records.map(
+        (record: { native: { maximumCandidateCount: number } }) =>
+          record.native.maximumCandidateCount,
       ),
     ),
+    maximumInputBytes: pdfBenchmark.limits.maximumSourceBytes,
+    maximumMeasuredPeakRssBytes: pdfBenchmark.summary.maximumPeakRssBytes,
+    maximumOutputBytes: pdfBenchmark.limits.maximumOutputBytes,
+  };
+
+  const fileBytes: Record<string, Buffer> = {
+    "live-cost-model.json": Buffer.from(canonicalJson(createLiveCostModel(costInput))),
     "processing-release-inputs.json": Buffer.from(
       canonicalJson(
         createProcessingReleaseInputs({
@@ -279,9 +291,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
             version: 1,
             artifactSha256: "3".repeat(64),
             modelInput: (() => {
-              const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
-                readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
-              );
+              const { routeCpuBenchmark: _route, ...modelInput } = costInput;
               return modelInput;
             })(),
           },
@@ -294,9 +304,7 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
           },
           routeCpuBenchmark: {
             artifactSha256: "4".repeat(64),
-            ...JSON.parse(
-              readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
-            ).routeCpuBenchmark,
+            ...costInput.routeCpuBenchmark,
           },
         }),
       ),

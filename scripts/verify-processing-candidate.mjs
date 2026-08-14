@@ -20,7 +20,10 @@ import {
   verifyDockerImageArchive,
   verifyOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
-import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
+import {
+  assertReviewedPdfCostBinding,
+  verifyProcessingReleaseInputBindings,
+} from "./verify-processing-release-input-bindings.mjs";
 
 const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
@@ -494,13 +497,18 @@ export async function verifyProcessingCandidate({
   const entries = releaseAssetEntries(candidate);
   for (const [asset, label] of entries) await verifyAsset(canonicalRoot, asset, label);
   await verifySecurityGates(canonicalRoot, candidate);
+  let verifiedPdfBenchmark;
   if (candidate.pdfQuality !== undefined) {
     const readQuality = async (asset, label) =>
       JSON.parse(
         await readBoundedRegularFile(join(canonicalRoot, asset.path), 8 * 1024 * 1024, label),
       );
+    verifiedPdfBenchmark = await readQuality(
+      candidate.releaseAssets.pdfQuality.benchmark,
+      "PDF benchmark",
+    );
     const quality = await validatePdfBenchmarkEvidence({
-      report: await readQuality(candidate.releaseAssets.pdfQuality.benchmark, "PDF benchmark"),
+      report: verifiedPdfBenchmark,
       gate: await readQuality(candidate.releaseAssets.pdfQuality.releaseGate, "PDF release gate"),
       benchmarkSchema: await readQuality(
         candidate.releaseAssets.pdfQuality.benchmarkSchema,
@@ -521,6 +529,14 @@ export async function verifyProcessingCandidate({
     liveCostModelPath: join(canonicalRoot, candidate.releaseAssets.costModel.path),
     expectedReleaseId: candidate.releaseId,
   });
+  if (candidate.pdfQuality !== undefined) {
+    assertReviewedPdfCostBinding(
+      financialInputs.reviewedPdfBenchmark,
+      verifiedPdfBenchmark,
+      candidate.pdfQuality.benchmarkSha256,
+      candidate.pdfEngine.docker.configDigest,
+    );
+  }
   if (
     financialInputs.releaseInputs.sha256 !== candidate.releaseInputs.sha256 ||
     financialInputs.costModel.sha256 !== candidate.costModel.sha256

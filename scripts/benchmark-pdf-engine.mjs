@@ -1046,13 +1046,22 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath, 
   const networkName = `hereisit-pdf-benchmark-${randomUUID()}`;
   const startedAt = Date.now();
   try {
-    await docker(["network", "create", "--internal", networkName]);
+    await docker([
+      "network",
+      "create",
+      "--internal",
+      "--label",
+      "hereisit.pdf-benchmark=true",
+      networkName,
+    ]);
     await docker([
       "run",
       "--detach",
       "--rm",
       "--name",
       containerName,
+      "--label",
+      "hereisit.pdf-benchmark=true",
       "--network",
       networkName,
       "--read-only",

@@ -13,7 +13,10 @@ import {
   inspectOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
 import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
-import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
+import {
+  assertReviewedPdfCostBinding,
+  verifyProcessingReleaseInputBindings,
+} from "./verify-processing-release-input-bindings.mjs";
 
 const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
@@ -290,8 +293,11 @@ export async function createBuiltProcessingCandidate({
       throw new TypeError("PDF OCI and Docker source archive identities do not match");
     }
 
+    const pdfBenchmark = JSON.parse(
+      await readFile(join(temporaryRoot, sourceNames.pdfBenchmark), "utf8"),
+    );
     const pdfQuality = await validatePdfBenchmarkEvidence({
-      report: JSON.parse(await readFile(join(temporaryRoot, sourceNames.pdfBenchmark), "utf8")),
+      report: pdfBenchmark,
       gate: JSON.parse(await readFile(join(temporaryRoot, sourceNames.pdfReleaseGate), "utf8")),
       benchmarkSchema: JSON.parse(
         await readFile(join(temporaryRoot, sourceNames.pdfBenchmarkSchema), "utf8"),
@@ -319,11 +325,21 @@ export async function createBuiltProcessingCandidate({
       maximumProviderSchemaBytes,
       "provider usage schema",
     );
-    const financialInputs = await verifyProcessingReleaseInputBindings({
+    const verifiedFinancialInputs = await verifyProcessingReleaseInputBindings({
       releaseInputsPath: join(temporaryRoot, sourceNames.releaseInputs),
       liveCostModelPath: join(temporaryRoot, sourceNames.costModel),
       expectedReleaseId: releaseId,
     });
+    assertReviewedPdfCostBinding(
+      verifiedFinancialInputs.reviewedPdfBenchmark,
+      pdfBenchmark,
+      pdfQuality.benchmarkSha256,
+      pdfDocker.configDigest,
+    );
+    const financialInputs = {
+      releaseInputs: verifiedFinancialInputs.releaseInputs,
+      costModel: verifiedFinancialInputs.costModel,
+    };
 
     const webReleaseAsset = (asset, identity) => ({
       path: asset.path,

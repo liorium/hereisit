@@ -56,6 +56,7 @@ describe("native PDF processing release workflows", () => {
     expect(ci.indexOf("create-pdf-visual-hosted-reports.mjs")).toBeLessThan(
       ci.indexOf("create-processing-hosted-check.mjs"),
     );
+    expect(ci).not.toContain("cp .artifacts/pdf-browser-visual-evidence.json");
     expect(ci).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
     expect(ci).not.toContain('execution: "exact-main-hosted-check"');
     expect(ci).toContain("--hosted-check-root .artifacts/hosted-check");

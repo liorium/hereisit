@@ -345,6 +345,19 @@ jobs:
             --git-sha "$GITHUB_SHA" \
             --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
             --check-run-id "$GITHUB_RUN_ID"
+      - name: Upload sanitized PDF visual evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pdf-visual-evidence-${{ github.sha }}
+          path: |
+            .artifacts/pdf-visual-benchmark.json
+            .artifacts/pdf-visual-benchmark-gate.json
+            .artifacts/pdf-browser-visual-evidence.json
+            .artifacts/hosted-reports/fullCorpusBenchmark.json
+            .artifacts/hosted-reports/deviceMatrix.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
       - name: Seal genuine exact-main hosted review receipts
         if: github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
         run: |
@@ -355,8 +368,6 @@ jobs:
             --git-sha "$GITHUB_SHA" --source "$RUNNER_TEMP/exact-source.tar" \
             --check-run-id "$GITHUB_RUN_ID" --input .artifacts/hosted-reports \
             --output .artifacts/hosted-check
-          cp .artifacts/pdf-browser-visual-evidence.json \
-            .artifacts/hosted-check/pdfVisualBrowserEvidence.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
         with:
@@ -369,6 +380,8 @@ jobs:
       - name: Remove private PDF visual inputs
         if: always()
         run: |
+          docker ps --all --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker rm --force
+          docker network ls --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker network rm
           rm -rf -- .artifacts/pdf-corpus .artifacts/pdf-visual-private .artifacts/pdf-visual-receipts
           rm -rf -- test-results/pdf-visual playwright-report/pdf-visual
           docker image rm --force hereisit-pdf-engine:visual-evidence >/dev/null 2>&1 || true

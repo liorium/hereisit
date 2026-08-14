@@ -23,6 +23,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Require the exact main branch
+        run: test "$GITHUB_REF" = "refs/heads/main"
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -42,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p .artifacts/pdf-visual-receipts .artifacts/hosted-reports
+          mkdir -p .artifacts/pdf-visual-receipts
           git archive --format=tar "$GITHUB_SHA" > "$RUNNER_TEMP/exact-source.tar"
           echo "HEREISIT_PDF_VISUAL_SOURCE_SHA256=$(sha256sum "$RUNNER_TEMP/exact-source.tar" | cut -d' ' -f1)" >> "$GITHUB_ENV"
           node scripts/create-pdf-compression-corpus.mjs --output .artifacts/pdf-corpus
@@ -89,17 +91,11 @@ jobs:
             --git-sha "$GITHUB_SHA" \
             --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
             --check-run-id "$GITHUB_RUN_ID"
-          node scripts/create-pdf-visual-hosted-reports.mjs \
-            --benchmark docs/deployment/pdf-engine-benchmark.json \
-            --gate docs/deployment/pdf-engine-release-gate.json \
-            --visual-evidence .artifacts/pdf-browser-visual-evidence.json \
-            --output .artifacts/hosted-reports \
-            --git-sha "$GITHUB_SHA" \
-            --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
-            --check-run-id "$GITHUB_RUN_ID"
       - name: Remove private PDF visual inputs
         if: always()
         run: |
+          docker ps --all --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker rm --force
+          docker network ls --quiet --filter label=hereisit.pdf-benchmark=true | xargs --no-run-if-empty docker network rm
           rm -rf -- .artifacts/pdf-corpus .artifacts/pdf-visual-private .artifacts/pdf-visual-receipts
           rm -rf -- test-results/pdf-visual playwright-report
           docker image rm --force hereisit-pdf-engine:quality >/dev/null 2>&1 || true
@@ -112,8 +108,6 @@ jobs:
             .artifacts/pdf-benchmark.json
             .artifacts/pdf-benchmark-gate.json
             .artifacts/pdf-browser-visual-evidence.json
-            .artifacts/hosted-reports/fullCorpusBenchmark.json
-            .artifacts/hosted-reports/deviceMatrix.json
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14

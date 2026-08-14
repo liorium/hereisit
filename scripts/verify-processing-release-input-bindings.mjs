@@ -40,6 +40,24 @@ function parseJson(bytes, label) {
   }
 }
 
+export function assertReviewedPdfCostBinding(reviewed, report, benchmarkSha256, engineImageDigest) {
+  const maximumCandidates = Math.max(
+    ...report.records.map((record) => record.native.maximumCandidateCount),
+  );
+  if (
+    reviewed === undefined ||
+    reviewed.evidenceSha256 !== benchmarkSha256 ||
+    reviewed.engineImageId !== engineImageDigest ||
+    reviewed.engineImageDigest !== engineImageDigest ||
+    reviewed.maximumCandidates !== maximumCandidates ||
+    reviewed.maximumInputBytes !== report.limits.maximumSourceBytes ||
+    reviewed.maximumOutputBytes !== report.limits.maximumOutputBytes ||
+    reviewed.maximumMeasuredPeakRssBytes !== report.summary.maximumPeakRssBytes
+  ) {
+    throw new TypeError("reviewed PDF cost inputs do not match the exact benchmark evidence");
+  }
+}
+
 export async function verifyProcessingReleaseInputBindings({
   releaseInputsPath,
   liveCostModelPath,
@@ -65,5 +83,6 @@ export async function verifyProcessingReleaseInputBindings({
   return {
     releaseInputs: { sha256: sha256Bytes(releaseBytes) },
     costModel: { sha256: sha256Bytes(costBytes) },
+    reviewedPdfBenchmark: releaseInputs.pricesAndResources.modelInput.pdfBenchmark,
   };
 }

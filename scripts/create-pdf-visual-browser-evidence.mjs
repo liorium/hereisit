@@ -165,6 +165,7 @@ export function validatePdfVisualBrowserEvidence(raw) {
     evidence.projects.length !== PDF_VISUAL_BROWSER_PROJECTS.length
   )
     throw new TypeError("PDF browser visual projects are incomplete");
+  let expectedResults;
   for (const [index, rawProject] of evidence.projects.entries()) {
     const project = assertObject(rawProject, "PDF browser visual project");
     assertExactKeys(project, ["project", "passed", "results"], "PDF browser visual project");
@@ -172,6 +173,7 @@ export function validatePdfVisualBrowserEvidence(raw) {
       throw new TypeError("PDF browser visual project order is invalid");
     if (!Array.isArray(project.results) || project.results.length !== 3)
       throw new TypeError("PDF browser visual project results are incomplete");
+    expectedResults ??= project.results;
     for (const [repeat, rawResult] of project.results.entries()) {
       const result = assertObject(rawResult, "PDF browser visual project result");
       assertExactKeys(
@@ -185,7 +187,9 @@ export function validatePdfVisualBrowserEvidence(raw) {
         !SHA.test(result.sha256) ||
         !Number.isSafeInteger(result.byteLength) ||
         result.byteLength < 1 ||
-        result.byteLength > 50 * 1024 * 1024
+        result.byteLength > 50 * 1024 * 1024 ||
+        result.sha256 !== expectedResults[repeat]?.sha256 ||
+        result.byteLength !== expectedResults[repeat]?.byteLength
       )
         throw new TypeError("PDF browser visual project result is invalid");
     }

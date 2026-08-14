@@ -74,13 +74,14 @@ async function fixture() {
   };
   await writeFile(paths.report, canonicalJson(report));
   await writeFile(paths.gate, canonicalJson(gate));
-  await writeFile(paths.visual, canonicalJson(visualEvidence(report)));
-  return { report, gate, paths };
+  const visual = visualEvidence(report);
+  await writeFile(paths.visual, canonicalJson(visual));
+  return { report, gate, visual, paths };
 }
 
 describe("PDF visual hosted report projection", () => {
   it("creates only strict benchmark and device documents bound to the exact hosted run", async () => {
-    const { report, gate, paths } = await fixture();
+    const { report, gate, visual, paths } = await fixture();
 
     await createPdfVisualHostedReports({
       benchmarkPath: paths.report,
@@ -96,6 +97,9 @@ describe("PDF visual hosted report projection", () => {
       await readFile(join(paths.output, "fullCorpusBenchmark.json"), "utf8"),
     );
     const device = JSON.parse(await readFile(join(paths.output, "deviceMatrix.json"), "utf8"));
+    const aggregate = JSON.parse(
+      await readFile(join(paths.output, "pdfVisualBrowserEvidence.json"), "utf8"),
+    );
     expect(benchmark).toMatchObject({
       passed: true,
       gitSha,
@@ -119,6 +123,7 @@ describe("PDF visual hosted report projection", () => {
       productAnalytics: true,
       pdfVisualProfilesMeasured: 9,
     });
+    expect(aggregate).toEqual(visual);
     await expect(readFile(join(paths.output, "privacyReview.json"))).rejects.toThrow();
   });
 

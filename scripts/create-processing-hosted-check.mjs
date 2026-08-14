@@ -1,11 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validatePdfVisualBrowserEvidence } from "./create-pdf-visual-browser-evidence.mjs";
 import {
   assertExactKeys,
   assertObject,
   assertSha256,
   canonicalize,
+  canonicalJson,
   parseCliArguments,
   readBoundedRegularFile,
   sha256Bytes,
@@ -169,10 +171,32 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
       checkRunId: parsedRunId,
     });
   }
+  let visual;
+  try {
+    const visualBytes = await readBoundedRegularFile(
+      join(resolve(input), "pdfVisualBrowserEvidence.json"),
+      1024 * 1024,
+      "PDF browser visual evidence",
+    );
+    visual = validatePdfVisualBrowserEvidence(JSON.parse(visualBytes.toString("utf8")));
+  } catch {
+    throw new TypeError("PDF browser visual evidence is missing or invalid");
+  }
+  if (
+    visual.gitSha !== gitSha ||
+    visual.sourceSha256 !== sourceSha256 ||
+    visual.checkRunId !== parsedRunId ||
+    visual.engineImageDigest !== documents.fullCorpusBenchmark.engineImageDigest ||
+    visual.corpusManifestSha256 !== documents.fullCorpusBenchmark.corpusSha256 ||
+    visual.visualProfilesMeasured !== documents.deviceMatrix.pdfVisualProfilesMeasured ||
+    documents.deviceMatrix.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual))
+  ) {
+    throw new TypeError("PDF browser visual evidence does not bind the exact hosted reviews");
+  }
   const root = resolve(output);
   await mkdir(root, { recursive: true, mode: 0o700 });
-  await Promise.all(
-    Object.entries(documents).map(([reportName, document]) =>
+  await Promise.all([
+    ...Object.entries(documents).map(([reportName, document]) =>
       writeCanonicalJsonAtomic(
         join(root, `${reportName}.json`),
         canonicalize({
@@ -188,7 +212,11 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
         { refuseOverwrite: true, mode: 0o600 },
       ),
     ),
-  );
+    writeCanonicalJsonAtomic(join(root, "pdfVisualBrowserEvidence.json"), visual, {
+      refuseOverwrite: true,
+      mode: 0o600,
+    }),
+  ]);
   return { sourceSha256, checkRunId: parsedRunId };
 }
 

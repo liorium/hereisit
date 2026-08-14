@@ -148,4 +148,20 @@ describe("PDF browser visual evidence", () => {
     expect(serialized).not.toContain(pdf("source").toString("base64"));
     expect(createHash("sha256").update(serialized).digest("hex")).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it("rejects browser projects that verified different result bytes", async () => {
+    const value = await fixture();
+    const evidence = await createPdfVisualBrowserEvidence({
+      inputRoot: value.inputRoot,
+      receiptRoot: value.receiptRoot,
+      output: join(value.root, "evidence.json"),
+      gitSha,
+      sourceSha256,
+      checkRunId,
+    });
+    const drifted = structuredClone(evidence);
+    drifted.projects[2].results[0].sha256 = "e".repeat(64);
+
+    expect(() => validatePdfVisualBrowserEvidence(drifted)).toThrow(/result|browser/i);
+  });
 });

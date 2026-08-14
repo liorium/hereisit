@@ -86,8 +86,37 @@ async function installLocalNoReduction(page: Page) {
           if (options?.name === "hereisit-pdf-compress-scanned-worker")
             return new NoReductionWorker() as unknown as Worker;
           const worker = Reflect.construct(Target, argumentsList) as Worker;
-          if (options?.name === "hereisit-pdf-optimize-verifier")
-            sessionStorage.setItem("__hereisitRealPdfVerifier", "1");
+          if (options?.name === "hereisit-pdf-optimize-verifier") {
+            const state = globalThis as typeof globalThis & {
+              __hereisitPdfVerifierPending?: number;
+              __hereisitPdfVerifierCompleted?: number;
+              __hereisitReleasePdfVerifier?: () => boolean;
+            };
+            const releases: Array<() => void> = [];
+            const released = new Set<string>();
+            state.__hereisitPdfVerifierPending ??= 0;
+            state.__hereisitPdfVerifierCompleted ??= 0;
+            state.__hereisitReleasePdfVerifier = () => {
+              const release = releases.shift();
+              release?.();
+              return release !== undefined;
+            };
+            worker.addEventListener("message", (event) => {
+              const message = event.data as { jobId?: unknown; type?: unknown };
+              if (message.type !== "complete" || typeof message.jobId !== "string") return;
+              if (released.has(message.jobId)) {
+                state.__hereisitPdfVerifierCompleted =
+                  (state.__hereisitPdfVerifierCompleted ?? 0) + 1;
+                return;
+              }
+              event.stopImmediatePropagation();
+              state.__hereisitPdfVerifierPending = (state.__hereisitPdfVerifierPending ?? 0) + 1;
+              releases.push(() => {
+                released.add(message.jobId as string);
+                worker.dispatchEvent(new MessageEvent("message", { data: event.data }));
+              });
+            });
+          }
           return worker;
         },
       }),
@@ -242,14 +271,38 @@ test("verifies three native image-optimized repeats in the real browser Worker",
     ).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: `${input.source.pageCount}페이지 용량 줄이기` }).click();
     await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { __hereisitPdfVerifierPending?: number })
+              .__hereisitPdfVerifierPending ?? 0,
+        ),
+      )
+      .toBe(result.repeat + 1);
+    await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & { __hereisitReleasePdfVerifier?: () => boolean }
+          ).__hereisitReleasePdfVerifier?.() ?? false,
+      ),
+    ).toBe(true);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { __hereisitPdfVerifierCompleted?: number })
+              .__hereisitPdfVerifierCompleted ?? 0,
+        ),
+      )
+      .toBe(result.repeat + 1);
     await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
       timeout: 60_000,
     });
     await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
     await expect.poll(() => acknowledged.has(activeRepeat)).toBe(true);
-    expect(await page.evaluate(() => sessionStorage.getItem("__hereisitRealPdfVerifier"))).toBe(
-      "1",
-    );
     await page.getByRole("button", { name: "다른 PDF 압축" }).click();
     await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
   }
