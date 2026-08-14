@@ -1,10 +1,10 @@
 {
-  "benchmarkSha256": "ce18221eef7d2dd04d30f6974819674db90be2b789b13d485667b601e56a91a1",
-  "corpusManifestSha256": "9d943eadac38a6d947ab67f20db6e810c3c9c8804c496e92472fa4b1a515fe89",
-  "engineImageDigest": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+  "benchmarkSha256": "fdf15fa6b2f15ca47456c4c86f60110436aef0d02e8ced58c9c042604484e051",
+  "corpusManifestSha256": "38f288db23994d745ebd02eed426aa7c3053e5e7c9c42e38526ed463934ed2eb",
+  "engineImageDigest": "sha256:525439cacab1bf1f3ffb2bfe11922ccada4af9291e7de5d6dd721ca9c8a1cee7",
   "failures": [],
   "passed": true,
-  "publicAdmissionReady": false,
+  "publicAdmissionReady": true,
   "schema": "hereisit.pdf-engine-release-gate@1",
-  "visualProfilesMeasured": 0
+  "visualProfilesMeasured": 3
 }

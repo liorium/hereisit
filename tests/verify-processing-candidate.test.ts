@@ -463,8 +463,8 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
     pdfQuality: {
       benchmarkSha256: pdfReleaseGate.benchmarkSha256,
       releaseGateSha256: sha256Bytes(Buffer.from(canonicalJson(pdfReleaseGate))),
-      visualProfilesMeasured: 0,
-      publicAdmissionReady: false,
+      visualProfilesMeasured: pdfReleaseGate.visualProfilesMeasured,
+      publicAdmissionReady: pdfReleaseGate.publicAdmissionReady,
     },
     web: { staging: stagingIdentity, production: productionIdentity },
     security: { trivyDbDigest: `sha256:${"d".repeat(64)}` },

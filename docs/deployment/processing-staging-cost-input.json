@@ -33,12 +33,12 @@
     "containerInstanceDiskGb": 12
   },
   "pdfBenchmark": {
-    "evidenceSha256": "ce18221eef7d2dd04d30f6974819674db90be2b789b13d485667b601e56a91a1",
-    "engineImageDigest": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
-    "engineImageId": "sha256:5c6ce8a5b14967fdd759977bfa9def9cee014de284c1c130e19e4c757ed2387f",
+    "evidenceSha256": "fdf15fa6b2f15ca47456c4c86f60110436aef0d02e8ced58c9c042604484e051",
+    "engineImageDigest": "sha256:525439cacab1bf1f3ffb2bfe11922ccada4af9291e7de5d6dd721ca9c8a1cee7",
+    "engineImageId": "sha256:525439cacab1bf1f3ffb2bfe11922ccada4af9291e7de5d6dd721ca9c8a1cee7",
     "maximumCandidates": 2,
     "maximumInputBytes": 52428800,
-    "maximumMeasuredPeakRssBytes": 250888192,
+    "maximumMeasuredPeakRssBytes": 714518528,
     "maximumOutputBytes": 52428800,
     "maximumPages": 100,
     "maximumWallMs": 45000
