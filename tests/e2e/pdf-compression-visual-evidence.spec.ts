@@ -1,13 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-// @ts-expect-error Repository release scripts are executable JavaScript without declarations.
-import { validatePdfVisualInputManifest } from "../../scripts/benchmark-pdf-engine.mjs";
-// @ts-expect-error Repository release scripts are executable JavaScript without declarations.
-import * as visualEvidenceModule from "../../scripts/create-pdf-visual-browser-evidence.mjs";
-// @ts-expect-error Repository release scripts are executable JavaScript without declarations.
-import { canonicalJson, sha256Bytes } from "../../scripts/image-lab-common.mjs";
 
 const environment = process.env as Record<string, string | undefined>;
 const inputRoot = environment.HEREISIT_PDF_VISUAL_INPUT;
@@ -15,7 +10,25 @@ const receiptRoot = environment.HEREISIT_PDF_VISUAL_RECEIPTS;
 const gitSha = environment.HEREISIT_PDF_VISUAL_GIT_SHA;
 const sourceSha256 = environment.HEREISIT_PDF_VISUAL_SOURCE_SHA256;
 const checkRunId = environment.HEREISIT_PDF_VISUAL_CHECK_RUN_ID;
-const { createPdfVisualProjectReceipt, PDF_VISUAL_BROWSER_PROJECTS } = visualEvidenceModule;
+
+function scriptUrl(name: string): string {
+  return pathToFileURL(resolve(`scripts/${name}`)).href;
+}
+
+async function loadVisualEvidenceHelpers() {
+  const [benchmark, visualEvidence, common] = await Promise.all([
+    import(scriptUrl("benchmark-pdf-engine.mjs")),
+    import(scriptUrl("create-pdf-visual-browser-evidence.mjs")),
+    import(scriptUrl("image-lab-common.mjs")),
+  ]);
+  return {
+    validatePdfVisualInputManifest: benchmark.validatePdfVisualInputManifest,
+    createPdfVisualProjectReceipt: visualEvidence.createPdfVisualProjectReceipt,
+    PDF_VISUAL_BROWSER_PROJECTS: visualEvidence.PDF_VISUAL_BROWSER_PROJECTS as readonly string[],
+    canonicalJson: common.canonicalJson,
+    sha256Bytes: common.sha256Bytes,
+  };
+}
 
 type VisualInput = {
   engineImageDigest: string;
@@ -143,6 +156,13 @@ test("verifies three native image-optimized repeats in the real browser Worker",
       checkRunId === undefined,
     "exact hosted PDF visual inputs are not configured",
   );
+  const {
+    validatePdfVisualInputManifest,
+    createPdfVisualProjectReceipt,
+    PDF_VISUAL_BROWSER_PROJECTS,
+    canonicalJson,
+    sha256Bytes,
+  } = await loadVisualEvidenceHelpers();
   test.skip(
     !PDF_VISUAL_BROWSER_PROJECTS.includes(testInfo.project.name),
     "PDF visual evidence uses desktop browser engines only",

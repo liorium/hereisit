@@ -5,6 +5,7 @@ const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
 const pdfQualityWorkflow = readFileSync(".github/workflows/pdf-quality-benchmark.yml", "utf8");
 const config = readFileSync("playwright.config.ts", "utf8");
+const pdfVisualSpec = readFileSync("tests/e2e/pdf-compression-visual-evidence.spec.ts", "utf8");
 
 describe("Playwright CI workflow", () => {
   it("runs all browser projects on the hosted runner without Docker", () => {
@@ -117,6 +118,11 @@ describe("Playwright CI workflow", () => {
       "HEREISIT_PDF_VISUAL_CHECK_RUN_ID",
     ])
       expect(workflow).toContain(variable);
+  });
+
+  it("loads ESM release helpers without Playwright transpiling them as CommonJS", () => {
+    expect(pdfVisualSpec).not.toMatch(/^import .*\.\.\/\.\.\/scripts\/.*\.mjs["'];$/mu);
+    expect(pdfVisualSpec).toContain("import(scriptUrl(");
   });
 
   it("forwards project and grep options to Playwright", () => {
