@@ -81,6 +81,8 @@ describe("Playwright CI workflow", () => {
       expect(source).not.toMatch(/upload-artifact[\s\S]{0,500}pdf-visual-private/u);
     }
     expect(workflow).toContain("create-pdf-visual-hosted-reports.mjs");
+    expect(workflow).toContain("--benchmark .artifacts/pdf-visual-benchmark.json");
+    expect(workflow).toContain("--gate .artifacts/pdf-visual-benchmark-gate.json");
     expect(pdfQualityWorkflow).not.toContain("create-pdf-visual-hosted-reports.mjs");
     expect(pdfQualityWorkflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
     expect(pdfQualityWorkflow).not.toContain("fullCorpusBenchmark.json");
@@ -98,6 +100,12 @@ describe("Playwright CI workflow", () => {
     expect(protectedSeal).toBeGreaterThan(sanitizedUpload);
     expect(workflow.slice(sanitizedUpload, protectedSeal)).not.toContain(
       "PROCESSING_HOSTED_REVIEWS_READY",
+    );
+    expect(workflow.slice(protectedSeal)).toContain(
+      "cp .artifacts/pdf-visual-benchmark.json .artifacts/hosted-check/pdf-engine-benchmark.json",
+    );
+    expect(workflow.slice(protectedSeal)).toContain(
+      "cp .artifacts/pdf-visual-benchmark-gate.json .artifacts/hosted-check/pdf-engine-release-gate.json",
     );
     for (const project of ["chromium", "firefox", "webkit"])
       expect(pdfQualityWorkflow).toContain(`--project=${project}`);

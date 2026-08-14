@@ -106,9 +106,9 @@ jobs:
             --expected-archive-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").archiveSha256')" \
             --expected-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").treeSha256')" \
             --output .artifacts/runtime/web-production-scan
-          cp docs/deployment/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json
+          cp .artifacts/hosted-check/pdf-engine-benchmark.json .artifacts/release-source/pdf-engine-benchmark.json
           cp docs/deployment/pdf-engine-benchmark.schema.json .artifacts/release-source/pdf-engine-benchmark.schema.json
-          cp docs/deployment/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json
+          cp .artifacts/hosted-check/pdf-engine-release-gate.json .artifacts/release-source/pdf-engine-release-gate.json
           cp docs/deployment/pdf-engine-release-gate.schema.json .artifacts/release-source/pdf-engine-release-gate.schema.json
           cp docs/deployment/provider-usage-schema.v1.json .artifacts/runtime/provider-usage-schema.v1.json
       - name: Generate and verify both engine and application security evidence
@@ -339,8 +339,8 @@ jobs:
             --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
             --check-run-id "$GITHUB_RUN_ID"
           node scripts/create-pdf-visual-hosted-reports.mjs \
-            --benchmark docs/deployment/pdf-engine-benchmark.json \
-            --gate docs/deployment/pdf-engine-release-gate.json \
+            --benchmark .artifacts/pdf-visual-benchmark.json \
+            --gate .artifacts/pdf-visual-benchmark-gate.json \
             --visual-evidence .artifacts/pdf-browser-visual-evidence.json \
             --output .artifacts/hosted-reports \
             --git-sha "$GITHUB_SHA" \
@@ -370,6 +370,8 @@ jobs:
             --git-sha "$GITHUB_SHA" --source "$RUNNER_TEMP/exact-source.tar" \
             --check-run-id "$GITHUB_RUN_ID" --input .artifacts/hosted-reports \
             --output .artifacts/hosted-check
+          cp .artifacts/pdf-visual-benchmark.json .artifacts/hosted-check/pdf-engine-benchmark.json
+          cp .artifacts/pdf-visual-benchmark-gate.json .artifacts/hosted-check/pdf-engine-release-gate.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'
         with:
