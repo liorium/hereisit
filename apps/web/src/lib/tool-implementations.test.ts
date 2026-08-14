@@ -9,6 +9,7 @@ import {
 } from "./tool-implementations";
 
 const expectedImplementationMapping = {
+  "data.json-format": { intent: "json-format", bundleProfile: "json-quick" },
   "image.compress": { intent: "compress", bundleProfile: "image-compression-server" },
   "image.resize": { intent: "resize", bundleProfile: "image" },
   "image.convert": { intent: "convert", bundleProfile: "image" },
@@ -34,6 +35,7 @@ const exactLiteralImplementationMapping = toolImplementationConfig satisfies {
 void exactLiteralImplementationMapping;
 
 const supportedBundleProfiles = [
+  "json-quick",
   "image",
   "image-compression-server",
   "image-watermark",
@@ -79,13 +81,18 @@ describe("tool implementation ownership", () => {
       "family",
       "intent",
       "notices",
-      "sourceFileLimits",
     ];
+    const fileFields = [...sharedFields, "sourceFileLimits"];
+    const quickFields = [...sharedFields, "maxDepth", "maxOutputBytes", "sourceTextLimitBytes"];
 
     for (const tool of availableToolEntries) {
       const implementation = getToolImplementation(tool.id);
       const expectedFields =
-        implementation.family === "pdf" ? [...sharedFields, "intentClass"] : sharedFields;
+        implementation.family === "data"
+          ? quickFields
+          : implementation.family === "pdf"
+            ? [...fileFields, "intentClass"]
+            : fileFields;
 
       expect(Object.keys(implementation).sort(), tool.id).toEqual(expectedFields.sort());
     }
@@ -94,12 +101,26 @@ describe("tool implementation ownership", () => {
   it("keeps catalog launchers and implementation limits aligned with each execution path", () => {
     for (const tool of availableToolEntries) {
       expect(tool.execution).toBe(tool.id === "image.compress" ? "server" : "browser");
-      expect(tool.launcherInput).not.toBeNull();
+      const implementation = getToolImplementation(tool.id);
+
+      if (tool.id === "data.json-format") {
+        expect(tool.launcherInput).toBeNull();
+        expect(implementation).toMatchObject({
+          family: "data",
+          sourceTextLimitBytes: 1024 * 1024,
+          maxDepth: 100,
+          maxOutputBytes: 4 * 1024 * 1024,
+        });
+        continue;
+      }
 
       const launcherInput = tool.launcherInput;
-      if (launcherInput === null) throw new Error(`Missing launcher input: ${tool.id}`);
+      if (launcherInput === null) throw new Error("Missing launcher input");
 
-      const { sourceFileLimits, bundleProfile } = getToolImplementation(tool.id);
+      if (!("sourceFileLimits" in implementation)) {
+        throw new Error("Missing file limits");
+      }
+      const { sourceFileLimits, bundleProfile } = implementation;
       const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = sourceFileLimits;
 
       expect(launcherInput).toMatchObject({ minFiles, maxFiles });

@@ -19,6 +19,7 @@ import {
 import { useToolPreferences } from "../lib/use-tool-preferences";
 import { CatalogSearch } from "./catalog-search";
 import styles from "./site-header.module.css";
+import { globalNavigationLinks } from "./site-header-navigation";
 
 type GlobalOverlay = "mega" | "search" | "drawer" | null;
 
@@ -244,27 +245,20 @@ export function SiteHeader({ activePath }: { activePath?: string }): ReactNode {
           >
             모든 도구
           </button>
-          <Link
-            aria-current={isCurrentPath(normalizedActivePath, "/workflows") ? "page" : undefined}
-            className={styles.navLink}
-            href="/workflows"
-            onClick={closeOverlay}
-            prefetch={false}
-          >
-            워크플로
-            <span aria-hidden="true" className={styles.comingSoon}>
-              준비 중
-            </span>
-          </Link>
-          <Link
-            aria-current={isCurrentPath(normalizedActivePath, "/my-tools") ? "page" : undefined}
-            className={styles.navLink}
-            href="/my-tools"
-            onClick={closeOverlay}
-            prefetch={false}
-          >
-            내 도구
-          </Link>
+          {globalNavigationLinks.map((destination) => (
+            <Link
+              aria-current={
+                isCurrentPath(normalizedActivePath, destination.href) ? "page" : undefined
+              }
+              className={styles.navLink}
+              href={destination.href}
+              key={destination.href}
+              onClick={closeOverlay}
+              prefetch={false}
+            >
+              {destination.label}
+            </Link>
+          ))}
           <button
             aria-controls="site-header-search"
             aria-expanded={overlay === "search"}
@@ -326,15 +320,6 @@ export function SiteHeader({ activePath }: { activePath?: string }): ReactNode {
                 <p className={styles.emptyRecent}>아직 최근 사용한 도구가 없어요.</p>
               )}
             </section>
-
-            <aside className={styles.workflowTeaser}>
-              <span>준비 중</span>
-              <strong>여러 작업을 한 흐름으로</strong>
-              <p>반복 작업을 연결하는 워크플로를 준비하고 있어요.</p>
-              <Link href="/workflows" onClick={closeOverlay} prefetch={false}>
-                워크플로 보기
-              </Link>
-            </aside>
           </nav>
         ) : null}
 
@@ -401,13 +386,16 @@ export function SiteHeader({ activePath }: { activePath?: string }): ReactNode {
             <Link href="/tools" onClick={closeOverlay} prefetch={false}>
               모든 도구
             </Link>
-            <Link href="/workflows" onClick={closeOverlay} prefetch={false}>
-              워크플로
-              <span aria-hidden="true">준비 중</span>
-            </Link>
-            <Link href="/my-tools" onClick={closeOverlay} prefetch={false}>
-              내 도구
-            </Link>
+            {globalNavigationLinks.map((destination) => (
+              <Link
+                href={destination.href}
+                key={destination.href}
+                onClick={closeOverlay}
+                prefetch={false}
+              >
+                {destination.label}
+              </Link>
+            ))}
           </nav>
 
           <section className={styles.drawerSection}>

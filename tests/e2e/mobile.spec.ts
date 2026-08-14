@@ -224,6 +224,7 @@ test("starts each representative work area inside a 320 by 568 viewport", async 
   for (const [path, regionName] of [
     ["/image/compress", "파일 작업 영역"],
     ["/pdf/organize", "편집 작업 공간"],
+    ["/data/json", "빠른 작업 영역"],
   ] as const) {
     await page.goto(path);
     const box = await page.getByRole("region", { name: regionName }).boundingBox();

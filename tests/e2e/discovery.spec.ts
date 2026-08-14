@@ -36,6 +36,13 @@ async function pressTabUntilFocused(page: Page, target: Locator, maximumTabs = 3
   throw new Error(`Keyboard focus did not reach the requested control within ${maximumTabs} tabs`);
 }
 
+async function revealAlternateFileTools(page: Page): Promise<void> {
+  await page
+    .locator('section[aria-labelledby="file-launcher-title"] summary')
+    .filter({ hasText: /^다른 작업 \d+개 보기$/ })
+    .click();
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem("hereisit.favorite-tools.v1", "[]");
@@ -192,8 +199,8 @@ test("recovers invalid catalog values and resets an empty AND-filtered result", 
   await page.getByRole("button", { name: "모든 필터 초기화" }).click();
   await expect(page).toHaveURL(/\/tools$/);
   await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
-  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(11);
-  await expect(page.getByText("검색 결과 11개", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(12);
+  await expect(page.getByText("검색 결과 12개", { exact: true })).toBeVisible();
 });
 
 test("resets through client navigation without losing memory-only favorites", async ({ page }) => {
@@ -730,6 +737,9 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
   });
   await expect(launcher.locator("img, canvas, [data-thumbnail]")).toHaveCount(0);
 
+  await expect(page.getByText("가장 잘 맞는 도구", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "PDF 합치기 도구 선택" })).not.toBeVisible();
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
   await expect(page.getByText(sentinelFilename, { exact: true })).toBeVisible();
@@ -864,8 +874,8 @@ test("rejects 101 launcher files before reading any bytes", async ({ page }) => 
   );
 
   const launcher = page.locator('section[aria-labelledby="file-launcher-title"]');
-  await expect(launcher.getByRole("status")).toContainText("최대 100개");
-  await expect(launcher.locator("p:not([role])").filter({ hasText: "최대 100개" })).toBeVisible();
+  await expect(launcher.getByRole("alert")).toHaveText(/최대 100개/);
+  await expect(launcher.getByRole("status")).toHaveCount(0);
   expect(
     await page.evaluate(
       () => (window as Window & { __hereisitLauncherReads?: number }).__hereisitLauncherReads,
@@ -888,6 +898,7 @@ test("keeps ready and needs-more recommendations actionable while disabling too-
   });
 
   await input.setInputFiles(pdfFixture("one.pdf"));
+  await revealAlternateFileTools(page);
   const merge = page.getByRole("button", { name: "PDF 합치기 도구 선택" });
   const split = page.getByRole("button", { name: "PDF 페이지 분할 도구 선택" });
   await expect(merge).toBeEnabled();
@@ -896,6 +907,7 @@ test("keeps ready and needs-more recommendations actionable while disabling too-
   await expect(page).toHaveURL(/\/$/);
 
   await input.setInputFiles([pdfFixture("first.pdf"), pdfFixture("second.pdf")]);
+  await revealAlternateFileTools(page);
   await expect(merge).toBeEnabled();
   await expect(split).toBeDisabled();
   await expect(split.locator("..")).toContainText("최대 1개");
@@ -912,6 +924,7 @@ test("hands a chosen file to the canonical destination without auto-processing",
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByText(/handoff\.png · 68B/)).toBeVisible();
@@ -930,6 +943,7 @@ test("revalidates detected bytes instead of filename hints at the destination bo
   });
 
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByText(/revalidate-at-destination\.bin · 68B/)).toBeVisible();
@@ -944,6 +958,7 @@ test("consumes a handoff only once during client navigation", async ({ page }) =
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page.getByText(/one-use-handoff\.png · 68B/)).toBeVisible();
   await page.getByRole("link", { name: "HereIsIt 홈" }).click();
@@ -964,6 +979,7 @@ test("shows the ordinary selector after a handed-off destination reload", async 
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page.getByText(/reload-clears-handoff\.png · 68B/)).toBeVisible();
   await page.reload();
@@ -987,6 +1003,7 @@ test("inspects a pending image handoff without OffscreenCanvas", async ({ page }
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
@@ -1016,11 +1033,12 @@ test("does not leave a consumed image handoff for a different tool", async ({ pa
     buffer: onePixelPng,
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
   await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
-  await page.getByRole("link", { name: "워크플로", exact: true }).click();
-  await expect(page).toHaveURL(/\/workflows\/?$/);
+  await page.getByRole("link", { name: "내 도구", exact: true }).click();
+  await expect(page).toHaveURL(/\/my-tools\/?$/);
   await page.evaluate(() => {
     (
       window as Window & { __hereisitEnableImageRuntime?: () => void }
@@ -1045,6 +1063,7 @@ test("hands a needs-more recommendation through destination validation", async (
     buffer: Buffer.from("%PDF-1.7\n%%EOF"),
   });
 
+  await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
   await expect(page.getByText("needs-another.pdf", { exact: true })).toBeVisible();
@@ -1057,8 +1076,7 @@ test("exposes the desktop destinations and a bounded navigation disclosure", asy
   await expect(page.getByRole("link", { name: "HereIsIt 홈" })).toBeVisible();
   const allTools = page.getByRole("button", { name: "모든 도구", exact: true });
   await expect(allTools).toBeVisible();
-  await expect(page.getByRole("link", { name: "워크플로", exact: true })).toBeVisible();
-  await expect(page.getByText("준비 중", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "워크플로", exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "내 도구", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "검색", exact: true })).toBeVisible();
   await expect(allTools).toHaveAttribute("aria-expanded", "false");
@@ -1080,10 +1098,7 @@ test("exposes the desktop destinations and a bounded navigation disclosure", asy
     "href",
     "/tools",
   );
-  await expect(mega.getByRole("link", { name: "워크플로 보기", exact: true })).toHaveAttribute(
-    "href",
-    "/workflows",
-  );
+  await expect(mega.getByRole("link", { name: "워크플로 보기", exact: true })).toHaveCount(0);
 
   const featuredLinks = mega.locator('[data-tool-section="featured"] [data-tool-link]');
   const recentLinks = mega.locator('[data-tool-section="recent"] [data-tool-link]');

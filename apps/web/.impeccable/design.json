@@ -1,0 +1,307 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-13T12:01:39Z",
+  "title": "Design System: HereIsIt",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "종이",
+        "canonical": "#f7f7f2",
+        "tonalRamp": [
+          "oklch(15% 0.007 106.5)",
+          "oklch(27% 0.007 106.5)",
+          "oklch(39% 0.007 106.5)",
+          "oklch(51% 0.007 106.5)",
+          "oklch(63% 0.007 106.5)",
+          "oklch(75% 0.007 106.5)",
+          "oklch(87% 0.007 106.5)",
+          "oklch(95% 0.007 106.5)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "먹색",
+        "canonical": "#17191f",
+        "tonalRamp": [
+          "oklch(15% 0.012 270.8)",
+          "oklch(27% 0.012 270.8)",
+          "oklch(39% 0.012 270.8)",
+          "oklch(51% 0.012 270.8)",
+          "oklch(63% 0.012 270.8)",
+          "oklch(75% 0.012 270.8)",
+          "oklch(87% 0.012 270.8)",
+          "oklch(95% 0.012 270.8)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "절제된 회색",
+        "canonical": "#6b6f7a",
+        "tonalRamp": [
+          "oklch(15% 0.018 269.8)",
+          "oklch(27% 0.018 269.8)",
+          "oklch(39% 0.018 269.8)",
+          "oklch(51% 0.018 269.8)",
+          "oklch(63% 0.018 269.8)",
+          "oklch(75% 0.018 269.8)",
+          "oklch(87% 0.018 269.8)",
+          "oklch(95% 0.018 269.8)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "구분선",
+        "canonical": "#dadde3",
+        "tonalRamp": [
+          "oklch(15% 0.009 264.5)",
+          "oklch(27% 0.009 264.5)",
+          "oklch(39% 0.009 264.5)",
+          "oklch(51% 0.009 264.5)",
+          "oklch(63% 0.009 264.5)",
+          "oklch(75% 0.009 264.5)",
+          "oklch(87% 0.009 264.5)",
+          "oklch(95% 0.009 264.5)"
+        ]
+      },
+      "action-blue": {
+        "role": "primary",
+        "displayName": "액션 블루",
+        "canonical": "#3d5afe",
+        "tonalRamp": [
+          "oklch(15% 0.243 268.8)",
+          "oklch(27% 0.243 268.8)",
+          "oklch(39% 0.243 268.8)",
+          "oklch(51% 0.243 268.8)",
+          "oklch(63% 0.243 268.8)",
+          "oklch(75% 0.243 268.8)",
+          "oklch(87% 0.243 268.8)",
+          "oklch(95% 0.243 268.8)"
+        ]
+      },
+      "action-blue-dark": {
+        "role": "primary",
+        "displayName": "깊은 액션 블루",
+        "canonical": "#263dcc",
+        "tonalRamp": [
+          "oklch(15% 0.219 268.0)",
+          "oklch(27% 0.219 268.0)",
+          "oklch(39% 0.219 268.0)",
+          "oklch(51% 0.219 268.0)",
+          "oklch(63% 0.219 268.0)",
+          "oklch(75% 0.219 268.0)",
+          "oklch(87% 0.219 268.0)",
+          "oklch(95% 0.219 268.0)"
+        ]
+      },
+      "highlighter-yellow": {
+        "role": "secondary",
+        "displayName": "형광 노랑",
+        "canonical": "#ffd84d",
+        "tonalRamp": [
+          "oklch(15% 0.157 93.0)",
+          "oklch(27% 0.157 93.0)",
+          "oklch(39% 0.157 93.0)",
+          "oklch(51% 0.157 93.0)",
+          "oklch(63% 0.157 93.0)",
+          "oklch(75% 0.157 93.0)",
+          "oklch(87% 0.157 93.0)",
+          "oklch(95% 0.157 93.0)"
+        ]
+      },
+      "safe-green": {
+        "role": "tertiary",
+        "displayName": "안전 그린",
+        "canonical": "#16845b",
+        "tonalRamp": [
+          "oklch(15% 0.114 161.8)",
+          "oklch(27% 0.114 161.8)",
+          "oklch(39% 0.114 161.8)",
+          "oklch(51% 0.114 161.8)",
+          "oklch(63% 0.114 161.8)",
+          "oklch(75% 0.114 161.8)",
+          "oklch(87% 0.114 161.8)",
+          "oklch(95% 0.114 161.8)"
+        ]
+      },
+      "warning-red": {
+        "role": "tertiary",
+        "displayName": "경고 레드",
+        "canonical": "#c83b3b",
+        "tonalRamp": [
+          "oklch(15% 0.178 25.0)",
+          "oklch(27% 0.178 25.0)",
+          "oklch(39% 0.178 25.0)",
+          "oklch(51% 0.178 25.0)",
+          "oklch(63% 0.178 25.0)",
+          "oklch(75% 0.178 25.0)",
+          "oklch(87% 0.178 25.0)",
+          "oklch(95% 0.178 25.0)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "패널 화이트",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(39% 0 0)",
+          "oklch(51% 0 0)",
+          "oklch(63% 0 0)",
+          "oklch(75% 0 0)",
+          "oklch(87% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "디스플레이",
+        "purpose": "홈 히어로와 페이지의 가장 큰 약속 하나."
+      },
+      "headline": { "displayName": "헤드라인", "purpose": "섹션과 주요 작업 단계의 시작." },
+      "title": { "displayName": "타이틀", "purpose": "도구 카드와 결과 그룹 제목." },
+      "body": { "displayName": "본문", "purpose": "설명, 처리 조건과 안내." },
+      "label": { "displayName": "라벨", "purpose": "버튼, 탐색, 상태와 짧은 눈썹 문구." }
+    },
+    "shadows": [
+      {
+        "name": "tool-card-hover",
+        "value": "5px 5px 0 var(--yellow)",
+        "purpose": "일반 도구 카드의 포인터 호버 반응."
+      },
+      {
+        "name": "home-card-hover",
+        "value": "7px 7px 0 var(--yellow)",
+        "purpose": "홈의 큰 도구 카드 호버 반응."
+      },
+      {
+        "name": "floating-panel",
+        "value": "0 18px 48px rgba(23, 25, 31, 0.16)",
+        "purpose": "검색 결과와 떠 있는 메뉴."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "160ms ease",
+        "purpose": "호버, 테두리, 색상과 짧은 이동 상태. reduced-motion에서는 제거한다."
+      }
+    ],
+    "breakpoints": [
+      { "name": "narrow-card", "value": "420px" },
+      { "name": "compact", "value": "600px" },
+      { "name": "mobile", "value": "800px" },
+      { "name": "catalog", "value": "1040px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "파일 선택이나 처리 실행처럼 화면의 주요 행동 하나에 사용한다.",
+      "html": "<button class=\"ds-btn-primary\">파일 선택</button>",
+      "css": ".ds-btn-primary { min-height: 48px; padding: 0 18px; border: 1px solid var(--ink, #17191f); border-radius: 10px; background: var(--ink, #17191f); color: var(--paper, #f7f7f2); cursor: pointer; font: 800 13px/1.4 Pretendard, sans-serif; transition: background 160ms ease, border-color 160ms ease; } .ds-btn-primary:hover { border-color: var(--blue-dark, #263dcc); background: var(--blue-dark, #263dcc); } .ds-btn-primary:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 50%, transparent); outline-offset: 3px; } .ds-btn-primary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "초기화, 다시 선택과 같은 보조 행동에 사용한다.",
+      "html": "<button class=\"ds-btn-secondary\">다시 선택</button>",
+      "css": ".ds-btn-secondary { min-height: 44px; padding: 0 14px; border: 1px solid var(--line, #dadde3); border-radius: 10px; background: var(--panel, #fff); color: var(--ink, #17191f); cursor: pointer; font: 800 13px/1.4 Pretendard, sans-serif; transition: border-color 160ms ease, background 160ms ease; } .ds-btn-secondary:hover { border-color: var(--ink, #17191f); background: color-mix(in srgb, var(--panel, #fff) 82%, var(--paper, #f7f7f2)); } .ds-btn-secondary:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 50%, transparent); outline-offset: 3px; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "도구 이름과 작업 목적을 찾는 기본 검색 입력이다.",
+      "html": "<label class=\"ds-search\"><span>도구 검색</span><input type=\"search\" placeholder=\"무엇을 하고 싶나요?\"></label>",
+      "css": ".ds-search { display: grid; gap: 8px; color: var(--ink, #17191f); font: 800 13px/1.4 Pretendard, sans-serif; } .ds-search input { min-height: 46px; padding: 0 14px; border: 1px solid var(--line, #dadde3); border-radius: 10px; background: var(--panel, #fff); color: var(--ink, #17191f); font: 400 16px/1.7 Pretendard, sans-serif; } .ds-search input::placeholder { color: color-mix(in srgb, var(--muted, #6b6f7a) 82%, transparent); } .ds-search input:hover { border-color: color-mix(in srgb, var(--blue, #3d5afe) 45%, var(--line, #dadde3)); } .ds-search input:focus-visible { border-color: var(--blue, #3d5afe); outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 24%, transparent); outline-offset: 1px; }"
+    },
+    {
+      "name": "Tool Card",
+      "kind": "card",
+      "refersTo": "card-tool",
+      "description": "도구 이름, 설명과 실행 위치를 한 번에 보여주는 탐색 카드다.",
+      "html": "<a class=\"ds-tool-card\" href=\"#\"><strong>이미지 압축</strong><span>화질을 지키며 파일 크기를 줄여요.</span><em>기기에서 처리</em></a>",
+      "css": ".ds-tool-card { min-height: 190px; padding: 24px; display: flex; flex-direction: column; border: 1px solid var(--line, #dadde3); border-radius: 16px; background: var(--panel, #fff); color: var(--ink, #17191f); text-decoration: none; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; } .ds-tool-card strong { font: 850 23px/1.25 Pretendard, sans-serif; letter-spacing: -0.035em; } .ds-tool-card span { margin-top: 10px; color: var(--muted, #6b6f7a); font: 400 14px/1.65 Pretendard, sans-serif; } .ds-tool-card em { margin-top: auto; padding-top: 22px; color: var(--green, #16845b); font: normal 800 12px/1.5 Pretendard, sans-serif; } .ds-tool-card:hover { border-color: var(--ink, #17191f); box-shadow: 5px 5px 0 var(--yellow, #ffd84d); transform: translate(-2px, -2px); } .ds-tool-card:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 58%, transparent); outline-offset: -3px; }"
+    },
+    {
+      "name": "Privacy Chip",
+      "kind": "chip",
+      "refersTo": "chip-privacy",
+      "description": "로컬 처리와 개인정보 보호 상태를 짧게 확인시킨다.",
+      "html": "<span class=\"ds-privacy-chip\"><i aria-hidden=\"true\"></i>기기에서 처리</span>",
+      "css": ".ds-privacy-chip { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line, #dadde3); border-radius: 999px; background: rgba(255, 255, 255, 0.55); color: var(--ink, #17191f); font: 700 13px/1.4 Pretendard, sans-serif; } .ds-privacy-chip i { width: 8px; height: 8px; border-radius: 999px; background: var(--green, #16845b); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green, #16845b) 13%, transparent); }"
+    },
+    {
+      "name": "Navigation Link",
+      "kind": "nav",
+      "description": "작고 굵은 라벨로 현재 위치와 탐색 상태를 보여준다.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"주요 탐색\"><a href=\"#\">도구</a><a href=\"#\" aria-current=\"page\">이미지</a></nav>",
+      "css": ".ds-nav { display: flex; gap: 4px; } .ds-nav a { min-height: 42px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 9px; background: transparent; color: var(--muted, #6b6f7a); text-decoration: none; font: 780 13px/1.4 Pretendard, sans-serif; } .ds-nav a:hover, .ds-nav a[aria-current=\"page\"] { background: var(--panel, #fff); color: var(--ink, #17191f); } .ds-nav a:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 50%, transparent); outline-offset: 3px; }"
+    },
+    {
+      "name": "File Dropzone",
+      "kind": "custom",
+      "description": "파일이 기기를 떠나는지 설명하면서 선택과 드래그를 받는 서명 컴포넌트다.",
+      "html": "<div class=\"ds-dropzone\"><strong>파일을 여기에 놓으세요</strong><span>파일은 업로드되지 않아요.</span><button type=\"button\">파일 선택</button></div>",
+      "css": ".ds-dropzone { min-height: 220px; padding: 34px 24px; display: grid; place-items: center; align-content: center; gap: 10px; border: 2px dashed color-mix(in srgb, var(--blue, #3d5afe) 50%, var(--line, #dadde3)); border-radius: 20px; background: color-mix(in srgb, var(--panel, #fff) 80%, var(--paper, #f7f7f2)); color: var(--ink, #17191f); text-align: center; } .ds-dropzone strong { font: 850 22px/1.3 Pretendard, sans-serif; letter-spacing: -0.035em; } .ds-dropzone span { color: var(--muted, #6b6f7a); font: 400 13px/1.5 Pretendard, sans-serif; } .ds-dropzone button { min-height: 48px; margin-top: 8px; padding: 0 18px; border: 1px solid var(--ink, #17191f); border-radius: 12px; background: var(--ink, #17191f); color: var(--paper, #f7f7f2); cursor: pointer; font: 850 13px/1.4 Pretendard, sans-serif; } .ds-dropzone:hover { border-style: solid; border-color: var(--blue, #3d5afe); background: color-mix(in srgb, var(--blue, #3d5afe) 8%, var(--panel, #fff)); } .ds-dropzone button:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue, #3d5afe) 50%, transparent); outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "친절한 편집 작업대",
+    "overview": "HereIsIt은 종이 위에 필요한 도구만 정갈하게 펼쳐 놓은 편집 작업대처럼 보여야 한다. 따뜻한 종이색 바탕과 먹색 글자, 굵은 편집형 제목이 사용자를 바로 작업으로 이끌고, 액션 블루와 형광 노랑이 선택과 반응을 짧고 분명하게 표시한다.\n\n분위기는 차분하고 유능하며 정직하다. 화면은 장식보다 도구의 목적, 처리 위치, 현재 상태와 다음 행동을 우선한다. 흔한 SaaS 대시보드, 글래스모피즘과 과한 그라데이션은 사용하지 않는다.",
+    "keyCharacteristics": [
+      "따뜻한 종이 바탕과 선명한 먹색 대비",
+      "크고 압축적인 한국어 제목과 읽기 편한 본문",
+      "평면을 기본으로 하고 상호작용에서만 드러나는 노란 오프셋 그림자",
+      "한 화면의 주요 행동 하나와 최소 44px 터치 영역",
+      "로컬 처리, 서버 전송과 상태를 숨기지 않는 시각 언어"
+    ],
+    "rules": [
+      {
+        "name": "The Highlighter Rule",
+        "body": "형광 노랑은 정보 배경이 아니라 한 번의 선택이나 움직임을 강조할 때만 사용한다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Honest State Rule",
+        "body": "그린과 레드는 실제 성공·실패 상태에만 사용하며 장식용으로 소비하지 않는다.",
+        "section": "colors"
+      },
+      {
+        "name": "The Korean First Rule",
+        "body": "한국어는 억지로 쪼개지 않으며 `word-break: keep-all`과 균형 잡힌 줄바꿈을 우선한다.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Promise Rule",
+        "body": "한 화면에서 가장 큰 제목은 사용자가 지금 끝낼 수 있는 작업 하나만 약속한다.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat by Default Rule",
+        "body": "정지 상태의 카드에는 그림자를 두지 않고, 그림자는 상호작용 또는 실제 레이어 관계를 설명할 때만 나타낸다.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 한 화면에서 사용자가 선택할 주요 행동을 하나만 가장 강하게 표시한다.",
+      "Do 종이 배경, 패널, 테두리와 상태색으로 위계를 설명하고 장식보다 상태를 우선한다.",
+      "Do 최소 44px 터치 영역, 3px 키보드 포커스와 축소 동작 설정을 유지한다.",
+      "Do 모바일에서 내용을 세로로 쌓고 한국어 문장을 자연스럽게 줄바꿈한다.",
+      "Do 로컬 처리와 서버 전송 여부를 행동 전에 가까운 문구로 명시한다."
+    ],
+    "donts": [
+      "Don't 흔한 SaaS 대시보드, 글래스모피즘 또는 과한 그라데이션을 도입한다.",
+      "Don't 모든 카드에 그림자나 형광 노랑을 사용해 강조의 위계를 없앤다.",
+      "Don't 한 화면에 동등하게 강한 주요 버튼을 여러 개 배치한다.",
+      "Don't 개인정보 보호, 진행 상태 또는 오류를 아이콘과 색상만으로 설명한다.",
+      "Don't 미래의 로그인·유료 기능을 현재 사용할 수 있는 기능처럼 시각적으로 약속한다."
+    ]
+  }
+}

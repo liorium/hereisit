@@ -14,7 +14,10 @@ function detectedFile(
 
 function recommendationIds(items: readonly FileDetectionItem[]): readonly string[] {
   const plan = planFileRecommendations(items);
-  return plan.groups.flatMap((group) => group.recommendations.map(({ tool }) => tool.id));
+  return plan.groups.flatMap((group) => [
+    group.primaryRecommendation.tool.id,
+    ...group.alternateRecommendations.map(({ tool }) => tool.id),
+  ]);
 }
 
 describe("planFileRecommendations", () => {
@@ -31,9 +34,18 @@ describe("planFileRecommendations", () => {
         {
           kind: "mixed",
           items: [jpeg, png],
+          primaryRecommendation: {
+            tool: { id: "pdf.image-to-pdf" },
+          },
         },
       ],
     });
+    expect(plan.groups[0]?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
+      "image.compress",
+      "image.resize",
+      "image.convert",
+      "image.watermark",
+    ]);
     expect(recommendationIds([jpeg, png])).toEqual([
       "pdf.image-to-pdf",
       "image.compress",
@@ -57,8 +69,8 @@ describe("planFileRecommendations", () => {
         { kind: "application/pdf", items: [pdf] },
       ],
     });
-    expect(plan.groups[0]?.recommendations.length).toBeGreaterThan(0);
-    expect(plan.groups[1]?.recommendations.length).toBeGreaterThan(0);
+    expect(plan.groups[0]?.primaryRecommendation).toBeDefined();
+    expect(plan.groups[1]?.primaryRecommendation).toBeDefined();
   });
 
   it("keeps a JPEG plus an unknown file grouped instead of calling the selection complete", () => {
@@ -90,13 +102,30 @@ describe("planFileRecommendations", () => {
 
     expect(plan.state).toBe("complete");
     expect(
-      plan.groups[0]?.recommendations.find(({ tool }) => tool.id === "pdf.merge"),
+      [
+        plan.groups[0]?.primaryRecommendation,
+        ...(plan.groups[0]?.alternateRecommendations ?? []),
+      ].find((recommendation) => recommendation?.tool.id === "pdf.merge"),
     ).toMatchObject({
       readiness: "needs-more",
       missingFiles: 1,
       maximumFiles: 20,
       matchedIndexes: [0],
     });
+  });
+
+  it("keeps one primary recommendation and puts every other match behind disclosure", () => {
+    const plan = planFileRecommendations([detectedFile("document.pdf", "application/pdf")]);
+    const group = plan.groups[0];
+
+    expect(group?.primaryRecommendation.tool.id).toBe("pdf.compress-scanned");
+    expect(group?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
+      "pdf.split",
+      "pdf.organize",
+      "pdf.to-image",
+      "pdf.watermark",
+      "pdf.merge",
+    ]);
   });
 
   it("reports PDF merge as too-many for 21 PDFs", () => {
@@ -107,7 +136,10 @@ describe("planFileRecommendations", () => {
 
     expect(plan.state).toBe("complete");
     expect(
-      plan.groups[0]?.recommendations.find(({ tool }) => tool.id === "pdf.merge"),
+      [
+        plan.groups[0]?.primaryRecommendation,
+        ...(plan.groups[0]?.alternateRecommendations ?? []),
+      ].find((recommendation) => recommendation?.tool.id === "pdf.merge"),
     ).toMatchObject({
       readiness: "too-many",
       missingFiles: 0,

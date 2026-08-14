@@ -18,6 +18,8 @@
       "!!**/out",
       "!!**/.wrangler",
       "!!**/.artifacts",
+      "!!**/.impeccable/config.local.json",
+      "!!**/.impeccable/hook.cache.json",
       "!!**/.worktrees",
       "!!**/.superpowers"
     ]

@@ -84,17 +84,23 @@ describe("catalog search and filters", () => {
   });
 
   it("searches domain labels and IDs, then ranks matches", () => {
-    const expected = ["image.convert", "pdf.to-image", "pdf.image-to-pdf"];
+    const expected = ["data.json-format", "image.convert", "pdf.to-image", "pdf.image-to-pdf"];
     expect(availableIds("data")).toEqual(expected);
     expect(availableIds("데이터")).toEqual(expected);
   });
 
   it("suppresses duplicate matches and returns a newly frozen ranked array", () => {
-    expect(availableIds("변환")).toEqual(["image.convert", "pdf.to-image", "pdf.image-to-pdf"]);
+    expect(availableIds("변환")).toEqual([
+      "image.convert",
+      "pdf.to-image",
+      "pdf.image-to-pdf",
+      "data.json-format",
+    ]);
 
     const first = searchAvailableTools("");
     const second = searchAvailableTools("");
     expect(first.map((tool) => tool.id)).toEqual([
+      "data.json-format",
       "image.compress",
       "pdf.merge",
       "image.resize",

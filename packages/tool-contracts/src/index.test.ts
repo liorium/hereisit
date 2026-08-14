@@ -5,6 +5,8 @@ import {
   IMAGE_WATERMARK_TOOL_VERSION,
   imagePipelineSpecSchema,
   imageWatermarkSpecSchema,
+  JSON_FORMAT_TOOL_ID,
+  JSON_FORMAT_TOOL_VERSION,
   PDF_COMPRESS_SCANNED_TOOL_ID,
   PDF_COMPRESS_SCANNED_TOOL_VERSION,
   PDF_TO_IMAGES_TOOL_ID,
@@ -13,6 +15,13 @@ import {
   pdfPipelineSpecSchema,
   pdfToImagesSpecSchema,
 } from "./index";
+
+describe("JSON format contract", () => {
+  it("publishes the stable local tool identity", () => {
+    expect(JSON_FORMAT_TOOL_ID).toBe("json.format");
+    expect(JSON_FORMAT_TOOL_VERSION).toBe(1);
+  });
+});
 
 const basePdfToImagesSpec = {
   version: 1 as const,

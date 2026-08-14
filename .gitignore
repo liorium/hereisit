@@ -17,6 +17,7 @@ test-results/
 tests/image-corpus/private/
 tests/image-corpus/competitor-output/
 .artifacts/
+.codex/
 
 .env
 .env.*

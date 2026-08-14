@@ -72,15 +72,6 @@
   color: var(--ink);
 }
 
-.comingSoon {
-  padding: 3px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 800;
-}
-
 .searchTrigger > span {
   font-size: 20px;
   line-height: 1;
@@ -100,10 +91,7 @@
   right: 0;
   left: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 1.45fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr) minmax(
-      180px,
-      0.7fr
-    );
+  grid-template-columns: minmax(320px, 1.45fr) minmax(190px, 0.8fr) minmax(190px, 0.8fr);
   gap: 24px;
   padding: 24px;
 }
@@ -209,44 +197,6 @@
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
-}
-
-.workflowTeaser {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--ink);
-  color: var(--paper);
-}
-
-.workflowTeaser > span {
-  padding: 3px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.workflowTeaser strong {
-  margin-top: 18px;
-  font-size: 14px;
-}
-
-.workflowTeaser p {
-  margin: 7px 0 18px;
-  color: rgba(255, 255, 255, 0.68);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
-.workflowTeaser a {
-  margin-top: auto;
-  color: var(--paper);
-  font-size: 11px;
-  font-weight: 800;
 }
 
 .searchPanel {
@@ -401,10 +351,6 @@
 @media (max-width: 980px) {
   .mega {
     grid-template-columns: minmax(300px, 1.35fr) 1fr 1fr;
-  }
-
-  .workflowTeaser {
-    display: none;
   }
 }
 

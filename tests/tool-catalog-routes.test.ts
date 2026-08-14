@@ -14,6 +14,12 @@ it("backs every available route with a static page", async () => {
   }
 });
 
+it("backs the approved JSON quick route with a static page", async () => {
+  await expect(
+    access(path.join(process.cwd(), "apps/web/src/app/data/json/page.tsx")),
+  ).resolves.toBeUndefined();
+});
+
 it("does not reserve a route for roadmap cards", async () => {
   expect(plannedToolEntries.every((tool) => !("route" in tool))).toBe(true);
   await expect(

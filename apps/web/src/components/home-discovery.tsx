@@ -20,7 +20,7 @@ export function HomeDiscovery(): ReactNode {
           <h1 id="home-title">
             파일 작업, <span className={styles.closingPhrase}>여기서 끝.</span>
           </h1>
-          <p>파일은 기기 밖으로 나가지 않아요. 파일로 시작하거나 필요한 도구를 검색하세요.</p>
+          <p>대부분 기기에서 처리해요. 서버 작업은 먼저 알리고 선택을 받아요.</p>
         </div>
         <div className={styles.search}>
           <CatalogSearch idPrefix="home-hero" variant="hero" />

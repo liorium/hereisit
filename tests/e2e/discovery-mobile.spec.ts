@@ -479,10 +479,7 @@ test("closes the drawer control and restores its single mobile trigger", async (
     "href",
     "/tools",
   );
-  await expect(drawer.getByRole("link", { name: "워크플로", exact: true })).toHaveAttribute(
-    "href",
-    "/workflows",
-  );
+  await expect(drawer.getByRole("link", { name: "워크플로", exact: true })).toHaveCount(0);
   await expect(drawer.getByRole("link", { name: "내 도구", exact: true })).toHaveAttribute(
     "href",
     "/my-tools",

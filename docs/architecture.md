@@ -33,10 +33,11 @@ The discovery routes `/`, `/tools`, `/my-tools`, and `/workflows` may import cat
 processor, codec, Worker, browser runtime, image tool, PDF tool, or tool-contract implementation. The
 export verifier enforces that processor-free import boundary. Each processor route directly imports only
 its assigned workbench and passes that route-owned node to the shared detail shell; there is no central
-workbench switch or dynamic processor registry. The shell selects `파일 작업 영역` for `file` tools and
-`편집 작업 공간` for `workspace` tools, renders the browser-execution disclosure, and reads its exactly
-three next actions from the catalog. The current inventory is ten `file` tools and one `workspace` tool
-(`/pdf/organize`); there is no placeholder `quick` route or generic quick shell.
+workbench switch or dynamic processor registry. The shell selects `빠른 작업 영역` for `quick` tools,
+`파일 작업 영역` for `file` tools, and `편집 작업 공간` for `workspace` tools, renders the
+browser-execution disclosure, and reads its exactly three next actions from the catalog. The current
+inventory is ten `file` tools, one `workspace` tool (`/pdf/organize`), and one `quick` tool
+(`/data/json`). There is no generic quick-workbench registry.
 
 Home file recommendation reads at most the first 64 KiB of each selected file, accepts at most 100 files,
 and schedules at most two prefix reads concurrently. Every prefix lease is released after detection. A
@@ -55,6 +56,14 @@ Discovery JavaScript is checked after every production export. Each discovery ro
 76,800 gzip bytes and the discovery-shared layer at most 122,880 gzip bytes. Relative to the checked-in
 baseline, each route and the shared layer may grow by only the smaller of 10% or 10 KiB. These size gates
 run alongside the processor-marker and route-import isolation checks.
+
+`json.format@1` is the first non-file quick contract. It accepts pasted UTF-8 JSON up to 1MiB and 100
+nesting levels and emits at most 4MiB. Native `JSON.parse()` validates syntax only; its parsed value is
+discarded. Separate bounded linear scans change JSON whitespace and structural spacing while copying
+string, number, literal, escape and duplicate-key tokens exactly, so large integers and lexical number
+forms are not rounded or normalized. The input and result remain in component memory, and clipboard or
+download output occurs only after the corresponding explicit button. It has no file input, Worker,
+network request, storage, JSON5 recovery, schema validation or key sorting.
 
 The initial `image.pipeline@1` tool guarantees one decode and one raster draw per item. Quality-based
 output performs one encode; target-byte mode may encode repeatedly against the already-rendered canvas.
@@ -244,7 +253,7 @@ node scripts/smoke-pdf-to-images.mjs http://127.0.0.1:3000
 ~~~
 
 Without a base URL, all four scripts target the production Pages origin. The navigation smoke verifies
-the six release routes, canonical security headers, approved header/search behavior, home tabs and local
+the seven release routes, canonical security headers, approved header/search behavior, home tabs and local
 launcher, the complete and planned catalog states, non-indexed personal/workflow pages, representative
 file/workspace shells, exact next actions, and read-only same-origin browser traffic.
 The image-watermark smoke also proves the security headers, approved defaults, synthetic 320×180 PNG

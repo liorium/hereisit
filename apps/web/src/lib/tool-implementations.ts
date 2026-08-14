@@ -1,6 +1,8 @@
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
+import { JSON_FORMAT_LIMITS } from "./json-format.ts";
 
 export type ToolBundleProfile =
+  | "json-quick"
   | "image"
   | "image-compression-server"
   | "image-watermark"
@@ -38,16 +40,31 @@ export function isPdfEditingIntent(intent: PdfToolIntent): intent is PdfEditingI
   return intent !== "compress" && intent !== "to-image";
 }
 
-export interface ToolImplementationConfig {
-  family: "image" | "pdf";
+interface ToolImplementationBase {
   bundleProfile: ToolBundleProfile;
   intent: string;
-  intentClass?: PdfToolIntentClass;
-  sourceFileLimits: SourceFileLimits;
   eyebrow: string;
   defaultSummary: string;
   notices: readonly ToolNotice[];
 }
+
+export type ToolImplementationConfig =
+  | (ToolImplementationBase & {
+      family: "image";
+      sourceFileLimits: SourceFileLimits;
+    })
+  | (ToolImplementationBase & {
+      family: "pdf";
+      intentClass: PdfToolIntentClass;
+      sourceFileLimits: SourceFileLimits;
+    })
+  | (ToolImplementationBase & {
+      family: "data";
+      bundleProfile: "json-quick";
+      sourceTextLimitBytes: number;
+      maxOutputBytes: number;
+      maxDepth: number;
+    });
 
 export type ToolImplementationConfigMap = Readonly<
   Record<AvailableToolId, ToolImplementationConfig>
@@ -91,6 +108,17 @@ function defineToolImplementationConfig<
 }
 
 export const toolImplementationConfig = defineToolImplementationConfig({
+  "data.json-format": {
+    family: "data",
+    bundleProfile: "json-quick",
+    intent: "json-format",
+    sourceTextLimitBytes: JSON_FORMAT_LIMITS.maxInputBytes,
+    maxOutputBytes: JSON_FORMAT_LIMITS.maxOutputBytes,
+    maxDepth: JSON_FORMAT_LIMITS.maxDepth,
+    eyebrow: "JSON FORMATTER",
+    defaultSummary: "JSON 값을 바꾸지 않고 문법을 확인한 뒤 읽기 좋게 정리하거나 공백만 줄여요.",
+    notices: [],
+  },
   "image.compress": {
     family: "image",
     bundleProfile: "image-compression-server",

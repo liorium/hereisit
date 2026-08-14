@@ -67,6 +67,13 @@ const pdfCompressionTool = {
   description: "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
 } as const;
 
+const jsonFormatTool = {
+  path: "/data/json",
+  title: "JSON 정리·검사",
+  description:
+    "JSON 문법을 검사하고 읽기 좋게 정리하거나 공백을 줄이세요. 내용은 브라우저 밖으로 나가지 않습니다.",
+} as const;
+
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -231,6 +238,88 @@ test("publishes the PDF to image tool", async ({ page }) => {
   );
 });
 
+test("formats JSON locally without changing value tokens", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          (window as Window & { __hereisitCopiedJson?: string }).__hereisitCopiedJson = value;
+        },
+      },
+    });
+  });
+
+  await page.goto("/tools");
+  await expect(await revealCatalogTool(page, jsonFormatTool.path)).toBeVisible();
+  const response = await page.goto(jsonFormatTool.path);
+  expect(response?.ok()).toBe(true);
+  await expect(page).toHaveTitle(`${jsonFormatTool.title} | HereIsIt`);
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    jsonFormatTool.description,
+  );
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://hereisit.app/data/json",
+  );
+
+  const violations: string[] = [];
+  const sentinel = "PRIVATE_JSON_SENTINEL";
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin !== new URL(page.url()).origin) violations.push("cross-origin");
+    if (!["GET", "HEAD"].includes(request.method())) violations.push("write-method");
+    if (request.postDataBuffer() !== null) violations.push("request-body");
+    if (request.url().includes(sentinel)) violations.push("sentinel-url");
+  });
+
+  const source = `{"private":"${sentinel}","big":9007199254740993,"decimal":1.2300,"exponent":1e+09,"escaped":"\\u0061","dup":1,"dup":2}`;
+  const pretty = `{\n  "private": "${sentinel}",\n  "big": 9007199254740993,\n  "decimal": 1.2300,\n  "exponent": 1e+09,\n  "escaped": "\\u0061",\n  "dup": 1,\n  "dup": 2\n}`;
+  const compact = source;
+  const input = page.getByRole("textbox", { name: "JSON 입력" });
+
+  await input.fill(source);
+  await page.getByRole("button", { name: "정리하기", exact: true }).click();
+  const result = page.getByRole("textbox", { name: "결과" });
+  await expect(result).toHaveValue(pretty);
+
+  await page.getByRole("button", { name: "결과 복사", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { __hereisitCopiedJson?: string }).__hereisitCopiedJson,
+      ),
+    )
+    .toBe(pretty);
+
+  await page.getByRole("button", { name: "공백 줄이기", exact: true }).click();
+  await expect(result).toHaveValue(compact);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "JSON 다운로드", exact: true }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("minified.json");
+  const stream = await download.createReadStream();
+  expect(stream).not.toBeNull();
+  if (stream === null) throw new Error("JSON download stream was not created");
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString("utf8")).toBe(compact);
+
+  await input.fill("{");
+  await page.getByRole("button", { name: "정리하기", exact: true }).click();
+  const alert = page.locator("#json-format-feedback");
+  await expect(alert).toHaveText(
+    "올바른 JSON 형식이 아니에요. 괄호, 쉼표와 따옴표를 확인해 주세요.",
+  );
+  await expect(alert).toBeFocused();
+  await page.getByRole("button", { name: "지우기", exact: true }).click();
+  await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
+  await expect(result).toHaveCount(0);
+  expect(violations).toEqual([]);
+});
+
 test("publishes every available catalog route from the complete tools page", async ({
   page,
   request,
@@ -245,7 +334,7 @@ test("publishes every available catalog route from the complete tools page", asy
 
   for (const tool of availableToolEntries) {
     // This loop verifies static publication, while the focused browser tests above cover
-    // hydration and interaction. Keeping the 11-route sweep on the request context also avoids
+    // hydration and interaction. Keeping the catalog-route sweep on the request context also avoids
     // treating a transient WebKit navigation-process disconnect as an application regression.
     const response = await request.get(tool.route);
     expect(response.ok()).toBe(true);
