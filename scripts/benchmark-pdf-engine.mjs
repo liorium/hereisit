@@ -578,7 +578,7 @@ function schemaTypeMatches(value, type) {
   return typeof value === type;
 }
 
-function validateJsonSchema(value, schema, root, path = "$") {
+export function validateJsonSchema(value, schema, root, path = "$") {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema))
     throw new TypeError(`${path} schema is invalid`);
   if (schema.$ref !== undefined)
@@ -629,7 +629,7 @@ function validateJsonSchema(value, schema, root, path = "$") {
   }
 }
 
-function assertClosedSchema(schema, path = "$") {
+export function assertClosedSchema(schema, path = "$") {
   if (typeof schema !== "object" || schema === null || Array.isArray(schema)) return;
   if (schema.type === "object") {
     if (schema.additionalProperties !== false) throw new TypeError(`${path} schema must be closed`);
