@@ -87,7 +87,14 @@ describe("Playwright CI workflow", () => {
     expect(pdfQualityWorkflow).not.toContain("deviceMatrix.json");
     const sanitizedUpload = workflow.indexOf("Upload sanitized PDF visual evidence");
     const protectedSeal = workflow.indexOf("Seal genuine exact-main hosted review receipts");
+    const sanitizedReports = workflow.indexOf("Create sanitized PDF visual hosted reports");
     expect(sanitizedUpload).toBeGreaterThan(-1);
+    expect(workflow.slice(sanitizedReports, sanitizedUpload)).toContain(
+      "if: github.ref == 'refs/heads/main'",
+    );
+    expect(workflow.slice(sanitizedUpload, protectedSeal)).toContain(
+      "if: github.ref == 'refs/heads/main'",
+    );
     expect(protectedSeal).toBeGreaterThan(sanitizedUpload);
     expect(workflow.slice(sanitizedUpload, protectedSeal)).not.toContain(
       "PROCESSING_HOSTED_REVIEWS_READY",

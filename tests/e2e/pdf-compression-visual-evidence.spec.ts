@@ -88,10 +88,12 @@ async function installLocalNoReduction(page: Page) {
           const worker = Reflect.construct(Target, argumentsList) as Worker;
           if (options?.name === "hereisit-pdf-optimize-verifier") {
             const state = globalThis as typeof globalThis & {
+              __hereisitPdfResultUrls?: number;
               __hereisitPdfVerifierPending?: number;
               __hereisitPdfVerifierCompleted?: number;
               __hereisitReleasePdfVerifier?: () => boolean;
             };
+            state.__hereisitPdfResultUrls ??= 0;
             const releases: Array<() => void> = [];
             const released = new Set<string>();
             state.__hereisitPdfVerifierPending ??= 0;
@@ -121,6 +123,12 @@ async function installLocalNoReduction(page: Page) {
         },
       }),
     });
+    const createObjectURL = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (object) => {
+      const state = globalThis as typeof globalThis & { __hereisitPdfResultUrls?: number };
+      state.__hereisitPdfResultUrls = (state.__hereisitPdfResultUrls ?? 0) + 1;
+      return createObjectURL(object);
+    };
   });
 }
 
@@ -270,6 +278,11 @@ test("verifies three native image-optimized repeats in the real browser Worker",
       page.getByText(`${input.source.pageCount}페이지 PDF를 불러왔어요.`).first(),
     ).toBeVisible({ timeout: 60_000 });
     await page.getByRole("button", { name: `${input.source.pageCount}페이지 용량 줄이기` }).click();
+    const resultUrlsBeforeVerification = await page.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { __hereisitPdfResultUrls?: number })
+          .__hereisitPdfResultUrls ?? 0,
+    );
     await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
     await expect
       .poll(() =>
@@ -281,6 +294,13 @@ test("verifies three native image-optimized repeats in the real browser Worker",
       )
       .toBe(result.repeat + 1);
     await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () =>
+          (globalThis as typeof globalThis & { __hereisitPdfResultUrls?: number })
+            .__hereisitPdfResultUrls ?? 0,
+      ),
+    ).toBe(resultUrlsBeforeVerification);
     expect(
       await page.evaluate(
         () =>
@@ -302,6 +322,15 @@ test("verifies three native image-optimized repeats in the real browser Worker",
       timeout: 60_000,
     });
     await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (globalThis as typeof globalThis & { __hereisitPdfResultUrls?: number })
+              .__hereisitPdfResultUrls ?? 0,
+        ),
+      )
+      .toBe(resultUrlsBeforeVerification + 1);
     await expect.poll(() => acknowledged.has(activeRepeat)).toBe(true);
     await page.getByRole("button", { name: "다른 PDF 압축" }).click();
     await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   evaluatePdfEngineReleaseGate,
   fetchBeforeDeadline,
+  pdfBenchmarkDockerArguments,
   readBoundedPdfResponse,
   runBenchmarkRepeats,
   validatePdfBenchmarkReport,
@@ -144,6 +145,33 @@ function passingReport() {
 }
 
 describe("PDF native benchmark release gate", () => {
+  it("labels the exact Docker resources used by the benchmark", () => {
+    expect(
+      pdfBenchmarkDockerArguments({
+        containerName: "benchmark-container",
+        networkName: "benchmark-network",
+        engineImage: "pdf-engine:test",
+      }),
+    ).toMatchObject({
+      network: [
+        "network",
+        "create",
+        "--internal",
+        "--label",
+        "hereisit.pdf-benchmark=true",
+        "benchmark-network",
+      ],
+      container: expect.arrayContaining([
+        "--name",
+        "benchmark-container",
+        "--label",
+        "hereisit.pdf-benchmark=true",
+        "--network",
+        "benchmark-network",
+      ]),
+    });
+  });
+
   it("accepts only complete evidence derived from all three repeats", () => {
     const report = validatePdfBenchmarkReport(passingReport());
     expect(evaluatePdfEngineReleaseGate(report)).toMatchObject({

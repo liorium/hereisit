@@ -328,6 +328,7 @@ jobs:
           HEREISIT_PDF_VISUAL_SOURCE_SHA256: ${{ env.HEREISIT_PDF_VISUAL_SOURCE_SHA256 }}
           HEREISIT_PDF_VISUAL_CHECK_RUN_ID: ${{ github.run_id }}
       - name: Create sanitized PDF visual hosted reports
+        if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
           node scripts/create-pdf-visual-browser-evidence.mjs \
@@ -346,6 +347,7 @@ jobs:
             --source-sha256 "$HEREISIT_PDF_VISUAL_SOURCE_SHA256" \
             --check-run-id "$GITHUB_RUN_ID"
       - name: Upload sanitized PDF visual evidence
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pdf-visual-evidence-${{ github.sha }}

@@ -1032,29 +1032,17 @@ function runnerRecord(runs, sourceBytes) {
   };
 }
 
-export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath, visualOutput }) {
-  const manifest = validatePdfCorpusManifest(JSON.parse(await readFile(corpusPath, "utf8")));
-  const corpusRoot = dirname(resolve(corpusPath));
-  await verifyPdfCorpusFiles(manifest, corpusRoot);
-  const corpusManifestSha256 = createHash("sha256").update(canonicalJson(manifest)).digest("hex");
-  const imageId = await docker(["image", "inspect", engineImage, "--format", "{{.Id}}"]);
-  safeString(imageId, /^sha256:[a-f0-9]{64}$/u, "engine image ID");
-  const sourceLockSha256 = createHash("sha256")
-    .update(await readFile("apps/pdf-engine/native/sources.lock.json"))
-    .digest("hex");
-  const containerName = `hereisit-pdf-benchmark-${randomUUID()}`;
-  const networkName = `hereisit-pdf-benchmark-${randomUUID()}`;
-  const startedAt = Date.now();
-  try {
-    await docker([
+export function pdfBenchmarkDockerArguments({ containerName, networkName, engineImage }) {
+  return {
+    network: [
       "network",
       "create",
       "--internal",
       "--label",
       "hereisit.pdf-benchmark=true",
       networkName,
-    ]);
-    await docker([
+    ],
+    container: [
       "run",
       "--detach",
       "--rm",
@@ -1078,7 +1066,31 @@ export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath, 
       "--security-opt",
       "no-new-privileges",
       engineImage,
-    ]);
+    ],
+  };
+}
+
+export async function benchmarkPdfEngine({ engineImage, corpusPath, outputPath, visualOutput }) {
+  const manifest = validatePdfCorpusManifest(JSON.parse(await readFile(corpusPath, "utf8")));
+  const corpusRoot = dirname(resolve(corpusPath));
+  await verifyPdfCorpusFiles(manifest, corpusRoot);
+  const corpusManifestSha256 = createHash("sha256").update(canonicalJson(manifest)).digest("hex");
+  const imageId = await docker(["image", "inspect", engineImage, "--format", "{{.Id}}"]);
+  safeString(imageId, /^sha256:[a-f0-9]{64}$/u, "engine image ID");
+  const sourceLockSha256 = createHash("sha256")
+    .update(await readFile("apps/pdf-engine/native/sources.lock.json"))
+    .digest("hex");
+  const containerName = `hereisit-pdf-benchmark-${randomUUID()}`;
+  const networkName = `hereisit-pdf-benchmark-${randomUUID()}`;
+  const startedAt = Date.now();
+  try {
+    const dockerArguments = pdfBenchmarkDockerArguments({
+      containerName,
+      networkName,
+      engineImage,
+    });
+    await docker(dockerArguments.network);
+    await docker(dockerArguments.container);
     const address = await docker([
       "inspect",
       containerName,
