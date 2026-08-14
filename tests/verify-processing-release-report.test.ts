@@ -1,5 +1,4 @@
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -226,9 +225,25 @@ async function fixture() {
     await readFile("docs/deployment/pdf-engine-release-gate.schema.json"),
   );
 
-  const costModel = createLiveCostModel(
-    JSON.parse(readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8")),
+  const costInput = JSON.parse(
+    await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
   );
+  costInput.pdfBenchmark = {
+    ...costInput.pdfBenchmark,
+    evidenceSha256: sha256Bytes(canonicalJson(pdfBenchmark)),
+    engineImageId: pdfConfigDigest,
+    engineImageDigest: pdfConfigDigest,
+    maximumCandidates: Math.max(
+      ...pdfBenchmark.records.map(
+        (record: { native: { maximumCandidateCount: number } }) =>
+          record.native.maximumCandidateCount,
+      ),
+    ),
+    maximumInputBytes: pdfBenchmark.limits.maximumSourceBytes,
+    maximumMeasuredPeakRssBytes: pdfBenchmark.summary.maximumPeakRssBytes,
+    maximumOutputBytes: pdfBenchmark.limits.maximumOutputBytes,
+  };
+  const costModel = createLiveCostModel(costInput);
   const releaseInputs = createProcessingReleaseInputs({
     version: 1,
     releaseId,
@@ -239,9 +254,7 @@ async function fixture() {
       version: 1,
       artifactSha256: "3".repeat(64),
       modelInput: (() => {
-        const { routeCpuBenchmark: _route, ...modelInput } = JSON.parse(
-          readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"),
-        );
+        const { routeCpuBenchmark: _route, ...modelInput } = costInput;
         return modelInput;
       })(),
     },
@@ -254,8 +267,7 @@ async function fixture() {
     },
     routeCpuBenchmark: {
       artifactSha256: "4".repeat(64),
-      ...JSON.parse(readFileSync("docs/deployment/processing-staging-cost-input.json", "utf8"))
-        .routeCpuBenchmark,
+      ...costInput.routeCpuBenchmark,
     },
   });
   await writeFile(join(source, "live-cost-model.json"), canonicalJson(costModel));
