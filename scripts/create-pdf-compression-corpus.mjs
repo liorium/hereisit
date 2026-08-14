@@ -319,8 +319,7 @@ async function generate(stratum, token) {
     const image = await document.embedJpg(
       stratum === "jpeg-heavy" ? await visualJpeg() : TINY_JPEG,
     );
-    for (let index = 0; index < (stratum === "jpeg-heavy" ? 12 : 1); index += 1)
-      page.drawImage(image, { x: 24 + index * 10, y: 24 + index * 6, width: 240, height: 160 });
+    page.drawImage(image, { x: 24, y: 24, width: 240, height: 160 });
   } else if (stratum === "non-jpeg-image") {
     const image = await document.embedPng(PNG);
     page.drawImage(image, { x: 24, y: 24, width: 240, height: 160 });
