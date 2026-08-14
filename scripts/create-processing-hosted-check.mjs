@@ -24,12 +24,23 @@ export const hostedReviewSchemas = Object.freeze({
 });
 
 const detailKeys = Object.freeze({
-  fullCorpusBenchmark: ["profilesMeasured", "corpusSha256"],
+  fullCorpusBenchmark: [
+    "profilesMeasured",
+    "corpusSha256",
+    "benchmarkSha256",
+    "releaseGateSha256",
+    "engineImageDigest",
+  ],
   competitorComparison: ["casesCompared", "baselineSha256"],
   blindedHumanReview: ["reviewers", "approval"],
   commercialReview: ["licenseGateSha256", "approval"],
   privacyReview: ["testsRun"],
-  deviceMatrix: ["projects", "productAnalytics"],
+  deviceMatrix: [
+    "projects",
+    "productAnalytics",
+    "pdfVisualEvidenceSha256",
+    "pdfVisualProfilesMeasured",
+  ],
 });
 
 const browserProjects = Object.freeze([
@@ -92,6 +103,10 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
     if (!Number.isSafeInteger(document.profilesMeasured) || document.profilesMeasured < 1)
       throw new TypeError("full corpus benchmark did not measure profiles");
     assertSha256(document.corpusSha256, "full corpus benchmark corpus hash");
+    assertSha256(document.benchmarkSha256, "full corpus benchmark hash");
+    assertSha256(document.releaseGateSha256, "full corpus release gate hash");
+    if (!/^sha256:[a-f0-9]{64}$/u.test(document.engineImageDigest))
+      throw new TypeError("full corpus benchmark engine digest is invalid");
   } else if (name === "competitorComparison") {
     if (!Number.isSafeInteger(document.casesCompared) || document.casesCompared < 1)
       throw new TypeError("competitor comparison did not compare cases");
@@ -114,6 +129,9 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
       document.projects.some((project, index) => project !== browserProjects[index])
     )
       throw new TypeError("device matrix is incomplete");
+    assertSha256(document.pdfVisualEvidenceSha256, "device matrix PDF visual evidence hash");
+    if (document.pdfVisualProfilesMeasured !== 9)
+      throw new TypeError("device matrix PDF visual coverage is incomplete");
   } else {
     throw new TypeError("hosted review name is invalid");
   }

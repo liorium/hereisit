@@ -26,7 +26,13 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
     execution: "exact-main-hosted-check",
   };
   const detail = {
-    fullCorpusBenchmark: { profilesMeasured: 3, corpusSha256: "b".repeat(64) },
+    fullCorpusBenchmark: {
+      profilesMeasured: 3,
+      corpusSha256: "b".repeat(64),
+      benchmarkSha256: "1".repeat(64),
+      releaseGateSha256: "2".repeat(64),
+      engineImageDigest: `sha256:${"3".repeat(64)}`,
+    },
     competitorComparison: { casesCompared: 12, baselineSha256: "c".repeat(64) },
     blindedHumanReview: {
       reviewers: 2,
@@ -55,6 +61,8 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
         "mobile-webkit",
       ],
       productAnalytics: true,
+      pdfVisualEvidenceSha256: "4".repeat(64),
+      pdfVisualProfilesMeasured: 9,
     },
   };
   return { ...common, ...detail[reportName] };

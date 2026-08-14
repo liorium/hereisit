@@ -56,6 +56,20 @@ export function validateHostedReviewReceipt(value, { name, gitSha, sourceSha256 
   });
 }
 
+export function validateHostedPdfCandidateBinding(reports, candidate) {
+  const corpus = reports.fullCorpusBenchmark;
+  const device = reports.deviceMatrix;
+  if (
+    corpus.benchmarkSha256 !== candidate.pdfQuality.benchmarkSha256 ||
+    corpus.releaseGateSha256 !== candidate.pdfQuality.releaseGateSha256 ||
+    corpus.profilesMeasured !== candidate.pdfQuality.visualProfilesMeasured ||
+    corpus.engineImageDigest !== candidate.pdfEngine.oci.configDigest ||
+    device.pdfVisualProfilesMeasured !== corpus.profilesMeasured * 3
+  )
+    throw new TypeError("hosted PDF quality evidence does not match the exact candidate");
+  return reports;
+}
+
 export async function prepareProcessingCiEvidence({
   candidatePath,
   releaseId,
@@ -92,6 +106,7 @@ export async function prepareProcessingCiEvidence({
       }),
     ),
   );
+  validateHostedPdfCandidateBinding(reports, candidate);
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1000).toISOString();
   await writeProcessingEvidenceBundle({

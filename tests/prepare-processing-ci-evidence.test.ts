@@ -47,6 +47,8 @@ describe("CI release evidence", () => {
           "mobile-webkit",
         ],
         productAnalytics: true,
+        pdfVisualEvidenceSha256: "c".repeat(64),
+        pdfVisualProfilesMeasured: 9,
       },
     };
     expect(validate(value, input)).toEqual(value.document);
@@ -70,6 +72,40 @@ describe("CI release evidence", () => {
         sourceSha256: "b".repeat(64),
       }),
     ).rejects.toThrow(/hosted review/);
+  });
+
+  it("binds hosted PDF benchmark and browser coverage to the exact candidate", () => {
+    const validate = (
+      ciEvidenceModule as unknown as {
+        validateHostedPdfCandidateBinding: (reports: unknown, candidate: unknown) => unknown;
+      }
+    ).validateHostedPdfCandidateBinding;
+    const reports = {
+      fullCorpusBenchmark: {
+        benchmarkSha256: "1".repeat(64),
+        releaseGateSha256: "2".repeat(64),
+        profilesMeasured: 3,
+        engineImageDigest: `sha256:${"3".repeat(64)}`,
+      },
+      deviceMatrix: { pdfVisualProfilesMeasured: 9 },
+    };
+    const candidate = {
+      pdfQuality: {
+        benchmarkSha256: "1".repeat(64),
+        releaseGateSha256: "2".repeat(64),
+        visualProfilesMeasured: 3,
+      },
+      pdfEngine: { oci: { configDigest: `sha256:${"3".repeat(64)}` } },
+    };
+    expect(validate(reports, candidate)).toBe(reports);
+    for (const changed of [
+      { ...candidate, pdfQuality: { ...candidate.pdfQuality, visualProfilesMeasured: 0 } },
+      {
+        ...candidate,
+        pdfEngine: { oci: { configDigest: `sha256:${"4".repeat(64)}` } },
+      },
+    ])
+      expect(() => validate(reports, changed)).toThrow(/exact candidate/i);
   });
 
   it("binds protected reviewed reports to the exact current @2 candidate", async () => {
