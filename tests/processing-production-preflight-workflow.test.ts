@@ -21,6 +21,7 @@ describe("processing production preflight workflow", () => {
     expect(workflow).toContain("inspect-processing-cost-providers.mjs");
     expect(workflow).toContain("processing-production-cost-providers.json");
     expect(workflow).toContain("$RUNNER_TEMP/processing-production-worker-version.json");
+    expect(workflow).toContain('require("node:path").resolve(process.argv[1])');
     for (const secret of [
       "PRODUCTION_ANALYTICS_READ_TOKEN",
       "PRODUCTION_LOGPUSH_STATUS_TOKEN",

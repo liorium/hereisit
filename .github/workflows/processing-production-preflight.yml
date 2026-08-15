@@ -71,7 +71,7 @@ jobs:
           node scripts/verify-processing-admission-state.mjs \
             --mode inspect-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$DATABASE_ID" > .artifacts/preflight/processing-production-state.json
-          ACTIVE_VERSION_ID="$(node -e 'const state=require(process.argv[1]);if(typeof state.activeVersionId!=="string")process.exit(1);process.stdout.write(state.activeVersionId)' .artifacts/preflight/processing-production-state.json)"
+          ACTIVE_VERSION_ID="$(node -e 'const state=require(require("node:path").resolve(process.argv[1]));if(typeof state.activeVersionId!=="string")process.exit(1);process.stdout.write(state.activeVersionId)' .artifacts/preflight/processing-production-state.json)"
           pnpm exec wrangler versions view "$ACTIVE_VERSION_ID" \
             --name hereisit-processing-production --json > "$WORKER_VERSION_FILE"
           node scripts/inspect-processing-cost-providers.mjs \
