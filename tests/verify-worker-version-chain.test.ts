@@ -170,6 +170,19 @@ describe("Worker version chain verifier", () => {
     });
   });
 
+  it("uses the active deployment when an inactive newer version exists", () => {
+    const input = admissionInput();
+    const nextPublicId = "00000000-0000-0000-0000-000000000009";
+    const nextPublic = cloudflareVersion(nextPublicId, 9, "upload");
+    input.before = [versions.final, versions.public];
+    input.after = [versions.final, versions.public, nextPublic];
+    input.deployment = { version_id: nextPublicId };
+    input.afterDeployment = { versions: [{ version_id: nextPublicId, percentage: 100 }] };
+    input.verifiedAt = "2026-08-10T00:10:00.000Z";
+
+    expect(verifyWorkerAdmissionTransition(input).activeVersionId).toBe(nextPublicId);
+  });
+
   it.each([
     ["a partial rollout", () => ({ publicAdmissionPercent: 5 })],
     [
@@ -196,6 +209,10 @@ describe("Worker version chain verifier", () => {
     [
       "an inactive canary version",
       () => ({ beforeDeployment: { versions: [{ version_id: ids.bootstrap, percentage: 100 }] } }),
+    ],
+    [
+      "an attested canary absent from the version snapshot",
+      () => ({ before: [], after: [versions.public] }),
     ],
     [
       "a partial public deployment",

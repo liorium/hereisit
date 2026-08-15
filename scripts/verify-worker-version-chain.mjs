@@ -1129,7 +1129,7 @@ export function verifyWorkerAdmissionTransition(inputValue) {
   const currentAttestation = validateWorkerVersionAttestation(input.currentAttestation);
   const currentActive = currentAttestation.versions.at(-1);
   if (
-    currentAttestation.activeVersionId !== before.at(-1)?.id ||
+    !before.some((version) => version.id === currentAttestation.activeVersionId) ||
     currentActive.versionId !== currentAttestation.activeVersionId ||
     currentActive.publicAdmissionPercent !== 0
   ) {
