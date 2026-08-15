@@ -24,6 +24,12 @@ const safeFailures = new Set([
   `${stableFailure} [public-context]`,
   `${stableFailure} [public-navigation]`,
   `${stableFailure} [public-policy]`,
+  `${stableFailure} [public-policy-invalid]`,
+  `${stableFailure} [public-policy-missing]`,
+  `${stableFailure} [public-policy-status]`,
+  `${stableFailure} [public-policy-identity]`,
+  `${stableFailure} [public-policy-execution]`,
+  `${stableFailure} [public-policy-reason]`,
   `${stableFailure} [public-ui]`,
   `${stableFailure} [public-invariants]`,
   `${stableFailure} [maintainer-context]`,
@@ -211,7 +217,7 @@ async function assertPolicies(state, expected) {
     detail = "reason";
   }
   if (detail !== null) {
-    const stage = expected.maintainer ? `maintainer-policy-${detail}` : "public-policy";
+    const stage = expected.maintainer ? `maintainer-policy-${detail}` : `public-policy-${detail}`;
     throw new Error(`${stableFailure} [${stage}]`);
   }
 }

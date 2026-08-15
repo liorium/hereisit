@@ -190,7 +190,7 @@ describe("authenticated processing staging smoke", () => {
         pageOrigin: PROCESSING_PRODUCTION_ORIGIN,
         publicAdmission: true,
       }),
-    ).rejects.toThrow("processing staging smoke failed [public-policy]");
+    ).rejects.toThrow("processing staging smoke failed [public-policy-execution]");
 
     browserLaunch.mockResolvedValue(browserThatStopsAtJobSubmit(true));
 
@@ -487,6 +487,18 @@ describe("authenticated processing staging smoke", () => {
         environment: { STAGING_MAINTAINER_SESSION_ID: sessionId },
       }),
     ).rejects.toThrow("processing staging smoke failed [maintainer-policy-execution]");
+  });
+
+  it("preserves only allowlisted public policy diagnostics", async () => {
+    const output = await outputPath();
+    browserSmoke.mockRejectedValue(
+      new Error("processing staging smoke failed [public-policy-execution]"),
+    );
+    await expect(
+      runProcessingPublicSmokeCli({
+        argv: ["--page-origin", PROCESSING_PRODUCTION_ORIGIN, "--output", output],
+      }),
+    ).rejects.toThrow("processing staging smoke failed [public-policy-execution]");
   });
 
   it("preserves only allowlisted browser invariant diagnostics", async () => {
