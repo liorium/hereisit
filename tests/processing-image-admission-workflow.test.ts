@@ -55,8 +55,10 @@ describe("deployed image canary admission workflow", () => {
     expect(restore).toBeLessThan(pause);
     const restoreStep = workflow.slice(restore, pause);
     expect(restoreStep).toContain('wrangler versions deploy "$CANARY_VERSION_ID@100%"');
-    expect(restoreStep).toContain("apply-worker-version-attestations.mjs");
-    expect(restoreStep).toContain(".artifacts/canary/worker-version.json");
+    expect(workflow.slice(discover, mutation)).toContain("canary-rollback.json");
+    expect(restoreStep).toContain("processing-admission-rollback-state.mjs");
+    expect(restoreStep).toContain("--mode restore");
+    expect(restoreStep).toContain(".artifacts/runtime/canary-rollback.json");
     expect(restoreStep).toContain("verify-processing-admission-state.mjs");
     expect(restoreStep).toContain('--expected-release-report-sha256 "$SOURCE_SHA256"');
     expect(restoreStep).toContain("verifyActiveWorkerDeployment");
@@ -79,5 +81,12 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow).toContain('test "$CIRCUIT_RECOVERY" -eq 0');
     expect(workflow).toContain('test "$VERSION_RECOVERY" -eq 0');
     expect(workflow).toContain('test "$POLICY_RECOVERY" -eq 0');
+    const recovery = workflow.indexOf("Attempt every fail-closed recovery layer");
+    const upload = workflow.indexOf("actions/upload-artifact", recovery);
+    const recoveryStep = workflow.slice(recovery, upload);
+    expect(recoveryStep.indexOf("processing-admission-rollback-state.mjs")).toBeGreaterThan(0);
+    expect(recoveryStep.indexOf("processing-admission-rollback-state.mjs")).toBeLessThan(
+      recoveryStep.indexOf("--mode disable-current"),
+    );
   });
 });

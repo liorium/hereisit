@@ -238,10 +238,13 @@ jobs:
             --no-bundle --containers-rollout none --dry-run
           node --input-type=module - <<'NODE'
           import { createHash } from "node:crypto";
-          import { readFile } from "node:fs/promises";
+          import { readFile, writeFile } from "node:fs/promises";
           const hash = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
           const canary = JSON.parse(await readFile(".artifacts/canary/worker-version.json", "utf8"));
           if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/admission/source-sha.txt") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
+          const observedAt = Date.parse(canary.verifiedAt);
+          if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new Error("canary verification time is invalid");
+          await writeFile(".artifacts/runtime/canary-rollback.json", `${JSON.stringify({ schema: "hereisit-processing-admission-rollback@1", state: { circuitOpen: 0, circuitReason: null, openedAt: null, versionId: canary.activeVersionId, workerModuleSha256: canary.workerModuleSha256, generatedConfigSha256: canary.generatedConfigSha256, releaseReportSha256: canary.releaseReportSha256, publicAdmissionAllowed: 1, observedAt } })}\n`, { flag: "wx", mode: 0o600 });
           NODE
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-before.json
           pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-before.json
@@ -279,9 +282,9 @@ jobs:
           import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
           verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
           NODE
-          node scripts/apply-worker-version-attestations.mjs \
-            --attestation .artifacts/canary/worker-version.json \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID"
+          node scripts/processing-admission-rollback-state.mjs \
+            --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
@@ -409,11 +412,6 @@ jobs:
         run: |
           set +e
           umask 077
-          CIRCUIT_RECOVERY=0
-          node scripts/verify-processing-admission-state.mjs \
-            --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --database-id "$PRODUCTION_D1_DATABASE_ID" \
-            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
           QUEUE_RECOVERY=0
           pnpm exec wrangler queues pause-delivery "$QUEUE_NAME" || QUEUE_RECOVERY=$?
           pnpm exec wrangler queues pause-delivery "$DLQ_NAME" || QUEUE_RECOVERY=$?
@@ -422,10 +420,15 @@ jobs:
           VERSION_RECOVERY=0
           pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
           if [[ "$VERSION_RECOVERY" -eq 0 ]]; then
-            node scripts/apply-worker-version-attestations.mjs \
-              --attestation .artifacts/canary/worker-version.json \
-              --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" || VERSION_RECOVERY=$?
+            node scripts/processing-admission-rollback-state.mjs \
+              --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+              --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json || VERSION_RECOVERY=$?
           fi
+          CIRCUIT_RECOVERY=0
+          node scripts/verify-processing-admission-state.mjs \
+            --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
           POLICY_RECOVERY=0
           node --input-type=module - <<'NODE' || POLICY_RECOVERY=$?
           const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
