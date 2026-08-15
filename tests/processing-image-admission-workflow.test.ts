@@ -17,6 +17,16 @@ describe("deployed image canary admission workflow", () => {
       'test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
     );
     expect(workflow).toContain("rebuilt canary artifacts do not match");
+    const materialize = workflow.indexOf("Materialize current admission control plane");
+    const restore = workflow.indexOf("Restore and verify the exact local canary before admission");
+    expect(materialize).toBeGreaterThan(0);
+    expect(materialize).toBeLessThan(restore);
+    expect(workflow.slice(materialize, restore)).toContain(
+      'git show "${' + 'GITHUB_SHA}:scripts/processing-admission-rollback-state.mjs"',
+    );
+    expect(workflow.slice(materialize, restore)).toContain(
+      "scripts/.processing-admission-rollback-state.mjs",
+    );
     expect(workflow).toContain("verifyActiveWorkerDeployment");
     expect(workflow).toContain("--mode verify");
     expect(workflow).toContain('--expected-version-id "$CANARY_VERSION_ID"');
