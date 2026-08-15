@@ -184,6 +184,23 @@ async function readStateRows({ accountId, databaseId, apiToken, fetchImpl }) {
   return result.results;
 }
 
+export async function inspectCurrentProcessingAdmissionInD1(input) {
+  const values = { fetchImpl: fetch, ...input };
+  validateCoordinates(values);
+  const row = requireSingleStateRow(await readStateRows(values));
+  return {
+    circuitOpen: row.circuitOpen === 1,
+    circuitReason: row.circuitReason,
+    deletionOverdueCount: row.deletionOverdueCount,
+    activeJobs: row.activeJobs,
+    unsentOutbox: row.unsentOutbox,
+    activeVersionId: row.activeVersionId,
+    publicAdmissionAllowed: row.publicAdmissionAllowed === 1,
+    costAccountingEpoch: row.costAccountingEpoch,
+    releaseReportSha256: row.releaseReportSha256,
+  };
+}
+
 export async function readProcessingAdmissionStateFromD1(input) {
   const values = { fetchImpl: fetch, ...input };
   validateCoordinates(values);
@@ -248,17 +265,21 @@ export async function runProcessingAdmissionStateCli(
   { env = process.env, fetchImpl = fetch, stdout = process.stdout } = {},
 ) {
   const args = parseCliArguments(argv);
-  if (!["verify", "disable", "disable-current"].includes(args.mode)) {
-    throw new TypeError("processing admission --mode must be verify, disable, or disable-current");
+  if (!["verify", "inspect-current", "disable", "disable-current"].includes(args.mode)) {
+    throw new TypeError(
+      "processing admission --mode must be verify, inspect-current, disable, or disable-current",
+    );
   }
   const base = ["mode", "account-id", "database-id"];
   const expectedRelease = ["expected-version-id", "expected-release-report-sha256"];
   const expected =
     args.mode === "verify"
       ? [...base, ...expectedRelease]
-      : args.mode === "disable"
-        ? [...base, ...expectedRelease, "now"]
-        : [...base, "now"];
+      : args.mode === "inspect-current"
+        ? base
+        : args.mode === "disable"
+          ? [...base, ...expectedRelease, "now"]
+          : [...base, "now"];
   assertExactKeys(args, expected, "processing admission arguments");
   if (!env.CLOUDFLARE_D1_API_TOKEN) {
     throw new TypeError("CLOUDFLARE_D1_API_TOKEN environment variable is required");
@@ -274,15 +295,25 @@ export async function runProcessingAdmissionStateCli(
   const result =
     args.mode === "verify"
       ? await readProcessingAdmissionStateFromD1(input)
-      : args.mode === "disable"
-        ? await disableProcessingAdmissionInD1({ ...input, now: parseCanonicalTimestamp(args.now) })
-        : await disableCurrentProcessingAdmissionInD1({
+      : args.mode === "inspect-current"
+        ? await inspectCurrentProcessingAdmissionInD1({
             accountId: input.accountId,
             databaseId: input.databaseId,
             apiToken: input.apiToken,
             fetchImpl,
-            now: parseCanonicalTimestamp(args.now),
-          });
+          })
+        : args.mode === "disable"
+          ? await disableProcessingAdmissionInD1({
+              ...input,
+              now: parseCanonicalTimestamp(args.now),
+            })
+          : await disableCurrentProcessingAdmissionInD1({
+              accountId: input.accountId,
+              databaseId: input.databaseId,
+              apiToken: input.apiToken,
+              fetchImpl,
+              now: parseCanonicalTimestamp(args.now),
+            });
   stdout.write(canonicalJson(result));
   return result;
 }

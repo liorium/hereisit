@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   disableProcessingAdmissionInD1,
+  inspectCurrentProcessingAdmissionInD1,
   readProcessingAdmissionStateFromD1,
   runProcessingAdmissionStateCli,
   verifyProcessingAdmissionState,
@@ -133,6 +134,32 @@ describe("processing public admission state", () => {
     expect(calls[0]).toMatchObject({ params: [] });
     expect(JSON.stringify(calls[0])).toContain("deletion_overdue_count");
     expect(JSON.stringify(calls[0])).not.toContain("d1-token");
+  });
+
+  it("projects the current circuit state without requiring it to be closed", async () => {
+    const open = {
+      ...readyRow(),
+      circuitOpen: 1,
+      circuitReason: "COST_ACCOUNTING_INCOMPLETE",
+    };
+    await expect(
+      inspectCurrentProcessingAdmissionInD1({
+        accountId,
+        databaseId,
+        apiToken: "d1-token",
+        fetchImpl: async () => response([open]),
+      }),
+    ).resolves.toEqual({
+      circuitOpen: true,
+      circuitReason: "COST_ACCOUNTING_INCOMPLETE",
+      deletionOverdueCount: 0,
+      activeJobs: 0,
+      unsentOutbox: 0,
+      activeVersionId,
+      publicAdmissionAllowed: true,
+      costAccountingEpoch: "release-epoch",
+      releaseReportSha256,
+    });
   });
 
   it("rejects a replica D1 response", async () => {

@@ -17,6 +17,8 @@ jobs:
     environment: processing-production
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      D1_NAME: hereisit-processing-production
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -51,3 +53,24 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm exec wrangler whoami
+      - name: Inspect current fail-closed processing state
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .artifacts/preflight
+          pnpm exec wrangler d1 list --json > .artifacts/preflight/d1-list.json
+          DATABASE_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const rows=JSON.parse(readFileSync(".artifacts/preflight/d1-list.json","utf8")); const matches=Array.isArray(rows)?rows.filter((row)=>row?.name===process.env.D1_NAME):[]; if(matches.length!==1||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(matches[0].uuid))process.exit(1); process.stdout.write(matches[0].uuid)')"
+          node scripts/verify-processing-admission-state.mjs \
+            --mode inspect-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$DATABASE_ID" > .artifacts/preflight/processing-production-state.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: processing-production-preflight-${{ github.run_id }}
+          path: .artifacts/preflight/processing-production-state.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7

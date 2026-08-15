@@ -14,6 +14,9 @@ describe("processing production preflight workflow", () => {
       "node scripts/verify-processing-deployment-environment.mjs --environment production",
     );
     expect(workflow).toContain("pnpm exec wrangler whoami");
+    expect(workflow).toContain("pnpm exec wrangler d1 list --json");
+    expect(workflow).toContain("--mode inspect-current");
+    expect(workflow).toContain("processing-production-state.json");
     for (const secret of [
       "PRODUCTION_ANALYTICS_READ_TOKEN",
       "PRODUCTION_LOGPUSH_STATUS_TOKEN",
