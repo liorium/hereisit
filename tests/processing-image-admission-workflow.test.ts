@@ -34,6 +34,12 @@ describe("deployed image canary admission workflow", () => {
       "scripts/.verify-worker-version-chain.mjs",
     );
     expect(workflow.slice(materialize, restore)).toContain(
+      'git show "${' + 'GITHUB_SHA}:scripts/rotate-staging-accounting-epoch.mjs"',
+    );
+    expect(workflow.slice(materialize, restore)).toContain(
+      "scripts/.rotate-staging-accounting-epoch.mjs",
+    );
+    expect(workflow.slice(materialize, restore)).toContain(
       'git show "${' + 'GITHUB_SHA}:scripts/smoke-image-compress-server.mjs"',
     );
     expect(workflow.slice(materialize, restore)).toContain(
@@ -96,6 +102,9 @@ describe("deployed image canary admission workflow", () => {
     expect(restoreStep).toContain("body.disclosure?.upload === false");
     expect(workflow.slice(discover, mutation)).not.toContain(
       "verify-processing-admission-state.mjs",
+    );
+    expect(workflow.slice(rearm, restore)).toContain(
+      "node scripts/.rotate-staging-accounting-epoch.mjs",
     );
     expect(workflow.slice(rearm, restore)).toContain("--mode public-admission-rearm");
   });
