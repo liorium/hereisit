@@ -33,7 +33,14 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow.slice(materialize, restore)).toContain(
       "scripts/.verify-worker-version-chain.mjs",
     );
+    expect(workflow.slice(materialize, restore)).toContain(
+      'git show "${' + 'GITHUB_SHA}:scripts/smoke-image-compress-server.mjs"',
+    );
+    expect(workflow.slice(materialize, restore)).toContain(
+      "scripts/.smoke-image-compress-server.mjs",
+    );
     expect(workflow).toContain("node scripts/.verify-worker-version-chain.mjs \\");
+    expect(workflow).toContain('from "./scripts/.smoke-image-compress-server.mjs"');
     expect(workflow).toContain("verifyActiveWorkerDeployment");
     expect(workflow).toContain("--mode verify");
     expect(workflow).toContain('--expected-version-id "$CANARY_VERSION_ID"');

@@ -177,7 +177,10 @@ jobs:
           test ! -e scripts/.verify-worker-version-chain.mjs
           git show "${GITHUB_SHA}:scripts/verify-worker-version-chain.mjs" \
             > scripts/.verify-worker-version-chain.mjs
-          chmod 0700 scripts/.processing-admission-rollback-state.mjs scripts/.verify-worker-version-chain.mjs
+          test ! -e scripts/.smoke-image-compress-server.mjs
+          git show "${GITHUB_SHA}:scripts/smoke-image-compress-server.mjs" \
+            > scripts/.smoke-image-compress-server.mjs
+          chmod 0700 scripts/.processing-admission-rollback-state.mjs scripts/.verify-worker-version-chain.mjs scripts/.smoke-image-compress-server.mjs
       - name: Discover production resources and reconstruct the exact rollout pair
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -392,7 +395,7 @@ jobs:
       - name: Run anonymous public production smoke
         run: |
           node --input-type=module - "$PRODUCTION_PAGES_ORIGIN" .artifacts/runtime/public-smoke-result.json <<'NODE'
-          import { runProcessingPublicSmokeCli } from "./scripts/smoke-image-compress-server.mjs";
+          import { runProcessingPublicSmokeCli } from "./scripts/.smoke-image-compress-server.mjs";
           try {
             await runProcessingPublicSmokeCli({ argv: ["--page-origin", process.argv[2], "--output", process.argv[3]] });
           } catch (error) {
