@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputPath = path.join(repositoryRoot, "apps/web/public/_headers");
+const officialProcessingApiOrigin = "https://api.hereisit.app";
 
 function normalizeOrigin(value, allowLocal) {
   if (value === null || value === undefined || value.trim() === "") return null;
@@ -31,8 +32,10 @@ function normalizeOrigin(value, allowLocal) {
 }
 
 export function generateHeaders({ processingApiOrigin, allowLocalProcessingOrigins = false }) {
-  const origin = normalizeOrigin(processingApiOrigin, allowLocalProcessingOrigins);
-  const connectSource = `'self' https://cloudflareinsights.com${origin === null ? "" : ` ${origin}`}`;
+  const origin =
+    normalizeOrigin(processingApiOrigin, allowLocalProcessingOrigins) ??
+    officialProcessingApiOrigin;
+  const connectSource = `'self' https://cloudflareinsights.com ${origin}`;
   return `/*
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com/beacon.min.js; connect-src ${connectSource}; manifest-src 'self'
   Referrer-Policy: no-referrer

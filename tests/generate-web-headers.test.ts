@@ -20,7 +20,7 @@ describe("Cloudflare Pages header generation", () => {
       "connect-src 'self' https://cloudflareinsights.com https://processing.example.com",
     );
     expect(generateHeaders({ processingApiOrigin: null })).toContain(
-      "connect-src 'self' https://cloudflareinsights.com;",
+      "connect-src 'self' https://cloudflareinsights.com https://api.hereisit.app;",
     );
   });
 
