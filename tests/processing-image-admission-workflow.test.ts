@@ -53,6 +53,9 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow).toContain("--max-live-cost-per-1000-microusd 500000");
     expect(workflow).toContain('body.execution !== "local"');
     expect(workflow).toContain("runProcessingPublicSmokeCli");
+    expect(workflow).toContain(
+      'error instanceof Error ? error.message : "processing production public smoke failed"',
+    );
     expect(workflow).not.toMatch(/PDF_|pdf-|PdfEngine|hereisit-pdf/u);
     expect(workflow).not.toMatch(
       /containers push|d1 migrations apply|ensure-cloudflare-processing-resources/u,
