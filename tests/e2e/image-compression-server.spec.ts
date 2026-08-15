@@ -388,7 +388,9 @@ test.describe("configured processing server", () => {
     );
     await expect(page.getByTestId("image-workbench-status")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "이미지 선택" })).toBeDisabled();
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeChecked();
+    await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).not.toBeChecked();
     const policyLinkBox = await page.getByRole("link", { name: "자세히" }).boundingBox();
     expect(policyLinkBox?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(policyLinkBox?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -427,6 +429,44 @@ test.describe("configured processing server", () => {
     await expect(page.getByRole("heading", { name: /압축 완료|원본 유지/ })).toHaveCount(0);
     await expect.poll(() => calls.includes(`DELETE /v1/jobs/${jobId}`)).toBe(true);
     expect(calls.some((call) => call.includes("/downloaded"))).toBe(false);
+  });
+
+  test("keeps an explicit local choice on-device and restores it after reload", async ({
+    page,
+  }) => {
+    const jobRequests: string[] = [];
+    await page.route("**/v1/policy", (route) =>
+      route.fulfill({ status: 200, json: serverPolicy() }),
+    );
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/v1/jobs")) {
+        jobRequests.push(`${request.method()} ${request.url()}`);
+      }
+    });
+
+    await page.goto("/image/compress");
+    await page.getByRole("radio", { name: /내 기기에서 처리/ }).check();
+    await expect(page.locator('[data-policy="local"]')).toHaveText(
+      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    );
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "local.png",
+      mimeType: "image/png",
+      buffer: onePixelPng,
+    });
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.getByRole("button", { name: /원본 다운로드 ↓|결과 다운로드 ↓/ })).toBeVisible(
+      {
+        timeout: 20_000,
+      },
+    );
+    expect(jobRequests).toEqual([]);
+
+    await page.reload();
+    await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).toBeChecked();
+    await page.getByRole("radio", { name: /고성능 서버 압축/ }).check();
+    await page.reload();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeChecked();
   });
 
   test("downloads an original-retained item locally without requesting a server result", async ({
@@ -496,7 +536,7 @@ test.describe("configured processing server", () => {
     });
 
     await page.goto("/image/compress");
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "retained.png",
       mimeType: "image/png",
@@ -1087,7 +1127,7 @@ test.describe("configured processing server", () => {
     await expect(terminalError).toContainText(
       "처리 시간이 초과됐어요. 추천 설정으로 다시 시도해 주세요.",
     );
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
     await expect(page.getByText(/사용량 보호/)).toHaveCount(0);
   });
 
@@ -1098,7 +1138,7 @@ test.describe("configured processing server", () => {
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 720 });
       await page.goto("/image/compress");
-      await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+      await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -1140,7 +1180,7 @@ test.describe("configured processing server", () => {
       if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobCalls.push(request.url());
     });
     await page.goto("/image/compress");
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "lossless.webp",
       mimeType: "image/webp",
@@ -1170,7 +1210,7 @@ test.describe("configured processing server", () => {
       });
     });
     await page.goto("/image/compress");
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "refreshed-local.png",
       mimeType: "image/png",
@@ -1224,7 +1264,7 @@ test.describe("configured processing server", () => {
       }
     });
     await page.goto("/image/compress");
-    await expect(page.getByText(/파일은 HereIsIt 처리 서버로 전송/)).toBeVisible();
+    await expect(page.getByText(/선택한 파일을 HereIsIt 서버에서 처리/)).toBeVisible();
     await page.locator('input[type="file"]').setInputFiles({
       name: "quota.png",
       mimeType: "image/png",

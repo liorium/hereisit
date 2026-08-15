@@ -239,6 +239,9 @@ test("starts each representative work area inside a 320 by 568 viewport", async 
 test("keeps image compression preset text readable after selection", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/image/compress");
+  await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.locator('input[type="file"][multiple]').setInputFiles({
     name: "sample.png",
     mimeType: "image/png",
