@@ -174,7 +174,10 @@ jobs:
           test ! -e scripts/.processing-admission-rollback-state.mjs
           git show "${GITHUB_SHA}:scripts/processing-admission-rollback-state.mjs" \
             > scripts/.processing-admission-rollback-state.mjs
-          chmod 0700 scripts/.processing-admission-rollback-state.mjs
+          test ! -e scripts/.verify-worker-version-chain.mjs
+          git show "${GITHUB_SHA}:scripts/verify-worker-version-chain.mjs" \
+            > scripts/.verify-worker-version-chain.mjs
+          chmod 0700 scripts/.processing-admission-rollback-state.mjs scripts/.verify-worker-version-chain.mjs
       - name: Discover production resources and reconstruct the exact rollout pair
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -332,7 +335,7 @@ jobs:
               --no-bundle --containers-rollout none
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-after.json
           pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-after.json
-          node scripts/verify-worker-version-chain.mjs \
+          node scripts/.verify-worker-version-chain.mjs \
             --mode finalize-admission \
             --before .artifacts/runtime/versions-before.json \
             --after .artifacts/runtime/versions-after.json \
