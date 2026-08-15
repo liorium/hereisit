@@ -22,6 +22,10 @@ The official production web origin is `https://hereisit.app`; `https://www.herei
 the apex, and `https://api.hereisit.app` is the production processing API. The legacy Pages and
 `workers.dev` origins remain available only for migration compatibility and recovery.
 
+Public image compression uses the same-format native server engine only after the exact-SHA production
+admission workflow passes. The UI discloses the upload before selection, and any policy, queue, cost, or
+runtime failure falls back to local browser processing.
+
 The compressor's fixed presets are balanced 150DPI/JPEG quality 72/white and minimum 96DPI/JPEG quality
 55/white. It accepts one 1-byte–50MiB PDF with 1–100 pages and offers a result only when the final PDF is
 at most `sourceBytes - max(1, ceil(sourceBytes / 100))`. It plans CropBox/rotation/UserUnit-aware visible
