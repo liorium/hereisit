@@ -166,6 +166,15 @@ jobs:
           PRODUCTION_MAINTAINER_SESSION_ID: ${{ secrets.PRODUCTION_MAINTAINER_SESSION_ID }}
           PRODUCTION_MAINTAINER_HASHES_JSON: ${{ secrets.PRODUCTION_MAINTAINER_HASHES_JSON }}
         run: node scripts/verify-processing-deployment-environment.mjs --environment production
+      - name: Materialize current admission control plane
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test ! -e scripts/.processing-admission-rollback-state.mjs
+          git show "${GITHUB_SHA}:scripts/processing-admission-rollback-state.mjs" \
+            > scripts/.processing-admission-rollback-state.mjs
+          chmod 0700 scripts/.processing-admission-rollback-state.mjs
       - name: Discover production resources and reconstruct the exact rollout pair
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -282,7 +291,7 @@ jobs:
           import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
           verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
           NODE
-          node scripts/processing-admission-rollback-state.mjs \
+          node scripts/.processing-admission-rollback-state.mjs \
             --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json
           node scripts/verify-processing-admission-state.mjs \
@@ -420,7 +429,7 @@ jobs:
           VERSION_RECOVERY=0
           pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
           if [[ "$VERSION_RECOVERY" -eq 0 ]]; then
-            node scripts/processing-admission-rollback-state.mjs \
+            node scripts/.processing-admission-rollback-state.mjs \
               --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" \
               --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json || VERSION_RECOVERY=$?
           fi
