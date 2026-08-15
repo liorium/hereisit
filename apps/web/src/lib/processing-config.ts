@@ -3,8 +3,11 @@ export interface ProcessingClientConfig {
 }
 
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
+const IMAGE_COMPRESSION_LOCATION_STORAGE_KEY = "hereisit.image-compression-location.v1";
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 let memorySessionId: string | null = null;
+
+export type ImageCompressionLocation = "server" | "local";
 
 function normalizePublicOrigin(value: string | undefined): string | null {
   if (value === undefined || value.trim() === "") return null;
@@ -73,4 +76,25 @@ export function isUnprovenInAppBrowser(userAgent?: string): boolean {
   }
   if (!/iPhone|iPad|iPod/i.test(value)) return false;
   return !/Safari|CriOS|FxiOS|EdgiOS|OPiOS/i.test(value);
+}
+
+export function readImageCompressionLocation(
+  storage: Storage = globalThis.localStorage,
+): ImageCompressionLocation {
+  try {
+    return storage.getItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY) === "local" ? "local" : "server";
+  } catch {
+    return "server";
+  }
+}
+
+export function writeImageCompressionLocation(
+  value: ImageCompressionLocation,
+  storage: Storage = globalThis.localStorage,
+): void {
+  try {
+    storage.setItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY, value);
+  } catch {
+    // Privacy modes may deny localStorage; the current React state still applies.
+  }
 }
