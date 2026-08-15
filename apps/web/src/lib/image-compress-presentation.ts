@@ -1,4 +1,5 @@
 export type ImageCompressScreen = "setup" | "processing" | "result";
+export type ImageCompressionExecution = "server" | "local" | "checking";
 
 export interface ImageCompressionSummary {
   readonly count: number;
@@ -14,6 +15,13 @@ export function deriveImageCompressScreen(input: {
 }): ImageCompressScreen {
   if (input.processing || input.archiving) return "processing";
   return input.completedCount > 0 ? "result" : "setup";
+}
+
+export function resolveImageCompressionExecution(
+  preference: "server" | "local",
+  policy: ImageCompressionExecution,
+): ImageCompressionExecution {
+  return preference === "local" ? "local" : policy;
 }
 
 export function summarizeImageCompression(

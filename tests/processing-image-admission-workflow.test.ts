@@ -1,0 +1,58 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const workflow = readFileSync(".github/workflows/processing-image-admission.yml", "utf8");
+
+describe("deployed image canary admission workflow", () => {
+  it("binds an explicit immutable production artifact before any mutation", () => {
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("source_sha:");
+    expect(workflow).toContain("production_run_id:");
+    expect(workflow).toContain("production_run_attempt:");
+    expect(workflow).toContain("ref: $" + "{{ inputs.source_sha }}");
+    expect(workflow).toContain("name: processing-production-canary-$" + "{{ inputs.source_sha }}");
+    expect(workflow).toContain("run-id: $" + "{{ inputs.production_run_id }}");
+    expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"');
+    expect(workflow).toContain(
+      'test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
+    );
+    expect(workflow).toContain("rebuilt canary artifacts do not match");
+    expect(workflow).toContain("verifyActiveWorkerDeployment");
+    expect(workflow).toContain("--mode verify");
+    expect(workflow).toContain('--expected-version-id "$CANARY_VERSION_ID"');
+  });
+
+  it("changes only the image admission state under the existing cost ceilings", () => {
+    const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
+    const pause = workflow.indexOf("Pause and verify both queues before mutation");
+    const deploy = workflow.indexOf("Deploy and attest the public Worker version");
+    const resume = workflow.indexOf("Resume only primary delivery");
+    expect(mutation).toBeGreaterThan(0);
+    expect(mutation).toBeLessThan(pause);
+    expect(pause).toBeLessThan(deploy);
+    expect(deploy).toBeLessThan(resume);
+    expect(workflow).toContain("--rollout-percent 100");
+    expect(workflow).toContain("--max-projected-monthly-cost-microusd 5000000");
+    expect(workflow).toContain("--max-live-cost-per-1000-microusd 500000");
+    expect(workflow).toContain('body.execution !== "local"');
+    expect(workflow).toContain("runProcessingPublicSmokeCli");
+    expect(workflow).not.toMatch(/PDF_|pdf-|PdfEngine|hereisit-pdf/u);
+    expect(workflow).not.toMatch(
+      /containers push|d1 migrations apply|ensure-cloudflare-processing-resources/u,
+    );
+  });
+
+  it("fails closed on failure or cancellation before reporting success", () => {
+    expect(workflow).toContain(
+      "if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())",
+    );
+    expect(workflow).toContain("--mode disable-current");
+    expect(workflow).toContain('wrangler queues pause-delivery "$QUEUE_NAME"');
+    expect(workflow).toContain('wrangler versions deploy "$CANARY_VERSION_ID@100%"');
+    expect(workflow).toContain('body.execution !== "local"');
+    expect(workflow).toContain('test "$QUEUE_RECOVERY" -eq 0');
+    expect(workflow).toContain('test "$CIRCUIT_RECOVERY" -eq 0');
+    expect(workflow).toContain('test "$VERSION_RECOVERY" -eq 0');
+    expect(workflow).toContain('test "$POLICY_RECOVERY" -eq 0');
+  });
+});

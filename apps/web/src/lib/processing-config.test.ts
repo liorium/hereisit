@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getOrCreateAnonymousSessionId,
   isUnprovenInAppBrowser,
+  readImageCompressionLocation,
   readProcessingClientConfig,
+  writeImageCompressionLocation,
 } from "./processing-config";
 
 class FakeStorage implements Storage {
@@ -82,5 +84,51 @@ describe("download handoff capability", () => {
         "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/126.0 Mobile/15E148 Safari/604.1",
       ),
     ).toBe(false);
+  });
+});
+
+describe("image compression location", () => {
+  it("defaults malformed or missing preferences to the server", () => {
+    const storage = new FakeStorage();
+    expect(readImageCompressionLocation(storage)).toBe("server");
+    storage.setItem("hereisit.image-compression-location.v1", "remote");
+    expect(readImageCompressionLocation(storage)).toBe("server");
+  });
+
+  it("persists an explicit local choice", () => {
+    const storage = new FakeStorage();
+    writeImageCompressionLocation("local", storage);
+    expect(storage.getItem("hereisit.image-compression-location.v1")).toBe("local");
+    expect(readImageCompressionLocation(storage)).toBe("local");
+  });
+
+  it("fails safely when preference storage is unavailable", () => {
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    } as unknown as Storage;
+    expect(readImageCompressionLocation(broken)).toBe("server");
+    expect(() => writeImageCompressionLocation("local", broken)).not.toThrow();
+  });
+
+  it("fails safely when the browser denies access to localStorage itself", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage denied", "SecurityError");
+      },
+    });
+    try {
+      expect(readImageCompressionLocation()).toBe("server");
+      expect(() => writeImageCompressionLocation("local")).not.toThrow();
+    } finally {
+      if (descriptor === undefined) delete (globalThis as { localStorage?: Storage }).localStorage;
+      else Object.defineProperty(globalThis, "localStorage", descriptor);
+    }
   });
 });

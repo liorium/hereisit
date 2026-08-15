@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveImageCompressScreen,
+  resolveImageCompressionExecution,
   summarizeImageCompression,
 } from "./image-compress-presentation";
 
@@ -18,6 +19,14 @@ describe("image compression presentation", () => {
     expect(
       deriveImageCompressScreen({ processing: false, archiving: false, completedCount: 1 }),
     ).toBe("result");
+  });
+
+  it("respects an explicit local choice and otherwise follows server availability", () => {
+    expect(resolveImageCompressionExecution("local", "checking")).toBe("local");
+    expect(resolveImageCompressionExecution("local", "server")).toBe("local");
+    expect(resolveImageCompressionExecution("server", "server")).toBe("server");
+    expect(resolveImageCompressionExecution("server", "local")).toBe("local");
+    expect(resolveImageCompressionExecution("server", "checking")).toBe("checking");
   });
 
   it("aggregates only completed result byte pairs", () => {

@@ -116,6 +116,49 @@
   border: 0;
 }
 
+.executionModes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.executionModes legend {
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.executionModes label {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-content: center;
+  gap: 3px 7px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.executionModes label[data-selected="true"] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--yellow) 20%, var(--panel));
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.executionModes input {
+  grid-row: 1 / 3;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--ink);
+}
+
+.executionModes span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .disclosure {
   display: flex;
   align-items: flex-start;
@@ -409,6 +452,7 @@
 .picker:focus-visible,
 .settings summary:focus-visible,
 .individualResults summary:focus-visible,
+.executionModes input:focus-visible,
 .presets input:focus-visible,
 .individualResults button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--ink) 36%, transparent);
@@ -441,10 +485,12 @@
     font-size: 1.05rem;
   }
 
+  .executionModes,
   .presets {
     grid-template-columns: 1fr;
   }
 
+  .executionModes label,
   .presets label {
     min-height: 64px;
   }

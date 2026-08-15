@@ -22,6 +22,7 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } f
 import { downloadUrl, formatBytes } from "../lib/files";
 import {
   deriveImageCompressScreen,
+  resolveImageCompressionExecution,
   summarizeImageCompression,
 } from "../lib/image-compress-presentation";
 import {
@@ -30,8 +31,11 @@ import {
 } from "../lib/local-image-optimize-fallback";
 import {
   getOrCreateAnonymousSessionId,
+  type ImageCompressionLocation,
   isUnprovenInAppBrowser,
+  readImageCompressionLocation,
   readProcessingClientConfig,
+  writeImageCompressionLocation,
 } from "../lib/processing-config";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import {
@@ -49,6 +53,8 @@ const HEIC_GUIDANCE =
   "HEIC·HEIF는 같은 형식으로 압축할 수 없어요. 이미지 형식 변환 도구를 이용해 주세요.";
 const SUPPORTED_IMAGE_GUIDANCE =
   "JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.";
+const SERVER_DISCLOSURE = "선택한 파일을 HereIsIt 서버에서 처리하고 완료 후 삭제해요.";
+const LOCAL_DISCLOSURE = "파일은 업로드하지 않고 이 기기에서 처리해요.";
 
 type Preset = "recommended" | "smallest" | "lossless";
 type PolicyView =
@@ -120,6 +126,7 @@ async function disposeRemoteItems(items: readonly WorkItem[]): Promise<void> {
 export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const config = useMemo(() => readProcessingClientConfig(), []);
   const sessionId = useMemo(() => getOrCreateAnonymousSessionId(), []);
+  const [location, setLocation] = useState<ImageCompressionLocation>("server");
   const [policy, setPolicy] = useState<PolicyView>({ state: "checking" });
   const [items, setItems] = useState<readonly WorkItem[]>([]);
   const [preset, setPreset] = useState<Preset>("recommended");
@@ -144,6 +151,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   const downloadHandoffRef = useRef(false);
   const remoteDeliveryLockRef = useRef(false);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
+  const locationRef = useRef(location);
+
+  useEffect(() => {
+    const saved = readImageCompressionLocation();
+    locationRef.current = saved;
+    setLocation(saved);
+  }, []);
 
   useEffect(() => {
     setImageRuntimeSupported(supportsBrowserImageRuntime());
@@ -161,9 +175,9 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
   useEffect(() => {
     let active = true;
     if (config.apiOrigin === null) {
-      setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
+      setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
       if (!hasFileSelectionRef.current) {
-        setMessage("파일은 업로드하지 않고 이 기기에서 처리해요.");
+        setMessage(LOCAL_DISCLOSURE);
       }
       return () => {
         active = false;
@@ -175,13 +189,17 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
         if (value.execution === "server") {
           setPolicy({
             state: "server",
-            text: "파일은 HereIsIt 처리 서버로 전송되며 작업 후 자동 삭제를 시도해요.",
+            text: SERVER_DISCLOSURE,
           });
-          if (!hasFileSelectionRef.current) setMessage("서버 처리 정책을 확인했어요.");
+          if (!hasFileSelectionRef.current) {
+            setMessage(
+              locationRef.current === "local" ? LOCAL_DISCLOSURE : "서버 처리 정책을 확인했어요.",
+            );
+          }
         } else {
           setPolicy({
             state: "local",
-            text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
+            text: LOCAL_DISCLOSURE,
           });
           if (!hasFileSelectionRef.current) {
             setMessage(
@@ -194,7 +212,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       })
       .catch(() => {
         if (!active) return;
-        setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
+        setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
         if (!hasFileSelectionRef.current) {
           setMessage("서버에 연결하지 못해 로컬 처리로 전환했어요.");
         }
@@ -316,7 +334,14 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     setMessage([prefix, ...rejected].join(" "));
   }, []);
 
-  const executionReady = policy.state !== "checking" && inspectionRuntimeSupported;
+  const effectiveExecution = resolveImageCompressionExecution(location, policy.state);
+  const disclosureText =
+    effectiveExecution === "checking"
+      ? "처리 방식을 확인하고 있어요."
+      : effectiveExecution === "local"
+        ? LOCAL_DISCLOSURE
+        : SERVER_DISCLOSURE;
+  const executionReady = effectiveExecution !== "checking" && inspectionRuntimeSupported;
   const busy = processing || archiving || remoteDeliveryBusy;
 
   usePendingToolFiles({
@@ -343,6 +368,21 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     itemsRef.current = reset;
     setItems(reset);
     setMessage("압축 설정이 바뀌었어요. 다시 처리해 주세요.");
+  };
+
+  const changeLocation = (value: ImageCompressionLocation) => {
+    locationRef.current = value;
+    setLocation(value);
+    writeImageCompressionLocation(value);
+    setMessage(
+      value === "local"
+        ? LOCAL_DISCLOSURE
+        : policy.state === "checking"
+          ? "처리 방식을 확인하고 있어요."
+          : policy.state === "server"
+            ? SERVER_DISCLOSURE
+            : policy.text,
+    );
   };
 
   const runLocal = async (
@@ -435,7 +475,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       processing ||
       remoteDeliveryBusy ||
       items.length === 0 ||
-      policy.state === "checking"
+      effectiveExecution === "checking"
     )
       return;
     const sourceItems = items.filter((item) => item.status === "ready" || item.status === "failed");
@@ -461,8 +501,8 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       }
     };
     try {
-      let execution: "server" | "local" = policy.state === "server" ? "server" : "local";
-      if (config.apiOrigin !== null) {
+      let execution: "server" | "local" = effectiveExecution;
+      if (location === "server" && config.apiOrigin !== null) {
         setMessage("처리 정책을 다시 확인하고 있어요.");
         try {
           const refreshed = await getProcessingPolicy({
@@ -475,13 +515,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             execution = "server";
             setPolicy({
               state: "server",
-              text: "파일은 HereIsIt 처리 서버로 전송되며 작업 후 자동 삭제를 시도해요.",
+              text: SERVER_DISCLOSURE,
             });
           } else {
             execution = "local";
             setPolicy({
               state: "local",
-              text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
+              text: LOCAL_DISCLOSURE,
             });
           }
         } catch {
@@ -491,7 +531,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             return;
           }
           execution = "local";
-          setPolicy({ state: "local", text: "파일은 업로드하지 않고 이 기기에서 처리해요." });
+          setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
         }
       }
 
@@ -584,7 +624,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             if (result.error.code === "RATE_LIMITED" || result.error.code === "QUOTA_EXCEEDED") {
               setPolicy({
                 state: "local",
-                text: "파일은 업로드하지 않고 이 기기에서 처리해요.",
+                text: LOCAL_DISCLOSURE,
               });
             }
             fallback.push(source);
@@ -600,7 +640,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           }
         }
         if (fallback.length > 0) {
-          setMessage("서버 처리를 시작하지 못한 이미지를 업로드 없이 다시 처리해요.");
+          setMessage("서버를 사용할 수 없어 이 기기에서 처리했어요.");
           recordLocalResults(await runLocal(fallback, spec, processingController.signal));
         }
       } else {
@@ -819,13 +859,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     items.length === 0 &&
     (statusMessage === "처리 방식을 확인하고 있어요." ||
       statusMessage === "서버 처리 정책을 확인했어요." ||
-      (policy.state !== "checking" && statusMessage === policy.text));
+      statusMessage === disclosureText);
   const runDisabled =
     actionableCount === 0 ||
     inspecting ||
-    policy.state === "checking" ||
+    effectiveExecution === "checking" ||
     remoteDeliveryBusy ||
-    (policy.state === "local" &&
+    (effectiveExecution === "local" &&
       (preset === "lossless" ? !inspectionRuntimeSupported : !imageRuntimeSupported));
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -853,13 +893,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     setItems([]);
     setDragging(false);
     await disposeRemoteItems(previous);
-    setMessage(
-      policy.state === "checking"
-        ? "처리 방식을 확인하고 있어요."
-        : policy.state === "server"
-          ? "서버 처리 정책을 확인했어요."
-          : policy.text,
-    );
+    setMessage(disclosureText);
   };
 
   return (
@@ -925,9 +959,34 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             disabled={!executionReady || busy}
             onChange={handleFileInputChange}
           />
-          <p className={styles.disclosure} data-policy={policy.state}>
-            {policy.state === "checking" ? "처리 방식을 확인하고 있어요." : policy.text}
-            {policy.state === "server" ? <a href="/privacy">자세히</a> : null}
+          <fieldset className={styles.executionModes}>
+            <legend>처리 방식</legend>
+            <label data-selected={location === "server"}>
+              <input
+                type="radio"
+                name="image-processing-location"
+                value="server"
+                checked={location === "server"}
+                onChange={() => changeLocation("server")}
+              />
+              <strong>고성능 서버 압축</strong>
+              <span>처리 후 자동 삭제</span>
+            </label>
+            <label data-selected={location === "local"}>
+              <input
+                type="radio"
+                name="image-processing-location"
+                value="local"
+                checked={location === "local"}
+                onChange={() => changeLocation("local")}
+              />
+              <strong>내 기기에서 처리</strong>
+              <span>파일 전송 없음</span>
+            </label>
+          </fieldset>
+          <p className={styles.disclosure} data-policy={effectiveExecution}>
+            {disclosureText}
+            {effectiveExecution === "server" ? <a href="/privacy">자세히</a> : null}
           </p>
           {items.length > 0 ? (
             <details className={styles.settings}>

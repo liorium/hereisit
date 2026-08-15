@@ -2,7 +2,9 @@
 
 ## Product principles
 
-- Prefer local browser processing. A file must not leave the device unless the UI explicitly says so.
+- Prefer local browser processing, except that `/image/compress` defaults to the disclosed native server
+  engine and keeps local processing as an explicit option. A file must not leave the device unless the UI
+  explicitly says so.
 - Optimize for time-to-first-feedback, bounded memory, and honest progress reporting.
 - Keep every tool behind a versioned contract so browser and server implementations can coexist.
 - Do not add a new dependency when a small, tested platform implementation is sufficient.
