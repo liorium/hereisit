@@ -125,9 +125,60 @@ describe("processing cost provider inspection", () => {
       }),
     ).resolves.toEqual({
       targetHourKey,
-      logpush: { reachable: false, httpStatus: 401 },
-      analytics: { reachable: false, httpStatus: 401 },
-      container: { reachable: false, httpStatus: 403 },
+      logpush: { reachable: false, httpStatus: 401, failure: "http-error" },
+      analytics: { reachable: false, httpStatus: 401, failure: "http-error" },
+      container: { reachable: false, httpStatus: 403, failure: "http-error" },
+    });
+  });
+
+  it("classifies successful but rejected envelopes without exposing their contents", async () => {
+    const schemaSha256 = await providerUsageContractSha256();
+    const hourEnd = new Date((targetHourKey + 1) * 3_600_000).toISOString();
+    await expect(
+      inspectProcessingCostProviders({
+        state: { activeVersionId, targetHourKey },
+        workerVersion: workerVersion(schemaSha256),
+        accountId,
+        analyticsReadToken: "analytics-token",
+        logpushStatusToken: "logpush-token",
+        fetchImpl: async (input) => {
+          const url = String(input);
+          if (url.includes("/logpush/jobs/41")) {
+            return Response.json({
+              success: true,
+              errors: [],
+              messages: [],
+              result: {
+                id: 41,
+                dataset: "workers_trace_events",
+                enabled: true,
+                last_complete: hourEnd,
+                last_error: null,
+                error_message: null,
+              },
+            });
+          }
+          if (url.includes("/analytics_engine/sql")) return Response.json({ private: true });
+          if (url.endsWith("/graphql")) {
+            return Response.json({ data: null, errors: [{ private: true }] });
+          }
+          throw new Error("unexpected provider request");
+        },
+      }),
+    ).resolves.toEqual({
+      targetHourKey,
+      logpush: {
+        reachable: true,
+        complete: true,
+        lastCompleteMilliseconds: Date.parse(hourEnd),
+      },
+      analytics: {
+        reachable: false,
+        httpStatus: 200,
+        failure: "schema",
+        schemaIssues: ["invalid_type:meta", "invalid_type:data", "invalid_type:rows"],
+      },
+      container: { reachable: false, httpStatus: 200, failure: "provider-error" },
     });
   });
 });

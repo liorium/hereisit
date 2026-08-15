@@ -46,12 +46,44 @@ function trackedFetch(fetchImpl) {
   };
 }
 
+function failureKind(error, status) {
+  if (status !== undefined && status >= 400) return "http-error";
+  if (error instanceof Error && error.name === "ZodError") return "schema";
+  if (!(error instanceof Error)) return "unknown";
+  return (
+    new Map([
+      ["Analytics response row count is inconsistent.", "row-count"],
+      ["Sampled Analytics results cannot seal provider usage.", "sampled"],
+      ["Container provider GraphQL response contains errors.", "provider-error"],
+      ["Container provider pagination envelope is invalid.", "pagination"],
+      ["Container provider resource envelope is invalid.", "resource"],
+      ["Container provider resource ordering is invalid.", "resource"],
+    ]).get(error.message) ?? "invalid-response"
+  );
+}
+
 async function projected(promise, project, httpStatus) {
   try {
     return { reachable: true, ...project(await promise) };
-  } catch {
+  } catch (error) {
     const status = httpStatus();
-    return status === undefined ? { reachable: false } : { reachable: false, httpStatus: status };
+    const schemaIssues =
+      error instanceof Error &&
+      error.name === "ZodError" &&
+      Array.isArray(error.issues) &&
+      error.issues.length > 0
+        ? error.issues
+            .slice(0, 8)
+            .map((issue) => `${String(issue.code)}:${issue.path.map(String).join(".")}`)
+        : undefined;
+    return status === undefined
+      ? { reachable: false }
+      : {
+          reachable: false,
+          httpStatus: status,
+          failure: failureKind(error, status),
+          ...(schemaIssues === undefined ? {} : { schemaIssues }),
+        };
   }
 }
 
