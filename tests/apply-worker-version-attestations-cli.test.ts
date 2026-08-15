@@ -287,8 +287,8 @@ describe("Worker version attestation application CLI", () => {
             fetchImpl,
           },
         ),
-      ).resolves.toEqual({ applied: true, statements: 6, verificationQueries: 2 });
-      expect(calls).toHaveLength(4);
+      ).resolves.toEqual({ applied: true, statements: 7, verificationQueries: 3 });
+      expect(calls).toHaveLength(5);
       expect(calls.every((call) => call.authorization === "Bearer deployment-token")).toBe(true);
       expect(JSON.stringify(calls.map((call) => call.body))).not.toContain("deployment-token");
       expect(JSON.stringify(calls.map((call) => call.body))).not.toContain(attestationFile);

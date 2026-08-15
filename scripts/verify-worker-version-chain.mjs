@@ -638,7 +638,12 @@ const upsertAttestationSql =
 export function createWorkerVersionAttestationBatch(attestationValue) {
   const attestation = validateWorkerVersionAttestation(attestationValue);
   const observedAt = Date.parse(attestation.verifiedAt);
-  const statements = [];
+  const statements = [
+    {
+      sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = MAX(observed_at, ?) WHERE kind = ? AND version_id <> ?",
+      params: ["retired", observedAt, "active", attestation.activeVersionId],
+    },
+  ];
   if (attestation.previousActive !== null) {
     statements.push({
       sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE version_id = ?",
@@ -708,6 +713,11 @@ export function createWorkerVersionAttestationBatch(attestationValue) {
         sql: `SELECT version_id AS versionId, worker_module_sha256 AS workerModuleSha256, generated_config_sha256 AS generatedConfigSha256, release_report_sha256 AS releaseReportSha256 FROM worker_version_attestations WHERE version_id IN (${newIds.map(() => "?").join(", ")}) ORDER BY version_id`,
         params: newIds,
         expected: hashExpected,
+      },
+      {
+        sql: "SELECT version_id AS versionId, public_admission_allowed AS publicAdmissionAllowed FROM worker_version_attestations WHERE kind = 'active' ORDER BY version_id",
+        params: [],
+        expected: [{ versionId: attestation.activeVersionId, publicAdmissionAllowed: 1 }],
       },
     ],
   };

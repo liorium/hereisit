@@ -193,5 +193,41 @@ describe("Worker version attestation migration", () => {
         .prepare("SELECT version_id AS versionId FROM worker_version_attestations WHERE kind = ?")
         .all("active"),
     ).toEqual([{ versionId: versionIds[6] }]);
+
+    database
+      .prepare(
+        "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = observed_at WHERE version_id = ?",
+      )
+      .run("retired", versionIds[6]);
+    const driftedVersionId = "00000000-0000-0000-0000-000000000008";
+    insertAttestation(database, {
+      versionId: driftedVersionId,
+      workerModuleSha256: "d".repeat(64),
+      generatedConfigSha256: "e".repeat(64),
+      releaseReportSha256: "f".repeat(64),
+      observedAt: Date.parse("2026-07-20T00:00:00.000Z"),
+    });
+
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const statement of batch.statements) {
+        database.prepare(statement.sql).run(...statement.params);
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+
+    for (const query of batch.verification) {
+      expect(database.prepare(query.sql).all(...query.params)).toEqual(query.expected);
+    }
+    expect(
+      database
+        .prepare(
+          "SELECT kind, public_admission_allowed AS publicAdmissionAllowed FROM worker_version_attestations WHERE version_id = ?",
+        )
+        .get(driftedVersionId),
+    ).toEqual({ kind: "retired", publicAdmissionAllowed: 0 });
   });
 });
