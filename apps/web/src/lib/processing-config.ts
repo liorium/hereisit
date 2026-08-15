@@ -78,11 +78,12 @@ export function isUnprovenInAppBrowser(userAgent?: string): boolean {
   return !/Safari|CriOS|FxiOS|EdgiOS|OPiOS/i.test(value);
 }
 
-export function readImageCompressionLocation(
-  storage: Storage = globalThis.localStorage,
-): ImageCompressionLocation {
+export function readImageCompressionLocation(storage?: Storage): ImageCompressionLocation {
   try {
-    return storage.getItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY) === "local" ? "local" : "server";
+    return (storage ?? globalThis.localStorage).getItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY) ===
+      "local"
+      ? "local"
+      : "server";
   } catch {
     return "server";
   }
@@ -90,10 +91,10 @@ export function readImageCompressionLocation(
 
 export function writeImageCompressionLocation(
   value: ImageCompressionLocation,
-  storage: Storage = globalThis.localStorage,
+  storage?: Storage,
 ): void {
   try {
-    storage.setItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY, value);
+    (storage ?? globalThis.localStorage).setItem(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY, value);
   } catch {
     // Privacy modes may deny localStorage; the current React state still applies.
   }

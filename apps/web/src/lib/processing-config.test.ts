@@ -114,4 +114,21 @@ describe("image compression location", () => {
     expect(readImageCompressionLocation(broken)).toBe("server");
     expect(() => writeImageCompressionLocation("local", broken)).not.toThrow();
   });
+
+  it("fails safely when the browser denies access to localStorage itself", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("Storage denied", "SecurityError");
+      },
+    });
+    try {
+      expect(readImageCompressionLocation()).toBe("server");
+      expect(() => writeImageCompressionLocation("local")).not.toThrow();
+    } finally {
+      if (descriptor === undefined) delete (globalThis as { localStorage?: Storage }).localStorage;
+      else Object.defineProperty(globalThis, "localStorage", descriptor);
+    }
+  });
 });
