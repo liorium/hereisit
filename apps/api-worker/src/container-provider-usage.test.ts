@@ -91,6 +91,33 @@ describe("Cloudflare Container provider usage", () => {
     });
   });
 
+  it("accepts bounded opaque provider instance and region identifiers", async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      response(
+        usageBody()
+          .replace(instanceId, "01JHEREISITCONTAINERINSTANCE000000000000000000000000000000")
+          .replace('"region":"enam"', '"region":"WNAM"'),
+      ),
+    );
+
+    await expect(queryContainerUsageHour(fetcher, await validInput())).resolves.toMatchObject({
+      transmittedBytesByRegion: [{ region: "WNAM", transmittedBytes: "123" }],
+    });
+  });
+
+  it("rejects unsafe provider identifiers", async () => {
+    for (const replacement of ['"instanceId":"../private"', '"region":"bad region"']) {
+      const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        response(
+          replacement.startsWith('"instanceId"')
+            ? usageBody().replace(`"instanceId":"${instanceId}"`, replacement)
+            : usageBody().replace('"region":"enam"', replacement),
+        ),
+      );
+      await expect(queryContainerUsageHour(fetcher, await validInput())).rejects.toThrow();
+    }
+  });
+
   it("sums every application instance and preserves exact regional transmission totals", async () => {
     const first = usageBody();
     const secondRow = `{
