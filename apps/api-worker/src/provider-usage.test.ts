@@ -73,7 +73,7 @@ describe("Cloudflare provider usage checks", () => {
             entrypoint: "default",
             version_id: "123e4567-e89b-42d3-a456-426614174000",
             release_report_sha256: releaseReportSha256,
-            point_count: 3,
+            point_count: "3",
             minimum_sample_interval: 1,
             maximum_sample_interval: 1,
           },
@@ -129,6 +129,38 @@ describe("Cloudflare provider usage checks", () => {
         hourKey,
       }),
     ).rejects.toThrow(/sample/i);
+  });
+
+  it("rejects non-canonical or unsafe Analytics counts", async () => {
+    for (const pointCount of ["03", "9007199254740992"]) {
+      const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          meta: [],
+          data: [
+            {
+              event_type: "fetch",
+              entrypoint: "default",
+              version_id: "123e4567-e89b-42d3-a456-426614174000",
+              release_report_sha256: releaseReportSha256,
+              point_count: pointCount,
+              minimum_sample_interval: 1,
+              maximum_sample_interval: 1,
+            },
+          ],
+          rows: 1,
+        }),
+      );
+
+      await expect(
+        queryAnalyticsHour(fetcher, {
+          accountId,
+          token,
+          dataset: "hereisit_processing_usage_staging",
+          environment: "staging",
+          hourKey,
+        }),
+      ).rejects.toThrow();
+    }
   });
 
   it("rejects an Analytics event paired with the wrong Worker entrypoint", async () => {

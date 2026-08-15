@@ -10,6 +10,15 @@ const MAXIMUM_RESPONSE_BYTES = 64 * 1024;
 type ProviderFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 const nonnegativeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const providerInteger = z
+  .union([
+    nonnegativeInteger,
+    z
+      .string()
+      .regex(/^(0|[1-9][0-9]*)$/)
+      .transform(Number),
+  ])
+  .pipe(nonnegativeInteger);
 const logpushEnvelopeSchema = z
   .object({
     success: z.boolean(),
@@ -33,7 +42,7 @@ const analyticsRowSchema = z
     entrypoint: z.enum(["default", "queue", "scheduled"]),
     version_id: z.string().regex(UUID_PATTERN),
     release_report_sha256: z.string().regex(SHA256_PATTERN),
-    point_count: nonnegativeInteger,
+    point_count: providerInteger,
     minimum_sample_interval: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     maximum_sample_interval: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   })

@@ -5,6 +5,8 @@ import providerUsageContract from "../../../docs/deployment/provider-usage-schem
 
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const PROVIDER_IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const PROVIDER_REGION_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const TOKEN_PATTERN = /^[!-~]{1,4096}$/;
 const INT64_MAXIMUM = 9_223_372_036_854_775_807n;
@@ -25,8 +27,8 @@ const providerRowSchema = z
       .object({
         datetimeHour: z.string().min(1).max(64),
         applicationId: z.string().regex(UUID_PATTERN),
-        instanceId: z.string().regex(UUID_PATTERN),
-        region: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+        instanceId: z.string().regex(PROVIDER_IDENTIFIER_PATTERN),
+        region: z.string().regex(PROVIDER_REGION_PATTERN),
       })
       .strict(),
     sum: z
