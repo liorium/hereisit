@@ -172,7 +172,12 @@ describe("processing cost provider inspection", () => {
         complete: true,
         lastCompleteMilliseconds: Date.parse(hourEnd),
       },
-      analytics: { reachable: false, httpStatus: 200, failure: "schema" },
+      analytics: {
+        reachable: false,
+        httpStatus: 200,
+        failure: "schema",
+        schemaIssues: ["invalid_type:meta", "invalid_type:data", "invalid_type:rows"],
+      },
       container: { reachable: false, httpStatus: 200, failure: "provider-error" },
     });
   });

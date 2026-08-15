@@ -67,9 +67,23 @@ async function projected(promise, project, httpStatus) {
     return { reachable: true, ...project(await promise) };
   } catch (error) {
     const status = httpStatus();
+    const schemaIssues =
+      error instanceof Error &&
+      error.name === "ZodError" &&
+      Array.isArray(error.issues) &&
+      error.issues.length > 0
+        ? error.issues
+            .slice(0, 8)
+            .map((issue) => `${String(issue.code)}:${issue.path.map(String).join(".")}`)
+        : undefined;
     return status === undefined
       ? { reachable: false }
-      : { reachable: false, httpStatus: status, failure: failureKind(error, status) };
+      : {
+          reachable: false,
+          httpStatus: status,
+          failure: failureKind(error, status),
+          ...(schemaIssues === undefined ? {} : { schemaIssues }),
+        };
   }
 }
 
