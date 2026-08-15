@@ -37,6 +37,17 @@ describe("processing client configuration", () => {
     expect(readProcessingClientConfig()).toEqual({ apiOrigin: null });
   });
 
+  it("uses the official API when an official production build omits the public origin", () => {
+    vi.stubEnv("NEXT_PUBLIC_PROCESSING_API_ORIGIN", "");
+    expect(readProcessingClientConfig("https://hereisit.app")).toEqual({
+      apiOrigin: "https://api.hereisit.app",
+    });
+    expect(readProcessingClientConfig("https://hereisit.pages.dev")).toEqual({
+      apiOrigin: "https://api.hereisit.app",
+    });
+    expect(readProcessingClientConfig("https://preview.example")).toEqual({ apiOrigin: null });
+  });
+
   it("accepts an exact HTTPS origin and rejects paths or credentials", () => {
     vi.stubEnv("NEXT_PUBLIC_PROCESSING_API_ORIGIN", "https://processing.example");
     expect(readProcessingClientConfig()).toEqual({ apiOrigin: "https://processing.example" });

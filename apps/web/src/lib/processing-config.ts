@@ -4,6 +4,8 @@ export interface ProcessingClientConfig {
 
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
 const IMAGE_COMPRESSION_LOCATION_STORAGE_KEY = "hereisit.image-compression-location.v1";
+const OFFICIAL_PROCESSING_API_ORIGIN = "https://api.hereisit.app";
+const OFFICIAL_PAGE_ORIGINS = new Set(["https://hereisit.app", "https://hereisit.pages.dev"]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 let memorySessionId: string | null = null;
 
@@ -33,9 +35,16 @@ function normalizePublicOrigin(value: string | undefined): string | null {
   return url.origin;
 }
 
-export function readProcessingClientConfig(): ProcessingClientConfig {
+export function readProcessingClientConfig(
+  pageOrigin = typeof location === "undefined" ? null : location.origin,
+): ProcessingClientConfig {
+  const configured = normalizePublicOrigin(process.env.NEXT_PUBLIC_PROCESSING_API_ORIGIN);
   return {
-    apiOrigin: normalizePublicOrigin(process.env.NEXT_PUBLIC_PROCESSING_API_ORIGIN),
+    apiOrigin:
+      configured ??
+      (pageOrigin !== null && OFFICIAL_PAGE_ORIGINS.has(pageOrigin)
+        ? OFFICIAL_PROCESSING_API_ORIGIN
+        : null),
   };
 }
 
