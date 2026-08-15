@@ -395,8 +395,10 @@ jobs:
           import { runProcessingPublicSmokeCli } from "./scripts/smoke-image-compress-server.mjs";
           try {
             await runProcessingPublicSmokeCli({ argv: ["--page-origin", process.argv[2], "--output", process.argv[3]] });
-          } catch {
-            process.stderr.write("processing production public smoke failed\n");
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "processing production public smoke failed";
+            process.stderr.write(`${message}\n`);
             process.exitCode = 1;
           }
           NODE
