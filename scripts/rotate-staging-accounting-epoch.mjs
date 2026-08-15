@@ -9,6 +9,7 @@ const DATABASE_ID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const EPOCH_PATTERN = /^[0-9a-f]{32}$/;
 const HOUR_MILLISECONDS = 3_600_000;
+const PUBLIC_ADMISSION_REARM_MODE = "public-admission-rearm";
 
 function requireInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -37,6 +38,7 @@ export async function rotateStagingAccountingEpoch({
   databaseId,
   apiToken,
   releaseReportSha256,
+  mode = "release",
   now = Date.now(),
   fetchImpl = fetch,
 }) {
@@ -53,10 +55,19 @@ export async function rotateStagingAccountingEpoch({
     throw new TypeError("release report SHA-256 is invalid");
   }
   if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
+  if (mode !== "release" && mode !== PUBLIC_ADMISSION_REARM_MODE) {
+    throw new TypeError("cost accounting epoch rotation mode is invalid");
+  }
   requireInteger(now, "rotation time");
   const accountingStartedAt = (Math.floor(now / HOUR_MILLISECONDS) + 1) * HOUR_MILLISECONDS;
+  const staleCutoff = Math.max(0, now - 2 * HOUR_MILLISECONDS);
   requireInteger(accountingStartedAt, "accounting start time");
+  requireInteger(staleCutoff, "stale accounting cutoff");
   const accountingEpoch = randomBytes(16).toString("hex");
+  const markerTask =
+    mode === PUBLIC_ADMISSION_REARM_MODE
+      ? "cost-accounting-public-admission"
+      : "cost-accounting-release";
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
   const statements = [
     {
@@ -77,6 +88,7 @@ SET cost_accounting_epoch = ?,
     manual_reset_at = ?
 WHERE id = 1
   AND deletion_overdue_count = 0
+  ${mode === PUBLIC_ADMISSION_REARM_MODE ? "AND last_sealed_hour_key IS NULL\n  AND cost_accounting_started_at <= ?" : ""}
   AND (circuit_open = 0 OR reason IN (
     'COST_ACCOUNTING_INCOMPLETE',
     'COST_ACCOUNTING_HASH_MISMATCH',
@@ -93,18 +105,26 @@ WHERE id = 1
   )
   AND NOT EXISTS (
     SELECT 1 FROM maintenance_cursors
-    WHERE task = 'cost-accounting-release' AND cursor = ?
+    WHERE task = ? AND cursor = ?
   )`,
-      params: [accountingEpoch, accountingStartedAt, now, releaseReportSha256, releaseReportSha256],
+      params: [
+        accountingEpoch,
+        accountingStartedAt,
+        now,
+        ...(mode === PUBLIC_ADMISSION_REARM_MODE ? [staleCutoff] : []),
+        releaseReportSha256,
+        markerTask,
+        releaseReportSha256,
+      ],
     },
     {
       sql: `INSERT INTO maintenance_cursors (task, cursor, updated_at)
-SELECT 'cost-accounting-release', ?, ?
+SELECT ?, ?, ?
 WHERE changes() = 1
 ON CONFLICT(task) DO UPDATE SET
   cursor = excluded.cursor,
   updated_at = excluded.updated_at`,
-      params: [releaseReportSha256, now],
+      params: [markerTask, releaseReportSha256, now],
     },
   ];
   const writes = await postD1Query({
@@ -127,6 +147,7 @@ ON CONFLICT(task) DO UPDATE SET
   control.reason AS reason,
   control.opened_at AS openedAt,
   control.manual_reset_at AS manualResetAt,
+  control.last_sealed_hour_key AS lastSealedHourKey,
   marker.cursor AS releaseMarker,
   (
     SELECT COUNT(*) FROM worker_version_attestations
@@ -138,20 +159,29 @@ ON CONFLICT(task) DO UPDATE SET
   ) AS nonterminalJobCount,
   control.deletion_overdue_count AS deletionOverdueCount
 FROM rollout_control AS control
-LEFT JOIN maintenance_cursors AS marker ON marker.task = 'cost-accounting-release'
+LEFT JOIN maintenance_cursors AS marker ON marker.task = ?
 WHERE control.id = 1`;
   const [verification] = await postD1Query({
     url,
     apiToken,
-    body: { sql: verificationSql, params: [releaseReportSha256] },
+    body: { sql: verificationSql, params: [releaseReportSha256, markerTask] },
     expectedCount: 1,
     fetchImpl,
   });
   const row = requireRow(verification.results[0]);
+  const lastSealedHourKeyValid =
+    row.lastSealedHourKey === null ||
+    (Number.isSafeInteger(row.lastSealedHourKey) && row.lastSealedHourKey >= 0);
+  const staleUnsealed = row.lastSealedHourKey === null && row.accountingStartedAt <= staleCutoff;
+  const markerConverged =
+    mode === PUBLIC_ADMISSION_REARM_MODE
+      ? !staleUnsealed
+      : row.releaseMarker === releaseReportSha256;
   const commonConverged =
     EPOCH_PATTERN.test(row.accountingEpoch) &&
     Number.isSafeInteger(row.accountingStartedAt) &&
-    row.releaseMarker === releaseReportSha256 &&
+    lastSealedHourKeyValid &&
+    markerConverged &&
     row.activeReleaseCount === 1 &&
     row.nonterminalJobCount === 0 &&
     row.deletionOverdueCount === 0;
@@ -176,11 +206,12 @@ WHERE control.id = 1`;
 
 export async function runRotateStagingAccountingEpochCli(argv, { env = process.env } = {}) {
   const args = parseCliArguments(argv);
-  const allowed = new Set(["account-id", "database-id", "release-report-sha256"]);
+  const required = new Set(["account-id", "database-id", "release-report-sha256"]);
+  const allowed = new Set([...required, "mode"]);
   if (Object.keys(args).some((key) => !allowed.has(key))) {
     throw new TypeError("unknown staging accounting epoch argument");
   }
-  for (const name of allowed) {
+  for (const name of required) {
     if (args[name] === undefined) throw new TypeError(`--${name} is required`);
   }
   if (typeof env.CLOUDFLARE_D1_API_TOKEN !== "string" || env.CLOUDFLARE_D1_API_TOKEN.length === 0) {
@@ -191,6 +222,7 @@ export async function runRotateStagingAccountingEpochCli(argv, { env = process.e
     databaseId: args["database-id"],
     apiToken: env.CLOUDFLARE_D1_API_TOKEN,
     releaseReportSha256: args["release-report-sha256"],
+    mode: args.mode ?? "release",
   });
 }
 
