@@ -107,4 +107,27 @@ describe("processing cost provider inspection", () => {
       container: { reachable: false },
     });
   });
+
+  it("reports only the bounded HTTP status of rejected provider responses", async () => {
+    const schemaSha256 = await providerUsageContractSha256();
+    await expect(
+      inspectProcessingCostProviders({
+        state: { activeVersionId, targetHourKey },
+        workerVersion: workerVersion(schemaSha256),
+        accountId,
+        analyticsReadToken: "analytics-token",
+        logpushStatusToken: "logpush-token",
+        fetchImpl: async (input) =>
+          new Response(String(input).includes("/graphql") ? "private response" : null, {
+            status: String(input).includes("/graphql") ? 403 : 401,
+            headers: { "content-type": "text/plain" },
+          }),
+      }),
+    ).resolves.toEqual({
+      targetHourKey,
+      logpush: { reachable: false, httpStatus: 401 },
+      analytics: { reachable: false, httpStatus: 401 },
+      container: { reachable: false, httpStatus: 403 },
+    });
+  });
 });
