@@ -55,9 +55,16 @@ describe("deployed image canary admission workflow", () => {
     expect(restore).toBeLessThan(pause);
     const restoreStep = workflow.slice(restore, pause);
     expect(restoreStep).toContain('wrangler versions deploy "$CANARY_VERSION_ID@100%"');
+    expect(restoreStep).toContain("apply-worker-version-attestations.mjs");
+    expect(restoreStep).toContain(".artifacts/canary/worker-version.json");
+    expect(restoreStep).toContain("verify-processing-admission-state.mjs");
+    expect(restoreStep).toContain('--expected-release-report-sha256 "$SOURCE_SHA256"');
     expect(restoreStep).toContain("verifyActiveWorkerDeployment");
     expect(restoreStep).toContain('body.execution === "local"');
     expect(restoreStep).toContain("body.disclosure?.upload === false");
+    expect(workflow.slice(discover, mutation)).not.toContain(
+      "verify-processing-admission-state.mjs",
+    );
   });
 
   it("fails closed on failure or cancellation before reporting success", () => {

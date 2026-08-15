@@ -254,10 +254,6 @@ jobs:
           process.stdout.write(deployment.versions.length === 1 && deployment.versions[0].version_id === process.argv[2] && deployment.versions[0].percentage === 100 ? "false" : "true");
           NODE
           )"
-          node scripts/verify-processing-admission-state.mjs \
-            --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
-            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/preflight.json
           generate_config public
           cp "$WRANGLER_CONFIG" .artifacts/runtime/public-wrangler.jsonc
           {
@@ -271,6 +267,7 @@ jobs:
       - name: Restore and verify the exact local canary before admission
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
         run: |
           set -euo pipefail
           if [[ "$CANARY_RESTORE_REQUIRED" == true ]]; then
@@ -282,6 +279,13 @@ jobs:
           import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
           verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
           NODE
+          node scripts/apply-worker-version-attestations.mjs \
+            --attestation .artifacts/canary/worker-version.json \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID"
+          node scripts/verify-processing-admission-state.mjs \
+            --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
+            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/preflight.json
           node --input-type=module - <<'NODE'
           import { setTimeout as delay } from "node:timers/promises";
           for (let attempt = 1; attempt <= 30; attempt += 1) {
@@ -417,6 +421,11 @@ jobs:
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?
           VERSION_RECOVERY=0
           pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes || VERSION_RECOVERY=$?
+          if [[ "$VERSION_RECOVERY" -eq 0 ]]; then
+            node scripts/apply-worker-version-attestations.mjs \
+              --attestation .artifacts/canary/worker-version.json \
+              --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" || VERSION_RECOVERY=$?
+          fi
           POLICY_RECOVERY=0
           node --input-type=module - <<'NODE' || POLICY_RECOVERY=$?
           const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {

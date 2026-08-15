@@ -75,7 +75,7 @@ function validateBatch(value) {
   if (
     !Array.isArray(batch.statements) ||
     batch.statements.length < 1 ||
-    batch.statements.length > 7
+    batch.statements.length > 8
   ) {
     throw new TypeError("D1 attestation batch statement count is invalid");
   }
@@ -95,7 +95,7 @@ function validateBatch(value) {
   if (
     !Array.isArray(batch.verification) ||
     batch.verification.length < 1 ||
-    batch.verification.length > 2
+    batch.verification.length > 3
   ) {
     throw new TypeError("D1 attestation verification count is invalid");
   }

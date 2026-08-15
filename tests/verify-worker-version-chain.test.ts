@@ -430,8 +430,12 @@ describe("Worker version chain verifier", () => {
     const batch = createWorkerVersionAttestationBatch(attestation);
 
     expect(batch.version).toBe(1);
-    expect(batch.statements).toHaveLength(7);
+    expect(batch.statements).toHaveLength(8);
     expect(batch.statements[0]).toEqual({
+      sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = MAX(observed_at, ?) WHERE kind = ? AND version_id <> ?",
+      params: ["retired", Date.parse("2026-07-19T00:08:00.000Z"), "active", ids.final],
+    });
+    expect(batch.statements[1]).toEqual({
       sql: "UPDATE worker_version_attestations SET kind = ?, public_admission_allowed = 0, retired_at = ? WHERE version_id = ?",
       params: ["retired", Date.parse("2026-07-19T00:18:00.000Z"), ids.prior],
     });
@@ -476,6 +480,11 @@ describe("Worker version chain verifier", () => {
           releaseReportSha256: hashes.releaseReportSha256,
         }),
       ]),
+    });
+    expect(batch.verification[2]).toEqual({
+      sql: "SELECT version_id AS versionId, public_admission_allowed AS publicAdmissionAllowed FROM worker_version_attestations WHERE kind = 'active' ORDER BY version_id",
+      params: [],
+      expected: [{ versionId: ids.final, publicAdmissionAllowed: 1 }],
     });
     expect(JSON.stringify(batch)).not.toMatch(
       /author|email|destination|token|filename|object_key/i,
@@ -666,7 +675,7 @@ describe("Worker version chain verifier", () => {
       });
 
       expect(result.attestation.activeVersionId).toBe(ids.final);
-      expect(result.batch.statements).toHaveLength(7);
+      expect(result.batch.statements).toHaveLength(8);
       expect(JSON.parse(await readFile(paths.output, "utf8"))).toEqual(result.attestation);
       await runWorkerVersionChainCli(
         [
