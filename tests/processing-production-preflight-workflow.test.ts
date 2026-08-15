@@ -17,6 +17,10 @@ describe("processing production preflight workflow", () => {
     expect(workflow).toContain("pnpm exec wrangler d1 list --json");
     expect(workflow).toContain("--mode inspect-current");
     expect(workflow).toContain("processing-production-state.json");
+    expect(workflow).toContain("wrangler versions view");
+    expect(workflow).toContain("inspect-processing-cost-providers.mjs");
+    expect(workflow).toContain("processing-production-cost-providers.json");
+    expect(workflow).toContain("$RUNNER_TEMP/processing-production-worker-version.json");
     for (const secret of [
       "PRODUCTION_ANALYTICS_READ_TOKEN",
       "PRODUCTION_LOGPUSH_STATUS_TOKEN",
