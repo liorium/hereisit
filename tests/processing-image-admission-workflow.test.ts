@@ -75,9 +75,12 @@ describe("deployed image canary admission workflow", () => {
     );
     const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
     const restore = workflow.indexOf("Restore and verify the exact local canary before admission");
+    const rearm = workflow.indexOf("Rearm stale unsealed cost accounting once");
     const pause = workflow.indexOf("Pause and verify both queues before mutation");
     expect(discover).toBeGreaterThan(0);
     expect(discover).toBeLessThan(mutation);
+    expect(mutation).toBeLessThan(rearm);
+    expect(rearm).toBeLessThan(restore);
     expect(mutation).toBeLessThan(restore);
     expect(restore).toBeLessThan(pause);
     const restoreStep = workflow.slice(restore, pause);
@@ -94,6 +97,7 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow.slice(discover, mutation)).not.toContain(
       "verify-processing-admission-state.mjs",
     );
+    expect(workflow.slice(rearm, restore)).toContain("--mode public-admission-rearm");
   });
 
   it("fails closed on failure or cancellation before reporting success", () => {

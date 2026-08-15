@@ -142,6 +142,7 @@ describe("staging cost-accounting epoch rotation", () => {
             reason: "VERIFICATION_FAILED",
             openedAt: now + 1,
             manualResetAt: now,
+            lastSealedHourKey: 496100,
             releaseMarker: releaseReportSha256,
             activeReleaseCount: 1,
             nonterminalJobCount: 0,
@@ -163,6 +164,99 @@ describe("staging cost-accounting epoch rotation", () => {
     ).resolves.toMatchObject({ rotated: false, accountingEpoch, circuitOpen: true });
   });
 
+  it("rearms one stale unsealed epoch before delayed public admission", async () => {
+    const database = migratedDatabase();
+    database
+      .prepare(
+        `UPDATE rollout_control
+         SET cost_accounting_started_at = ?, circuit_open = 1,
+             reason = 'COST_ACCOUNTING_INCOMPLETE', opened_at = ?`,
+      )
+      .run(now - 4 * 3_600_000, now - 1);
+    database
+      .prepare(
+        `INSERT INTO maintenance_cursors (task, cursor, updated_at)
+         VALUES ('cost-accounting-release', ?, ?)`,
+      )
+      .run(releaseReportSha256, now - 4 * 3_600_000);
+    const fetchImpl = async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      if ("batch" in body) {
+        database.exec("BEGIN IMMEDIATE");
+        try {
+          const results = body.batch.map(
+            (statement: { sql: string; params: (string | number)[] }) => {
+              const changes = Number(
+                database.prepare(statement.sql).run(...statement.params).changes,
+              );
+              return result([], changes);
+            },
+          );
+          database.exec("COMMIT");
+          return response(results);
+        } catch (error) {
+          database.exec("ROLLBACK");
+          throw error;
+        }
+      }
+      return response([
+        result(database.prepare(body.sql).all(...body.params) as Record<string, unknown>[]),
+      ]);
+    };
+
+    await expect(
+      rotateStagingAccountingEpoch({
+        accountId,
+        databaseId,
+        apiToken: "d1-token",
+        releaseReportSha256,
+        now,
+        mode: "public-admission-rearm",
+        fetchImpl,
+      }),
+    ).resolves.toMatchObject({
+      rotated: true,
+      accountingStartedAt: Date.parse("2026-07-30T06:00:00.000Z"),
+      circuitOpen: false,
+    });
+    expect(
+      database
+        .prepare("SELECT cursor FROM maintenance_cursors WHERE task = ?")
+        .get("cost-accounting-public-admission"),
+    ).toEqual({ cursor: releaseReportSha256 });
+
+    await expect(
+      rotateStagingAccountingEpoch({
+        accountId,
+        databaseId,
+        apiToken: "d1-token",
+        releaseReportSha256,
+        now,
+        mode: "public-admission-rearm",
+        fetchImpl,
+      }),
+    ).resolves.toMatchObject({ rotated: false, circuitOpen: false });
+
+    database
+      .prepare(
+        `UPDATE rollout_control
+         SET cost_accounting_started_at = ?, circuit_open = 1,
+             reason = 'VERIFICATION_FAILED', opened_at = ?`,
+      )
+      .run(now - 4 * 3_600_000, now + 1);
+    await expect(
+      rotateStagingAccountingEpoch({
+        accountId,
+        databaseId,
+        apiToken: "d1-token",
+        releaseReportSha256,
+        now: now + 2,
+        mode: "public-admission-rearm",
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/guard|converge/i);
+  });
+
   it("rejects a new-release rotation when guarded state did not converge", async () => {
     const fetchImpl = async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
@@ -176,6 +270,7 @@ describe("staging cost-accounting epoch rotation", () => {
             reason: "DELETION_OVERDUE",
             openedAt: now,
             manualResetAt: null,
+            lastSealedHourKey: null,
             releaseMarker: null,
             activeReleaseCount: 1,
             nonterminalJobCount: 0,

@@ -282,6 +282,16 @@ jobs:
       - name: Arm fail-closed mutation recovery
         id: mutation
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
+      - name: Rearm stale unsealed cost accounting once
+        env:
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/rotate-staging-accounting-epoch.mjs \
+            --mode public-admission-rearm \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" \
+            --release-report-sha256 "$SOURCE_SHA256"
       - name: Restore and verify the exact local canary before admission
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
