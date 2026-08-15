@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hereisit.app/schemas/processing-application-release.schema.json",
+  "title": "HereIsIt Processing Application Release",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "gitSha",
+    "baseReleaseReportSha256",
+    "worker",
+    "web",
+    "security",
+    "createdAt",
+    "expiresAt",
+    "verificationSha256"
+  ],
+  "properties": {
+    "schema": { "const": "hereisit-processing-application-release@1" },
+    "version": { "const": 1 },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "baseReleaseReportSha256": { "$ref": "#/$defs/sha256" },
+    "worker": { "$ref": "#/$defs/artifact" },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["staging", "production"],
+      "properties": {
+        "staging": { "$ref": "#/$defs/webArtifact" },
+        "production": { "$ref": "#/$defs/webArtifact" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sboms", "vulnerabilityReports"],
+      "properties": {
+        "sboms": { "$ref": "#/$defs/scopes" },
+        "vulnerabilityReports": { "$ref": "#/$defs/scopes" }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "verificationSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^\\.artifacts/application/[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "sizeBytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "webArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256", "treeSha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^\\.artifacts/application/[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "sizeBytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "treeSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "scopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worker", "webStaging", "webProduction", "lockfile"],
+      "properties": {
+        "worker": { "$ref": "#/$defs/artifact" },
+        "webStaging": { "$ref": "#/$defs/artifact" },
+        "webProduction": { "$ref": "#/$defs/artifact" },
+        "lockfile": { "$ref": "#/$defs/artifact" }
+      }
+    }
+  }
+}
