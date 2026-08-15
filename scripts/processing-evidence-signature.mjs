@@ -42,6 +42,11 @@ async function readCanonicalBundle(path) {
       "./create-processing-deployment-report.mjs"
     );
     validateProcessingDeploymentReport(value);
+  } else if (value.schema === "hereisit-processing-application-release@1" && value.version === 1) {
+    const { validateProcessingApplicationRelease } = await import(
+      "./processing-application-release.mjs"
+    );
+    validateProcessingApplicationRelease(value);
   } else {
     throw new TypeError("processing evidence bundle schema or version is invalid");
   }
