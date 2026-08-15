@@ -42,6 +42,24 @@ describe("deployed image canary admission workflow", () => {
     );
   });
 
+  it("restores a drifted canary only after fail-closed recovery is armed", () => {
+    const discover = workflow.indexOf(
+      "Discover production resources and reconstruct the exact rollout pair",
+    );
+    const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
+    const restore = workflow.indexOf("Restore and verify the exact local canary before admission");
+    const pause = workflow.indexOf("Pause and verify both queues before mutation");
+    expect(discover).toBeGreaterThan(0);
+    expect(discover).toBeLessThan(mutation);
+    expect(mutation).toBeLessThan(restore);
+    expect(restore).toBeLessThan(pause);
+    const restoreStep = workflow.slice(restore, pause);
+    expect(restoreStep).toContain('wrangler versions deploy "$CANARY_VERSION_ID@100%"');
+    expect(restoreStep).toContain("verifyActiveWorkerDeployment");
+    expect(restoreStep).toContain('body.execution === "local"');
+    expect(restoreStep).toContain("body.disclosure?.upload === false");
+  });
+
   it("fails closed on failure or cancellation before reporting success", () => {
     expect(workflow).toContain(
       "if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())",

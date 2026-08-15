@@ -246,11 +246,14 @@ jobs:
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-before.json
           pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-before.json
           CANARY_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/canary/worker-version.json","utf8")); process.stdout.write(value.activeVersionId)')"
-          node --input-type=module - "$CANARY_VERSION_ID" <<'NODE'
+          CANARY_RESTORE_REQUIRED="$(node --input-type=module - "$CANARY_VERSION_ID" <<'NODE'
           import { readFile } from "node:fs/promises";
-          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
-          verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
+          const deployment = JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8"));
+          const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+          if (!Array.isArray(deployment?.versions) || deployment.versions.length === 0 || deployment.versions.some((entry) => !uuid.test(entry?.version_id ?? "") || !Number.isInteger(entry?.percentage) || entry.percentage < 0 || entry.percentage > 100) || deployment.versions.reduce((sum, entry) => sum + entry.percentage, 0) !== 100) throw new Error("current Worker deployment is invalid");
+          process.stdout.write(deployment.versions.length === 1 && deployment.versions[0].version_id === process.argv[2] && deployment.versions[0].percentage === 100 ? "false" : "true");
           NODE
+          )"
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
@@ -260,10 +263,39 @@ jobs:
           {
             echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
             echo "CANARY_VERSION_ID=$CANARY_VERSION_ID"
+            echo "CANARY_RESTORE_REQUIRED=$CANARY_RESTORE_REQUIRED"
           } >> "$GITHUB_ENV"
       - name: Arm fail-closed mutation recovery
         id: mutation
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
+      - name: Restore and verify the exact local canary before admission
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$CANARY_RESTORE_REQUIRED" == true ]]; then
+            pnpm exec wrangler versions deploy "$CANARY_VERSION_ID@100%" --config "$WRANGLER_CONFIG" --yes
+          fi
+          pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-before.json
+          node --input-type=module - "$CANARY_VERSION_ID" <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { verifyActiveWorkerDeployment } from "./scripts/verify-worker-version-chain.mjs";
+          verifyActiveWorkerDeployment(JSON.parse(await readFile(".artifacts/runtime/deployment-before.json", "utf8")), process.argv[2], "canary");
+          NODE
+          node --input-type=module - <<'NODE'
+          import { setTimeout as delay } from "node:timers/promises";
+          for (let attempt = 1; attempt <= 30; attempt += 1) {
+            const response = await fetch(`${process.env.PRODUCTION_API_ORIGIN}/v1/policy`, {
+              method: "POST",
+              headers: { "content-type": "application/json", origin: process.env.PRODUCTION_PAGES_ORIGIN },
+              body: JSON.stringify({ contract: "tool-job@1", toolContract: "image.optimize@1", anonymousSessionId: "018f47a2-65d4-7f31-a377-5afbb8f53f27" }),
+            });
+            const body = await response.json();
+            if (response.status === 200 && body.execution === "local" && body.reason === "LOCAL_FALLBACK_REQUIRED" && body.disclosure?.upload === false) process.exit(0);
+            if (attempt < 30) await delay(2_000);
+          }
+          throw new Error("restored canary policy did not converge to local");
+          NODE
       - name: Pause and verify both queues before mutation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
