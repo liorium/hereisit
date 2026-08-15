@@ -34,11 +34,24 @@ function plainTextBinding(workerVersion, name) {
   return matches[0].text;
 }
 
-async function projected(promise, project) {
+function trackedFetch(fetchImpl) {
+  let httpStatus;
+  return {
+    fetch: async (...args) => {
+      const response = await fetchImpl(...args);
+      httpStatus = response.status;
+      return response;
+    },
+    httpStatus: () => httpStatus,
+  };
+}
+
+async function projected(promise, project, httpStatus) {
   try {
     return { reachable: true, ...project(await promise) };
   } catch {
-    return { reachable: false };
+    const status = httpStatus();
+    return status === undefined ? { reachable: false } : { reachable: false, httpStatus: status };
   }
 }
 
@@ -78,18 +91,22 @@ export async function inspectProcessingCostProviders({
   }
   if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
 
+  const logpushFetch = trackedFetch(fetchImpl);
+  const analyticsFetch = trackedFetch(fetchImpl);
+  const containerFetch = trackedFetch(fetchImpl);
   const [logpush, analytics, container] = await Promise.all([
     projected(
-      checkLogpushHour(fetchImpl, {
+      checkLogpushHour(logpushFetch.fetch, {
         accountId,
         token: logpushStatusToken,
         jobId,
         hourKey: state.targetHourKey,
       }),
       (result) => result,
+      logpushFetch.httpStatus,
     ),
     projected(
-      queryAnalyticsHour(fetchImpl, {
+      queryAnalyticsHour(analyticsFetch.fetch, {
         accountId,
         token: analyticsReadToken,
         dataset,
@@ -100,9 +117,10 @@ export async function inspectProcessingCostProviders({
         handlerInvocationCount: result.handlerInvocationCount,
         groupCount: result.groups.length,
       }),
+      analyticsFetch.httpStatus,
     ),
     projected(
-      queryContainerUsageHour(fetchImpl, {
+      queryContainerUsageHour(containerFetch.fetch, {
         accountId,
         token: analyticsReadToken,
         applicationId,
@@ -117,6 +135,7 @@ export async function inspectProcessingCostProviders({
           result.transmittedBytes !== "0",
         regionCount: result.transmittedBytesByRegion.length,
       }),
+      containerFetch.httpStatus,
     ),
   ]);
   return { targetHourKey: state.targetHourKey, logpush, analytics, container };
