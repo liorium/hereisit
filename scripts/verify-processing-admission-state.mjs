@@ -14,7 +14,17 @@ const databaseIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const versionIdPattern = databaseIdPattern;
 const epochPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 
-export const processingAdmissionStateSql = `SELECT
+export const processingAdmissionStateSql = `WITH target AS (
+  SELECT control.*,
+         CASE
+           WHEN control.last_sealed_hour_key IS NULL
+             THEN CAST((control.cost_accounting_started_at + 3599999) / 3600000 AS INTEGER)
+           ELSE control.last_sealed_hour_key + 1
+         END AS target_hour_key
+  FROM rollout_control AS control
+  WHERE control.id = 1
+)
+SELECT
   control.circuit_open AS circuitOpen,
   control.reason AS circuitReason,
   control.deletion_overdue_count AS deletionOverdueCount,
@@ -24,10 +34,26 @@ export const processingAdmissionStateSql = `SELECT
   active.version_id AS activeVersionId,
   active.public_admission_allowed AS publicAdmissionAllowed,
   control.cost_accounting_epoch AS costAccountingEpoch,
+  control.cost_accounting_started_at AS costAccountingStartedAt,
+  control.last_sealed_hour_key AS lastSealedHourKey,
+  control.target_hour_key AS targetHourKey,
+  CASE WHEN cost.hour_key IS NULL THEN 0 ELSE 1 END AS targetCostRowPresent,
+  COALESCE(cost.provider_worker_usage_complete, 0) AS targetProviderWorkerUsageComplete,
+  COALESCE(cost.provider_container_usage_complete, 0) AS targetProviderContainerUsageComplete,
+  COALESCE(cost.analytics_engine_usage_complete, 0) AS targetAnalyticsUsageComplete,
+  COALESCE(cost.provider_usage_complete, 0) AS targetProviderUsageComplete,
+  COALESCE(cost.complete, 0) AS targetComplete,
+  CASE WHEN observation.hour_key IS NULL THEN 0 ELSE 1 END AS targetUsageObservationCount,
+  COALESCE(observation.matching_observation_count, 0) AS targetUsageObservationMatches,
   active.release_report_sha256 AS releaseReportSha256
-FROM rollout_control AS control
+FROM target AS control
 LEFT JOIN worker_version_attestations AS active ON active.kind = 'active'
-WHERE control.id = 1`;
+LEFT JOIN operational_cost_hourly AS cost
+  ON cost.accounting_epoch = control.cost_accounting_epoch
+ AND cost.hour_key = control.target_hour_key
+LEFT JOIN usage_log_hour_observations AS observation
+  ON observation.accounting_epoch = control.cost_accounting_epoch
+ AND observation.hour_key = control.target_hour_key`;
 
 const disableSql = `UPDATE rollout_control
 SET circuit_open = 1,
@@ -70,6 +96,17 @@ function validateStateRow(value) {
       "activeVersionId",
       "publicAdmissionAllowed",
       "costAccountingEpoch",
+      "costAccountingStartedAt",
+      "lastSealedHourKey",
+      "targetHourKey",
+      "targetCostRowPresent",
+      "targetProviderWorkerUsageComplete",
+      "targetProviderContainerUsageComplete",
+      "targetAnalyticsUsageComplete",
+      "targetProviderUsageComplete",
+      "targetComplete",
+      "targetUsageObservationCount",
+      "targetUsageObservationMatches",
       "releaseReportSha256",
     ],
     "processing admission state",
@@ -81,12 +118,55 @@ function validateStateRow(value) {
     "unsentOutbox",
     "activeAttestationCount",
     "publicAdmissionAllowed",
+    "targetCostRowPresent",
+    "targetProviderWorkerUsageComplete",
+    "targetProviderContainerUsageComplete",
+    "targetAnalyticsUsageComplete",
+    "targetProviderUsageComplete",
+    "targetComplete",
   ]) {
     if (!Number.isSafeInteger(row[name]) || row[name] < 0) {
       throw new TypeError(`processing admission ${name} is invalid`);
     }
   }
-  if (![0, 1].includes(row.circuitOpen) || ![0, 1].includes(row.publicAdmissionAllowed)) {
+  for (const name of [
+    "circuitOpen",
+    "publicAdmissionAllowed",
+    "targetCostRowPresent",
+    "targetProviderWorkerUsageComplete",
+    "targetProviderContainerUsageComplete",
+    "targetAnalyticsUsageComplete",
+    "targetProviderUsageComplete",
+    "targetComplete",
+  ]) {
+    if (![0, 1].includes(row[name])) {
+      throw new TypeError("processing admission boolean state is invalid");
+    }
+  }
+  for (const name of [
+    "costAccountingStartedAt",
+    "targetHourKey",
+    "targetUsageObservationCount",
+    "targetUsageObservationMatches",
+  ]) {
+    if (!Number.isSafeInteger(row[name]) || row[name] < 0) {
+      throw new TypeError(`processing admission ${name} is invalid`);
+    }
+  }
+  if (
+    row.lastSealedHourKey !== null &&
+    (!Number.isSafeInteger(row.lastSealedHourKey) || row.lastSealedHourKey < 0)
+  ) {
+    throw new TypeError("processing admission lastSealedHourKey is invalid");
+  }
+  const firstHourKey = Math.ceil(row.costAccountingStartedAt / 3_600_000);
+  if (
+    row.targetHourKey !==
+    (row.lastSealedHourKey === null ? firstHourKey : row.lastSealedHourKey + 1)
+  ) {
+    throw new TypeError("processing admission target hour is inconsistent");
+  }
+  if (row.targetUsageObservationCount > 1) {
     throw new TypeError("processing admission boolean state is invalid");
   }
   if (
@@ -197,6 +277,17 @@ export async function inspectCurrentProcessingAdmissionInD1(input) {
     activeVersionId: row.activeVersionId,
     publicAdmissionAllowed: row.publicAdmissionAllowed === 1,
     costAccountingEpoch: row.costAccountingEpoch,
+    costAccountingStartedAt: row.costAccountingStartedAt,
+    lastSealedHourKey: row.lastSealedHourKey,
+    targetHourKey: row.targetHourKey,
+    targetCostRowPresent: row.targetCostRowPresent === 1,
+    targetProviderWorkerUsageComplete: row.targetProviderWorkerUsageComplete === 1,
+    targetProviderContainerUsageComplete: row.targetProviderContainerUsageComplete === 1,
+    targetAnalyticsUsageComplete: row.targetAnalyticsUsageComplete === 1,
+    targetProviderUsageComplete: row.targetProviderUsageComplete === 1,
+    targetComplete: row.targetComplete === 1,
+    targetUsageObservationCount: row.targetUsageObservationCount,
+    targetUsageObservationMatches: row.targetUsageObservationMatches,
     releaseReportSha256: row.releaseReportSha256,
   };
 }
