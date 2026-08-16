@@ -36,7 +36,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the pinned native PDF engine
         run: |
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          export SOURCE_DATE_EPOCH=1786752000
           docker build --file apps/pdf-engine/Dockerfile --target production \
             --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
             --tag hereisit-pdf-engine:quality .

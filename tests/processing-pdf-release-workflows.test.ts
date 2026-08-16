@@ -38,6 +38,8 @@ describe("native PDF processing release workflows", () => {
     const production = read("processing-production");
     const admission = read("processing-production-admission");
     expect(ci).toContain("release-authority:");
+    expect(ci.match(/export SOURCE_DATE_EPOCH=1786752000/g)).toHaveLength(2);
+    expect(ci).not.toContain('SOURCE_DATE_EPOCH="$(git show -s --format=%ct');
     expect(ci).toContain(`release-authority:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'`);
     expect(ci).toContain("workflow_dispatch:");

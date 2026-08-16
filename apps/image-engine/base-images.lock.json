@@ -9,10 +9,16 @@
       "platformDigest": "sha256:4727898c104ecd2e22d780925832502faee9fe4e70581b8572af081370b315a0"
     },
     {
-      "name": "node-build-runtime",
-      "reference": "node:24.13.0-bookworm-slim",
-      "indexDigest": "sha256:4660b1ca8b28d6d1906fd644abe34b2ed81d15434d26d845ef0aced307cf4b6f",
-      "platformDigest": "sha256:46feb5752989c05b8606e6323fbbc3db667d14ade1c24f5d0d44d9ca9909d607"
+      "name": "node-build",
+      "reference": "node:24.13.0-trixie-slim",
+      "indexDigest": "sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8",
+      "platformDigest": "sha256:71b380b4b918650f5be84db689c041459154345bddc7df0dc35c375a2eb0060b"
+    },
+    {
+      "name": "node-runtime",
+      "reference": "gcr.io/distroless/nodejs24-debian13",
+      "indexDigest": "sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
+      "platformDigest": "sha256:f987682b3ea8d8e22497cb95edc5014d793612f7064e43df8104394db0ce19fe"
     }
   ]
 }

@@ -39,7 +39,7 @@ jobs:
       - name: Build the engine and metric tools once
         run: |
           set -euo pipefail
-          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          SOURCE_DATE_EPOCH=1786752000
           [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]
           docker buildx build \
             --file apps/image-engine/Dockerfile \

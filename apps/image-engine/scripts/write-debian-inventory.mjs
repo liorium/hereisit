@@ -27,7 +27,7 @@ await writeFile(
   outputPath,
   `${JSON.stringify({
     schemaVersion: 1,
-    snapshot: "20260716T000000Z",
+    snapshot: "20260815T000000Z",
     packages,
     copyrightPaths,
   })}\n`,

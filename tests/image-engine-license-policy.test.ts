@@ -121,7 +121,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
   Object.assign(buildMetadata, {
     "debian-packages.json": {
       schemaVersion: 1,
-      snapshot: "20260716T000000Z",
+      snapshot: "20260815T000000Z",
       packages: [{ name: "base-files", version: "1" }],
       copyrightPaths: ["/usr/share/doc/base-files/copyright"],
     },
@@ -418,15 +418,23 @@ describe("image engine native supply-chain policy", () => {
   });
 
   it("builds the complete WebP library set required by libvips inside isolated prefixes", async () => {
-    const [webpBuild, mozjpegBuild, jpegliBuild, libjxlMetricsBuild, dockerfile, rootDockerignore] =
-      await Promise.all([
-        readFile(join(repositoryRoot, "apps/image-engine/native/build-libwebp.sh"), "utf8"),
-        readFile(join(repositoryRoot, "apps/image-engine/native/build-mozjpeg.sh"), "utf8"),
-        readFile(join(repositoryRoot, "apps/image-engine/native/build-jpegli.sh"), "utf8"),
-        readFile(join(repositoryRoot, "apps/image-engine/native/build-libjxl-metrics.sh"), "utf8"),
-        readFile(join(repositoryRoot, "apps/image-engine/Dockerfile"), "utf8"),
-        readFile(join(repositoryRoot, ".dockerignore"), "utf8"),
-      ]);
+    const [
+      webpBuild,
+      mozjpegBuild,
+      jpegliBuild,
+      libjxlMetricsBuild,
+      dockerfile,
+      rootDockerignore,
+      verifier,
+    ] = await Promise.all([
+      readFile(join(repositoryRoot, "apps/image-engine/native/build-libwebp.sh"), "utf8"),
+      readFile(join(repositoryRoot, "apps/image-engine/native/build-mozjpeg.sh"), "utf8"),
+      readFile(join(repositoryRoot, "apps/image-engine/native/build-jpegli.sh"), "utf8"),
+      readFile(join(repositoryRoot, "apps/image-engine/native/build-libjxl-metrics.sh"), "utf8"),
+      readFile(join(repositoryRoot, "apps/image-engine/Dockerfile"), "utf8"),
+      readFile(join(repositoryRoot, ".dockerignore"), "utf8"),
+      readFile(join(repositoryRoot, "scripts/verify-image-engine-licenses.mjs"), "utf8"),
+    ]);
     expect(webpBuild).toContain("-DWEBP_BUILD_LIBWEBPMUX=ON");
     expect(webpBuild).toContain("-DWEBP_BUILD_WEBPMUX=OFF");
     expect(mozjpegBuild).toContain('-DCMAKE_INSTALL_LIBDIR:PATH="$PREFIX/lib"');
@@ -468,15 +476,20 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain(
       "unlink /opt/app/node_modules/.pnpm/node_modules/@hereisit/image-engine",
     );
+    expect(dockerfile).toContain("rm /opt/app/node_modules/.modules.yaml");
     expect(dockerfile).toContain("! -name node_modules ! -name package.json -exec rm -rf {} +");
-    expect(dockerfile).toContain("rm -rf /opt/yarn-v1.22.22 /usr/local/lib/node_modules");
+    expect(dockerfile).toContain("chmod -R a=rX /runtime-root/app /runtime-root/licenses");
     expect(dockerfile).toContain(
-      "rm -f /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx",
+      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
     );
-    expect(dockerfile).toContain(
-      "/usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/docker-entrypoint.sh",
-    );
-    expect(dockerfile).toContain("chmod -R a=rX /licenses /security /build-metadata");
+    const runtimeStage = "FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime";
+    expect(dockerfile).toContain(runtimeStage);
+    expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
+    expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
+    expect(verifier).toContain('debian.snapshot !== "20260815T000000Z"');
+    const runtime = dockerfile.slice(dockerfile.indexOf(runtimeStage));
+    expect(runtime).not.toMatch(/\b(?:apt-get|corepack|npm|SHELL|RUN)\b/u);
+    expect(runtime).toContain('ENTRYPOINT ["/nodejs/bin/node", "/app/dist/server.mjs"]');
     expect(dockerfile.trimEnd()).toMatch(/FROM runtime AS production$/);
     expect(rootDockerignore).toContain("**/node_modules");
     expect(rootDockerignore).toContain("**/target");
@@ -537,7 +550,7 @@ describe("image engine native supply-chain policy", () => {
     }
   });
 
-  it("fails closed on copyleft application licenses and starts with no CVE exceptions", async () => {
+  it("fails closed on copyleft licenses and keeps reviewed CVEs exact and temporary", async () => {
     const policy = (await readJson("apps/image-engine/licenses/policy.json")) as {
       applicationAndNative: { prohibited: string[] };
       runtime: { prohibitedNames: string[]; benchmarkOnlyNames: string[] };
@@ -553,9 +566,33 @@ describe("image engine native supply-chain policy", () => {
     expect(policy.vulnerabilityExceptions.requiredFields).toEqual(
       expect.arrayContaining(["affectedVersion", "affectedScope"]),
     );
-    await expect(
-      readJson("apps/image-engine/security/vulnerability-exceptions.json"),
-    ).resolves.toEqual({ schemaVersion: 1, exceptions: [] });
+    const exceptions = (await readJson(
+      "apps/image-engine/security/vulnerability-exceptions.json",
+    )) as Parameters<typeof validateVulnerabilityExceptions>[0] & {
+      exceptions: Array<Record<string, string>>;
+    };
+    expect(() =>
+      validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z")),
+    ).not.toThrow();
+    expect(exceptions.exceptions).toHaveLength(9);
+    expect(
+      new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
+    ).toEqual(
+      new Set([
+        "CVE-2026-53615:libblkid1",
+        "CVE-2026-53615:libmount1",
+        "CVE-2026-58010:libglib2.0-0t64",
+        "CVE-2026-58011:libglib2.0-0t64",
+        "CVE-2026-58012:libglib2.0-0t64",
+        "CVE-2026-58013:libglib2.0-0t64",
+        "CVE-2026-58014:libglib2.0-0t64",
+        "CVE-2026-58015:libglib2.0-0t64",
+        "CVE-2026-58016:libglib2.0-0t64",
+      ]),
+    );
+    expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
+      new Set(["sha256:c71a66d3ba8e61a158a274a285b5e68c6ef5d3aedd455ce7425d613ffcb033db"]),
+    );
   });
 
   it.each([
