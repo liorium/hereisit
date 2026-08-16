@@ -119,7 +119,10 @@ jobs:
           set -euo pipefail
           TRIVY_DB_DIGEST="$(docker buildx imagetools inspect ghcr.io/aquasecurity/trivy-db:2 | awk '$1 == "Digest:" { print $2; exit }')"
           [[ "$TRIVY_DB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          test "$TRIVY_DB_DIGEST" = "${{ vars.TRIVY_DB_DIGEST }}"
+          if [[ "$TRIVY_DB_DIGEST" != "${{ vars.TRIVY_DB_DIGEST }}" ]]; then
+            echo "::error title=Stale Trivy DB pin::Rotate TRIVY_DB_DIGEST and start a new workflow run; reruns retain their original variables."
+            exit 1
+          fi
           mkdir -p .artifacts/runtime/trivy-cache
           docker run --rm -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
             image --cache-dir /trivy-cache --db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST" \

@@ -79,6 +79,7 @@ describe("native PDF processing release workflows", () => {
       "if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'",
     );
     expect(ci).toContain("ghcr.io/aquasecurity/trivy-db:2");
+    expect(ci).toContain("Stale Trivy DB pin");
     expect(ci).toContain('--db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST"');
     expect(ci).toContain("--skip-db-update --offline-scan");
     expect(ci).toContain(".artifacts/runtime/web-staging-scan");
