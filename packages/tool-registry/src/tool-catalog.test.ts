@@ -149,7 +149,7 @@ const expectedCopy = {
   "pdf.compress-scanned": {
     name: "PDF 용량 줄이기",
     shortDescription:
-      "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 파일은 서버로 전송되지 않습니다.",
+      "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 기본은 임시 서버에서 처리하며 완료 후 자동 삭제합니다.",
   },
 } as const satisfies Record<ExpectedAvailableToolId, { name: string; shortDescription: string }>;
 
@@ -174,6 +174,9 @@ describe("tool catalog", () => {
       },
       contract: { id: "image.optimize", version: 1 },
       experience: "file",
+      execution: "server",
+    });
+    expect(getAvailableToolById("pdf.compress-scanned")).toMatchObject({
       execution: "server",
     });
     expect(getAvailableToolById("pdf.organize").experience).toBe("workspace");

@@ -35,7 +35,13 @@ interface InspectedPdfOutput {
   title: string | undefined;
 }
 
-async function openReadyPdfCompression(page: Page): Promise<void> {
+async function openReadyPdfCompression(
+  page: Page,
+  processingLocation: "local" | "server" = "local",
+): Promise<void> {
+  await page.addInitScript((location) => {
+    localStorage.setItem("hereisit.pdf-compression-location.v1", location);
+  }, processingLocation);
   await page.goto(PDF_COMPRESSION_ROUTE);
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
 }
@@ -644,7 +650,7 @@ async function uploadPdf(
 async function prepareCompressedResult(
   page: Page,
 ): Promise<Awaited<ReturnType<typeof installPrivacyObserver>>> {
-  const privacy = await installPrivacyObserver(page);
+  const privacy = await installPrivacyObserver(page, { allowProcessingRequests: true });
   await openReadyPdfCompression(page);
   await uploadPdf(page, "scan.pdf", await createScannedPdf(page), 1);
   await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
@@ -674,7 +680,10 @@ async function expectMobileCompressionStage(page: Page): Promise<void> {
 
 test("detects a sentinel filename hidden in a structured console argument", async ({ page }) => {
   const sentinelFilename = "PRIVATE_STRUCTURED_CONSOLE_SENTINEL.pdf";
-  const privacy = await installPrivacyObserver(page, { sentinels: [sentinelFilename] });
+  const privacy = await installPrivacyObserver(page, {
+    allowProcessingRequests: true,
+    sentinels: [sentinelFilename],
+  });
   await openReadyPdfCompression(page);
 
   await page.evaluate((name) => {
@@ -694,6 +703,7 @@ test("rejects a wide console container before enumerating it in the privacy harn
   page,
 }) => {
   const privacy = await installPrivacyObserver(page, {
+    allowProcessingRequests: true,
     sentinels: ["PRIVATE_WIDE_CONTAINER_SENTINEL"],
   });
   await openReadyPdfCompression(page);
@@ -730,7 +740,10 @@ test("rejects a wide console container before enumerating it in the privacy harn
 
 test("keeps console inspection fail-closed for accessors", async ({ page }) => {
   const sentinel = "PRIVATE_ACCESSOR_SENTINEL";
-  const privacy = await installPrivacyObserver(page, { sentinels: [sentinel] });
+  const privacy = await installPrivacyObserver(page, {
+    allowProcessingRequests: true,
+    sentinels: [sentinel],
+  });
   await openReadyPdfCompression(page);
 
   await page.evaluate((privateValue) => {
@@ -932,7 +945,7 @@ test("bounds a wide history state before enumerating its values", async ({ page 
 });
 
 test("shows only the file-selection step before a PDF is ready", async ({ page }) => {
-  await openReadyPdfCompression(page);
+  await openReadyPdfCompression(page, "server");
   await expect(page.getByRole("heading", { level: 2, name: "PDF 용량 줄이기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled();
   await expect(page.getByRole("radio")).toHaveCount(0);
@@ -940,7 +953,9 @@ test("shows only the file-selection step before a PDF is ready", async ({ page }
   await expect(
     page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("파일은 이 기기에서만 처리돼요.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
+  ).toBeVisible();
 });
 
 test("explains an unsupported browser before selection without starting local work", async ({
@@ -1021,6 +1036,7 @@ test("compresses a known scan with the default preset and downloads only after o
   await installObjectUrlCounters(page);
   const privacySentinel = "PRIVATE_SCAN_SENTINEL";
   const privacy = await installPrivacyObserver(page, {
+    allowProcessingRequests: true,
     sentinels: [privacySentinel, SOURCE_TITLE, SOURCE_AUTHOR],
   });
   await openReadyPdfCompression(page);
@@ -1306,7 +1322,7 @@ test("falls back to local PDF processing when the server policy is unavailable",
   await fallback.click();
   await expect.poll(() => serverRequests).toEqual(["POST /v1/policy", "POST /v1/policy"]);
   await expect(
-    page.getByText("현재 처리 서버를 사용할 수 없어요. 잠시 후 다시 시도해 주세요."),
+    page.getByText("서버를 사용할 수 없어 이 기기에서 처리할 준비가 됐어요."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 다운로드 ↓" })).toHaveCount(0);
@@ -1356,12 +1372,12 @@ test("exposes a server PDF only after browser verification and direct download",
   expect(output.byteLength).toBeLessThanOrEqual(exactCompressionTarget(source.byteLength));
   const server = await installPdfServerDouble(page, { source, output });
 
-  await openReadyPdfCompression(page);
-  await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeChecked();
+  await openReadyPdfCompression(page, "server");
   await expect(
     page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
   ).toBeVisible();
   await uploadPdf(page, "server-source.pdf", source, 12);
+  await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeChecked();
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
   await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
     timeout: 60_000,

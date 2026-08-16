@@ -17,7 +17,7 @@ export default function PrivacyPage() {
         <article>
           <p className={styles.eyebrow}>PRIVACY</p>
           <h1>개인정보 보호</h1>
-          <p className={styles.lead}>파일은 기본적으로 이 기기에서 처리됩니다.</p>
+          <p className={styles.lead}>파일 처리 위치와 삭제 방식은 도구 실행 전에 안내합니다.</p>
 
           <section>
             <h2>파일 처리</h2>
@@ -26,9 +26,9 @@ export default function PrivacyPage() {
               파일을 서버로 전송하지 않습니다.
             </p>
             <p>
-              PDF 압축은 먼저 이 기기에서 실행됩니다. 로컬에서 구조를 보존하며 줄이지 못한 경우에만
-              안내와 처리 서버 버튼이 나타나며, 버튼을 눌러야 업로드됩니다. 결과는 브라우저에서 다시
-              확인한 뒤 다운로드할 수 있고, 서버의 입력과 결과는 완료 후 자동으로 삭제됩니다.
+              PDF 압축은 기본적으로 고성능 처리 서버에서 실행되며, 원하면 내 기기 처리를 선택할 수
+              있습니다. 서버 결과는 브라우저에서 다시 확인한 뒤 다운로드할 수 있고, 서버의 입력과
+              결과는 완료 후 자동으로 삭제됩니다.
             </p>
           </section>
 

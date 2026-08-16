@@ -265,8 +265,7 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     intentClass: "pdf-compress-scanned",
     sourceFileLimits: pdfSingleFileSourceLimits,
     eyebrow: "PDF COMPRESSOR",
-    defaultSummary:
-      "먼저 이 기기에서 압축하고, 줄어들지 않을 때만 선택해서 처리 서버로 더 압축해요.",
+    defaultSummary: "기본은 고성능 처리 서버에서 압축하고, 원하면 내 기기에서 처리할 수 있어요.",
     notices: [
       {
         tone: "warning",
