@@ -11,14 +11,22 @@ import {
 import { inspectPdfFile } from "@hereisit/browser-runtime/pdf-inspection";
 import type { PdfOptimizeVerificationHandle } from "@hereisit/browser-runtime/pdf-optimize-verification";
 import { compressedPdfName } from "@hereisit/pdf-tool";
-import type { PdfOptimizeJobHandle, PdfOptimizeJobOutcome } from "@hereisit/server-runtime";
+import {
+  getPdfProcessingPolicy,
+  type PdfOptimizeJobHandle,
+  type PdfOptimizeJobOutcome,
+} from "@hereisit/server-runtime";
 import type { PdfInspectionHandle, PdfInspectionResult } from "@hereisit/tool-contracts";
 import type { AvailableToolId } from "@hereisit/tool-registry/catalog";
-import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { downloadUrl, formatBytes } from "../lib/files";
+import { resolveImageCompressionExecution } from "../lib/image-compress-presentation";
 import {
   getOrCreateAnonymousSessionId,
+  type PdfCompressionLocation,
+  readPdfCompressionLocation,
   readProcessingClientConfig,
+  writePdfCompressionLocation,
 } from "../lib/processing-config";
 import { reportDownloadRequested, startProductUsageRun } from "../lib/product-analytics";
 import { getToolImplementation, type SourceFileLimits } from "../lib/tool-implementations";
@@ -38,6 +46,10 @@ if (PDF_COMPRESSION_NOTICE === undefined) {
 
 type Preset = PdfCompressScannedSpecV2["preset"];
 type CompressionStage = "select" | "inspecting" | "setup" | "processing" | "result";
+type PolicyView =
+  | { readonly state: "checking" }
+  | { readonly state: "server"; readonly text: string }
+  | { readonly state: "local"; readonly text: string };
 type CompressionResult =
   | ({ readonly source: "browser" } & Omit<PdfCompressScannedResultV2, "bytes">)
   | {
@@ -51,6 +63,7 @@ type CompressionResult =
 type RemotePdfResult = Extract<PdfOptimizeJobOutcome, { status: "fulfilled" }>["value"];
 
 const SERVER_DISCLOSURE = "PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요.";
+const LOCAL_DISCLOSURE = "PDF를 업로드하지 않고 이 기기에서 처리해요.";
 const SERVER_RETRY_MESSAGE = "현재 처리 서버를 사용할 수 없어요. 잠시 후 다시 시도해 주세요.";
 
 function isPdf(file: File): boolean {
@@ -77,6 +90,8 @@ function progressLabel(progress: PdfCompressScannedProgress | undefined): string
 }
 
 export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
+  const config = useMemo(() => readProcessingClientConfig(), []);
+  const sessionId = useMemo(() => getOrCreateAnonymousSessionId(), []);
   const implementation = getToolImplementation(toolId);
   if (
     implementation.bundleProfile !== "pdf-compress-scanned" ||
@@ -98,6 +113,8 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const [preset, setPreset] = useState<Preset>("balanced");
   const [progress, setProgress] = useState<PdfCompressScannedProgress>();
   const [result, setResult] = useState<CompressionResult>();
+  const [location, setLocation] = useState<PdfCompressionLocation>("server");
+  const [policy, setPolicy] = useState<PolicyView>({ state: "checking" });
   const [serverFallback, setServerFallback] = useState(false);
   const [serverMode, setServerMode] = useState(false);
   const [serverProgress, setServerProgress] = useState<number | null>(null);
@@ -121,7 +138,16 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   const resultUrlRef = useRef<string | undefined>(undefined);
   const runRef = useRef(0);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
+  const hasFileSelectionRef = useRef(false);
+  const locationRef = useRef(location);
   const busy = inspecting || processing;
+  const effectiveExecution = resolveImageCompressionExecution(location, policy.state);
+  const disclosureText =
+    effectiveExecution === "checking"
+      ? "처리 방식을 확인하고 있어요."
+      : effectiveExecution === "server"
+        ? SERVER_DISCLOSURE
+        : LOCAL_DISCLOSURE;
   const visibleMessage = hydrated && !runtimeSupported ? UNSUPPORTED_BROWSER_MESSAGE : message;
 
   const clearResult = useCallback((updateState = true) => {
@@ -173,6 +199,53 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     setHydrated(true);
     setRuntimeSupported(supportsBrowserPdfCompressScannedRuntime());
   }, []);
+
+  useEffect(() => {
+    const saved = readPdfCompressionLocation();
+    locationRef.current = saved;
+    setLocation(saved);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (config.apiOrigin === null) {
+      setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
+      return () => {
+        active = false;
+      };
+    }
+    void getPdfProcessingPolicy({ apiOrigin: config.apiOrigin, anonymousSessionId: sessionId })
+      .then((value) => {
+        if (!active) return;
+        if (value.execution === "server") {
+          setPolicy({ state: "server", text: SERVER_DISCLOSURE });
+          if (!hasFileSelectionRef.current) {
+            setMessage(
+              locationRef.current === "local" ? LOCAL_DISCLOSURE : "서버 처리 정책을 확인했어요.",
+            );
+          }
+        } else {
+          setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
+          if (!hasFileSelectionRef.current) {
+            setMessage(
+              value.reason === "LOCAL_FALLBACK_REQUIRED"
+                ? "사용량 보호를 위해 이 기기에서 처리해요."
+                : "현재 서버 처리가 중지되어 이 기기에서 처리해요.",
+            );
+          }
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
+        if (!hasFileSelectionRef.current) {
+          setMessage("서버에 연결하지 못해 이 기기에서 처리해요.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [config.apiOrigin, sessionId]);
 
   useEffect(
     () => () => {
@@ -293,6 +366,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         return;
       }
 
+      hasFileSelectionRef.current = true;
       void inspectSelectedFile(nextFile);
     },
     [inspectSelectedFile, maxFileBytes, maxFiles, minFiles, runtimeSupported],
@@ -307,11 +381,25 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
 
   const reset = () => {
     invalidateActiveWork();
+    hasFileSelectionRef.current = false;
     setFile(undefined);
     setInspection(undefined);
     setPreset("balanced");
     setDragging(false);
     setMessage(INITIAL_MESSAGE);
+  };
+
+  const changeLocation = (value: PdfCompressionLocation) => {
+    locationRef.current = value;
+    setLocation(value);
+    writePdfCompressionLocation(value);
+    setMessage(
+      value === "local"
+        ? LOCAL_DISCLOSURE
+        : policy.state === "checking"
+          ? "처리 방식을 확인하고 있어요."
+          : policy.text,
+    );
   };
 
   const selectPreset = (nextPreset: Preset) => {
@@ -405,7 +493,13 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
   };
 
   const startServerProcessing = async () => {
-    if (busy || file === undefined || inspection === undefined || !serverFallback) return;
+    if (
+      busy ||
+      file === undefined ||
+      inspection === undefined ||
+      (!serverFallback && effectiveExecution !== "server")
+    )
+      return;
 
     const selectedFile = file;
     const selectedInspection = inspection;
@@ -417,11 +511,11 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
     setProcessing(true);
     setMessage("처리 서버에서 PDF를 압축하고 있어요.");
 
-    const config = readProcessingClientConfig();
     if (config.apiOrigin === null) {
+      setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
       setProcessing(false);
       setServerMode(false);
-      setMessage(SERVER_RETRY_MESSAGE);
+      setMessage("서버에 연결할 수 없어 이 기기에서 처리할 준비가 됐어요.");
       return;
     }
 
@@ -440,7 +534,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
         { version: 1, preset: selectedPreset },
         {
           apiOrigin: config.apiOrigin,
-          anonymousSessionId: getOrCreateAnonymousSessionId(),
+          anonymousSessionId: sessionId,
           pageCount: selectedInspection.pageCount,
           onProgress: (event) => {
             if (runRef.current === runId) {
@@ -476,7 +570,12 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
       if (outcome.status === "rejected") {
         productRun.failed(outcome.error.code);
         analyticsSettled = true;
-        setMessage(SERVER_RETRY_MESSAGE);
+        if (outcome.error.retryable || outcome.error.code === "LOCAL_FALLBACK_REQUIRED") {
+          setPolicy({ state: "local", text: LOCAL_DISCLOSURE });
+          setMessage("서버를 사용할 수 없어 이 기기에서 처리할 준비가 됐어요.");
+        } else {
+          setMessage(SERVER_RETRY_MESSAGE);
+        }
         return;
       }
 
@@ -660,7 +759,7 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
           </div>
           <div className={styles.localBadge}>
             <span aria-hidden="true">✓</span>
-            <span>파일은 이 기기에서만 처리돼요.</span>
+            <span>{disclosureText}</span>
           </div>
         </section>
       ) : stage === "inspecting" ? (
@@ -698,6 +797,39 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             <span>{formatBytes(file.size)}</span>
             <span>{inspection.pageCount}페이지</span>
           </div>
+
+          <fieldset className={styles.splitOptions}>
+            <legend>처리 방식</legend>
+            <label>
+              <input
+                type="radio"
+                name="pdf-processing-location"
+                checked={location === "server"}
+                onChange={() => changeLocation("server")}
+              />
+              <span>
+                <strong>고성능 서버 압축 · 추천</strong>
+                <small>처리가 끝나면 파일을 자동으로 삭제해요.</small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="pdf-processing-location"
+                checked={location === "local"}
+                onChange={() => changeLocation("local")}
+              />
+              <span>
+                <strong>내 기기에서 처리</strong>
+                <small>파일을 업로드하지 않아요.</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <p className={styles.processingDisclosure} data-policy={effectiveExecution}>
+            {disclosureText}
+            {effectiveExecution === "server" ? <a href="/privacy">자세히</a> : null}
+          </p>
 
           <fieldset className={styles.splitOptions}>
             <legend>압축 수준</legend>
@@ -749,7 +881,10 @@ export function PdfCompressWorkbench({ toolId }: { toolId: AvailableToolId }) {
             <button
               className={styles.mergePrimaryAction}
               type="button"
-              onClick={() => void startProcessing()}
+              disabled={effectiveExecution === "checking"}
+              onClick={() =>
+                void (effectiveExecution === "server" ? startServerProcessing() : startProcessing())
+              }
             >
               {runLabel}
             </button>

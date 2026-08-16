@@ -87,6 +87,7 @@ async function forceLocalNoReduction(
   reason: "STRUCTURED_OR_MIXED" | "IMAGE_ONLY_NO_SAVINGS" = "STRUCTURED_OR_MIXED",
 ): Promise<void> {
   await page.addInitScript((noReductionReason) => {
+    localStorage.setItem("hereisit.pdf-compression-location.v1", "local");
     const NativeWorker = Worker;
     class NoReductionWorker extends EventTarget {
       onerror: ((event: ErrorEvent) => unknown) | null = null;
@@ -498,7 +499,7 @@ async function installPdfServerDouble(
           toolContract: "pdf.optimize@1",
           execution: "server",
           reason: null,
-          maintainer: true,
+          maintainer: false,
           disclosure: {
             upload: true,
             inputDeletion: "terminal",
@@ -1252,7 +1253,7 @@ test("keeps structure when neither preset can safely reduce the file", async ({ 
   expect(downloadCount).toBe(0);
 });
 
-test("contacts the PDF processing server only after the explicit fallback action", async ({
+test("falls back to local PDF processing when the server policy is unavailable", async ({
   page,
 }) => {
   const serverRequests: string[] = [];
@@ -1291,6 +1292,7 @@ test("contacts the PDF processing server only after the explicit fallback action
   });
 
   await openReadyPdfCompression(page);
+  await expect.poll(() => serverRequests).toEqual(["POST /v1/policy"]);
   await uploadPdf(page, "vector.pdf", await createVectorPdf(1, { width: 612, height: 792 }), 1);
   await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
 
@@ -1299,10 +1301,10 @@ test("contacts the PDF processing server only after the explicit fallback action
   await expect(
     page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
   ).toBeVisible();
-  expect(serverRequests).toEqual([]);
+  expect(serverRequests).toEqual(["POST /v1/policy"]);
 
   await fallback.click();
-  await expect.poll(() => serverRequests).toEqual(["POST /v1/policy"]);
+  await expect.poll(() => serverRequests).toEqual(["POST /v1/policy", "POST /v1/policy"]);
   await expect(
     page.getByText("현재 처리 서버를 사용할 수 없어요. 잠시 후 다시 시도해 주세요."),
   ).toBeVisible();
@@ -1326,6 +1328,7 @@ test("does not offer or contact the server for an image-only no-savings result",
   });
 
   await openReadyPdfCompression(page);
+  await expect.poll(() => serverRequests).toEqual(["POST /v1/policy"]);
   await uploadPdf(page, "scan.pdf", await createVectorPdf(1), 1);
   await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
 
@@ -1335,7 +1338,7 @@ test("does not offer or contact the server for an image-only no-savings result",
     ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toHaveCount(0);
-  expect(serverRequests).toEqual([]);
+  expect(serverRequests).toEqual(["POST /v1/policy"]);
 });
 
 test("exposes a server PDF only after browser verification and direct download", async ({
@@ -1347,7 +1350,6 @@ test("exposes a server PDF only after browser verification and direct download",
     allowProcessingRequests: true,
     sentinels: ["server-source.pdf"],
   });
-  await forceLocalNoReduction(page);
   await installObjectUrlCounters(page);
   const source = await createCompressibleStructuredPdf();
   const output = await structurallyRewritePdf(source);
@@ -1355,19 +1357,12 @@ test("exposes a server PDF only after browser verification and direct download",
   const server = await installPdfServerDouble(page, { source, output });
 
   await openReadyPdfCompression(page);
+  await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeChecked();
+  await expect(
+    page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
+  ).toBeVisible();
   await uploadPdf(page, "server-source.pdf", source, 12);
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
-  const fallback = page.getByRole("button", { name: "처리 서버에서 더 압축" });
-  await expect(fallback).toBeVisible();
-  expect(server.calls).toEqual([]);
-  expect(await objectUrlCounts(page)).toEqual({ created: 0, revoked: 0 });
-  expect(
-    await page.evaluate(() =>
-      JSON.parse(sessionStorage.getItem("__hereisitPdfWorkerNames") ?? "[]"),
-    ),
-  ).not.toContain("hereisit-pdf-optimize-verifier");
-
-  await fallback.click();
   await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
     timeout: 60_000,
   });
@@ -1394,7 +1389,6 @@ test("exposes a server PDF only after browser verification and direct download",
   server.calls.length = 0;
   await uploadPdf(page, "server-source.pdf", source, 12);
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
-  await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
   await expect(
     page.getByText("PDF 결과를 확인하지 못했어요. 잠시 후 다시 시도해 주세요."),
   ).toBeVisible({ timeout: 60_000 });

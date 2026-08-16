@@ -19,8 +19,8 @@ const gitShaPattern = /^[a-f0-9]{40}$/;
 export const hostedReviewSchemas = Object.freeze({
   fullCorpusBenchmark: "hereisit-full-corpus-benchmark-review@1",
   competitorComparison: "hereisit-competitor-comparison-review@1",
-  blindedHumanReview: "hereisit-blinded-human-review@1",
-  commercialReview: "hereisit-commercial-review@1",
+  blindedHumanReview: "hereisit-automated-visual-review@1",
+  commercialReview: "hereisit-commercial-license-review@1",
   privacyReview: "hereisit-privacy-review@1",
   deviceMatrix: "hereisit-device-matrix-review@1",
 });
@@ -34,9 +34,9 @@ const detailKeys = Object.freeze({
     "engineImageDigest",
   ],
   competitorComparison: ["casesCompared", "baselineSha256"],
-  blindedHumanReview: ["reviewers", "approval"],
-  commercialReview: ["licenseGateSha256", "approval"],
-  privacyReview: ["testsRun"],
+  blindedHumanReview: ["visualProfilesMeasured", "pdfVisualEvidenceSha256"],
+  commercialReview: ["licenseGateSha256"],
+  privacyReview: ["testsRun", "pdfVisualEvidenceSha256"],
   deviceMatrix: [
     "projects",
     "productAnalytics",
@@ -53,30 +53,6 @@ const browserProjects = Object.freeze([
   "webkit",
   "mobile-webkit",
 ]);
-
-function validateApproval(value, label) {
-  const approval = assertObject(value, label);
-  assertExactKeys(approval, ["kind", "href", "sha256"], label);
-  assertSha256(approval.sha256, `${label} hash`);
-  let url;
-  try {
-    url = new URL(approval.href);
-  } catch {
-    throw new TypeError(`${label} URL is invalid`);
-  }
-  if (
-    approval.kind !== "approval-reference" ||
-    url.protocol !== "https:" ||
-    url.hostname !== "approvals.example.test" ||
-    !/^\/reviews\/[1-9]\d*$/.test(url.pathname) ||
-    url.search !== "" ||
-    url.hash !== "" ||
-    url.username !== "" ||
-    url.password !== ""
-  ) {
-    throw new TypeError(`${label} is not a safe exact approval reference`);
-  }
-}
 
 export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256, checkRunId }) {
   const document = assertObject(value, `${name} hosted review document`);
@@ -114,15 +90,18 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
       throw new TypeError("competitor comparison did not compare cases");
     assertSha256(document.baselineSha256, "competitor comparison baseline hash");
   } else if (name === "blindedHumanReview") {
-    if (!Number.isSafeInteger(document.reviewers) || document.reviewers < 2)
-      throw new TypeError("blinded human review has insufficient reviewers");
-    validateApproval(document.approval, "blinded human approval");
+    if (
+      !Number.isSafeInteger(document.visualProfilesMeasured) ||
+      document.visualProfilesMeasured < 1
+    )
+      throw new TypeError("automated visual review did not measure profiles");
+    assertSha256(document.pdfVisualEvidenceSha256, "automated visual review evidence hash");
   } else if (name === "commercialReview") {
     assertSha256(document.licenseGateSha256, "commercial review license gate hash");
-    validateApproval(document.approval, "commercial approval");
   } else if (name === "privacyReview") {
     if (!Number.isSafeInteger(document.testsRun) || document.testsRun < 1)
       throw new TypeError("privacy review did not run tests");
+    assertSha256(document.pdfVisualEvidenceSha256, "privacy review evidence hash");
   } else if (name === "deviceMatrix") {
     if (
       document.productAnalytics !== true ||
@@ -189,7 +168,11 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
     visual.engineImageDigest !== documents.fullCorpusBenchmark.engineImageDigest ||
     visual.corpusManifestSha256 !== documents.fullCorpusBenchmark.corpusSha256 ||
     visual.visualProfilesMeasured !== documents.deviceMatrix.pdfVisualProfilesMeasured ||
-    documents.deviceMatrix.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual))
+    visual.visualProfilesMeasured !== documents.blindedHumanReview.visualProfilesMeasured ||
+    documents.deviceMatrix.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
+    documents.blindedHumanReview.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
+    documents.privacyReview.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
+    documents.competitorComparison.baselineSha256 !== documents.fullCorpusBenchmark.benchmarkSha256
   ) {
     throw new TypeError("PDF browser visual evidence does not bind the exact hosted reviews");
   }

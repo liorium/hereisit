@@ -82,6 +82,7 @@ describe("CI release evidence", () => {
           candidate: unknown,
           visual: unknown,
           benchmark: unknown,
+          pdfLicenseGateSha256: string,
         ) => unknown;
       }
     ).validateHostedPdfCandidateBinding;
@@ -96,7 +97,14 @@ describe("CI release evidence", () => {
         engineImageDigest: `sha256:${"3".repeat(64)}`,
         corpusSha256: "d".repeat(64),
       },
-      deviceMatrix: { pdfVisualProfilesMeasured: 9 },
+      competitorComparison: { casesCompared: 17, baselineSha256: "1".repeat(64) },
+      blindedHumanReview: {
+        visualProfilesMeasured: 9,
+        pdfVisualEvidenceSha256: "0".repeat(64),
+      },
+      commercialReview: { licenseGateSha256: "e".repeat(64) },
+      privacyReview: { testsRun: 6, pdfVisualEvidenceSha256: "0".repeat(64) },
+      deviceMatrix: { pdfVisualProfilesMeasured: 9, pdfVisualEvidenceSha256: "0".repeat(64) },
     };
     const candidate = {
       gitSha: "a".repeat(40),
@@ -137,12 +145,16 @@ describe("CI release evidence", () => {
         engineImageDigest: candidate.pdfEngine.oci.configDigest,
         corpusManifestSha256: visual.corpusManifestSha256,
       },
+      records: Array.from({ length: 17 }, (_, index) => ({ stratum: `case-${index}` })),
     };
     const benchmarkSha256 = sha256Canonical(benchmark);
     reports.fullCorpusBenchmark.benchmarkSha256 = benchmarkSha256;
     candidate.pdfQuality.benchmarkSha256 = benchmarkSha256;
     reports.deviceMatrix.pdfVisualEvidenceSha256 = sha256Canonical(visual);
-    expect(validate(reports, candidate, visual, benchmark)).toBe(reports);
+    reports.blindedHumanReview.pdfVisualEvidenceSha256 = sha256Canonical(visual);
+    reports.privacyReview.pdfVisualEvidenceSha256 = sha256Canonical(visual);
+    reports.competitorComparison.baselineSha256 = benchmarkSha256;
+    expect(validate(reports, candidate, visual, benchmark, "e".repeat(64))).toBe(reports);
     for (const changed of [
       { ...candidate, pdfQuality: { ...candidate.pdfQuality, visualProfilesMeasured: 0 } },
       {
@@ -150,18 +162,25 @@ describe("CI release evidence", () => {
         pdfEngine: { oci: { configDigest: `sha256:${"4".repeat(64)}` } },
       },
     ])
-      expect(() => validate(reports, changed, visual, benchmark)).toThrow(/exact candidate/i);
+      expect(() => validate(reports, changed, visual, benchmark, "e".repeat(64))).toThrow(
+        /exact candidate/i,
+      );
     const drifted = structuredClone(visual);
     drifted.projects[2].results[0].sha256 = "f".repeat(64);
-    expect(() => validate(reports, candidate, drifted, benchmark)).toThrow(
+    expect(() => validate(reports, candidate, drifted, benchmark, "e".repeat(64))).toThrow(
       /browser|visual|candidate/i,
     );
     const reboundReports = structuredClone(reports);
     const reboundCandidate = structuredClone(candidate);
     reboundReports.fullCorpusBenchmark.benchmarkSha256 = "e".repeat(64);
     reboundCandidate.pdfQuality.benchmarkSha256 = "e".repeat(64);
-    expect(() => validate(reboundReports, reboundCandidate, visual, benchmark)).toThrow(
-      /benchmark|candidate/i,
+    expect(() =>
+      validate(reboundReports, reboundCandidate, visual, benchmark, "e".repeat(64)),
+    ).toThrow(/benchmark|candidate/i);
+    const mismatchedReview = structuredClone(reports);
+    mismatchedReview.commercialReview.licenseGateSha256 = "f".repeat(64);
+    expect(() => validate(mismatchedReview, candidate, visual, benchmark, "e".repeat(64))).toThrow(
+      /license|candidate/i,
     );
   });
 

@@ -35,6 +35,7 @@ export async function createPdfVisualHostedReports({
   benchmarkPath,
   gatePath,
   visualEvidencePath,
+  licenseGatePath,
   output,
   gitSha,
   sourceSha256,
@@ -48,9 +49,39 @@ export async function createPdfVisualHostedReports({
   const benchmarkFile = await readJson(benchmarkPath, "PDF benchmark evidence");
   const gateFile = await readJson(gatePath, "PDF release gate evidence");
   const visualFile = await readJson(visualEvidencePath, "PDF browser visual evidence");
+  const licenseFile = await readJson(licenseGatePath, "PDF engine license gate");
   const benchmark = validatePdfBenchmarkReport(benchmarkFile.value);
   const gate = validatePdfReleaseGate(gateFile.value, benchmark);
   const visual = validatePdfVisualBrowserEvidence(visualFile.value);
+  const license = licenseFile.value;
+  assertExactKeys(
+    license,
+    [
+      "schema",
+      "passed",
+      "qpdfVersion",
+      "sourceSha256",
+      "sourceLockSha256",
+      "policySha256",
+      "licenseSha256",
+      "noticeSha256",
+    ],
+    "PDF engine license gate",
+  );
+  if (
+    license.schema !== "hereisit-pdf-engine-license-gate@1" ||
+    license.passed !== true ||
+    license.qpdfVersion !== "12.4.0"
+  )
+    throw new TypeError("PDF engine license gate did not pass");
+  for (const key of [
+    "sourceSha256",
+    "sourceLockSha256",
+    "policySha256",
+    "licenseSha256",
+    "noticeSha256",
+  ])
+    assertSha256(license[key], `PDF engine license gate ${key}`);
   const visualBytes = Buffer.from(canonicalJson(visual));
   if (
     !gate.publicAdmissionReady ||
@@ -82,6 +113,29 @@ export async function createPdfVisualHostedReports({
       releaseGateSha256: sha256Bytes(canonicalJson(gate)),
       engineImageDigest: gate.engineImageDigest,
     },
+    competitorComparison: {
+      schema: hostedReviewSchemas.competitorComparison,
+      ...common,
+      casesCompared: benchmark.records.length,
+      baselineSha256: gate.benchmarkSha256,
+    },
+    blindedHumanReview: {
+      schema: hostedReviewSchemas.blindedHumanReview,
+      ...common,
+      visualProfilesMeasured: visual.visualProfilesMeasured,
+      pdfVisualEvidenceSha256: sha256Bytes(visualBytes),
+    },
+    commercialReview: {
+      schema: hostedReviewSchemas.commercialReview,
+      ...common,
+      licenseGateSha256: sha256Bytes(licenseFile.bytes),
+    },
+    privacyReview: {
+      schema: hostedReviewSchemas.privacyReview,
+      ...common,
+      testsRun: projects.length,
+      pdfVisualEvidenceSha256: sha256Bytes(visualBytes),
+    },
     deviceMatrix: {
       schema: hostedReviewSchemas.deviceMatrix,
       ...common,
@@ -111,13 +165,23 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const args = parseCliArguments(process.argv.slice(2));
   assertExactKeys(
     args,
-    ["benchmark", "gate", "visual-evidence", "output", "git-sha", "source-sha256", "check-run-id"],
+    [
+      "benchmark",
+      "gate",
+      "visual-evidence",
+      "license-gate",
+      "output",
+      "git-sha",
+      "source-sha256",
+      "check-run-id",
+    ],
     "PDF visual hosted report CLI arguments",
   );
   const documents = await createPdfVisualHostedReports({
     benchmarkPath: args.benchmark,
     gatePath: args.gate,
     visualEvidencePath: args["visual-evidence"],
+    licenseGatePath: args["license-gate"],
     output: args.output,
     gitSha: args["git-sha"],
     sourceSha256: args["source-sha256"],
