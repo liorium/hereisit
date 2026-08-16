@@ -168,7 +168,7 @@ jobs:
             --base-lock apps/image-engine/base-images.lock.json \
             --output .artifacts/release-source/security-image-engine-license-gate.json
           node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine \
-            --output .artifacts/release-source/security-pdf-engine-license-gate.json
+            > .artifacts/release-source/security-pdf-engine-license-gate.json
           node scripts/application-supply-chain.mjs --mode verify --repository . \
             --policy security/application-license-policy.json --lockfile pnpm-lock.yaml \
             --notices-output apps/web/public/THIRD_PARTY_NOTICES.txt \

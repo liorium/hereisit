@@ -266,7 +266,9 @@ describe("native PDF processing release workflows", () => {
     );
     expect(workflow).toContain("--base-lock apps/image-engine/base-images.lock.json \\");
     expect(workflow).not.toContain("verify-image-engine-licenses.mjs --root");
-    expect(workflow).toContain("verify-pdf-engine-licenses.mjs");
+    expect(workflow).toContain(
+      "verify-pdf-engine-licenses.mjs --root apps/pdf-engine \\\n            > .artifacts/release-source/security-pdf-engine-license-gate.json",
+    );
     expect(workflow).toContain("validate-pdf-benchmark-evidence.mjs");
     expect(read("ci")).toContain("pdf-engine-benchmark.json");
     expect(workflow).toContain("pdf-engine-release-gate.json");
