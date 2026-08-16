@@ -144,4 +144,50 @@ describe("processing security evidence normalization", () => {
       }),
     ).rejects.toThrow(/SBOM|identity|miswired/i);
   });
+
+  it("normalizes Trivy's omitted empty result while rejecting explicit null", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-security-empty-"));
+    roots.push(root);
+    const sbomInput = join(root, "sbom.raw.json");
+    const trivyInput = join(root, "trivy.raw.json");
+    await writeFile(
+      sbomInput,
+      JSON.stringify({
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        version: 1,
+        metadata: { component: { type: "file", name: "/repo/web" } },
+      }),
+    );
+    const report = {
+      SchemaVersion: 2,
+      ArtifactName: "/repo/web",
+      ArtifactType: "filesystem",
+    };
+    await writeFile(trivyInput, JSON.stringify(report));
+    const trivyOutput = join(root, "trivy.json");
+    await normalizeProcessingSecurityEvidence({
+      scope: "web-staging",
+      artifactSha256: "a".repeat(64),
+      expectedScannerArtifact: "/repo/web",
+      sbomInput,
+      sbomOutput: join(root, "sbom.json"),
+      trivyInput,
+      trivyOutput,
+    });
+    expect(JSON.parse(await readFile(trivyOutput, "utf8")).Results).toEqual([]);
+
+    await writeFile(trivyInput, JSON.stringify({ ...report, Results: null }));
+    await expect(
+      normalizeProcessingSecurityEvidence({
+        scope: "web-staging",
+        artifactSha256: "a".repeat(64),
+        expectedScannerArtifact: "/repo/web",
+        sbomInput,
+        sbomOutput: join(root, "sbom-null.json"),
+        trivyInput,
+        trivyOutput: join(root, "trivy-null.json"),
+      }),
+    ).rejects.toThrow(/identity/i);
+  });
 });
