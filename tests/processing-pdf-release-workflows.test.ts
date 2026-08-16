@@ -83,6 +83,10 @@ describe("native PDF processing release workflows", () => {
     expect(ci).toContain("Stale Trivy DB pin");
     expect(ci).toContain('--db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST"');
     expect(ci).toContain("--skip-db-update --offline-scan");
+    expect(ci).toContain('-v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE"');
+    expect(ci).not.toContain(
+      '-v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache:ro" "$TRIVY_IMAGE"',
+    );
     expect(ci).toContain(".artifacts/runtime/web-staging-scan");
     expect(ci).toContain(".artifacts/runtime/web-production-scan");
     expect(ci).toContain('source="dir:/repo/.artifacts/runtime/$scope-scan"');
