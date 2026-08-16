@@ -255,6 +255,17 @@ describe("native PDF processing release workflows", () => {
   });
   it("fails CI closed on the sealed PDF benchmark and release gate", () => {
     const workflow = read("ci");
+    expect(workflow).toContain("verify-image-engine-licenses.mjs \\");
+    expect(workflow).toContain("--scope pr \\");
+    expect(workflow).toContain('--image "hereisit-image-engine:$GITHUB_SHA" \\');
+    expect(workflow).toContain('--artifact-sha256 "$IMAGE_ENGINE_SHA256" \\');
+    expect(workflow).toContain("--lock apps/image-engine/native/sources.lock.json \\");
+    expect(workflow).toContain("--policy apps/image-engine/licenses/policy.json \\");
+    expect(workflow).toContain(
+      "--exceptions apps/image-engine/security/vulnerability-exceptions.json \\",
+    );
+    expect(workflow).toContain("--base-lock apps/image-engine/base-images.lock.json \\");
+    expect(workflow).not.toContain("verify-image-engine-licenses.mjs --root");
     expect(workflow).toContain("verify-pdf-engine-licenses.mjs");
     expect(workflow).toContain("validate-pdf-benchmark-evidence.mjs");
     expect(read("ci")).toContain("pdf-engine-benchmark.json");
