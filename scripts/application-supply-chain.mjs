@@ -565,9 +565,12 @@ async function verifySbom(scope, descriptor, policyState) {
   const identities = new Set();
   for (const componentValue of sbom.components) {
     const component = assertObject(componentValue, `${scope} SBOM component`);
+    const type = nonEmptyString(component.type, `${scope} SBOM component type`);
     const name = nonEmptyString(component.name, `${scope} SBOM component name`);
-    const version = nonEmptyString(component.version, `${scope} SBOM component version`);
-    const identity = `${name}@${version}`;
+    const identity =
+      type === "file"
+        ? `file:${nonEmptyString(component["bom-ref"], `${scope} SBOM file reference`)}`
+        : `${name}@${nonEmptyString(component.version, `${scope} SBOM component version`)}`;
     if (identities.has(identity))
       throw new TypeError(`${scope} SBOM contains a duplicate component`);
     identities.add(identity);
