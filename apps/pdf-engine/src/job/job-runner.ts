@@ -259,6 +259,7 @@ export async function settleProcessTermination(termination: Promise<void>): Prom
 export function qpdfEnvironment(workspace: { readonly home: string; readonly tmp: string }) {
   return {
     PATH: "/usr/local/bin:/usr/bin:/bin",
+    LD_LIBRARY_PATH: "/usr/local/lib",
     HOME: workspace.home,
     TMPDIR: workspace.tmp,
     LANG: "C.UTF-8",
