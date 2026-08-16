@@ -91,6 +91,11 @@ describe("native PDF processing release workflows", () => {
     expect(ci).toContain(".artifacts/runtime/web-production-scan");
     expect(ci).toContain('source="dir:/repo/.artifacts/runtime/$scope-scan"');
     expect(ci).toContain('trivy=(filesystem "/repo/.artifacts/runtime/$scope-scan")');
+    expect(ci).toContain(
+      'scanner_artifact="/repo/$artifact"; source="docker-archive:/repo/$artifact"',
+    );
+    expect(ci).not.toContain('scanner_artifact="hereisit-image-engine:$GITHUB_SHA"');
+    expect(ci).not.toContain('scanner_artifact="hereisit-pdf-engine:$GITHUB_SHA"');
     expect(ci).not.toMatch(/web-(?:staging|production)\)[^\n]*source="file:/u);
     for (const scope of [
       "engine",
