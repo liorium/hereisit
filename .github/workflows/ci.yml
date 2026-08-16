@@ -138,8 +138,8 @@ jobs:
           LOCKFILE_SHA256="$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)"
           for scope in engine pdf-engine web-staging web-production worker lockfile; do
             case "$scope" in
-              engine) artifact=.artifacts/release-source/image-engine-linux-amd64.docker.tar; artifact_sha256="$IMAGE_ENGINE_SHA256"; scanner_artifact="hereisit-image-engine:$GITHUB_SHA"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
-              pdf-engine) artifact=.artifacts/release-source/pdf-engine-linux-amd64.docker.tar; artifact_sha256="$PDF_ENGINE_SHA256"; scanner_artifact="hereisit-pdf-engine:$GITHUB_SHA"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
+              engine) artifact=.artifacts/release-source/image-engine-linux-amd64.docker.tar; artifact_sha256="$IMAGE_ENGINE_SHA256"; scanner_artifact="/repo/$artifact"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
+              pdf-engine) artifact=.artifacts/release-source/pdf-engine-linux-amd64.docker.tar; artifact_sha256="$PDF_ENGINE_SHA256"; scanner_artifact="/repo/$artifact"; source="docker-archive:/repo/$artifact"; trivy=(image --input "/repo/$artifact") ;;
               web-staging) artifact=.artifacts/release-source/web-staging.tar; artifact_sha256="$WEB_STAGING_SHA256"; scanner_artifact="/repo/.artifacts/runtime/$scope-scan"; source="dir:/repo/.artifacts/runtime/$scope-scan"; trivy=(filesystem "/repo/.artifacts/runtime/$scope-scan") ;;
               web-production) artifact=.artifacts/release-source/web-production.tar; artifact_sha256="$WEB_PRODUCTION_SHA256"; scanner_artifact="/repo/.artifacts/runtime/$scope-scan"; source="dir:/repo/.artifacts/runtime/$scope-scan"; trivy=(filesystem "/repo/.artifacts/runtime/$scope-scan") ;;
               worker) artifact=.artifacts/release-source/api-worker.mjs; artifact_sha256="$WORKER_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
