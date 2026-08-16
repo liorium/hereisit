@@ -337,6 +337,24 @@ describe("application supply-chain gate", () => {
     ).rejects.toThrow(/version/i);
   });
 
+  it("accepts Syft SBOMs that omit an empty components array", async () => {
+    const fixture = await makeFixture();
+    await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+    const sbom = makeSbom("worker", fixture.sboms.worker.artifactSha256);
+    delete (sbom as Partial<typeof sbom>).components;
+    await writeCanonical(fixture.sboms.worker.path, sbom);
+
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+        fixture.adapters,
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      scopes: { worker: { componentCount: 0 } },
+    });
+  });
+
   it("uses the exact pnpm command contract and sanitizes adapter failures", async () => {
     const fixture = await makeFixture();
     let request: unknown;
