@@ -91,81 +91,6 @@ async function structurallyRewritePdf(source: Buffer): Promise<Buffer> {
 async function observePdfWorkerNames(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const NativeWorker = Worker;
-    Object.defineProperty(globalThis, "Worker", {
-      configurable: true,
-      value: new Proxy(NativeWorker, {
-        construct(Target, argumentsList) {
-          const options = argumentsList[1] as WorkerOptions | undefined;
-          const names = JSON.parse(
-            sessionStorage.getItem("__hereisitPdfWorkerNames") ?? "[]",
-          ) as string[];
-          names.push(options?.name ?? "unnamed");
-          sessionStorage.setItem("__hereisitPdfWorkerNames", JSON.stringify(names));
-          return Reflect.construct(Target, argumentsList);
-        },
-      }),
-    });
-  });
-}
-
-async function forceLocalNoReduction(
-  page: Page,
-  reason: "STRUCTURED_OR_MIXED" | "IMAGE_ONLY_NO_SAVINGS" = "STRUCTURED_OR_MIXED",
-): Promise<void> {
-  await page.addInitScript((noReductionReason) => {
-    localStorage.setItem("hereisit.pdf-compression-location.v1", "local");
-    const NativeWorker = Worker;
-    class NoReductionWorker extends EventTarget {
-      onerror: ((event: ErrorEvent) => unknown) | null = null;
-      onmessage: ((event: MessageEvent<unknown>) => unknown) | null = null;
-      onmessageerror: ((event: MessageEvent<unknown>) => unknown) | null = null;
-
-      constructor() {
-        super();
-        queueMicrotask(() => {
-          this.onmessage?.(
-            new MessageEvent("message", {
-              data: {
-                protocol: 1,
-                type: "ready",
-                capabilities: {
-                  offscreenCanvas: true,
-                  jpegEncoder: true,
-                  pdfjsWorker: true,
-                  pdfAssembly: true,
-                },
-                error: null,
-              },
-            }),
-          );
-        });
-      }
-
-      postMessage(value: unknown) {
-        const request = value as { jobId?: unknown; type?: unknown };
-        if (request.type !== "run" || typeof request.jobId !== "string") return;
-        queueMicrotask(() => {
-          this.onmessage?.(
-            new MessageEvent("message", {
-              data: {
-                protocol: 1,
-                type: "failed",
-                jobId: request.jobId,
-                error: {
-                  code: "NO_SIZE_REDUCTION",
-                  message: "PDF 용량을 1% 이상 줄이지 못했어요.",
-                  reason: noReductionReason,
-                  retryable: false,
-                },
-              },
-            }),
-          );
-        });
-      }
-
-      terminate() {}
-    }
-
     class FailedVerificationWorker extends EventTarget {
       onerror: ((event: ErrorEvent) => unknown) | null = null;
       onmessage: ((event: MessageEvent<unknown>) => unknown) | null = null;
@@ -174,11 +99,7 @@ async function forceLocalNoReduction(
       constructor() {
         super();
         queueMicrotask(() => {
-          this.onmessage?.(
-            new MessageEvent("message", {
-              data: { protocol: 1, type: "ready" },
-            }),
-          );
+          this.onmessage?.(new MessageEvent("message", { data: { protocol: 1, type: "ready" } }));
         });
       }
 
@@ -270,9 +191,6 @@ async function forceLocalNoReduction(
           ) as string[];
           names.push(options?.name ?? "unnamed");
           sessionStorage.setItem("__hereisitPdfWorkerNames", JSON.stringify(names));
-          if (options?.name === "hereisit-pdf-compress-scanned-worker") {
-            return new NoReductionWorker() as unknown as Worker;
-          }
           if (
             options?.name === "hereisit-pdf-optimize-verifier" &&
             sessionStorage.getItem("__hereisitFailPdfVerification") === "1"
@@ -284,6 +202,80 @@ async function forceLocalNoReduction(
             sessionStorage.getItem("__hereisitLatePdfVerification") === "1"
           ) {
             return new LateVerificationWorker() as unknown as Worker;
+          }
+          return Reflect.construct(Target, argumentsList);
+        },
+      }),
+    });
+  });
+}
+
+async function forceLocalNoReduction(
+  page: Page,
+  reason: "STRUCTURED_OR_MIXED" | "IMAGE_ONLY_NO_SAVINGS" = "STRUCTURED_OR_MIXED",
+): Promise<void> {
+  await observePdfWorkerNames(page);
+  await page.addInitScript((noReductionReason) => {
+    localStorage.setItem("hereisit.pdf-compression-location.v1", "local");
+    const NativeWorker = Worker;
+    class NoReductionWorker extends EventTarget {
+      onerror: ((event: ErrorEvent) => unknown) | null = null;
+      onmessage: ((event: MessageEvent<unknown>) => unknown) | null = null;
+      onmessageerror: ((event: MessageEvent<unknown>) => unknown) | null = null;
+
+      constructor() {
+        super();
+        queueMicrotask(() => {
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: {
+                protocol: 1,
+                type: "ready",
+                capabilities: {
+                  offscreenCanvas: true,
+                  jpegEncoder: true,
+                  pdfjsWorker: true,
+                  pdfAssembly: true,
+                },
+                error: null,
+              },
+            }),
+          );
+        });
+      }
+
+      postMessage(value: unknown) {
+        const request = value as { jobId?: unknown; type?: unknown };
+        if (request.type !== "run" || typeof request.jobId !== "string") return;
+        queueMicrotask(() => {
+          this.onmessage?.(
+            new MessageEvent("message", {
+              data: {
+                protocol: 1,
+                type: "failed",
+                jobId: request.jobId,
+                error: {
+                  code: "NO_SIZE_REDUCTION",
+                  message: "PDF 용량을 1% 이상 줄이지 못했어요.",
+                  reason: noReductionReason,
+                  retryable: false,
+                },
+              },
+            }),
+          );
+        });
+      }
+
+      terminate() {}
+    }
+
+    Object.defineProperty(globalThis, "Worker", {
+      configurable: true,
+      value: new Proxy(NativeWorker, {
+        construct(Target, argumentsList) {
+          const options = argumentsList[1] as WorkerOptions | undefined;
+          if (options?.name === "hereisit-pdf-compress-scanned-worker") {
+            return new NoReductionWorker() as unknown as Worker;
           }
           return Reflect.construct(Target, argumentsList);
         },
