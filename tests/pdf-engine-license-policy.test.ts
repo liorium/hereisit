@@ -46,6 +46,11 @@ describe("PDF engine supply-chain policy", () => {
     expect(build).not.toMatch(/^\s*(?:VERSION=[0-9]|URL=https?:|SHA256=[0-9a-f]{64}\s*$)/mu);
     expect(build).not.toMatch(/git clone|apt-get|\bpip\b|\bcargo\b/u);
     expect(dockerfile).toContain("USER 10001:10001");
+    expect(dockerfile).toContain(
+      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
+    );
+    expect(dockerfile).toContain("FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime");
+    expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).toContain("/tmp/hereisit-pdf-engine");
     expect(dockerfile).not.toMatch(/ghostscript|mupdf|poppler|pdfcpu|python/u);
     expect(dockerfile.trimEnd()).toMatch(/FROM runtime AS production$/);

@@ -75,7 +75,7 @@ jobs:
           umask 077
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           mkdir -p .artifacts/release-source .artifacts/runtime
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          export SOURCE_DATE_EPOCH=1786752000
           git archive --format=tar "$GITHUB_SHA" > .artifacts/runtime/exact-source.tar
           for engine in image pdf; do
             dockerfile="apps/$engine-engine/Dockerfile"
@@ -298,7 +298,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          export SOURCE_DATE_EPOCH=1786752000
           git archive --format=tar "$GITHUB_SHA" > "$RUNNER_TEMP/pdf-visual-source.tar"
           echo "HEREISIT_PDF_VISUAL_SOURCE_SHA256=$(sha256sum "$RUNNER_TEMP/pdf-visual-source.tar" | cut -d' ' -f1)" >> "$GITHUB_ENV"
           docker build --file apps/pdf-engine/Dockerfile --target production \

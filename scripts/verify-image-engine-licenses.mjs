@@ -547,7 +547,7 @@ export function validateRuntimeInventory(inventory, sourceLock, policy) {
   const debian = inventory.buildMetadata["debian-packages.json"];
   if (
     debian?.schemaVersion !== 1 ||
-    debian.snapshot !== "20260716T000000Z" ||
+    debian.snapshot !== "20260815T000000Z" ||
     !Array.isArray(debian.packages) ||
     debian.packages.length === 0 ||
     !Array.isArray(debian.copyrightPaths) ||

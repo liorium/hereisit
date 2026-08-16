@@ -249,6 +249,7 @@ describe("detached qpdf process cleanup", () => {
 
   it("uses only the job-private HOME and TMPDIR", () => {
     expect(qpdfEnvironment({ home: "/safe/job/home", tmp: "/safe/job/tmp" })).toMatchObject({
+      LD_LIBRARY_PATH: "/usr/local/lib",
       HOME: "/safe/job/home",
       TMPDIR: "/safe/job/tmp",
     });
