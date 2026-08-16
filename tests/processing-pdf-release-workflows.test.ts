@@ -39,7 +39,8 @@ describe("native PDF processing release workflows", () => {
     const admission = read("processing-production-admission");
     expect(ci).toContain("release-authority:");
     expect(ci).toContain(`release-authority:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'`);
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'`);
+    expect(ci).toContain("workflow_dispatch:");
     expect(ci).toContain('dockerfile="apps/$engine-engine/Dockerfile"');
     expect(ci.match(/docker buildx build/g)).toHaveLength(1);
     expect(ci).toContain("git archive --format=tar");
