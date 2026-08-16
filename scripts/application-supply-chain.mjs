@@ -559,11 +559,12 @@ async function verifySbom(scope, descriptor, policyState) {
     : false;
   if (source.name !== sourceName && !bound)
     throw new TypeError(`${scope} SBOM source identity is invalid`);
-  if (!Array.isArray(sbom.components) || sbom.components.length > 100_000) {
+  const components = sbom.components === undefined ? [] : sbom.components;
+  if (!Array.isArray(components) || components.length > 100_000) {
     throw new TypeError(`${scope} SBOM components are invalid`);
   }
   const identities = new Set();
-  for (const componentValue of sbom.components) {
+  for (const componentValue of components) {
     const component = assertObject(componentValue, `${scope} SBOM component`);
     const type = nonEmptyString(component.type, `${scope} SBOM component type`);
     const name = nonEmptyString(component.name, `${scope} SBOM component name`);
@@ -581,7 +582,7 @@ async function verifySbom(scope, descriptor, policyState) {
         throw new TypeError(`${scope} SBOM contains a must not ship component`);
     }
   }
-  return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: sbom.components.length };
+  return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: components.length };
 }
 
 function validateOptions(options) {
