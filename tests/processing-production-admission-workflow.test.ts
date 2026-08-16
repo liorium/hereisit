@@ -13,7 +13,7 @@ describe("processing production admission workflow", () => {
   it("promotes only the exact successful production canary behind the existing lock", () => {
     expect(workflow).toContain('workflows: ["Processing production"]');
     const promote = workflow.slice(workflow.indexOf("  promote:"), workflow.indexOf("  disable:"));
-    expect(promote).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
+    expect(promote).not.toContain("PROCESSING_HOSTED_REVIEWS_READY");
     expect(workflow).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(workflow).toContain("github.event.workflow_run.head_branch == 'main'");
     expect(workflow).toContain(

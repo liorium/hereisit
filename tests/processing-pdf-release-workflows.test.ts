@@ -39,7 +39,7 @@ describe("native PDF processing release workflows", () => {
     const admission = read("processing-production-admission");
     expect(ci).toContain("release-authority:");
     expect(ci).toContain(`release-authority:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'`);
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'`);
     expect(ci).toContain('dockerfile="apps/$engine-engine/Dockerfile"');
     expect(ci.match(/docker buildx build/g)).toHaveLength(1);
     expect(ci).toContain("git archive --format=tar");
@@ -57,7 +57,9 @@ describe("native PDF processing release workflows", () => {
       ci.indexOf("create-processing-hosted-check.mjs"),
     );
     expect(ci).not.toContain("cp .artifacts/pdf-browser-visual-evidence.json");
-    expect(ci).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
+    expect(ci).not.toContain("PROCESSING_HOSTED_REVIEWS_READY");
+    expect(ci).toContain("--license-gate .artifacts/pdf-engine-license-gate.json");
+    expect(ci).toContain(".artifacts/hosted-reports/*.json");
     expect(ci).not.toContain('execution: "exact-main-hosted-check"');
     expect(ci).toContain("--hosted-check-root .artifacts/hosted-check");
     expect(ci).toContain("--pdf-benchmark .artifacts/hosted-check/pdf-engine-benchmark.json");

@@ -12,7 +12,7 @@ beforeAll(() => {
 describe("processing production workflow", () => {
   it("deploys only the exact successful main staging run behind the production environment", () => {
     expect(workflow).toContain('workflows: ["Processing staging"]');
-    expect(workflow).toContain("vars.PROCESSING_HOSTED_REVIEWS_READY == 'true'");
+    expect(workflow).not.toContain("PROCESSING_HOSTED_REVIEWS_READY");
     expect(workflow).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(workflow).toContain("github.event.workflow_run.head_branch == 'main'");
     expect(workflow).toContain(

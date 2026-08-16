@@ -3,8 +3,10 @@ import {
   getOrCreateAnonymousSessionId,
   isUnprovenInAppBrowser,
   readImageCompressionLocation,
+  readPdfCompressionLocation,
   readProcessingClientConfig,
   writeImageCompressionLocation,
+  writePdfCompressionLocation,
 } from "./processing-config";
 
 class FakeStorage implements Storage {
@@ -141,5 +143,36 @@ describe("image compression location", () => {
       if (descriptor === undefined) delete (globalThis as { localStorage?: Storage }).localStorage;
       else Object.defineProperty(globalThis, "localStorage", descriptor);
     }
+  });
+});
+
+describe("PDF compression location", () => {
+  it("defaults malformed or missing preferences to the server", () => {
+    const storage = new FakeStorage();
+    expect(readPdfCompressionLocation(storage)).toBe("server");
+    storage.setItem("hereisit.pdf-compression-location.v1", "remote");
+    expect(readPdfCompressionLocation(storage)).toBe("server");
+  });
+
+  it("persists an explicit local choice independently from images", () => {
+    const storage = new FakeStorage();
+    writeImageCompressionLocation("server", storage);
+    writePdfCompressionLocation("local", storage);
+    expect(storage.getItem("hereisit.pdf-compression-location.v1")).toBe("local");
+    expect(readPdfCompressionLocation(storage)).toBe("local");
+    expect(readImageCompressionLocation(storage)).toBe("server");
+  });
+
+  it("fails safely when preference storage is unavailable", () => {
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    } as unknown as Storage;
+    expect(readPdfCompressionLocation(broken)).toBe("server");
+    expect(() => writePdfCompressionLocation("local", broken)).not.toThrow();
   });
 });

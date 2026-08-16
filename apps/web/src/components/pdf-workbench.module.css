@@ -598,6 +598,22 @@
   line-height: 1.55;
 }
 
+.processingDisclosure {
+  margin: 16px 28px 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.processingDisclosure a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  color: var(--ink);
+  font-weight: 750;
+}
+
 .compressionServerFallback {
   margin: 16px 28px 0;
   padding: 16px;
@@ -1624,6 +1640,7 @@
 
 @media (max-width: 640px) {
   .compressionSetupWarning,
+  .processingDisclosure,
   .compressionServerFallback {
     margin-right: 20px;
     margin-left: 20px;

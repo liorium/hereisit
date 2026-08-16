@@ -61,24 +61,18 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
       releaseGateSha256: "2".repeat(64),
       engineImageDigest: `sha256:${"3".repeat(64)}`,
     },
-    competitorComparison: { casesCompared: 12, baselineSha256: "c".repeat(64) },
+    competitorComparison: { casesCompared: 12, baselineSha256: "1".repeat(64) },
     blindedHumanReview: {
-      reviewers: 2,
-      approval: {
-        kind: "approval-reference",
-        href: "https://approvals.example.test/reviews/42",
-        sha256: "d".repeat(64),
-      },
+      visualProfilesMeasured: 9,
+      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visualEvidence(sourceSha256))),
     },
     commercialReview: {
       licenseGateSha256: "e".repeat(64),
-      approval: {
-        kind: "approval-reference",
-        href: "https://approvals.example.test/reviews/43",
-        sha256: "f".repeat(64),
-      },
     },
-    privacyReview: { testsRun: 9 },
+    privacyReview: {
+      testsRun: 6,
+      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visualEvidence(sourceSha256))),
+    },
     deviceMatrix: {
       projects: [
         "chromium",

@@ -327,12 +327,15 @@ test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ 
   page.on("download", () => {
     downloads += 1;
   });
+  await page.addInitScript(() => {
+    localStorage.setItem("hereisit.pdf-compression-location.v1", "local");
+  });
   await page.goto("/pdf/compress");
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
   await expect(
     page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("파일은 이 기기에서만 처리돼요.", { exact: true })).toBeVisible();
+  await expect(page.getByText("PDF를 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
 
   await page.locator("input[type=file]").setInputFiles({
     name: "mobile-scan.pdf",

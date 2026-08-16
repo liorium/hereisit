@@ -61,17 +61,33 @@ export function validateHostedReviewReceipt(value, { name, gitSha, sourceSha256 
   });
 }
 
-export function validateHostedPdfCandidateBinding(reports, candidate, rawVisual, benchmark) {
+export function validateHostedPdfCandidateBinding(
+  reports,
+  candidate,
+  rawVisual,
+  benchmark,
+  pdfLicenseGateSha256,
+) {
   const corpus = reports.fullCorpusBenchmark;
   const device = reports.deviceMatrix;
+  const visualReview = reports.blindedHumanReview;
+  const privacy = reports.privacyReview;
   const visual = validatePdfVisualBrowserEvidence(rawVisual);
+  const visualSha256 = sha256Bytes(canonicalJson(visual));
   if (
     corpus.benchmarkSha256 !== candidate.pdfQuality.benchmarkSha256 ||
     corpus.releaseGateSha256 !== candidate.pdfQuality.releaseGateSha256 ||
     corpus.profilesMeasured !== candidate.pdfQuality.visualProfilesMeasured ||
     corpus.engineImageDigest !== candidate.pdfEngine.oci.configDigest ||
     device.pdfVisualProfilesMeasured !== corpus.profilesMeasured * 3 ||
-    device.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
+    device.pdfVisualEvidenceSha256 !== visualSha256 ||
+    visualReview.visualProfilesMeasured !== device.pdfVisualProfilesMeasured ||
+    visualReview.pdfVisualEvidenceSha256 !== visualSha256 ||
+    privacy.testsRun !== 6 ||
+    privacy.pdfVisualEvidenceSha256 !== visualSha256 ||
+    reports.competitorComparison.casesCompared !== benchmark.records.length ||
+    reports.competitorComparison.baselineSha256 !== corpus.benchmarkSha256 ||
+    reports.commercialReview.licenseGateSha256 !== pdfLicenseGateSha256 ||
     visual.gitSha !== candidate.gitSha ||
     visual.gitSha !== corpus.gitSha ||
     visual.sourceSha256 !== corpus.sourceSha256 ||
@@ -125,6 +141,7 @@ export async function prepareProcessingCiEvidence({
   );
   let visual;
   let benchmark;
+  let pdfLicenseGateSha256;
   try {
     const visualBytes = await readBoundedRegularFile(
       join(resolve(hostedCheckRoot), "pdfVisualBrowserEvidence.json"),
@@ -146,10 +163,22 @@ export async function prepareProcessingCiEvidence({
       throw new TypeError("candidate PDF benchmark asset identity is invalid");
     }
     benchmark = validatePdfBenchmarkReport(JSON.parse(benchmarkBytes.toString("utf8")));
+    const licenseAsset = candidate.releaseAssets.security.gates.pdfEngine;
+    const licenseBytes = await readBoundedRegularFile(
+      join(dirname(resolve(candidatePath)), licenseAsset.path),
+      256 * 1024,
+      "candidate PDF license gate",
+    );
+    pdfLicenseGateSha256 = sha256Bytes(licenseBytes);
+    if (
+      licenseBytes.byteLength !== licenseAsset.sizeBytes ||
+      pdfLicenseGateSha256 !== licenseAsset.sha256
+    )
+      throw new TypeError("candidate PDF license gate identity is invalid");
   } catch {
     throw new TypeError("exact PDF browser and benchmark evidence is missing or invalid");
   }
-  validateHostedPdfCandidateBinding(reports, candidate, visual, benchmark);
+  validateHostedPdfCandidateBinding(reports, candidate, visual, benchmark, pdfLicenseGateSha256);
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1000).toISOString();
   await writeProcessingEvidenceBundle({

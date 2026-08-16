@@ -70,23 +70,38 @@ async function fixture() {
     report: join(root, "benchmark.json"),
     gate: join(root, "gate.json"),
     visual: join(root, "visual.json"),
+    license: join(root, "license.json"),
     output: join(root, "out"),
   };
   await writeFile(paths.report, canonicalJson(report));
   await writeFile(paths.gate, canonicalJson(gate));
   const visual = visualEvidence(report);
   await writeFile(paths.visual, canonicalJson(visual));
+  await writeFile(
+    paths.license,
+    canonicalJson({
+      schema: "hereisit-pdf-engine-license-gate@1",
+      passed: true,
+      qpdfVersion: "12.4.0",
+      sourceSha256: "1".repeat(64),
+      sourceLockSha256: "2".repeat(64),
+      policySha256: "3".repeat(64),
+      licenseSha256: "4".repeat(64),
+      noticeSha256: "5".repeat(64),
+    }),
+  );
   return { report, gate, visual, paths };
 }
 
 describe("PDF visual hosted report projection", () => {
-  it("creates only strict benchmark and device documents bound to the exact hosted run", async () => {
+  it("creates all strict automated documents bound to the exact hosted run", async () => {
     const { report, gate, visual, paths } = await fixture();
 
     await createPdfVisualHostedReports({
       benchmarkPath: paths.report,
       gatePath: paths.gate,
       visualEvidencePath: paths.visual,
+      licenseGatePath: paths.license,
       output: paths.output,
       gitSha,
       sourceSha256,
@@ -97,6 +112,16 @@ describe("PDF visual hosted report projection", () => {
       await readFile(join(paths.output, "fullCorpusBenchmark.json"), "utf8"),
     );
     const device = JSON.parse(await readFile(join(paths.output, "deviceMatrix.json"), "utf8"));
+    const competitor = JSON.parse(
+      await readFile(join(paths.output, "competitorComparison.json"), "utf8"),
+    );
+    const visualReview = JSON.parse(
+      await readFile(join(paths.output, "blindedHumanReview.json"), "utf8"),
+    );
+    const commercial = JSON.parse(
+      await readFile(join(paths.output, "commercialReview.json"), "utf8"),
+    );
+    const privacy = JSON.parse(await readFile(join(paths.output, "privacyReview.json"), "utf8"));
     const aggregate = JSON.parse(
       await readFile(join(paths.output, "pdfVisualBrowserEvidence.json"), "utf8"),
     );
@@ -123,8 +148,28 @@ describe("PDF visual hosted report projection", () => {
       productAnalytics: true,
       pdfVisualProfilesMeasured: 9,
     });
+    expect(competitor).toMatchObject({
+      passed: true,
+      casesCompared: 17,
+      baselineSha256: gate.benchmarkSha256,
+    });
+    expect(visualReview).toMatchObject({
+      schema: "hereisit-automated-visual-review@1",
+      passed: true,
+      visualProfilesMeasured: 9,
+      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visual)),
+    });
+    expect(commercial).toMatchObject({
+      schema: "hereisit-commercial-license-review@1",
+      passed: true,
+      licenseGateSha256: sha256Bytes(await readFile(paths.license)),
+    });
+    expect(privacy).toMatchObject({
+      passed: true,
+      testsRun: 6,
+      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visual)),
+    });
     expect(aggregate).toEqual(visual);
-    await expect(readFile(join(paths.output, "privacyReview.json"))).rejects.toThrow();
   });
 
   it("fails closed when browser evidence or public admission drifts", async () => {
@@ -138,6 +183,7 @@ describe("PDF visual hosted report projection", () => {
         benchmarkPath: paths.report,
         gatePath: paths.gate,
         visualEvidencePath: paths.visual,
+        licenseGatePath: paths.license,
         output: paths.output,
         gitSha,
         sourceSha256,
