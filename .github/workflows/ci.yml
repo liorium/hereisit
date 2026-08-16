@@ -158,7 +158,14 @@ jobs:
               --trivy-input ".artifacts/runtime/security-trivy-$scope.raw.json" \
               --trivy-output ".artifacts/release-source/security-trivy-$scope.json"
           done
-          node scripts/verify-image-engine-licenses.mjs --root apps/image-engine \
+          node scripts/verify-image-engine-licenses.mjs \
+            --scope pr \
+            --image "hereisit-image-engine:$GITHUB_SHA" \
+            --artifact-sha256 "$IMAGE_ENGINE_SHA256" \
+            --lock apps/image-engine/native/sources.lock.json \
+            --policy apps/image-engine/licenses/policy.json \
+            --exceptions apps/image-engine/security/vulnerability-exceptions.json \
+            --base-lock apps/image-engine/base-images.lock.json \
             --output .artifacts/release-source/security-image-engine-license-gate.json
           node scripts/verify-pdf-engine-licenses.mjs --root apps/pdf-engine \
             --output .artifacts/release-source/security-pdf-engine-license-gate.json

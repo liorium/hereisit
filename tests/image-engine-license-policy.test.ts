@@ -487,6 +487,8 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
     expect(verifier).toContain('debian.snapshot !== "20260815T000000Z"');
+    expect(verifier).toContain('"--entrypoint",\n      "/nodejs/bin/node",');
+    expect(verifier).not.toContain('"--entrypoint",\n      "node",');
     const runtime = dockerfile.slice(dockerfile.indexOf(runtimeStage));
     expect(runtime).not.toMatch(/\b(?:apt-get|corepack|npm|SHELL|RUN)\b/u);
     expect(runtime).toContain('ENTRYPOINT ["/nodejs/bin/node", "/app/dist/server.mjs"]');

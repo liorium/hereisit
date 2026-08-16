@@ -602,7 +602,7 @@ function inspectRuntimeImage({ image, artifactSha256 }) {
       "--network",
       "none",
       "--entrypoint",
-      "node",
+      "/nodejs/bin/node",
       "--mount",
       `type=bind,src=${inventoryScript},dst=/tmp/runtime-inventory.mjs,readonly`,
       image,
