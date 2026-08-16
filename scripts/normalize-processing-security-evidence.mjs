@@ -67,9 +67,10 @@ export async function normalizeProcessingSecurityEvidence({
     await readJson(trivyInput, "raw vulnerability report"),
     "raw vulnerability report",
   );
-  if (trivy.SchemaVersion !== 2 || !Array.isArray(trivy.Results)) {
+  if (trivy.SchemaVersion !== 2 || (trivy.Results !== undefined && !Array.isArray(trivy.Results))) {
     throw new TypeError("raw vulnerability report identity is invalid");
   }
+  trivy.Results ??= [];
   const container = scope === "engine" || scope === "pdf-engine";
   if (
     trivy.ArtifactName !== expectedScannerArtifact ||
