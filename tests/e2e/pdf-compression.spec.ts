@@ -88,6 +88,26 @@ async function structurallyRewritePdf(source: Buffer): Promise<Buffer> {
   );
 }
 
+async function observePdfWorkerNames(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeWorker = Worker;
+    Object.defineProperty(globalThis, "Worker", {
+      configurable: true,
+      value: new Proxy(NativeWorker, {
+        construct(Target, argumentsList) {
+          const options = argumentsList[1] as WorkerOptions | undefined;
+          const names = JSON.parse(
+            sessionStorage.getItem("__hereisitPdfWorkerNames") ?? "[]",
+          ) as string[];
+          names.push(options?.name ?? "unnamed");
+          sessionStorage.setItem("__hereisitPdfWorkerNames", JSON.stringify(names));
+          return Reflect.construct(Target, argumentsList);
+        },
+      }),
+    });
+  });
+}
+
 async function forceLocalNoReduction(
   page: Page,
   reason: "STRUCTURED_OR_MIXED" | "IMAGE_ONLY_NO_SAVINGS" = "STRUCTURED_OR_MIXED",
@@ -945,6 +965,7 @@ test("bounds a wide history state before enumerating its values", async ({ page 
 });
 
 test("shows only the file-selection step before a PDF is ready", async ({ page }) => {
+  await page.route("**/v1/policy", (route) => route.abort("failed"));
   await openReadyPdfCompression(page, "server");
   await expect(page.getByRole("heading", { level: 2, name: "PDF 용량 줄이기" })).toBeVisible();
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled();
@@ -953,9 +974,10 @@ test("shows only the file-selection step before a PDF is ready", async ({ page }
   await expect(
     page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
-  ).toBeVisible();
+  await expect(page.getByText("PDF를 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "서버에 연결하지 못해 이 기기에서 처리해요.",
+  );
 });
 
 test("explains an unsupported browser before selection without starting local work", async ({
@@ -1366,6 +1388,7 @@ test("exposes a server PDF only after browser verification and direct download",
     allowProcessingRequests: true,
     sentinels: ["server-source.pdf"],
   });
+  await observePdfWorkerNames(page);
   await installObjectUrlCounters(page);
   const source = await createCompressibleStructuredPdf();
   const output = await structurallyRewritePdf(source);

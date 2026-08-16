@@ -177,7 +177,12 @@ for (const tool of remainingPdfShells) {
   test(`renders ${tool.path} in its catalog-driven file shell`, async ({ page }) => {
     await page.goto(tool.path);
 
-    await expectCatalogShell(page, tool.title, "파일 작업 영역");
+    await expectCatalogShell(
+      page,
+      tool.title,
+      "파일 작업 영역",
+      tool.path === "/pdf/compress" ? "automatic" : "local",
+    );
     const shellHeader = page
       .getByRole("heading", { level: 1, name: tool.title })
       .locator("xpath=ancestor::header");

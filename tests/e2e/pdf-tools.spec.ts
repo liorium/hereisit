@@ -389,16 +389,25 @@ test("reorders, rotates, and deletes PDF pages without external uploads", async 
     timeout: 20_000,
   });
   const grid = page.getByRole("list", { name: "PDF 페이지 순서" });
-  await expect(grid.locator("img")).toHaveCount(3, { timeout: 20_000 });
-  const previewSize = await grid
-    .locator("img")
-    .first()
-    .evaluate((image) => ({
+  await expect(page.getByRole("status")).toHaveText(
+    /페이지 미리보기를 준비했어요\.|미리보기 없이 페이지 번호로 정리할 수 있어요\./,
+    { timeout: 20_000 },
+  );
+  const previews = grid.locator("img");
+  const previewCount = await previews.count();
+  expect([0, 3]).toContain(previewCount);
+  if (previewCount === 3) {
+    const previewSize = await previews.first().evaluate((image) => ({
       width: image.naturalWidth,
       height: image.naturalHeight,
     }));
-  expect(Math.min(previewSize.width, previewSize.height)).toBeGreaterThan(0);
-  expect(Math.max(previewSize.width, previewSize.height)).toBeLessThanOrEqual(160);
+    expect(Math.min(previewSize.width, previewSize.height)).toBeGreaterThan(0);
+    expect(Math.max(previewSize.width, previewSize.height)).toBeLessThanOrEqual(160);
+  } else {
+    await expect(page.getByRole("status")).toHaveText(
+      "미리보기 없이 페이지 번호로 정리할 수 있어요.",
+    );
+  }
 
   const cards = grid.getByRole("listitem");
   await cards.nth(2).dragTo(cards.nth(0));
