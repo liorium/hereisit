@@ -37,67 +37,14 @@ type VisualInput = {
   results: Array<{ artifact: string; sha256: string; byteLength: number; repeat: number }>;
 };
 
-async function installLocalNoReduction(page: Page) {
+async function installPdfVisualEvidenceObservers(page: Page) {
   await page.addInitScript(() => {
     const NativeWorker = Worker;
-    class NoReductionWorker extends EventTarget {
-      onerror: ((event: ErrorEvent) => unknown) | null = null;
-      onmessage: ((event: MessageEvent<unknown>) => unknown) | null = null;
-      onmessageerror: ((event: MessageEvent<unknown>) => unknown) | null = null;
-
-      constructor() {
-        super();
-        queueMicrotask(() =>
-          this.onmessage?.(
-            new MessageEvent("message", {
-              data: {
-                protocol: 1,
-                type: "ready",
-                capabilities: {
-                  offscreenCanvas: true,
-                  jpegEncoder: true,
-                  pdfjsWorker: true,
-                  pdfAssembly: true,
-                },
-                error: null,
-              },
-            }),
-          ),
-        );
-      }
-
-      postMessage(value: unknown) {
-        const request = value as { jobId?: unknown; type?: unknown };
-        if (request.type !== "run" || typeof request.jobId !== "string") return;
-        queueMicrotask(() =>
-          this.onmessage?.(
-            new MessageEvent("message", {
-              data: {
-                protocol: 1,
-                type: "failed",
-                jobId: request.jobId,
-                error: {
-                  code: "NO_SIZE_REDUCTION",
-                  message: "PDF 용량을 1% 이상 줄이지 못했어요.",
-                  reason: "STRUCTURED_OR_MIXED",
-                  retryable: false,
-                },
-              },
-            }),
-          ),
-        );
-      }
-
-      terminate() {}
-    }
-
     Object.defineProperty(globalThis, "Worker", {
       configurable: true,
       value: new Proxy(NativeWorker, {
         construct(Target, argumentsList) {
           const options = argumentsList[1] as WorkerOptions | undefined;
-          if (options?.name === "hereisit-pdf-compress-scanned-worker")
-            return new NoReductionWorker() as unknown as Worker;
           const worker = Reflect.construct(Target, argumentsList) as Worker;
           if (options?.name === "hereisit-pdf-optimize-verifier") {
             const state = globalThis as typeof globalThis & {
@@ -185,7 +132,7 @@ test("verifies three native image-optimized repeats in the real browser Worker",
   );
   let activeRepeat = 0;
   const acknowledged = new Set<number>();
-  await installLocalNoReduction(page);
+  await installPdfVisualEvidenceObservers(page);
   await page.route("**/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -297,13 +244,12 @@ test("verifies three native image-optimized repeats in the real browser Worker",
     await expect(
       page.getByText(`${input.source.pageCount}페이지 PDF를 불러왔어요.`).first(),
     ).toBeVisible({ timeout: 60_000 });
-    await page.getByRole("button", { name: `${input.source.pageCount}페이지 용량 줄이기` }).click();
     const resultUrlsBeforeVerification = await page.evaluate(
       () =>
         (globalThis as typeof globalThis & { __hereisitPdfResultUrls?: number })
           .__hereisitPdfResultUrls ?? 0,
     );
-    await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
+    await page.getByRole("button", { name: `${input.source.pageCount}페이지 용량 줄이기` }).click();
     await expect
       .poll(() =>
         page.evaluate(
