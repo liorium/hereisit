@@ -299,6 +299,44 @@ describe("application supply-chain gate", () => {
     expect(gateBytes).not.toMatch(/allow-mit|LGPL|node_modules|\.cdx\.json|example\.invalid/);
   });
 
+  it("accepts versionless Syft file components without weakening package identities", async () => {
+    const fixture = await makeFixture();
+    await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+    const sbom = makeSbom("engine", fixture.sboms.engine.artifactSha256);
+    sbom.components.push({
+      "bom-ref": "file-sha256-example",
+      type: "file",
+      name: "/usr/share/example",
+    } as never);
+    await writeCanonical(fixture.sboms.engine.path, sbom);
+
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+        fixture.adapters,
+      ),
+    ).resolves.toMatchObject({
+      passed: true,
+      scopes: { engine: { componentCount: packageSpecs.length + 1 } },
+    });
+
+    const versionlessPackage = { ...sbom.components[0] } as Partial<(typeof sbom.components)[0]>;
+    delete versionlessPackage.version;
+    sbom.components[0] = versionlessPackage as (typeof sbom.components)[0];
+    await writeCanonical(fixture.sboms.engine.path, sbom);
+    await expect(
+      runApplicationSupplyChain(
+        {
+          mode: "verify",
+          ...fixture.options,
+          sboms: fixture.sboms,
+          gatePath: join(fixture.root, "second-gate.json"),
+        },
+        fixture.adapters,
+      ),
+    ).rejects.toThrow(/version/i);
+  });
+
   it("uses the exact pnpm command contract and sanitizes adapter failures", async () => {
     const fixture = await makeFixture();
     let request: unknown;
