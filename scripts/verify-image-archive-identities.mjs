@@ -304,6 +304,18 @@ function layerTransform(mediaType) {
   throw new TypeError("OCI layer media type is unsupported");
 }
 
+async function dockerLayerTransform(handle, entry) {
+  const prefix = await readExactly(
+    handle,
+    entry.dataOffset,
+    Math.min(entry.size, 4),
+    "Docker layer",
+  );
+  if (prefix[0] === 0x1f && prefix[1] === 0x8b) return createGunzip;
+  if (prefix.equals(Buffer.from([0x28, 0xb5, 0x2f, 0xfd]))) return createZstdDecompress;
+  return undefined;
+}
+
 export async function inspectOciImageArchive({ archivePath, asset }) {
   const scanned = await scanVerifiedTarArchive({ archivePath, asset, label: "engine OCI asset" });
   try {
@@ -420,16 +432,23 @@ export async function inspectDockerImageArchive({ archivePath, asset, expectedRe
     if (!Array.isArray(image.Layers) || image.Layers.length !== configDiffIds.length) {
       throw new TypeError("Docker manifest layers do not align with the config rootfs");
     }
-    const derivedDiffIds = image.Layers.map((path, index) => {
+    const derivedDiffIds = [];
+    for (const [index, path] of image.Layers.entries()) {
       if (typeof path !== "string") throw new TypeError("Docker layer path is invalid");
       const entry = scanned.entries.get(path);
       if (entry === undefined) throw new TypeError("Docker layer entry is missing");
-      const digest = `sha256:${entry.sha256}`;
+      const digest = `sha256:${await hashRange(
+        scanned.handle,
+        entry.dataOffset,
+        entry.size,
+        await dockerLayerTransform(scanned.handle, entry),
+        maximumExpandedLayerBytes,
+      )}`;
       if (digest !== configDiffIds[index]) {
         throw new TypeError("Docker layer content does not match the config rootfs DiffIDs");
       }
-      return digest;
-    });
+      derivedDiffIds.push(digest);
+    }
     return { configDigest, diffIds: derivedDiffIds };
   } finally {
     await scanned.handle.close();

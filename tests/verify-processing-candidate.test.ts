@@ -76,7 +76,13 @@ function rewriteTarChecksum(header: Buffer) {
   header[155] = 0x20;
 }
 
-async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zstd" } = {}) {
+async function createFixture({
+  ociCompression,
+  dockerCompression,
+}: {
+  ociCompression?: "gzip" | "zstd";
+  dockerCompression?: "gzip" | "zstd";
+} = {}) {
   const parent = await mkdtemp(join(tmpdir(), "hereisit-candidate-verifier-"));
   temporaryRoots.push(parent);
   const root = join(parent, "candidate");
@@ -162,16 +168,28 @@ async function createFixture({ ociCompression }: { ociCompression?: "gzip" | "zs
   await createDeterministicTreeArchive({ root: ociTree, output: ociArchive });
 
   const dockerTree = join(build, "engine-docker");
-  await mkdir(join(dockerTree, "layer"), { recursive: true });
+  const dockerLayerBytes =
+    dockerCompression === "gzip"
+      ? gzipSync(layerBytes, { mtime: 0 })
+      : dockerCompression === "zstd"
+        ? zstdCompressSync(layerBytes)
+        : layerBytes;
+  const dockerLayerPath =
+    dockerCompression === undefined
+      ? "layer/layer.tar"
+      : `blobs/sha256/${sha256Bytes(dockerLayerBytes)}`;
+  await mkdir(join(dockerTree, dockerCompression === undefined ? "layer" : "blobs/sha256"), {
+    recursive: true,
+  });
   await writeFile(join(dockerTree, "config.json"), configBytes);
-  await writeFile(join(dockerTree, "layer", "layer.tar"), layerBytes);
+  await writeFile(join(dockerTree, dockerLayerPath), dockerLayerBytes);
   await writeFile(
     join(dockerTree, "manifest.json"),
     canonicalJson([
       {
         Config: "config.json",
         RepoTags: [`hereisit-image-engine:${gitSha}`],
-        Layers: ["layer/layer.tar"],
+        Layers: [dockerLayerPath],
       },
     ]),
   );
@@ -1002,6 +1020,21 @@ describe("processing candidate verifier", () => {
         asset: fixture.candidate.releaseAssets.engine.oci,
       }),
     ).resolves.toEqual(fixture.candidate.engine.oci);
+    await expect(
+      inspectDockerImageArchive({
+        archivePath: join(fixture.root, fixture.candidate.releaseAssets.engine.docker.path),
+        asset: fixture.candidate.releaseAssets.engine.docker,
+        expectedRepoTag: fixture.candidate.engine.loadedImage,
+      }),
+    ).resolves.toEqual(fixture.candidate.engine.docker);
+  });
+
+  it.each([
+    "gzip",
+    "zstd",
+  ] as const)("derives Docker DiffIDs from %s-compressed OCI blob layers", async (dockerCompression) => {
+    const fixture = await createFixture({ dockerCompression });
+
     await expect(
       inspectDockerImageArchive({
         archivePath: join(fixture.root, fixture.candidate.releaseAssets.engine.docker.path),
