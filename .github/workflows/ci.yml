@@ -147,7 +147,7 @@ jobs:
             esac
             docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" -o cyclonedx-json \
               > ".artifacts/runtime/security-sbom-$scope.raw.json"
-            docker run --rm -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache:ro" "$TRIVY_IMAGE" \
+            docker run --rm -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
               "${trivy[@]}" --cache-dir /trivy-cache --skip-db-update --offline-scan --format json \
               > ".artifacts/runtime/security-trivy-$scope.raw.json"
             node scripts/normalize-processing-security-evidence.mjs --scope "$scope" \
