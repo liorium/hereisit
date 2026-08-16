@@ -54,6 +54,7 @@ async function startServer(): Promise<void> {
             LC_ALL: "C.UTF-8",
             TZ: "UTC",
             NODE_ENV: "production",
+            LD_LIBRARY_PATH: "/usr/local/lib",
             ENGINE_BUILD_ID: config.build.engineBuildId,
             HOME: input.workspace.home,
             TMPDIR: input.workspace.tmp,

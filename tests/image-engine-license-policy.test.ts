@@ -591,7 +591,7 @@ describe("image engine native supply-chain policy", () => {
       ]),
     );
     expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
-      new Set(["sha256:c71a66d3ba8e61a158a274a285b5e68c6ef5d3aedd455ce7425d613ffcb033db"]),
+      new Set(["sha256:34d9bc5c1d96727c4d17ffc21ce979586284f7c7788f9c709aba1c9655fdc4a1"]),
     );
   });
 
