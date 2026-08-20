@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalJson } from "./image-lab-common.mjs";
 
 const EXPECTED = Object.freeze({
   version: "12.4.0",
@@ -85,7 +86,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   } else {
     try {
       process.stdout.write(
-        `${JSON.stringify(await verifyPdfEngineLicenses({ root: process.argv[index + 1] }))}\n`,
+        canonicalJson(await verifyPdfEngineLicenses({ root: process.argv[index + 1] })),
       );
     } catch {
       process.stderr.write("PDF engine license gate failed\n");
