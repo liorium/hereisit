@@ -263,6 +263,10 @@ describe("native PDF processing release workflows", () => {
       expect(workflow).toContain(`restore_queue ${key}`);
     }
     expect(workflow).toContain('--expected "$expected"');
+    expect(workflow).not.toContain("require(process.argv[1])");
+    expect(workflow).toContain(
+      'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))',
+    );
   });
   it("fails CI closed on the sealed PDF benchmark and release gate", () => {
     const workflow = read("ci");

@@ -134,7 +134,7 @@ jobs:
             --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
             --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
             --pdf-dlq-name "$PDF_DLQ_NAME" --output .artifacts/runtime/pre-mutation-state.json
-          node -e 'const s=require(process.argv[1]);if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
+          node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
           echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Bind CI-built engine, Worker, web, benchmark, cost, SBOM, Trivy, and license assets
         run: |
@@ -640,7 +640,7 @@ jobs:
           status=0
           restore_queue() {
             key="$1"; name="$2"
-            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
+            expected="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
             if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
             pnpm exec wrangler queues "$action" "$name" || status=1
             node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
