@@ -121,6 +121,9 @@ describe("native PDF processing release workflows", () => {
     expect(ci).toContain("create-processing-candidate.mjs");
     expect(ci).toContain("create-processing-release-report.mjs");
     expect(ci).toContain(
+      '--public-key .artifacts/runtime/evidence-public.pem --now "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"',
+    );
+    expect(ci).toContain(
       "cp .artifacts/runtime/evidence-public.pem .artifacts/release-authority/evidence-public.pem",
     );
     expect(ci).toContain(`processing-release-authority-\${{ github.sha }}`);
