@@ -78,6 +78,11 @@ jobs:
           path: .artifacts/canary
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          git diff --exit-code
       - name: Bind the exact successful production canary
         run: |
           set -euo pipefail
@@ -179,7 +184,6 @@ jobs:
       - name: Install locked tooling and bind the exact CI-built Worker, web, and cost artifacts
         run: |
           set -euo pipefail
-          pnpm install --frozen-lockfile
           git diff --exit-code
           cp .artifacts/canary/authority/api-worker.mjs "$WORKER_MODULE"
           cp .artifacts/canary/authority/live-cost-model.json .artifacts/runtime/live-cost-model.json

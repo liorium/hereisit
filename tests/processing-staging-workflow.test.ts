@@ -60,7 +60,7 @@ describe("processing staging workflow", () => {
     expect(checkout).toContain("persist-credentials: false");
     expect(deploy).toContain(`EXPECTED_HEAD_SHA: \${{ github.event.workflow_run.head_sha }}`);
     expect(verifySource).toBeGreaterThanOrEqual(0);
-    expect(install).toBeGreaterThan(verifySource);
+    expect(install).toBeLessThan(verifySource);
     expect(validateEnvironment).toBeGreaterThan(install);
     expect(firstCloudflareMutation).toBeGreaterThan(validateEnvironment);
   });

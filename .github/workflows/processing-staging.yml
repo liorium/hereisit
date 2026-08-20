@@ -67,6 +67,11 @@ jobs:
           path: .artifacts/authority
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
+      - name: Install locked dependencies
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          git diff --exit-code
       - name: Bind the exact successful CI source
         run: |
           set -euo pipefail
@@ -93,11 +98,6 @@ jobs:
           cp .artifacts/authority/processing-release-report.json .artifacts/deployment/processing-release-report.json
           cp .artifacts/authority/evidence-public.pem .artifacts/deployment/evidence-public.pem
           echo "REPORT_SHA256=$REPORT_SHA256" >> "$GITHUB_ENV"
-      - name: Install locked dependencies
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          git diff --exit-code
       - name: Validate sealed deployment environment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
