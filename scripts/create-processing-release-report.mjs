@@ -333,7 +333,7 @@ async function deriveProcessingReleaseReport(
     publicKeyPath,
     now,
   },
-  { candidateState = "built", reportBytes, verifiedReportPath } = {},
+  { candidateState = "built", reportBytes, verifiedReportPath, verifiedAt = now } = {},
 ) {
   const candidateVerification = await verifyProcessingCandidate({
     manifestPath: candidateManifestPath,
@@ -491,7 +491,7 @@ async function deriveProcessingReleaseReport(
       releaseId: builtCandidate.releaseId,
       gitSha: builtCandidate.gitSha,
       candidateVerificationSha256: builtCandidate.verificationSha256,
-      verifiedAt: now,
+      verifiedAt,
       expiresAt: evidence.expiresAt,
       evidence: {
         bundleSha256: evidenceIdentity.bundleSha256,
@@ -563,6 +563,7 @@ export async function verifyProcessingReleaseReport({ reportPath, ...inputs }) {
     candidateState: candidate.state,
     reportBytes: bytes,
     verifiedReportPath: reportPath,
+    verifiedAt: report.verifiedAt,
   });
   if (!bytes.equals(Buffer.from(canonicalJson(expected)))) {
     throw new TypeError("processing release report does not match verified release inputs");
