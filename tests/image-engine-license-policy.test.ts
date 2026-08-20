@@ -601,7 +601,10 @@ describe("image engine native supply-chain policy", () => {
     );
     expect(
       exceptions.exceptions
-        .filter(({ cve, affectedPackage }) => cve === "CVE-2026-14456" && affectedPackage === "libssl3t64")
+        .filter(
+          ({ cve, affectedPackage }) =>
+            cve === "CVE-2026-14456" && affectedPackage === "libssl3t64",
+        )
         .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
     ).toEqual([
       "engine:sha256:e424bcd0c7829efb9a81257334ef13dea3312876ccc9171621382ca6018b6e07",
