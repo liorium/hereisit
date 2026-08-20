@@ -576,13 +576,12 @@ describe("image engine native supply-chain policy", () => {
     expect(() =>
       validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z")),
     ).not.toThrow();
-    expect(exceptions.exceptions).toHaveLength(9);
+    expect(exceptions.exceptions).toHaveLength(8);
     expect(
       new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
     ).toEqual(
       new Set([
-        "CVE-2026-53615:libblkid1",
-        "CVE-2026-53615:libmount1",
+        "CVE-2026-14456:libssl3t64",
         "CVE-2026-58010:libglib2.0-0t64",
         "CVE-2026-58011:libglib2.0-0t64",
         "CVE-2026-58012:libglib2.0-0t64",
