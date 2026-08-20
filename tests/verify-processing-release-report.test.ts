@@ -531,6 +531,15 @@ describe("processing release report verification", () => {
       evidenceBundleSha256: created.evidence.bundleSha256,
       evidenceSignatureSha256: created.evidence.signatureSha256,
     });
+    await expect(
+      verifyProcessingReleaseReport({
+        ...options(value),
+        now: "2026-07-20T12:00:01.000Z",
+      }),
+    ).resolves.toMatchObject({
+      releaseId,
+      gitSha,
+    });
   });
 
   it("verifies a finalized candidate by reconstructing its unique built projection", async () => {
