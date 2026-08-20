@@ -668,7 +668,9 @@ export async function verifyImageEngineLicenseGate(
       }
     }
   }
-  validateVulnerabilityExceptions(exceptions.value);
+  validateVulnerabilityExceptions(exceptions.value, new Date(), {
+    allowedScopes: ["engine", "pdf-engine"],
+  });
   if (commercialReview !== undefined)
     validateCommercialReview(commercialReview.value, sourceLock.bytes);
   validateRuntimeInventory(await inspect({ image, artifactSha256 }), lock, policy.value);

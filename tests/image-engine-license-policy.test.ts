@@ -574,9 +574,11 @@ describe("image engine native supply-chain policy", () => {
       exceptions: Array<Record<string, string>>;
     };
     expect(() =>
-      validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z")),
+      validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z"), {
+        allowedScopes: ["engine", "pdf-engine"],
+      }),
     ).not.toThrow();
-    expect(exceptions.exceptions).toHaveLength(8);
+    expect(exceptions.exceptions).toHaveLength(9);
     expect(
       new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
     ).toEqual(
@@ -592,8 +594,19 @@ describe("image engine native supply-chain policy", () => {
       ]),
     );
     expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
-      new Set(["sha256:e424bcd0c7829efb9a81257334ef13dea3312876ccc9171621382ca6018b6e07"]),
+      new Set([
+        "sha256:e424bcd0c7829efb9a81257334ef13dea3312876ccc9171621382ca6018b6e07",
+        "sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
+      ]),
     );
+    expect(
+      exceptions.exceptions
+        .filter(({ cve, affectedPackage }) => cve === "CVE-2026-14456" && affectedPackage === "libssl3t64")
+        .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
+    ).toEqual([
+      "engine:sha256:e424bcd0c7829efb9a81257334ef13dea3312876ccc9171621382ca6018b6e07",
+      "pdf-engine:sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
+    ]);
   });
 
   it.each([
