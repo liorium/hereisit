@@ -227,7 +227,7 @@ jobs:
           node scripts/create-processing-release-report.mjs --candidate-root .artifacts/built-candidate \
             --candidate-manifest .artifacts/built-candidate/processing-candidate.json \
             --evidence-bundle .artifacts/runtime/evidence.json --evidence-signature .artifacts/runtime/evidence.sig \
-            --public-key .artifacts/runtime/evidence-public.pem --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --public-key .artifacts/runtime/evidence-public.pem --now "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
             --output .artifacts/runtime/processing-release-report.json
           node scripts/finalize-processing-candidate.mjs --built-root .artifacts/built-candidate \
             --output-root .artifacts/release-authority --report .artifacts/runtime/processing-release-report.json \
