@@ -44,7 +44,15 @@ describe("native PDF processing release workflows", () => {
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'`);
     expect(ci).toContain("workflow_dispatch:");
     expect(ci).toContain('dockerfile="apps/$engine-engine/Dockerfile"');
-    expect(ci.match(/docker buildx build/g)).toHaveLength(1);
+    expect(ci.match(/docker buildx build/g)).toHaveLength(2);
+    expect(ci).toContain("docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c");
+    expect(ci).toContain(
+      "driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f",
+    );
+    expect(ci).toContain(
+      '--output "type=docker,dest=$RUNNER_TEMP/pdf-visual-engine.docker.tar,rewrite-timestamp=true"',
+    );
+    expect(ci).toContain('docker load --input "$RUNNER_TEMP/pdf-visual-engine.docker.tar"');
     expect(ci).toContain("git archive --format=tar");
     expect(ci).toContain("normalize-processing-security-evidence.mjs");
     expect(ci).toContain("environment: processing-release-authority");
