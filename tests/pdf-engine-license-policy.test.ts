@@ -1,11 +1,15 @@
+import { execFile } from "node:child_process";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
+import { canonicalJson } from "../scripts/image-lab-common.mjs";
 import { verifyPdfEngineLicenses } from "../scripts/verify-pdf-engine-licenses.mjs";
 
 const root = "apps/pdf-engine";
 const roots: string[] = [];
+const execFileAsync = promisify(execFile);
 afterEach(async () => Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true }))));
 
 describe("PDF engine supply-chain policy", () => {
@@ -32,6 +36,15 @@ describe("PDF engine supply-chain policy", () => {
       passed: true,
       qpdfVersion: "12.4.0",
     });
+  });
+
+  it("prints the CLI gate as canonical JSON for release authority", async () => {
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["scripts/verify-pdf-engine-licenses.mjs", "--root", root],
+      { encoding: "utf8" },
+    );
+    expect(stdout).toBe(canonicalJson(JSON.parse(stdout)));
   });
 
   it("binds the build and application supply-chain gates", async () => {
