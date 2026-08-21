@@ -12,6 +12,7 @@ import type {
   ArtifactDeletionAuthorization,
   ArtifactMime,
   ArtifactUploadErrorCode,
+  ArtifactUploadStage,
   InputArtifactObjectKey,
   StoreExactInputArtifactResult,
 } from "../r2-artifacts";
@@ -40,7 +41,10 @@ export interface UploadRouteRepository
 }
 
 export interface UploadRouteRuntime {
-  readonly config: { readonly appOrigins: readonly URL[] };
+  readonly config: {
+    readonly appOrigins: readonly URL[];
+    readonly environment?: "local" | "staging" | "production";
+  };
   readonly currentSecret: string;
   readonly previousSecret: string;
   readonly networkRateLimiter: Pick<RateLimit, "limit">;
@@ -196,7 +200,11 @@ function commitDeletionResponse(
   return errorResponse(409, "UPLOAD_MISMATCH", "업로드 상태가 변경되었습니다.", true);
 }
 
-function artifactFailureResponse(code: ArtifactUploadErrorCode): Response {
+function artifactFailureResponse(
+  code: ArtifactUploadErrorCode,
+  stage: ArtifactUploadStage | undefined,
+  environment: UploadRouteRuntime["config"]["environment"],
+): Response {
   if (code === "UPLOAD_EXPIRED") {
     return errorResponse(410, "UPLOAD_EXPIRED", "업로드 기한이 만료되었습니다.", false);
   }
@@ -208,12 +216,16 @@ function artifactFailureResponse(code: ArtifactUploadErrorCode): Response {
       false,
     );
   }
-  return errorResponse(
+  const response = errorResponse(
     503,
     "STORAGE_FAILURE",
     "파일을 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.",
     true,
   );
+  if (environment === "staging" && stage !== undefined) {
+    response.headers.set("x-processing-diagnostic-stage", stage);
+  }
+  return response;
 }
 
 function classifyArtifactFailure(error: unknown): ArtifactUploadErrorCode {
@@ -229,6 +241,21 @@ function classifyArtifactFailure(error: unknown): ArtifactUploadErrorCode {
     return error.code;
   }
   return "STORAGE_FAILURE";
+}
+
+function artifactFailureStage(error: unknown): ArtifactUploadStage | undefined {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "stage" in error &&
+    (error.stage === "digest" ||
+      error.stage === "pending-put" ||
+      error.stage === "pending-read" ||
+      error.stage === "canonical-head")
+  ) {
+    return error.stage;
+  }
+  return undefined;
 }
 
 async function settlePreEngineAndDelete(
@@ -450,11 +477,12 @@ export async function routeUploadRequest(
     });
   } catch (error) {
     const code = classifyArtifactFailure(error);
+    const stage = artifactFailureStage(error);
     const failedAt = runtime.now();
     if (Number.isSafeInteger(failedAt) && failedAt >= 0) {
       await settleArtifactFailure({ runtime, job, now: failedAt, code });
     }
-    return artifactFailureResponse(code);
+    return artifactFailureResponse(code, stage, runtime.config.environment);
   }
 
   const completedAt = runtime.now();

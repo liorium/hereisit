@@ -69,6 +69,12 @@ const PDF_SMOKE_ERROR_CODES = new Set([
   "CANCELLED",
   "EXPIRED",
 ]);
+const PDF_SMOKE_STORAGE_STAGES = new Set([
+  "digest",
+  "pending-put",
+  "pending-read",
+  "canonical-head",
+]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -210,6 +216,7 @@ async function assertResponseStatus(response, expected, stage) {
   if (response.status !== expected) {
     const error = new TypeError(`PDF smoke ${stage} failed`);
     const code = await readPublicErrorCode(response);
+    const storageStage = response.headers.get("x-processing-diagnostic-stage");
     Object.defineProperties(error, {
       pdfSmokeDetail: { configurable: true, enumerable: false, value: "http-status" },
       pdfSmokeStage: { configurable: true, enumerable: false, value: stage },
@@ -217,6 +224,9 @@ async function assertResponseStatus(response, expected, stage) {
       ...(code === undefined
         ? {}
         : { pdfSmokeErrorCode: { configurable: true, enumerable: false, value: code } }),
+      ...(storageStage === null || !PDF_SMOKE_STORAGE_STAGES.has(storageStage)
+        ? {}
+        : { pdfSmokeStorageStage: { configurable: true, enumerable: false, value: storageStage } }),
     });
     throw error;
   }
@@ -800,6 +810,13 @@ if (
       PDF_SMOKE_ERROR_CODES.has(error.pdfSmokeErrorCode)
         ? error.pdfSmokeErrorCode
         : undefined;
+    const storageStage =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokeStorageStage === "string" &&
+      PDF_SMOKE_STORAGE_STAGES.has(error.pdfSmokeStorageStage)
+        ? error.pdfSmokeStorageStage
+        : undefined;
     process.stderr.write(
       `${canonicalJson({
         schema: "hereisit-processing-pdf-smoke-cli@1",
@@ -809,6 +826,7 @@ if (
         ...(detail === undefined ? {} : { detail }),
         ...(status === undefined ? {} : { status }),
         ...(errorCode === undefined ? {} : { errorCode }),
+        ...(storageStage === undefined ? {} : { storageStage }),
         ...(policyExecution === undefined ? {} : { policyExecution }),
         ...(policyMaintainer === undefined ? {} : { policyMaintainer }),
         ...(policyReason === undefined ? {} : { policyReason }),
