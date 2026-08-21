@@ -52,6 +52,18 @@ export type Sha256DigestStream = WritableStream<ArrayBuffer | ArrayBufferView> &
   readonly digest: Promise<ArrayBuffer>;
 };
 
+function defaultDigestStream(): Sha256DigestStream {
+  const DigestStreamConstructor = (
+    crypto as unknown as {
+      DigestStream?: new (algorithm: string) => Sha256DigestStream;
+    }
+  ).DigestStream;
+  if (typeof DigestStreamConstructor !== "function") {
+    throw new ArtifactUploadError("STORAGE_FAILURE");
+  }
+  return new DigestStreamConstructor("SHA-256");
+}
+
 export interface VerifiedInputArtifact {
   readonly key: InputArtifactObjectKey;
   readonly byteLength: number;
@@ -310,7 +322,7 @@ async function storeVerifiedPdfArtifact(input: {
   const fixedLengthStream = (input.createFixedLengthStream ?? defaultFixedLengthStream)(
     input.byteLength,
   );
-  const digestStream = (input.createDigestStream ?? (() => new DigestStream("SHA-256")))();
+  const digestStream = (input.createDigestStream ?? defaultDigestStream)();
   const digestObserved = digestStream.digest.then(
     (value) => ({ status: "fulfilled" as const, value }),
     () => ({ status: "rejected" as const }),
