@@ -220,6 +220,87 @@ describe("native PDF server smoke", () => {
     expect(JSON.stringify(calls)).not.toMatch(/filename|private|presigned|https?:/i);
   });
 
+  it("reports only the public error code for a failed control request", async () => {
+    const jobId = "123e4567-e89b-42d3-a456-426614174000";
+    const json = (body: unknown, status = 200) =>
+      Response.json(body, {
+        status,
+        headers: { "content-length": String(JSON.stringify(body).length) },
+      });
+    const fetcher: typeof fetch = async (input, init) => {
+      const path = new URL(typeof input === "string" ? input : input.url).pathname;
+      const method = init?.method ?? "GET";
+      if (path === "/v1/policy") {
+        return json({
+          contract: "tool-job@1",
+          toolContract: "pdf.optimize@1",
+          maintainer: true,
+          execution: "server",
+          reason: null,
+          limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
+          disclosure: {
+            upload: true,
+            inputDeletion: "terminal",
+            resultDeletion: {
+              mode: "server-temporary",
+              acknowledged: "immediate-delete-attempt",
+              unacknowledgedDueSeconds: 1800,
+              applicationSloSeconds: 2100,
+              lifecycleExpirationDays: 1,
+              exceptionalDelayPossible: true,
+            },
+          },
+        });
+      }
+      if (path === "/v1/jobs" && method === "POST") {
+        return json(
+          {
+            contract: "tool-job@1",
+            jobId,
+            mode: "upload-required",
+            upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
+              path: `/v1/jobs/${jobId}/input`,
+              byteLength: 1024,
+              contentType: "application/pdf",
+              expiresAt: "2026-08-12T01:00:00.000Z",
+            },
+            reservedWeightedUnits: 1024,
+          },
+          201,
+        );
+      }
+      if (path.endsWith("/input")) {
+        return json(
+          {
+            contract: "tool-job@1",
+            error: { code: "STORAGE_FAILURE", message: "private", retryable: true },
+          },
+          503,
+        );
+      }
+      if (path === `/v1/jobs/${jobId}` && method === "DELETE")
+        return new Response(null, { status: 204 });
+      throw new Error(`unexpected request ${method} ${path}`);
+    };
+    let failure: unknown;
+    await runPdfSmokeLifecycle({
+      pageOrigin: "https://processing-staging.hereisit.pages.dev",
+      sessionId: "123e4567-e89b-42d3-a456-426614174001",
+      fetch: fetcher,
+      source: new Uint8Array(1024).fill(1),
+    }).catch((error) => {
+      failure = error;
+    });
+    expect(failure).toMatchObject({
+      pdfSmokeStage: "upload",
+      pdfSmokeStatus: 503,
+      pdfSmokeErrorCode: "STORAGE_FAILURE",
+    });
+    expect((failure as Error).message).not.toContain("private");
+  });
+
   it("uses the shared strict versioned schemas for every JSON control response", () => {
     expect(pdfOptimizePolicyResponseSchema).toBeDefined();
     expect(pdfOptimizeCreateResponseSchema).toBeDefined();
