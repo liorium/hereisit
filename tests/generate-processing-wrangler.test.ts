@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Env, parseOperationalConfig } from "../apps/api-worker/src/env";
 import {
@@ -510,5 +512,13 @@ describe("processing Wrangler generator", () => {
         providerUsageSchemaSha256: "f".repeat(64),
       }),
     ).toThrow(/provider usage schema/i);
+  });
+
+  it("binds the runtime contract hash to the exact checked-in file bytes", () => {
+    const fileHash = createHash("sha256")
+      .update(readFileSync(resolve("docs/deployment/provider-usage-schema.v1.json")))
+      .digest("hex");
+
+    expect(CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256).toBe(fileHash);
   });
 });

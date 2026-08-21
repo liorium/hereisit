@@ -6,7 +6,9 @@ const BOOTSTRAP_CONTAINER_APPLICATION_ID = "00000000-0000-4000-8000-000000000000
 const MAX_STANDARD_ATTEMPT_WEIGHTED_UNITS = 2_502_994_560;
 
 export const CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 = createHash("sha256")
-  .update(JSON.stringify(providerUsageContract))
+  .update(
+    readFileSync(new URL("../docs/deployment/provider-usage-schema.v1.json", import.meta.url)),
+  )
   .digest("hex");
 
 const liveCostKeys = [
@@ -737,10 +739,8 @@ if (
 }
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import providerUsageContract from "../docs/deployment/provider-usage-schema.v1.json" with {
-  type: "json",
-};
 import { canonicalJson } from "./image-lab-common.mjs";
