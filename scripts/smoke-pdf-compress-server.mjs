@@ -148,6 +148,7 @@ function assertResponseStatus(response, expected, stage) {
     Object.defineProperties(error, {
       pdfSmokeDetail: { configurable: true, enumerable: false, value: "http-status" },
       pdfSmokeStage: { configurable: true, enumerable: false, value: stage },
+      pdfSmokeStatus: { configurable: true, enumerable: false, value: response.status },
     });
     throw error;
   }
@@ -683,6 +684,14 @@ if (
       PDF_SMOKE_DETAILS.has(error.pdfSmokeDetail)
         ? error.pdfSmokeDetail
         : undefined;
+    const status =
+      error &&
+      typeof error === "object" &&
+      Number.isInteger(error.pdfSmokeStatus) &&
+      error.pdfSmokeStatus >= 100 &&
+      error.pdfSmokeStatus <= 599
+        ? error.pdfSmokeStatus
+        : undefined;
     process.stderr.write(
       `${canonicalJson({
         schema: "hereisit-processing-pdf-smoke-cli@1",
@@ -690,6 +699,7 @@ if (
         reason: "PDF_SMOKE_FAILED",
         ...(stage === undefined ? {} : { stage }),
         ...(detail === undefined ? {} : { detail }),
+        ...(status === undefined ? {} : { status }),
       })}\n`,
     );
     process.exitCode = 1;
