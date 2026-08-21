@@ -230,6 +230,39 @@ describe("native PDF server smoke", () => {
     expect(source).toContain("pdfOptimizeStatusResponseSchema.parse");
   });
 
+  it("classifies a valid local policy without exposing response data", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          contract: "tool-job@1",
+          toolContract: "pdf.optimize@1",
+          maintainer: false,
+          execution: "local",
+          reason: "LOCAL_FALLBACK_REQUIRED",
+          limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
+          disclosure: {
+            upload: false,
+            inputDeletion: "not-uploaded",
+            resultDeletion: { mode: "not-uploaded" },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    let failure: unknown;
+    await runPdfSmokeLifecycle({
+      pageOrigin: "https://processing-staging.hereisit.pages.dev",
+      sessionId: "123e4567-e89b-42d3-a456-426614174001",
+      fetch: fetcher,
+    }).catch((error) => {
+      failure = error;
+    });
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).toMatchObject({ pdfSmokeStage: "policy", pdfSmokeDetail: "policy-cohort" });
+    expect((failure as Error).message).toBe(
+      "PDF smoke policy is not server enabled for the requested cohort",
+    );
+  });
+
   it.each([
     [
       "oversized declaration",

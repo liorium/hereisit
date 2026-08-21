@@ -38,6 +38,14 @@ const PDF_SMOKE_STAGES = new Set([
   "delete",
   "sweep",
 ]);
+const PDF_SMOKE_DETAILS = new Set([
+  "http-status",
+  "response-envelope",
+  "response-json",
+  "response-schema",
+  "policy-cohort",
+  "internal",
+]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -135,7 +143,14 @@ export async function createRepositoryOwnedPdf() {
 }
 
 function assertResponseStatus(response, expected, stage) {
-  if (response.status !== expected) throw new TypeError(`PDF smoke ${stage} failed`);
+  if (response.status !== expected) {
+    const error = new TypeError(`PDF smoke ${stage} failed`);
+    Object.defineProperties(error, {
+      pdfSmokeDetail: { configurable: true, enumerable: false, value: "http-status" },
+      pdfSmokeStage: { configurable: true, enumerable: false, value: stage },
+    });
+    throw error;
+  }
 }
 
 async function jsonResponse(response, expected, stage) {
@@ -151,7 +166,13 @@ async function jsonResponse(response, expected, stage) {
         Number(declared) > MAX_CONTROL_BYTES))
   ) {
     await response.body?.cancel().catch(() => undefined);
-    throw new TypeError(`PDF smoke ${stage} control response envelope is invalid`);
+    const error = new TypeError(`PDF smoke ${stage} control response envelope is invalid`);
+    Object.defineProperty(error, "pdfSmokeDetail", {
+      configurable: true,
+      enumerable: false,
+      value: "response-envelope",
+    });
+    throw error;
   }
   const expectedBytes = declared === null ? MAX_CONTROL_BYTES : Number(declared);
   const reader = response.body.getReader();
@@ -176,7 +197,13 @@ async function jsonResponse(response, expected, stage) {
       `PDF smoke ${stage}`,
     );
   } catch {
-    throw new TypeError(`PDF smoke ${stage} response is invalid`);
+    const error = new TypeError(`PDF smoke ${stage} response is invalid`);
+    Object.defineProperty(error, "pdfSmokeDetail", {
+      configurable: true,
+      enumerable: false,
+      value: "response-json",
+    });
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -389,12 +416,29 @@ export async function runPdfSmokeLifecycle(input) {
         anonymousSessionId: input.sessionId,
       }),
     });
-    const policy = pdfOptimizePolicyResponseSchema.parse(
-      await jsonResponse(policyResponse, 200, "policy"),
-    );
+    let policy;
+    try {
+      policy = pdfOptimizePolicyResponseSchema.parse(
+        await jsonResponse(policyResponse, 200, "policy"),
+      );
+    } catch {
+      const error = new TypeError("PDF smoke policy response is invalid");
+      Object.defineProperties(error, {
+        pdfSmokeDetail: { configurable: true, enumerable: false, value: "response-schema" },
+        pdfSmokeStage: { configurable: true, enumerable: false, value: "policy" },
+      });
+      throw error;
+    }
     trace.push(traceEntry("POST", "/v1/policy", policyResponse.status));
     if (policy.execution !== "server" || policy.maintainer !== (input.anonymous !== true)) {
-      throw new TypeError("PDF smoke policy is not server enabled for the requested cohort");
+      const error = new TypeError(
+        "PDF smoke policy is not server enabled for the requested cohort",
+      );
+      Object.defineProperties(error, {
+        pdfSmokeDetail: { configurable: true, enumerable: false, value: "policy-cohort" },
+        pdfSmokeStage: { configurable: true, enumerable: false, value: "policy" },
+      });
+      throw error;
     }
     stage = "create";
     const createResponse = await request("/v1/jobs", {
@@ -558,6 +602,13 @@ export async function runPdfSmokeLifecycle(input) {
         value: stage,
       });
     }
+    if (error instanceof Error && !Object.hasOwn(error, "pdfSmokeDetail")) {
+      Object.defineProperty(error, "pdfSmokeDetail", {
+        configurable: true,
+        enumerable: false,
+        value: "internal",
+      });
+    }
     if (jobId !== undefined) {
       const signal = timeoutSignal(CLEANUP_DEADLINE_MS);
       await fetcher(`${apiOrigin}/v1/jobs/${jobId}`, {
@@ -625,12 +676,20 @@ if (
       PDF_SMOKE_STAGES.has(error.pdfSmokeStage)
         ? error.pdfSmokeStage
         : undefined;
+    const detail =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokeDetail === "string" &&
+      PDF_SMOKE_DETAILS.has(error.pdfSmokeDetail)
+        ? error.pdfSmokeDetail
+        : undefined;
     process.stderr.write(
       `${canonicalJson({
         schema: "hereisit-processing-pdf-smoke-cli@1",
         passed: false,
         reason: "PDF_SMOKE_FAILED",
         ...(stage === undefined ? {} : { stage }),
+        ...(detail === undefined ? {} : { detail }),
       })}\n`,
     );
     process.exitCode = 1;
