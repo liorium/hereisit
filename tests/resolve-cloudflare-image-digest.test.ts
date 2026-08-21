@@ -8,6 +8,7 @@ import {
 
 const accountId = "0123456789abcdef0123456789abcdef";
 const imageRef = `registry.cloudflare.com/${accountId}/hereisit-image-engine:${"a".repeat(40)}`;
+const pdfImageRef = `registry.cloudflare.com/${accountId}/hereisit-pdf-engine:${"a".repeat(40)}`;
 const manifestDigest = `sha256:${"b".repeat(64)}`;
 const configDigest = `sha256:${"c".repeat(64)}`;
 const buildSpecificImageRef = `${imageRef}-${configDigest.slice("sha256:".length)}`;
@@ -164,6 +165,26 @@ describe("Cloudflare image digest resolver", () => {
         expectedConfigDigest: `sha256:${"9".repeat(64)}`,
       }),
     ).toThrow(/config/i);
+  });
+
+  it("resolves the PDF engine repository without accepting it as an image candidate", () => {
+    const pdfManifest = descriptor({ ref: pdfImageRef });
+    expect(
+      resolveCloudflareImageDigestFromConfig({
+        manifest: pdfManifest,
+        imageRef: pdfImageRef,
+        accountId,
+        expectedConfigDigest: configDigest,
+      }),
+    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-pdf-engine@${manifestDigest}`);
+    expect(() =>
+      resolveCloudflareImageDigest({
+        manifest: pdfManifest,
+        imageRef: pdfImageRef,
+        accountId,
+        candidateIdentity,
+      }),
+    ).toThrow(/repository/i);
   });
 
   it("binds a build-specific tag suffix to the same local config digest", () => {
