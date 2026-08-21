@@ -391,6 +391,49 @@ describe("R2 input invariants", () => {
 });
 
 describe("exact streaming R2 upload", () => {
+  it("creates the default PDF digest through crypto.DigestStream", async () => {
+    let resolveDigest: ((value: ArrayBuffer) => void) | undefined;
+    const digest = new Promise<ArrayBuffer>((resolve) => {
+      resolveDigest = resolve;
+    });
+    class TestDigestStream extends WritableStream<ArrayBuffer | ArrayBufferView> {
+      readonly digest = digest;
+
+      constructor(_algorithm: string) {
+        super({
+          close() {
+            resolveDigest?.(
+              Uint8Array.from(atob(PDF_DIGEST.slice(8)), (value) => value.charCodeAt(0)).buffer,
+            );
+          },
+        });
+      }
+    }
+    vi.stubGlobal("crypto", { DigestStream: TestDigestStream });
+    try {
+      const state = pdfBucket();
+      await expect(
+        storeExactInputArtifact({
+          bucket: state.bucket,
+          source: bytes(1, 2, 3),
+          key: INPUT_KEY,
+          byteLength: 3,
+          mime: "application/pdf",
+          uploadVersion: 1,
+          deadlineAt: Date.now() + 10_000,
+          expectedSha256: PDF_DIGEST,
+          createFixedLengthStream: passthroughFixedLengthStream,
+          randomUuid: vi
+            .fn()
+            .mockReturnValueOnce("11111111-1111-4111-8111-111111111111")
+            .mockReturnValueOnce("22222222-2222-4222-8222-222222222222"),
+        }),
+      ).resolves.toMatchObject({ kind: "stored" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("starts a create-only streaming put and verifies the authoritative head", async () => {
     const head = inputHead();
     const put = vi.fn(async (_key: string, stream: ReadableStream<Uint8Array>, options: object) => {
