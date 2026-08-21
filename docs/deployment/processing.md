@@ -17,7 +17,9 @@ is classified as `INPUT_LIMIT_EXCEEDED`. Encrypted input is rejected without exp
 The current corpus selected `image-optimized` output for the 1,200×1,600 synthetic JPEG-heavy fixture in
 all three native repeats: 2,833,489 bytes became 447,013 bytes, with semantic and bounded PDF.js pixel
 verification passing each time. The benchmark therefore records `visualProfilesMeasured: 3` and
-`publicAdmissionReady: true`; this is local Node evidence, not hosted browser admission evidence.
+`publicAdmissionReady: true` for the local quality gate only. That flag is not public deployment approval;
+hosted browser evidence and the staged canary still have to pass before anonymous server processing is
+enabled.
 
 The release authority must bind the exact benchmark, cost input, source SHA, Worker artifact, both immutable
 engine digests, and nine hosted browser visual measurements. Keep PDF public admission local until those
