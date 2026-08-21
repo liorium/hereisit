@@ -48,6 +48,27 @@ const PDF_SMOKE_DETAILS = new Set([
 ]);
 const PDF_SMOKE_POLICY_EXECUTIONS = new Set(["local", "server"]);
 const PDF_SMOKE_POLICY_REASONS = new Set(["LOCAL_FALLBACK_REQUIRED", "SERVER_PROCESSING_DISABLED"]);
+const PDF_SMOKE_ERROR_CODES = new Set([
+  "INVALID_REQUEST",
+  "UNSUPPORTED_INPUT",
+  "UNSUPPORTED_FEATURE",
+  "INPUT_LIMIT_EXCEEDED",
+  "PIXEL_LIMIT_EXCEEDED",
+  "RATE_LIMITED",
+  "QUOTA_EXCEEDED",
+  "SERVER_PROCESSING_DISABLED",
+  "LOCAL_FALLBACK_REQUIRED",
+  "UPLOAD_EXPIRED",
+  "UPLOAD_MISMATCH",
+  "QUEUE_UNAVAILABLE",
+  "ENGINE_TIMEOUT",
+  "ENGINE_OOM",
+  "ENGINE_CRASH",
+  "STORAGE_FAILURE",
+  "VERIFICATION_FAILED",
+  "CANCELLED",
+  "EXPIRED",
+]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -144,20 +165,65 @@ export async function createRepositoryOwnedPdf() {
   });
 }
 
-function assertResponseStatus(response, expected, stage) {
+async function readPublicErrorCode(response) {
+  if (
+    response.body === null ||
+    response.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json"
+  ) {
+    return undefined;
+  }
+  const declared = response.headers.get("content-length");
+  if (
+    declared !== null &&
+    (!/^(?:0|[1-9]\d*)$/.test(declared) || Number(declared) > MAX_CONTROL_BYTES)
+  ) {
+    return undefined;
+  }
+  const reader = response.clone().body?.getReader();
+  if (reader === undefined) return undefined;
+  const chunks = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_CONTROL_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return undefined;
+      }
+      chunks.push(value);
+    }
+    const parsed = JSON.parse(
+      Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8"),
+    );
+    const code = parsed?.error?.code;
+    return typeof code === "string" && PDF_SMOKE_ERROR_CODES.has(code) ? code : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function assertResponseStatus(response, expected, stage) {
   if (response.status !== expected) {
     const error = new TypeError(`PDF smoke ${stage} failed`);
+    const code = await readPublicErrorCode(response);
     Object.defineProperties(error, {
       pdfSmokeDetail: { configurable: true, enumerable: false, value: "http-status" },
       pdfSmokeStage: { configurable: true, enumerable: false, value: stage },
       pdfSmokeStatus: { configurable: true, enumerable: false, value: response.status },
+      ...(code === undefined
+        ? {}
+        : { pdfSmokeErrorCode: { configurable: true, enumerable: false, value: code } }),
     });
     throw error;
   }
 }
 
 async function jsonResponse(response, expected, stage) {
-  assertResponseStatus(response, expected, stage);
+  await assertResponseStatus(response, expected, stage);
   const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim();
   const declared = response.headers.get("content-length");
   if (
@@ -498,7 +564,7 @@ export async function runPdfSmokeLifecycle(input) {
       },
       body: source,
     });
-    assertResponseStatus(uploadResponse, 204, "upload");
+    await assertResponseStatus(uploadResponse, 204, "upload");
     trace.push(
       traceEntry("PUT", upload.path, uploadResponse.status, {
         contentLength: source.byteLength,
@@ -568,7 +634,7 @@ export async function runPdfSmokeLifecycle(input) {
         method: "GET",
         headers: { authorization: `Bearer ${jobToken}` },
       });
-      assertResponseStatus(resultResponse, 200, "result");
+      await assertResponseStatus(resultResponse, 200, "result");
       const expectedDigest = resultResponse.headers.get("digest");
       const downloadLease = resultResponse.headers.get("x-download-lease");
       if (!digestPattern.test(expectedDigest ?? "") || !TOKEN_PATTERN.test(downloadLease ?? "")) {
@@ -586,7 +652,7 @@ export async function runPdfSmokeLifecycle(input) {
           "x-download-lease": downloadLease,
         },
       });
-      assertResponseStatus(acknowledged, 204, "acknowledgement");
+      await assertResponseStatus(acknowledged, 204, "acknowledgement");
       trace.push(traceEntry("POST", `/v1/jobs/${jobId}/downloaded`, acknowledged.status));
     }
     stage = "delete";
@@ -594,7 +660,7 @@ export async function runPdfSmokeLifecycle(input) {
       method: "DELETE",
       headers: { authorization: `Bearer ${jobToken}` },
     });
-    assertResponseStatus(deleted, 204, "delete");
+    await assertResponseStatus(deleted, 204, "delete");
     trace.push(traceEntry("DELETE", `/v1/jobs/${jobId}`, deleted.status));
     stage = "sweep";
     const swept = await request(`/v1/jobs/${jobId}`, {
@@ -727,6 +793,13 @@ if (
       PDF_SMOKE_POLICY_REASONS.has(error.pdfSmokePolicyReason)
         ? error.pdfSmokePolicyReason
         : undefined;
+    const errorCode =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokeErrorCode === "string" &&
+      PDF_SMOKE_ERROR_CODES.has(error.pdfSmokeErrorCode)
+        ? error.pdfSmokeErrorCode
+        : undefined;
     process.stderr.write(
       `${canonicalJson({
         schema: "hereisit-processing-pdf-smoke-cli@1",
@@ -735,6 +808,7 @@ if (
         ...(stage === undefined ? {} : { stage }),
         ...(detail === undefined ? {} : { detail }),
         ...(status === undefined ? {} : { status }),
+        ...(errorCode === undefined ? {} : { errorCode }),
         ...(policyExecution === undefined ? {} : { policyExecution }),
         ...(policyMaintainer === undefined ? {} : { policyMaintainer }),
         ...(policyReason === undefined ? {} : { policyReason }),
