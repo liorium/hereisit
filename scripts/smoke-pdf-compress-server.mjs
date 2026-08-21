@@ -28,6 +28,16 @@ const MAX_RESULT_BYTES = 50 * 1024 * 1024;
 const MAX_CONTROL_BYTES = 16 * 1024;
 const DEFAULT_DEADLINE_MS = 20 * 60_000;
 const CLEANUP_DEADLINE_MS = 10_000;
+const PDF_SMOKE_STAGES = new Set([
+  "policy",
+  "create",
+  "upload",
+  "status",
+  "result",
+  "acknowledgement",
+  "delete",
+  "sweep",
+]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -357,6 +367,7 @@ export async function runPdfSmokeLifecycle(input) {
   const sourceDigest = sha256Digest(source);
   const trace = [];
   let jobId;
+  let stage = "policy";
   const request = async (path, init, timeoutMs = 15_000) => {
     const signal = timeoutSignal(Math.min(timeoutMs, Math.max(1, deadline - now())));
     return fetcher(`${apiOrigin}${path}`, {
@@ -368,6 +379,7 @@ export async function runPdfSmokeLifecycle(input) {
     });
   };
   try {
+    stage = "policy";
     const policyResponse = await request("/v1/policy", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -384,6 +396,7 @@ export async function runPdfSmokeLifecycle(input) {
     if (policy.execution !== "server" || policy.maintainer !== (input.anonymous !== true)) {
       throw new TypeError("PDF smoke policy is not server enabled for the requested cohort");
     }
+    stage = "create";
     const createResponse = await request("/v1/jobs", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -412,6 +425,7 @@ export async function runPdfSmokeLifecycle(input) {
     ) {
       throw new TypeError("PDF smoke create response is invalid");
     }
+    stage = "upload";
     const uploadResponse = await request(upload.path, {
       method: "PUT",
       headers: {
@@ -433,6 +447,7 @@ export async function runPdfSmokeLifecycle(input) {
     let lastSequence = -1;
     let lastRank = -1;
     while (now() < deadline) {
+      stage = "status";
       const statusResponse = await request(`/v1/jobs/${jobId}`, {
         method: "GET",
         headers: { authorization: `Bearer ${jobToken}` },
@@ -475,6 +490,7 @@ export async function runPdfSmokeLifecycle(input) {
       profile = "original-retained";
       outputBytes = source.byteLength;
     } else {
+      stage = "result";
       if (
         descriptor.kind !== "download" ||
         (descriptor.profile !== "structural" && descriptor.profile !== "image-optimized") ||
@@ -500,6 +516,7 @@ export async function runPdfSmokeLifecycle(input) {
       if (sha256Digest(resultBytes) !== expectedDigest)
         throw new TypeError("PDF smoke digest mismatch");
       trace.push(traceEntry("GET", `/v1/jobs/${jobId}/result`, resultResponse.status));
+      stage = "acknowledgement";
       const acknowledged = await request(`/v1/jobs/${jobId}/downloaded`, {
         method: "POST",
         headers: {
@@ -510,12 +527,14 @@ export async function runPdfSmokeLifecycle(input) {
       assertResponseStatus(acknowledged, 204, "acknowledgement");
       trace.push(traceEntry("POST", `/v1/jobs/${jobId}/downloaded`, acknowledged.status));
     }
+    stage = "delete";
     const deleted = await request(`/v1/jobs/${jobId}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${jobToken}` },
     });
     assertResponseStatus(deleted, 204, "delete");
     trace.push(traceEntry("DELETE", `/v1/jobs/${jobId}`, deleted.status));
+    stage = "sweep";
     const swept = await request(`/v1/jobs/${jobId}`, {
       method: "GET",
       headers: { authorization: `Bearer ${jobToken}` },
@@ -532,6 +551,13 @@ export async function runPdfSmokeLifecycle(input) {
       sweepPassed: true,
     });
   } catch (error) {
+    if (error instanceof Error && !Object.hasOwn(error, "pdfSmokeStage")) {
+      Object.defineProperty(error, "pdfSmokeStage", {
+        configurable: true,
+        enumerable: false,
+        value: stage,
+      });
+    }
     if (jobId !== undefined) {
       const signal = timeoutSignal(CLEANUP_DEADLINE_MS);
       await fetcher(`${apiOrigin}/v1/jobs/${jobId}`, {
@@ -591,9 +617,21 @@ if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url
 ) {
-  runPdfSmokeCli({ argv: process.argv.slice(2), environment: process.env }).catch(() => {
+  runPdfSmokeCli({ argv: process.argv.slice(2), environment: process.env }).catch((error) => {
+    const stage =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokeStage === "string" &&
+      PDF_SMOKE_STAGES.has(error.pdfSmokeStage)
+        ? error.pdfSmokeStage
+        : undefined;
     process.stderr.write(
-      `${canonicalJson({ schema: "hereisit-processing-pdf-smoke-cli@1", passed: false, reason: "PDF_SMOKE_FAILED" })}\n`,
+      `${canonicalJson({
+        schema: "hereisit-processing-pdf-smoke-cli@1",
+        passed: false,
+        reason: "PDF_SMOKE_FAILED",
+        ...(stage === undefined ? {} : { stage }),
+      })}\n`,
     );
     process.exitCode = 1;
   });
