@@ -170,7 +170,7 @@ jobs:
             > .artifacts/runtime/pdf-public-admission-summary.json
           cmp .artifacts/canary/pdf-public-admission.json \
             .artifacts/admission/pdf-public-admission.json
-          PDF_PUBLIC_ADMISSION_ENABLED="$(node -e 'const s=require(process.argv[1]);process.stdout.write(String(s.enabled))' .artifacts/admission/pdf-public-admission.json)"
+          PDF_PUBLIC_ADMISSION_ENABLED="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(s.enabled))' .artifacts/admission/pdf-public-admission.json)"
           echo "PDF_PUBLIC_ADMISSION_ENABLED=$PDF_PUBLIC_ADMISSION_ENABLED" >> "$GITHUB_ENV"
           for name in transition-attestation gate-result policy-result public-smoke-result recovery-result; do
             printf '%s\n' '{"schema":"hereisit-processing-production-admission-pending@1","passed":false}' > ".artifacts/admission/$name.json"
@@ -482,7 +482,7 @@ jobs:
           QUEUE_RECOVERY=0
           restore_queue() {
             key="$1"; name="$2"
-            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { QUEUE_RECOVERY=1; return; }
+            expected="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { QUEUE_RECOVERY=1; return; }
             if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
             pnpm exec wrangler queues "$action" "$name" || QUEUE_RECOVERY=$?
             node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || QUEUE_RECOVERY=$?

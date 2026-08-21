@@ -201,7 +201,7 @@ jobs:
             --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
             --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
             --pdf-dlq-name "$PDF_DLQ_NAME" --output .artifacts/runtime/pre-mutation-state.json
-          node -e 'const s=require(process.argv[1]);if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
+          node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
           echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Capture and arm the exact prior release before any mutation
         id: prior-release
@@ -211,9 +211,9 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          PRODUCTION_D1_DATABASE_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.d1?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
-          PRIOR_IMAGE_APPLICATION_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.containers.image?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
-          PRIOR_PDF_APPLICATION_ID="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.resources.containers.pdf?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          PRODUCTION_D1_DATABASE_ID="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.resources.d1?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          PRIOR_IMAGE_APPLICATION_ID="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.resources.containers.image?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
+          PRIOR_PDF_APPLICATION_ID="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.resources.containers.pdf?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
           test "$PRODUCTION_D1_DATABASE_ID" != none
           test "$PRIOR_IMAGE_APPLICATION_ID" != none
           test "$PRIOR_PDF_APPLICATION_ID" != none
@@ -246,8 +246,8 @@ jobs:
             > .artifacts/runtime/prior-image-container.json
           pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" \
             > .artifacts/runtime/prior-pdf-container.json
-          PRIOR_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-image-container.json)"
-          PRIOR_PDF_IMAGE="$(node -e 'process.stdout.write(require(process.argv[1]).configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
+          PRIOR_IMAGE="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.configuration.image)' .artifacts/runtime/prior-image-container.json)"
+          PRIOR_PDF_IMAGE="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
           [[ "$PRIOR_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
           [[ "$PRIOR_PDF_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
           {
@@ -700,7 +700,7 @@ jobs:
             --file .artifacts/runtime/prior-admission-state.json || status=1
           restore_queue() {
             key="$1"; name="$2"
-            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
+            expected="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
             if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
             pnpm exec wrangler queues "$action" "$name" || status=1
             node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
@@ -962,7 +962,7 @@ jobs:
           status=0
           restore_queue() {
             key="$1"; name="$2"
-            expected="$(node -e 'const s=require(process.argv[1]);process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
+            expected="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.queues[process.argv[2]].state)' .artifacts/runtime/prior-queue-states.json "$key")" || { status=1; return; }
             if [[ "$expected" == resumed ]]; then action=resume-delivery; else action=pause-delivery; fi
             pnpm exec wrangler queues "$action" "$name" || status=1
             node scripts/verify-queue-delivery-state.mjs --queue "$name" --expected "$expected" --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
