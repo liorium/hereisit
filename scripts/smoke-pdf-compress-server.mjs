@@ -46,6 +46,8 @@ const PDF_SMOKE_DETAILS = new Set([
   "policy-cohort",
   "internal",
 ]);
+const PDF_SMOKE_POLICY_EXECUTIONS = new Set(["local", "server"]);
+const PDF_SMOKE_POLICY_REASONS = new Set(["LOCAL_FALLBACK_REQUIRED", "SERVER_PROCESSING_DISABLED"]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
   ["POST", "/v1/jobs", 201],
@@ -438,6 +440,21 @@ export async function runPdfSmokeLifecycle(input) {
       Object.defineProperties(error, {
         pdfSmokeDetail: { configurable: true, enumerable: false, value: "policy-cohort" },
         pdfSmokeStage: { configurable: true, enumerable: false, value: "policy" },
+        pdfSmokePolicyExecution: {
+          configurable: true,
+          enumerable: false,
+          value: policy.execution,
+        },
+        pdfSmokePolicyMaintainer: {
+          configurable: true,
+          enumerable: false,
+          value: policy.maintainer,
+        },
+        pdfSmokePolicyReason: {
+          configurable: true,
+          enumerable: false,
+          value: policy.reason,
+        },
       });
       throw error;
     }
@@ -692,6 +709,24 @@ if (
       error.pdfSmokeStatus <= 599
         ? error.pdfSmokeStatus
         : undefined;
+    const policyExecution =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokePolicyExecution === "string" &&
+      PDF_SMOKE_POLICY_EXECUTIONS.has(error.pdfSmokePolicyExecution)
+        ? error.pdfSmokePolicyExecution
+        : undefined;
+    const policyMaintainer =
+      error && typeof error === "object" && typeof error.pdfSmokePolicyMaintainer === "boolean"
+        ? error.pdfSmokePolicyMaintainer
+        : undefined;
+    const policyReason =
+      error &&
+      typeof error === "object" &&
+      typeof error.pdfSmokePolicyReason === "string" &&
+      PDF_SMOKE_POLICY_REASONS.has(error.pdfSmokePolicyReason)
+        ? error.pdfSmokePolicyReason
+        : undefined;
     process.stderr.write(
       `${canonicalJson({
         schema: "hereisit-processing-pdf-smoke-cli@1",
@@ -700,6 +735,9 @@ if (
         ...(stage === undefined ? {} : { stage }),
         ...(detail === undefined ? {} : { detail }),
         ...(status === undefined ? {} : { status }),
+        ...(policyExecution === undefined ? {} : { policyExecution }),
+        ...(policyMaintainer === undefined ? {} : { policyMaintainer }),
+        ...(policyReason === undefined ? {} : { policyReason }),
       })}\n`,
     );
     process.exitCode = 1;

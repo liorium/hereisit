@@ -257,7 +257,13 @@ describe("native PDF server smoke", () => {
       failure = error;
     });
     expect(failure).toBeInstanceOf(Error);
-    expect(failure).toMatchObject({ pdfSmokeStage: "policy", pdfSmokeDetail: "policy-cohort" });
+    expect(failure).toMatchObject({
+      pdfSmokeStage: "policy",
+      pdfSmokeDetail: "policy-cohort",
+      pdfSmokePolicyExecution: "local",
+      pdfSmokePolicyMaintainer: false,
+      pdfSmokePolicyReason: "LOCAL_FALLBACK_REQUIRED",
+    });
     expect((failure as Error).message).toBe(
       "PDF smoke policy is not server enabled for the requested cohort",
     );
