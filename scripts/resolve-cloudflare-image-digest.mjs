@@ -21,13 +21,13 @@ function assertDigest(value, label) {
   return value;
 }
 
-function validateRequestedReference(imageRef, accountId) {
+function validateRequestedReference(imageRef, accountId, expectedRepository = null) {
   if (typeof accountId !== "string" || !accountPattern.test(accountId)) {
     throw new TypeError("Cloudflare account ID is invalid");
   }
   if (typeof imageRef !== "string") throw new TypeError("image reference is invalid");
   const pattern = new RegExp(
-    `^registry\\.cloudflare\\.com/${accountId}/hereisit-image-engine:([0-9a-f]{40})(?:-([0-9a-f]{64}))?$`,
+    `^registry\\.cloudflare\\.com/${accountId}/(hereisit-(?:image|pdf)-engine):([0-9a-f]{40})(?:-([0-9a-f]{64}))?$`,
   );
   const match = pattern.exec(imageRef);
   if (match === null) {
@@ -35,7 +35,14 @@ function validateRequestedReference(imageRef, accountId) {
       "image reference must be the same-account Cloudflare repository with an immutable git tag",
     );
   }
-  return match[2] === undefined ? null : `sha256:${match[2]}`;
+  const repository = match[1];
+  if (expectedRepository !== null && repository !== expectedRepository) {
+    throw new TypeError(`image reference repository must be ${expectedRepository}`);
+  }
+  return {
+    repository,
+    configDigest: match[3] === undefined ? null : `sha256:${match[3]}`,
+  };
 }
 
 function descriptorPlatform(entry) {
@@ -81,9 +88,9 @@ function validateCandidateIdentity(value) {
 }
 
 export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, candidateIdentity }) {
-  const taggedConfigDigest = validateRequestedReference(imageRef, accountId);
+  const requested = validateRequestedReference(imageRef, accountId, "hereisit-image-engine");
   const expected = validateCandidateIdentity(candidateIdentity);
-  if (taggedConfigDigest !== null && taggedConfigDigest !== expected.configDigest) {
+  if (requested.configDigest !== null && requested.configDigest !== expected.configDigest) {
     throw new TypeError("image tag config does not match the finalized candidate");
   }
   const selected = selectRunnableDescriptor(manifest);
@@ -115,7 +122,7 @@ export function resolveCloudflareImageDigest({ manifest, imageRef, accountId, ca
   ) {
     throw new TypeError("registry image ordered layers do not match the finalized candidate");
   }
-  return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
+  return `registry.cloudflare.com/${accountId}/${requested.repository}@${digest}`;
 }
 
 export function resolveCloudflareImageDigestFromConfig({
@@ -124,9 +131,9 @@ export function resolveCloudflareImageDigestFromConfig({
   accountId,
   expectedConfigDigest,
 }) {
-  const taggedConfigDigest = validateRequestedReference(imageRef, accountId);
+  const requested = validateRequestedReference(imageRef, accountId);
   const expected = assertDigest(expectedConfigDigest, "local image config digest");
-  if (taggedConfigDigest !== null && taggedConfigDigest !== expected) {
+  if (requested.configDigest !== null && requested.configDigest !== expected) {
     throw new TypeError("image tag config does not match the local Docker image");
   }
   const selected = selectRunnableDescriptor(manifest);
@@ -149,7 +156,7 @@ export function resolveCloudflareImageDigestFromConfig({
   for (const layer of imageManifest.layers) {
     assertDigest(assertObject(layer, "registry image layer").digest, "registry layer digest");
   }
-  return `registry.cloudflare.com/${accountId}/hereisit-image-engine@${digest}`;
+  return `registry.cloudflare.com/${accountId}/${requested.repository}@${digest}`;
 }
 
 export function candidateIdentityFromManifest(candidate) {
