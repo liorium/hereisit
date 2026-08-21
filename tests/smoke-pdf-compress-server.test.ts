@@ -101,7 +101,7 @@ describe("native PDF server smoke", () => {
       await crypto.subtle.digest("SHA-256", resultBytes),
     ).toString("base64")}`;
     const calls: Array<{ method: string; path: string; body?: string }> = [];
-    const json = (body: unknown, status = 200) =>
+    const json = (body: unknown, status = 200, includeLength = true) =>
       new Response(body === null ? null : JSON.stringify(body), {
         status,
         headers:
@@ -109,7 +109,9 @@ describe("native PDF server smoke", () => {
             ? undefined
             : {
                 "content-type": "application/json",
-                "content-length": String(Buffer.byteLength(JSON.stringify(body))),
+                ...(includeLength
+                  ? { "content-length": String(Buffer.byteLength(JSON.stringify(body))) }
+                  : {}),
               },
       });
     const fetcher: typeof fetch = async (input, init) => {
@@ -117,26 +119,30 @@ describe("native PDF server smoke", () => {
       const method = init?.method ?? "GET";
       calls.push({ method, path, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
       if (path === "/v1/policy")
-        return json({
-          contract: "tool-job@1",
-          toolContract: "pdf.optimize@1",
-          maintainer: true,
-          execution: "server",
-          reason: null,
-          limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
-          disclosure: {
-            upload: true,
-            inputDeletion: "terminal",
-            resultDeletion: {
-              mode: "server-temporary",
-              acknowledged: "immediate-delete-attempt",
-              unacknowledgedDueSeconds: 1800,
-              applicationSloSeconds: 2100,
-              lifecycleExpirationDays: 1,
-              exceptionalDelayPossible: true,
+        return json(
+          {
+            contract: "tool-job@1",
+            toolContract: "pdf.optimize@1",
+            maintainer: true,
+            execution: "server",
+            reason: null,
+            limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
+            disclosure: {
+              upload: true,
+              inputDeletion: "terminal",
+              resultDeletion: {
+                mode: "server-temporary",
+                acknowledged: "immediate-delete-attempt",
+                unacknowledgedDueSeconds: 1800,
+                applicationSloSeconds: 2100,
+                lifecycleExpirationDays: 1,
+                exceptionalDelayPossible: true,
+              },
             },
           },
-        });
+          200,
+          false,
+        );
       if (path === "/v1/jobs" && method === "POST") {
         return json(
           {
@@ -225,7 +231,6 @@ describe("native PDF server smoke", () => {
   });
 
   it.each([
-    ["missing length", { headers: { "content-type": "application/json" }, body: "{}" }],
     [
       "oversized declaration",
       { headers: { "content-type": "application/json", "content-length": "20000" }, body: "{}" },
@@ -241,6 +246,10 @@ describe("native PDF server smoke", () => {
     [
       "malformed JSON",
       { headers: { "content-type": "application/json", "content-length": "1" }, body: "{" },
+    ],
+    [
+      "oversized undeclared stream",
+      { headers: { "content-type": "application/json" }, body: `{${"x".repeat(16 * 1024)}` },
     ],
   ])("rejects a %s control response without exposing its private body", async (_label, fixture) => {
     const fetcher: typeof fetch = async () =>

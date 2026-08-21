@@ -134,16 +134,16 @@ async function jsonResponse(response, expected, stage) {
   const declared = response.headers.get("content-length");
   if (
     contentType !== "application/json" ||
-    declared === null ||
-    !/^(?:0|[1-9]\d*)$/.test(declared) ||
-    Number(declared) < 1 ||
-    Number(declared) > MAX_CONTROL_BYTES ||
-    response.body === null
+    response.body === null ||
+    (declared !== null &&
+      (!/^(?:0|[1-9]\d*)$/.test(declared) ||
+        Number(declared) < 1 ||
+        Number(declared) > MAX_CONTROL_BYTES))
   ) {
     await response.body?.cancel().catch(() => undefined);
     throw new TypeError(`PDF smoke ${stage} control response envelope is invalid`);
   }
-  const expectedBytes = Number(declared);
+  const expectedBytes = declared === null ? MAX_CONTROL_BYTES : Number(declared);
   const reader = response.body.getReader();
   const chunks = [];
   let received = 0;
@@ -158,7 +158,7 @@ async function jsonResponse(response, expected, stage) {
       }
       chunks.push(value);
     }
-    if (received !== expectedBytes) {
+    if (declared !== null && received !== expectedBytes) {
       throw new TypeError(`PDF smoke ${stage} control response length is invalid`);
     }
     return assertObject(
