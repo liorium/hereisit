@@ -12,6 +12,8 @@ const SAFE_ETAG_PATTERN = /^[\x20-\x7e]{1,256}$/;
 const ALLOWED_MIMES = new Set<ImageOptimizeMime>(["image/jpeg", "image/png", "image/webp"]);
 const PENDING_CLEANUP_TIMEOUT_MILLISECONDS = 250;
 
+export type ArtifactUploadStage = "digest" | "pending-put" | "pending-read" | "canonical-head";
+
 export type ArtifactMime = ImageOptimizeMime | PdfOptimizeMime;
 
 export type ArtifactObjectKey = `inputs/${string}` | `outputs/${string}`;
@@ -59,7 +61,7 @@ function defaultDigestStream(): Sha256DigestStream {
     }
   ).DigestStream;
   if (typeof DigestStreamConstructor !== "function") {
-    throw new ArtifactUploadError("STORAGE_FAILURE");
+    throw new ArtifactUploadError("STORAGE_FAILURE", "digest");
   }
   return new DigestStreamConstructor("SHA-256");
 }
@@ -91,11 +93,20 @@ export type ArtifactUploadErrorCode =
 
 export class ArtifactUploadError extends Error {
   readonly code: ArtifactUploadErrorCode;
+  readonly stage?: ArtifactUploadStage;
 
-  constructor(code: ArtifactUploadErrorCode) {
+  constructor(code: ArtifactUploadErrorCode, stage?: ArtifactUploadStage) {
     super(code);
     this.name = "ArtifactUploadError";
     this.code = code;
+    if (stage !== undefined) {
+      Object.defineProperty(this, "stage", {
+        configurable: true,
+        enumerable: false,
+        value: stage,
+        writable: false,
+      });
+    }
   }
 }
 
@@ -246,11 +257,11 @@ async function readArtifactBody(
   bucket: ArtifactBucket,
   key: string,
 ): Promise<(ArtifactHead & { readonly body: ReadableStream<Uint8Array> }) | null> {
-  if (bucket.get === undefined) throw new ArtifactUploadError("STORAGE_FAILURE");
+  if (bucket.get === undefined) throw new ArtifactUploadError("STORAGE_FAILURE", "pending-read");
   try {
     return await bucket.get(key);
   } catch {
-    throw new ArtifactUploadError("STORAGE_FAILURE");
+    throw new ArtifactUploadError("STORAGE_FAILURE", "pending-read");
   }
 }
 
@@ -354,7 +365,10 @@ async function storeVerifiedPdfArtifact(input: {
     const [produced, storedPending] = await Promise.allSettled([producer, pendingPut]);
     clearTimeout(timeout);
     if (produced.status === "rejected" || storedPending.status === "rejected") {
-      throw new ArtifactUploadError(deadlineExpired ? "UPLOAD_EXPIRED" : "STORAGE_FAILURE");
+      throw new ArtifactUploadError(
+        deadlineExpired ? "UPLOAD_EXPIRED" : "STORAGE_FAILURE",
+        storedPending.status === "rejected" ? "pending-put" : undefined,
+      );
     }
     if (storedPending.value === null) throw new ArtifactUploadError("UPLOAD_MISMATCH");
     const digest = await digestObserved;
@@ -424,7 +438,7 @@ async function readArtifactHead(
   try {
     return await bucket.head(key);
   } catch {
-    throw new ArtifactUploadError("STORAGE_FAILURE");
+    throw new ArtifactUploadError("STORAGE_FAILURE", "canonical-head");
   }
 }
 
