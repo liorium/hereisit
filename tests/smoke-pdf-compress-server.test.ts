@@ -163,6 +163,15 @@ describe("native PDF server smoke", () => {
         );
       }
       if (path.endsWith("/input")) return json(null, 204);
+      if (path.endsWith("/result") && calls.some((call) => call.method === "DELETE")) {
+        return json(
+          {
+            contract: "tool-job@1",
+            error: { code: "INVALID_REQUEST", message: "gone", retryable: false },
+          },
+          409,
+        );
+      }
       if (path.endsWith("/result")) {
         return new Response(resultBytes, {
           headers: {

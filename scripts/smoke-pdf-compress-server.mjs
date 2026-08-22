@@ -676,11 +676,11 @@ export async function runPdfSmokeLifecycle(input) {
     await assertResponseStatus(deleted, 204, "delete");
     trace.push(traceEntry("DELETE", `/v1/jobs/${jobId}`, deleted.status));
     stage = "sweep";
-    const swept = await request(`/v1/jobs/${jobId}`, {
+    const swept = await request(`/v1/jobs/${jobId}/result`, {
       method: "GET",
       headers: { authorization: `Bearer ${jobToken}` },
     });
-    if (swept.status !== 404) throw new TypeError("PDF smoke deletion was not observable");
+    await assertResponseStatus(swept, 409, "sweep");
     return createPdfSmokeResult({
       verdict,
       sourceBytes: source.byteLength,
