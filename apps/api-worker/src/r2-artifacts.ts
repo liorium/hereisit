@@ -513,7 +513,7 @@ export async function storeExactInputArtifact(input: {
       ...(input.createDigestStream === undefined
         ? {}
         : { createDigestStream: input.createDigestStream }),
-      randomUuid: input.randomUuid ?? crypto.randomUUID,
+      randomUuid: input.randomUuid ?? (() => crypto.randomUUID()),
     });
   }
 

@@ -60,6 +60,30 @@ afterEach(async () => {
 });
 
 describe("real Workerd FixedLengthStream and R2 semantics", () => {
+  it("stores an exact PDF input with the runtime digest stream", async () => {
+    const key = objectKey();
+    const body = Uint8Array.of(1, 2, 3);
+    const digest = await crypto.subtle.digest("SHA-256", body);
+    let binary = "";
+    for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+
+    const result = await storeExactInputArtifact({
+      bucket: env.JOB_OBJECTS,
+      source: stream([body]),
+      key,
+      byteLength: body.byteLength,
+      mime: "application/pdf",
+      uploadVersion: 1,
+      deadlineAt: Date.now() + 5_000,
+      expectedSha256: `sha-256=${btoa(binary)}`,
+    });
+
+    expect(result).toMatchObject({
+      kind: "stored",
+      artifact: { key, byteLength: 3, mime: "application/pdf", uploadVersion: 1 },
+    });
+  });
+
   it("stores and heads an exact create-only input", async () => {
     const key = objectKey();
     const result = await storeExactInputArtifact({
