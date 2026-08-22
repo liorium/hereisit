@@ -76,6 +76,7 @@ const PDF_SMOKE_STORAGE_STAGES = new Set([
   "pending-put",
   "pending-read",
   "canonical-head",
+  "store",
 ]);
 const traceDownloadShape = [
   ["POST", "/v1/policy", 200],
