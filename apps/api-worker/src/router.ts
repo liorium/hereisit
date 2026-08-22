@@ -32,7 +32,7 @@ import { routeUploadRequest, type UploadRouteRuntime } from "./routes/uploads";
 const ALLOW_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
 const ALLOW_HEADERS = "authorization, content-type, digest, x-download-lease";
 const EXPOSE_HEADERS =
-  "content-length, content-type, digest, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope";
+  "content-length, content-type, digest, etag, retry-after, x-download-lease, x-hereisit-rate-limit-scope, x-processing-diagnostic-stage";
 const UPLOAD_PATH_PATTERN =
   /^\/v1\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/input$/;
 const JOB_PATH_PATTERN =
