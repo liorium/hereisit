@@ -203,6 +203,30 @@ describe("PUT /v1/jobs/:jobId/input", () => {
     expect(response.headers.get("x-processing-diagnostic-stage")).toBe("commit");
   });
 
+  it("exposes an unclassified staging storage failure as store", async () => {
+    const runtime = await makeRuntime({
+      config: { appOrigins: [new URL(allowedOrigin)], environment: "staging" },
+      repository: {
+        loadExpectedTokenHash: vi.fn(async () => hashJobToken(jobToken)),
+        beginUpload: vi.fn(async () => ({ kind: "ready" as const, ...readyJob() })),
+        commitStoredInput: vi.fn(),
+        settlePreEngineFailure: vi.fn(async () => ({
+          kind: "settled" as const,
+          state: "failed" as const,
+        })),
+        openInvariantCircuit: vi.fn(),
+      },
+      storeInput: vi.fn(async () => {
+        throw new Error("unclassified storage failure");
+      }),
+    });
+
+    const response = await routeUploadRequest(request(), jobId, runtime);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-processing-diagnostic-stage")).toBe("store");
+  });
+
   it("requires an allowed browser Origin before network, D1, or body work", async () => {
     const runtime = await makeRuntime();
     const uploadRequest = request();

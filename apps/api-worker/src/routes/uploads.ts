@@ -25,7 +25,7 @@ const CANONICAL_INPUT_KEY_PATTERN = new RegExp(
 const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 
 type UploadJob = Extract<BeginUploadResult | PdfBeginUploadResult, { kind: "ready" }>;
-type UploadDiagnosticStage = ArtifactUploadStage | "begin" | "commit";
+type UploadDiagnosticStage = ArtifactUploadStage | "begin" | "commit" | "store";
 
 export interface UploadRouteRepository
   extends Pick<
@@ -478,7 +478,7 @@ export async function routeUploadRequest(
     });
   } catch (error) {
     const code = classifyArtifactFailure(error);
-    const stage = artifactFailureStage(error);
+    const stage = artifactFailureStage(error) ?? "store";
     const failedAt = runtime.now();
     if (Number.isSafeInteger(failedAt) && failedAt >= 0) {
       await settleArtifactFailure({ runtime, job, now: failedAt, code });
