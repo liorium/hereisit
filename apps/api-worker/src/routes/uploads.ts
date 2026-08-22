@@ -25,6 +25,7 @@ const CANONICAL_INPUT_KEY_PATTERN = new RegExp(
 const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 
 type UploadJob = Extract<BeginUploadResult | PdfBeginUploadResult, { kind: "ready" }>;
+type UploadDiagnosticStage = ArtifactUploadStage | "begin" | "commit";
 
 export interface UploadRouteRepository
   extends Pick<
@@ -202,7 +203,7 @@ function commitDeletionResponse(
 
 function artifactFailureResponse(
   code: ArtifactUploadErrorCode,
-  stage: ArtifactUploadStage | undefined,
+  stage: UploadDiagnosticStage | undefined,
   environment: UploadRouteRuntime["config"]["environment"],
 ): Response {
   if (code === "UPLOAD_EXPIRED") {
@@ -427,7 +428,7 @@ export async function routeUploadRequest(
   try {
     begin = await runtime.repository.beginUpload({ jobId, now: startedAt });
   } catch {
-    return errorResponse(503, "STORAGE_FAILURE", "업로드를 시작할 수 없습니다.", true);
+    return artifactFailureResponse("STORAGE_FAILURE", "begin", runtime.config.environment);
   }
   if (begin.kind === "rejected") {
     if (
@@ -487,7 +488,7 @@ export async function routeUploadRequest(
 
   const completedAt = runtime.now();
   if (!Number.isSafeInteger(completedAt) || completedAt < 0) {
-    return errorResponse(503, "STORAGE_FAILURE", "업로드 상태를 저장할 수 없습니다.", true);
+    return artifactFailureResponse("STORAGE_FAILURE", "commit", runtime.config.environment);
   }
   let committed: CommitStoredInputResult;
   try {
@@ -498,7 +499,7 @@ export async function routeUploadRequest(
       now: completedAt,
     });
   } catch {
-    return errorResponse(503, "STORAGE_FAILURE", "업로드 상태를 저장할 수 없습니다.", true);
+    return artifactFailureResponse("STORAGE_FAILURE", "commit", runtime.config.environment);
   }
 
   if (committed.kind === "queued") {

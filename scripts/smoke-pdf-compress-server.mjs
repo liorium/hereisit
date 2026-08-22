@@ -70,6 +70,8 @@ const PDF_SMOKE_ERROR_CODES = new Set([
   "EXPIRED",
 ]);
 const PDF_SMOKE_STORAGE_STAGES = new Set([
+  "begin",
+  "commit",
   "digest",
   "pending-put",
   "pending-read",

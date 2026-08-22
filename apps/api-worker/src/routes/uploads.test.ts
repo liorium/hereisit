@@ -151,6 +151,58 @@ describe("PUT /v1/jobs/:jobId/input", () => {
     expect(JSON.stringify(storeInput.mock.calls)).not.toContain("private");
   });
 
+  it("exposes the staging begin failure stage without exposing it in production", async () => {
+    const beginUpload = vi.fn(async () => {
+      throw new Error("begin storage failure");
+    });
+    const runtime = await makeRuntime({
+      config: { appOrigins: [new URL(allowedOrigin)], environment: "staging" },
+      repository: {
+        loadExpectedTokenHash: vi.fn(async () => hashJobToken(jobToken)),
+        beginUpload,
+        commitStoredInput: vi.fn(),
+        settlePreEngineFailure: vi.fn(),
+        openInvariantCircuit: vi.fn(),
+      },
+    });
+
+    const response = await routeUploadRequest(request(), jobId, runtime);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-processing-diagnostic-stage")).toBe("begin");
+  });
+
+  it("exposes the staging commit failure stage", async () => {
+    const commitStoredInput = vi.fn(async () => {
+      throw new Error("commit storage failure");
+    });
+    const runtime = await makeRuntime({
+      config: { appOrigins: [new URL(allowedOrigin)], environment: "staging" },
+      repository: {
+        loadExpectedTokenHash: vi.fn(async () => hashJobToken(jobToken)),
+        beginUpload: vi.fn(async () => ({ kind: "ready" as const, ...readyJob() })),
+        commitStoredInput,
+        settlePreEngineFailure: vi.fn(),
+        openInvariantCircuit: vi.fn(),
+      },
+      storeInput: vi.fn(async () => ({
+        kind: "stored" as const,
+        artifact: {
+          key: inputKey as `inputs/${string}`,
+          byteLength: 3,
+          mime: "image/png" as const,
+          etag: "raw-etag",
+          uploadVersion: 1,
+        },
+      })),
+    });
+
+    const response = await routeUploadRequest(request(), jobId, runtime);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-processing-diagnostic-stage")).toBe("commit");
+  });
+
   it("requires an allowed browser Origin before network, D1, or body work", async () => {
     const runtime = await makeRuntime();
     const uploadRequest = request();
