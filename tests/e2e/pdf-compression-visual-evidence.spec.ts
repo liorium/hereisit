@@ -223,8 +223,8 @@ test("verifies three native image-optimized repeats in the real browser Worker",
         body: output,
       });
     } else if (call === `POST /v1/jobs/${jobId}/downloaded`) {
-      acknowledged.add(activeRepeat);
       await route.fulfill({ status: 200, contentType: "text/plain", body: "ok" });
+      acknowledged.add(activeRepeat);
     } else if (call === `DELETE /v1/jobs/${jobId}`) {
       await route.fulfill({ status: 200, contentType: "text/plain", body: "ok" });
     } else {
@@ -299,6 +299,12 @@ test("verifies three native image-optimized repeats in the real browser Worker",
       .toBe(resultUrlsBeforeVerification + 1);
     await expect.poll(() => acknowledged.has(activeRepeat)).toBe(true);
     await page.getByRole("button", { name: "다른 PDF 압축" }).click();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
     await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
   }
 
