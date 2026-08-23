@@ -107,6 +107,39 @@ describe("processing evidence Ed25519 signatures", () => {
     expect(result).toMatchObject({ code: 1, stdout: "" });
     expect(result.stderr).not.toContain(missingPrivateKeyPath);
     expect(result.stderr).not.toContain("must-not-appear-private.pem");
+
+    await writeFile(
+      value.bundlePath,
+      canonicalJson({ schema: "hereisit-processing-deployment-report@1", version: 1 }),
+    );
+    const deploymentResult = await new Promise<{ code: number | null; stderr: string }>(
+      (finish) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "scripts/processing-evidence-signature.mjs",
+            "--mode",
+            "sign",
+            "--bundle",
+            value.bundlePath,
+            "--signature",
+            value.signaturePath,
+            "--private-key",
+            value.privateKeyPath,
+            "--repository-root",
+            resolve("."),
+          ],
+          { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
+        );
+        let stderr = "";
+        child.stderr.setEncoding("utf8").on("data", (chunk) => {
+          stderr += chunk;
+        });
+        child.on("close", (code) => finish({ code, stderr }));
+      },
+    );
+    expect(deploymentResult.code).toBe(1);
+    expect(deploymentResult.stderr).not.toContain("unsettled top-level await");
   });
 
   it("signs and verifies through explicit CLI modes", async () => {

@@ -8,6 +8,7 @@ import { constants } from "node:fs";
 import { link, open, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validateProcessingDeploymentReport } from "./create-processing-deployment-report.mjs";
 import {
   assertExactKeys,
   canonicalJson,
@@ -38,9 +39,6 @@ async function readCanonicalBundle(path) {
   if (value.schema === "hereisit-processing-evidence@1" && value.version === 1) {
     // The existing release verifier owns the complete evidence schema. This signer binds bytes.
   } else if (value.schema === "hereisit-processing-deployment-report@1" && value.version === 1) {
-    const { validateProcessingDeploymentReport } = await import(
-      "./create-processing-deployment-report.mjs"
-    );
     validateProcessingDeploymentReport(value);
   } else {
     throw new TypeError("processing evidence bundle schema or version is invalid");
