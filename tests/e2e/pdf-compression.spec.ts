@@ -1406,6 +1406,8 @@ test("exposes a server PDF only after browser verification and direct download",
   ).toContain("hereisit-pdf-optimize-verifier");
   await expect.poll(() => objectUrlCounts(page)).toEqual({ created: 1, revoked: 0 });
   await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
+  await expect.poll(() => server.acknowledgementOutcomes).toEqual(["succeeded"]);
+  await settleRenderedState(page);
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
