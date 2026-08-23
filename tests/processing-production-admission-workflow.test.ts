@@ -83,6 +83,18 @@ describe("processing production admission workflow", () => {
     expect(workflow).not.toMatch(/cost.*\$\{\{\s*inputs\./u);
   });
 
+  it("keeps disabled PDF admission unchanged during the image-only promotion", () => {
+    const generate = workflow.slice(workflow.indexOf("          generate_config()"));
+    expect(generate).toContain("local current_pdf_admission_json network_rate_limit_namespace_id");
+    expect(generate).toContain('pdf_admission_json="$current_pdf_admission_json"');
+    expect(generate).toContain(
+      'if [[ "$(node -e \'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(s.enabled))\' .artifacts/admission/pdf-public-admission.json)" == true ]]; then',
+    );
+    expect(generate).toContain(
+      "# Keep the disabled PDF state byte-identical during an image-only rollout.",
+    );
+  });
+
   it("uses only the custom production endpoints and exact legacy browser allowlist", () => {
     expect(workflow).toContain("PRODUCTION_API_ORIGIN: https://api.hereisit.app");
     expect(workflow).toContain("PRODUCTION_PAGES_ORIGIN: https://hereisit.app");
