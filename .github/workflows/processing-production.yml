@@ -273,7 +273,7 @@ jobs:
             entries["pdf-primary"] = null;
             entries["pdf-dlq"] = null;
             await writeFile(".artifacts/runtime/prior-queue-states.json", `${JSON.stringify({ schema: "hereisit-processing-queue-rollback@1", queues: entries })}\n`, { flag: "wx", mode: 0o600 });
-            NODE
+          NODE
           fi
           node scripts/processing-admission-rollback-state.mjs \
             --mode capture --account-id "$CLOUDFLARE_ACCOUNT_ID" \
