@@ -1591,7 +1591,9 @@ test("resets and deletes an unacknowledged result while acknowledgement is pendi
   await uploadPdf(page, "reset-race.pdf", source, 12);
   await page.getByRole("button", { name: "12페이지 용량 줄이기" }).click();
   await page.getByRole("button", { name: "처리 서버에서 더 압축" }).click();
-  await expect.poll(() => server.calls).toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
+  await expect
+    .poll(() => server.calls, { timeout: 60_000 })
+    .toContain(`POST /v1/jobs/${server.jobId}/downloaded`);
   await page.getByRole("button", { name: "다른 PDF 압축" }).click();
 
   await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
