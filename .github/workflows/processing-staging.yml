@@ -20,6 +20,7 @@ env:
 jobs:
   deploy:
     name: Deploy successful main CI commit to staging
+    # ponytail: only push-triggered CI may deploy; manual dispatch remains validation-only.
     if: >-
       github.repository == 'liorium/hereisit' &&
       github.event.workflow_run.conclusion == 'success' &&
