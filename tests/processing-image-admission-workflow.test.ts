@@ -12,6 +12,8 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow).toContain("ref: $" + "{{ inputs.source_sha }}");
     expect(workflow).toContain("name: processing-production-canary-$" + "{{ inputs.source_sha }}");
     expect(workflow).toContain("run-id: $" + "{{ inputs.production_run_id }}");
+    expect(workflow).toContain("if test -d .artifacts/canary/deployment; then");
+    expect(workflow).toContain("cp -a .artifacts/canary/deployment/. .artifacts/canary/");
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"');
     expect(workflow).toContain(
       'test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',

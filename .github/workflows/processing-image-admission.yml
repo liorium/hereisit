@@ -78,6 +78,13 @@ jobs:
           path: .artifacts/canary
           github-token: ${{ github.token }}
           run-id: ${{ inputs.production_run_id }}
+      - name: Normalize the production canary artifact layout
+        run: |
+          set -euo pipefail
+          if test -d .artifacts/canary/deployment; then
+            cp -a .artifacts/canary/deployment/. .artifacts/canary/
+          fi
+          test -f .artifacts/canary/source-sha.txt
       - name: Bind the exact successful production canary
         run: |
           set -euo pipefail
