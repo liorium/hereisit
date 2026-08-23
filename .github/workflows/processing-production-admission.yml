@@ -255,15 +255,21 @@ jobs:
             --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
           generate_config() {
-            local network_rate_limit_namespace_id rollout_args pdf_admission_json
+            local current_pdf_admission_json network_rate_limit_namespace_id rollout_args pdf_admission_json
+            current_pdf_admission_json="$(node -e 'process.stdout.write(JSON.stringify({costPassed:false,deletionPassed:false,enabled:false,releaseReportSha256:process.argv[1],rollbackPassed:false,schema:"hereisit-pdf-public-admission@1",visualProfilesMeasured:0}))' "$REPORT_SHA256")"
             if [[ "$1" == current ]]; then
               rollout_args=(--rollout-percent 0)
               network_rate_limit_namespace_id="${PRODUCTION_RUN_ID}${PRODUCTION_RUN_ATTEMPT}"
-              pdf_admission_json="$(node -e 'process.stdout.write(JSON.stringify({costPassed:false,deletionPassed:false,enabled:false,releaseReportSha256:process.argv[1],rollbackPassed:false,schema:"hereisit-pdf-public-admission@1",visualProfilesMeasured:0}))' "$REPORT_SHA256")"
+              pdf_admission_json="$current_pdf_admission_json"
             elif [[ "$1" == public ]]; then
               rollout_args=(--rollout-percent 100)
               network_rate_limit_namespace_id=22002
-              pdf_admission_json="$(cat .artifacts/admission/pdf-public-admission.json)"
+              if [[ "$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(s.enabled))' .artifacts/admission/pdf-public-admission.json)" == true ]]; then
+                pdf_admission_json="$(cat .artifacts/admission/pdf-public-admission.json)"
+              else
+                # Keep the disabled PDF state byte-identical during an image-only rollout.
+                pdf_admission_json="$current_pdf_admission_json"
+              fi
             else
               return 1
             fi
