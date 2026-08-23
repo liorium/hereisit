@@ -26,6 +26,8 @@ describe("processing production admission workflow", () => {
     expect(workflow).toContain(
       `PRODUCTION_RUN_ATTEMPT: \${{ github.event.workflow_run.run_attempt }}`,
     );
+    expect(workflow).toContain("if test -d .artifacts/canary/deployment; then");
+    expect(workflow).toContain("cp -a .artifacts/canary/deployment/. .artifacts/canary/");
     expect(workflow).toContain(
       'test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
     );

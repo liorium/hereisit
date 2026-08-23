@@ -70,6 +70,13 @@ jobs:
           path: .artifacts/staging
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
+      - name: Normalize the staged deployment artifact layout
+        run: |
+          set -euo pipefail
+          if test -d .artifacts/staging/deployment; then
+            cp -a .artifacts/staging/deployment/. .artifacts/staging/
+          fi
+          test -f .artifacts/staging/source-sha.txt
       - name: Install locked dependencies
         run: |
           set -euo pipefail

@@ -24,6 +24,8 @@ describe("processing production workflow", () => {
     expect(workflow).toContain(
       'test "$(cat .artifacts/staging/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
     );
+    expect(workflow).toContain("if test -d .artifacts/staging/deployment; then");
+    expect(workflow).toContain("cp -a .artifacts/staging/deployment/. .artifacts/staging/");
   });
 
   it("uses a separate Ubuntu network for the production browser canary", () => {
