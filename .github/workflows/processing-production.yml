@@ -223,7 +223,17 @@ jobs:
           PRIOR_PDF_APPLICATION_ID="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.resources.containers.pdf?.id ?? "none")' .artifacts/runtime/pre-mutation-state.json)"
           test "$PRODUCTION_D1_DATABASE_ID" != none
           test "$PRIOR_IMAGE_APPLICATION_ID" != none
-          test "$PRIOR_PDF_APPLICATION_ID" != none
+          PRIOR_PDF_PRIMARY_PRESENT="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(s.resources.queues.pdf.primary !== null))' .artifacts/runtime/pre-mutation-state.json)"
+          PRIOR_PDF_DLQ_PRESENT="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(s.resources.queues.pdf.dlq !== null))' .artifacts/runtime/pre-mutation-state.json)"
+          if [[ "$PRIOR_PDF_APPLICATION_ID" == none && "$PRIOR_PDF_PRIMARY_PRESENT" == false && "$PRIOR_PDF_DLQ_PRESENT" == false ]]; then
+            PRIOR_PDF_PRESENT=false
+            PRIOR_PDF_IMAGE=""
+          elif [[ "$PRIOR_PDF_APPLICATION_ID" != none && "$PRIOR_PDF_PRIMARY_PRESENT" == true && "$PRIOR_PDF_DLQ_PRESENT" == true ]]; then
+            PRIOR_PDF_PRESENT=true
+          else
+            echo "prior PDF resources are partially present" >&2
+            exit 1
+          fi
           PREVIOUS_ACTIVE_VERSION_ID="$(node scripts/resolve-previous-active-worker-version.mjs \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
             --attestation-only true)"
@@ -241,22 +251,44 @@ jobs:
           NODE
           pnpm exec wrangler versions view "$PREVIOUS_ACTIVE_VERSION_ID" \
             --name "$WORKER_SCRIPT_NAME" --json > .artifacts/runtime/prior-worker-version.json
-          node scripts/capture-processing-queue-states.mjs \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
-            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
-            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+          if [[ "$PRIOR_PDF_PRESENT" == true ]]; then
+            node scripts/capture-processing-queue-states.mjs \
+              --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
+              --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
+              --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+          else
+            node --input-type=module <<'NODE'
+            import { writeFile } from "node:fs/promises";
+            import { inspectQueueDeliveryState } from "./scripts/verify-queue-delivery-state.mjs";
+            const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+            const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+            const entries = {};
+            for (const [key, queue] of [["image-primary", process.env.QUEUE_NAME], ["image-dlq", process.env.DLQ_NAME]]) {
+              const state = await inspectQueueDeliveryState({ accountId, queueName: queue, apiToken });
+              if (state.queue !== queue || !["paused", "resumed"].includes(state.state) || state.verified !== true) {
+                throw new Error(`${key} Queue state is not verified`);
+              }
+              entries[key] = { name: queue, state: state.state };
+            }
+            entries["pdf-primary"] = null;
+            entries["pdf-dlq"] = null;
+            await writeFile(".artifacts/runtime/prior-queue-states.json", `${JSON.stringify({ schema: "hereisit-processing-queue-rollback@1", queues: entries })}\n`, { flag: "wx", mode: 0o600 });
+            NODE
+          fi
           node scripts/processing-admission-rollback-state.mjs \
             --mode capture --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" \
             --file .artifacts/runtime/prior-admission-state.json
           pnpm exec wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID" \
             > .artifacts/runtime/prior-image-container.json
-          pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" \
-            > .artifacts/runtime/prior-pdf-container.json
           PRIOR_IMAGE="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.configuration.image)' .artifacts/runtime/prior-image-container.json)"
-          PRIOR_PDF_IMAGE="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
           [[ "$PRIOR_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
-          [[ "$PRIOR_PDF_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
+          if [[ "$PRIOR_PDF_PRESENT" == true ]]; then
+            pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" \
+              > .artifacts/runtime/prior-pdf-container.json
+            PRIOR_PDF_IMAGE="$(node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s.configuration.image)' .artifacts/runtime/prior-pdf-container.json)"
+            [[ "$PRIOR_PDF_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine@sha256:[0-9a-f]{64}$ ]]
+          fi
           {
             echo "PRODUCTION_D1_DATABASE_ID=$PRODUCTION_D1_DATABASE_ID"
             echo "PREVIOUS_ACTIVE_VERSION_ID=$PREVIOUS_ACTIVE_VERSION_ID"
@@ -264,6 +296,7 @@ jobs:
             echo "PRIOR_PDF_APPLICATION_ID=$PRIOR_PDF_APPLICATION_ID"
             echo "PRIOR_IMAGE=$PRIOR_IMAGE"
             echo "PRIOR_PDF_IMAGE=$PRIOR_PDF_IMAGE"
+            echo "PRIOR_PDF_PRESENT=$PRIOR_PDF_PRESENT"
           } >> "$GITHUB_ENV"
           echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Provision isolated resources and deploy the bootstrap Worker
@@ -696,12 +729,14 @@ jobs:
             --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
             --container-class-name ImageEngineContainer --application-id "$PRIOR_IMAGE_APPLICATION_ID" \
             --engine-image "$PRIOR_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || status=1
-          pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" > .artifacts/runtime/pdf-container-restored.json || status=1
-          node scripts/resolve-cloudflare-container-application.mjs --mode verify \
-            --input .artifacts/runtime/pdf-container-restored.json --output .artifacts/runtime/pdf-container-restored-scope.json \
-            --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name PdfEngineContainer --application-id "$PRIOR_PDF_APPLICATION_ID" \
-            --engine-image "$PRIOR_PDF_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || status=1
+          if [[ "$PRIOR_PDF_PRESENT" == true ]]; then
+            pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" > .artifacts/runtime/pdf-container-restored.json || status=1
+            node scripts/resolve-cloudflare-container-application.mjs --mode verify \
+              --input .artifacts/runtime/pdf-container-restored.json --output .artifacts/runtime/pdf-container-restored-scope.json \
+              --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+              --container-class-name PdfEngineContainer --application-id "$PRIOR_PDF_APPLICATION_ID" \
+              --engine-image "$PRIOR_PDF_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || status=1
+          fi
           node scripts/processing-admission-rollback-state.mjs \
             --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
             --file .artifacts/runtime/prior-admission-state.json || status=1
@@ -716,8 +751,10 @@ jobs:
             ROLLBACK_PREREQUISITES_VERIFIED=true
             restore_queue image-primary "$QUEUE_NAME"
             restore_queue image-dlq "$DLQ_NAME"
-            restore_queue pdf-primary "$PDF_QUEUE_NAME"
-            restore_queue pdf-dlq "$PDF_DLQ_NAME"
+            if [[ "$PRIOR_PDF_PRESENT" == true ]]; then
+              restore_queue pdf-primary "$PDF_QUEUE_NAME"
+              restore_queue pdf-dlq "$PDF_DLQ_NAME"
+            fi
           else
             ROLLBACK_PREREQUISITES_VERIFIED=false
           fi
