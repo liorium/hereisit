@@ -32,10 +32,10 @@ function commonReceipt(value, reportSha256, label, schema, keys) {
   if (
     receipt.schema !== schema ||
     receipt.version !== 1 ||
-    receipt.passed !== true ||
+    typeof receipt.passed !== "boolean" ||
     receipt.releaseReportSha256 !== reportSha256
   )
-    throw new TypeError(`${label} is not passed and bound to the exact release report`);
+    throw new TypeError(`${label} is not bound to the exact release report`);
   assertSha256(receipt.releaseReportSha256, `${label} release report hash`);
   return receipt;
 }
@@ -48,9 +48,11 @@ function deletionReceipt(value, reportSha256) {
     "hereisit-pdf-deletion-receipt@1",
     ["deleted", "sweepPassed"],
   );
-  if (receipt.deleted !== true || receipt.sweepPassed !== true)
+  if (typeof receipt.deleted !== "boolean" || typeof receipt.sweepPassed !== "boolean")
+    throw new TypeError("deletion evidence is invalid");
+  if (receipt.passed && (receipt.deleted !== true || receipt.sweepPassed !== true))
     throw new TypeError("deletion evidence did not prove deletion and sweep");
-  return true;
+  return receipt.passed && receipt.deleted && receipt.sweepPassed;
 }
 
 function costReceipt(value, reportSha256) {
@@ -65,7 +67,7 @@ function costReceipt(value, reportSha256) {
   assertNonNegativeSafeInteger(receipt.costPer1000JobsMicrousd, "cost per 1000 jobs");
   if (receipt.projectedMonthlyCostMicrousd > 5_000_000 || receipt.costPer1000JobsMicrousd > 500_000)
     throw new TypeError("cost evidence exceeds the release ceiling");
-  return true;
+  return receipt.passed;
 }
 
 function rollbackReceipt(value, reportSha256) {
@@ -84,9 +86,11 @@ function rollbackReceipt(value, reportSha256) {
     "hereisit-pdf-rollback-receipt@1",
     keys,
   );
-  if (keys.some((key) => receipt[key] !== true))
+  if (keys.some((key) => typeof receipt[key] !== "boolean"))
+    throw new TypeError("rollback evidence is invalid");
+  if (receipt.passed && keys.some((key) => receipt[key] !== true))
     throw new TypeError("rollback evidence did not prove the exact release state");
-  return true;
+  return receipt.passed && keys.every((key) => receipt[key]);
 }
 
 export async function createPdfPublicAdmissionState({
