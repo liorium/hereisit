@@ -115,6 +115,74 @@ describe("PDF public-admission release gate", () => {
     }
   });
 
+  it("records bound but failed cost and rollback evidence as disabled admission", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pdf-admission-disabled-"));
+    try {
+      const reportPath = join(root, "report.json"),
+        output = join(root, "state.json");
+      const { createReportFixture } = await import("./fixtures/processing-release-report-fixture");
+      await writeFile(
+        reportPath,
+        canonicalJson(
+          createReportFixture({ visualProfilesMeasured: 1, publicAdmissionReady: true }),
+        ),
+      );
+      const releaseReportSha256 = await reportHash(reportPath);
+      const paths = {
+        deletionEvidencePath: join(root, "deletion.json"),
+        costEvidencePath: join(root, "cost.json"),
+        rollbackEvidencePath: join(root, "rollback.json"),
+      };
+      await writeFile(
+        paths.deletionEvidencePath,
+        canonicalJson({
+          schema: "hereisit-pdf-deletion-receipt@1",
+          version: 1,
+          passed: true,
+          releaseReportSha256,
+          deleted: true,
+          sweepPassed: true,
+        }),
+      );
+      await writeFile(
+        paths.costEvidencePath,
+        canonicalJson({
+          schema: "hereisit-pdf-cost-receipt@1",
+          version: 1,
+          passed: false,
+          releaseReportSha256,
+          projectedMonthlyCostMicrousd: 0,
+          costPer1000JobsMicrousd: 0,
+        }),
+      );
+      await writeFile(
+        paths.rollbackEvidencePath,
+        canonicalJson({
+          schema: "hereisit-pdf-rollback-receipt@1",
+          version: 1,
+          passed: false,
+          releaseReportSha256,
+          workerRestored: false,
+          imageEngineRestored: false,
+          pdfEngineRestored: false,
+          configRestored: false,
+          policyRestored: false,
+          queuesRestored: false,
+        }),
+      );
+      await expect(
+        createPdfPublicAdmissionState({ reportPath, output, ...paths }),
+      ).resolves.toMatchObject({
+        enabled: false,
+        deletionPassed: true,
+        costPassed: false,
+        rollbackPassed: false,
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects abbreviated, extra, over-budget, or report-drifted receipts", async () => {
     const root = await mkdtemp(join(tmpdir(), "pdf-admission-invalid-"));
     try {
