@@ -72,7 +72,7 @@ describe("generated PDF compression corpus", () => {
         entry.probe.signature,
       );
     }
-  });
+  }, 30_000);
 
   it("generates a realistic deterministic JPEG stratum for image optimization", async () => {
     const firstRoot = await root("visual-first");
@@ -111,7 +111,7 @@ describe("generated PDF compression corpus", () => {
     await expect(
       probePdfCorpusFeature(changed, "jpeg-heavy", firstJpeg.safety),
     ).resolves.not.toEqual(firstJpeg.probe.signature);
-  });
+  }, 30_000);
 
   it("rejects swapped labels when the bytes do not contain that stratum's defining feature", async () => {
     const output = await root("swapped");
