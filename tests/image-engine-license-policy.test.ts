@@ -595,7 +595,7 @@ describe("image engine native supply-chain policy", () => {
     );
     expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
       new Set([
-        "sha256:cc276cc11d9ad598785ce8244261e778232772786f1f95bba43d7be42535a76e",
+        "sha256:8859df7527f5ff64984db1f55e94927b28fb989674b1da657d0330ab50e06aea",
         "sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
       ]),
     );
@@ -607,7 +607,7 @@ describe("image engine native supply-chain policy", () => {
         )
         .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
     ).toEqual([
-      "engine:sha256:cc276cc11d9ad598785ce8244261e778232772786f1f95bba43d7be42535a76e",
+      "engine:sha256:8859df7527f5ff64984db1f55e94927b28fb989674b1da657d0330ab50e06aea",
       "pdf-engine:sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
     ]);
   });
