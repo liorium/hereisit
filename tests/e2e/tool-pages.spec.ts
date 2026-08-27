@@ -159,6 +159,12 @@ test("links to dedicated image tools and initializes each intent", async ({ page
         await expect(presetGroup.getByRole("button", { name: visiblePreset })).toBeVisible();
       }
     }
+    if (tool.path === "/image/crop") {
+      const topLeftCrop = page.getByRole("button", { name: "왼쪽 위 기준으로 자르기" });
+      await expect(topLeftCrop).toBeVisible();
+      await topLeftCrop.click();
+      await expect(topLeftCrop).toHaveAttribute("aria-pressed", "true");
+    }
     await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",

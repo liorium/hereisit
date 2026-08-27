@@ -14,6 +14,39 @@ export interface DrawGeometry {
   upscalingSkipped: boolean;
 }
 
+export type CropFocalPointPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "center-left"
+  | "center"
+  | "center-right"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
+const CROP_FOCAL_POINTS: Readonly<
+  Record<CropFocalPointPosition, Readonly<{ x: number; y: number }>>
+> = Object.freeze({
+  "top-left": { x: 0, y: 0 },
+  "top-center": { x: 0.5, y: 0 },
+  "top-right": { x: 1, y: 0 },
+  "center-left": { x: 0, y: 0.5 },
+  center: { x: 0.5, y: 0.5 },
+  "center-right": { x: 1, y: 0.5 },
+  "bottom-left": { x: 0, y: 1 },
+  "bottom-center": { x: 0.5, y: 1 },
+  "bottom-right": { x: 1, y: 1 },
+});
+
+export function focalPointForCropPosition(position: CropFocalPointPosition): {
+  x: number;
+  y: number;
+} {
+  const focalPoint = CROP_FOCAL_POINTS[position];
+  return { x: focalPoint.x, y: focalPoint.y };
+}
+
 function roundDimension(value: number): number {
   return Math.max(1, Math.round(value));
 }

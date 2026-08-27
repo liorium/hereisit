@@ -1,6 +1,7 @@
 "use client";
 
 import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
+import { type CropFocalPointPosition, focalPointForCropPosition } from "@hereisit/image-tool";
 import type {
   BatchHandle,
   BatchRuntimeEvent,
@@ -262,6 +263,18 @@ const CROP_RATIOS = [
   ["3:4", 3, 4],
   ["2:3", 2, 3],
 ] as const;
+
+const CROP_FOCAL_POSITIONS = [
+  ["top-left", "왼쪽 위", "↖"],
+  ["top-center", "가운데 위", "↑"],
+  ["top-right", "오른쪽 위", "↗"],
+  ["center-left", "왼쪽 가운데", "←"],
+  ["center", "가운데", "•"],
+  ["center-right", "오른쪽 가운데", "→"],
+  ["bottom-left", "왼쪽 아래", "↙"],
+  ["bottom-center", "가운데 아래", "↓"],
+  ["bottom-right", "오른쪽 아래", "↘"],
+] as const satisfies readonly [CropFocalPointPosition, string, string][];
 
 function cropRatioKey(resize: ImagePipelineSpecV2["resize"]): string {
   if (resize.kind !== "cover") return "1:1";
@@ -625,8 +638,23 @@ export function ImageWorkbench({
         kind: "cover",
         width: Math.max(1, Math.round(widthRatio * scale)),
         height: Math.max(1, Math.round(heightRatio * scale)),
+        ...(current.resize.kind === "cover" && current.resize.focalPoint !== undefined
+          ? { focalPoint: current.resize.focalPoint }
+          : {}),
       },
     }));
+  };
+
+  const changeCropPosition = (position: CropFocalPointPosition) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      return {
+        ...current,
+        resize: { ...current.resize, focalPoint: focalPointForCropPosition(position) },
+      };
+    });
   };
 
   const changeRotation = (rotation: 0 | 90 | 180 | 270) => {
@@ -1130,7 +1158,38 @@ export function ImageWorkbench({
                     ))}
                   </div>
                   <p className={styles.formatWarning}>
-                    <span>가운데를 기준으로 선택한 비율만 남겨요.</span>
+                    <span>선택한 비율과 위치만 남겨요.</span>
+                  </p>
+                </fieldset>
+              )}
+
+              {isCropIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>자르기 위치</legend>
+                  <div className={styles.cropPositionGrid}>
+                    {CROP_FOCAL_POSITIONS.map(([position, label, symbol]) => {
+                      const focalPoint =
+                        spec.resize.kind === "cover"
+                          ? (spec.resize.focalPoint ?? { x: 0.5, y: 0.5 })
+                          : { x: 0.5, y: 0.5 };
+                      const target = focalPointForCropPosition(position);
+                      const active = focalPoint.x === target.x && focalPoint.y === target.y;
+                      return (
+                        <button
+                          className={active ? styles.activeSegment : ""}
+                          type="button"
+                          key={position}
+                          aria-label={`${label} 기준으로 자르기`}
+                          aria-pressed={active}
+                          onClick={() => changeCropPosition(position)}
+                        >
+                          {symbol}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>인물이나 상품이 있는 쪽을 고르면 그 부분을 우선해요.</span>
                   </p>
                 </fieldset>
               )}
