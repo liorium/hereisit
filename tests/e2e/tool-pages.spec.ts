@@ -164,6 +164,10 @@ test("links to dedicated image tools and initializes each intent", async ({ page
       await expect(topLeftCrop).toBeVisible();
       await topLeftCrop.click();
       await expect(topLeftCrop).toHaveAttribute("aria-pressed", "true");
+      const cropWidth = page.getByRole("spinbutton", { name: "자르기 가로" });
+      await expect(cropWidth).toHaveValue("1200");
+      await cropWidth.fill("640");
+      await expect(cropWidth).toHaveValue("640");
     }
     await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(

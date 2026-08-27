@@ -39,6 +39,16 @@ const CROP_FOCAL_POINTS: Readonly<
   "bottom-right": { x: 1, y: 1 },
 });
 
+const MAX_IMAGE_DIMENSION = 16_384;
+
+export function clampImageDimension(value: number, fallback = 1): number {
+  const safeFallback = Number.isFinite(fallback)
+    ? Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.round(fallback)))
+    : 1;
+  if (!Number.isFinite(value) || value <= 0) return safeFallback;
+  return Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.round(value)));
+}
+
 export function focalPointForCropPosition(position: CropFocalPointPosition): {
   x: number;
   y: number;

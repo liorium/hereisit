@@ -1,7 +1,11 @@
 "use client";
 
 import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
-import { type CropFocalPointPosition, focalPointForCropPosition } from "@hereisit/image-tool";
+import {
+  type CropFocalPointPosition,
+  clampImageDimension,
+  focalPointForCropPosition,
+} from "@hereisit/image-tool";
 import type {
   BatchHandle,
   BatchRuntimeEvent,
@@ -277,10 +281,10 @@ const CROP_FOCAL_POSITIONS = [
 ] as const satisfies readonly [CropFocalPointPosition, string, string][];
 
 function cropRatioKey(resize: ImagePipelineSpecV2["resize"]): string {
-  if (resize.kind !== "cover") return "1:1";
+  if (resize.kind !== "cover") return "";
   const ratio = resize.width / resize.height;
   return (
-    CROP_RATIOS.find(([, width, height]) => Math.abs(ratio - width / height) < 0.01)?.[0] ?? "1:1"
+    CROP_RATIOS.find(([, width, height]) => Math.abs(ratio - width / height) < 0.01)?.[0] ?? ""
   );
 }
 
@@ -653,6 +657,19 @@ export function ImageWorkbench({
       return {
         ...current,
         resize: { ...current.resize, focalPoint: focalPointForCropPosition(position) },
+      };
+    });
+  };
+
+  const changeCropDimension = (axis: "width" | "height", value: number) => {
+    const dimension = clampImageDimension(value, 1200);
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      return {
+        ...current,
+        resize: { ...current.resize, [axis]: dimension },
       };
     });
   };
@@ -1159,6 +1176,45 @@ export function ImageWorkbench({
                   </div>
                   <p className={styles.formatWarning}>
                     <span>선택한 비율과 위치만 남겨요.</span>
+                  </p>
+                  <div className={styles.cropDimensionFields}>
+                    <label className={styles.numberField}>
+                      <span>가로</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="16384"
+                          step="1"
+                          value={spec.resize.kind === "cover" ? spec.resize.width : 1200}
+                          aria-label="자르기 가로"
+                          onChange={(event) =>
+                            changeCropDimension("width", Number(event.target.value))
+                          }
+                        />
+                        px
+                      </span>
+                    </label>
+                    <label className={styles.numberField}>
+                      <span>세로</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="16384"
+                          step="1"
+                          value={spec.resize.kind === "cover" ? spec.resize.height : 1200}
+                          aria-label="자르기 세로"
+                          onChange={(event) =>
+                            changeCropDimension("height", Number(event.target.value))
+                          }
+                        />
+                        px
+                      </span>
+                    </label>
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>가로·세로를 직접 입력하면 사용자 지정 비율로 잘라요.</span>
                   </p>
                 </fieldset>
               )}
