@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { clampImageDimension, computeDrawGeometry, focalPointForCropPosition } from "./geometry";
+import {
+  clampImageDimension,
+  computeDrawGeometry,
+  focalPointForCropPosition,
+  focalPointFromNormalizedPosition,
+} from "./geometry";
 
 describe("computeDrawGeometry", () => {
   it("keeps the original dimensions when resize is disabled", () => {
@@ -58,6 +63,15 @@ describe("computeDrawGeometry", () => {
     [640.4, 1200, 640],
   ] as const)("normalizes crop dimensions safely", (value, fallback, expected) => {
     expect(clampImageDimension(value, fallback)).toBe(expected);
+  });
+
+  it.each([
+    [-1, 0.5, 0, 0.5],
+    [0.25, 0.75, 0.25, 0.75],
+    [2, 3, 1, 1],
+    [Number.NaN, Number.POSITIVE_INFINITY, 0.5, 0.5],
+  ] as const)("clamps a dragged crop position to the image bounds", (x, y, expectedX, expectedY) => {
+    expect(focalPointFromNormalizedPosition(x, y)).toEqual({ x: expectedX, y: expectedY });
   });
 
   it.each([90, 270] as const)("swaps output dimensions for a %d degree turn", (rotation) => {

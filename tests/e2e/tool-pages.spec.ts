@@ -168,6 +168,29 @@ test("links to dedicated image tools and initializes each intent", async ({ page
       await expect(cropWidth).toHaveValue("1200");
       await cropWidth.fill("640");
       await expect(cropWidth).toHaveValue("640");
+      const cropPreview = page.getByTestId("crop-preview");
+      await expect(cropPreview).toHaveAttribute(
+        "aria-label",
+        "자르기 미리보기. 드래그해서 위치를 조정할 수 있어요.",
+      );
+      const cropPreviewBox = await cropPreview.boundingBox();
+      expect(cropPreviewBox).not.toBeNull();
+      if (cropPreviewBox !== null) {
+        await page.mouse.move(
+          cropPreviewBox.x + cropPreviewBox.width * 0.2,
+          cropPreviewBox.y + cropPreviewBox.height * 0.8,
+        );
+        await page.mouse.down();
+        await page.mouse.move(
+          cropPreviewBox.x + cropPreviewBox.width * 0.8,
+          cropPreviewBox.y + cropPreviewBox.height * 0.2,
+        );
+        await page.mouse.up();
+      }
+      await expect(cropPreview.locator("img")).toHaveAttribute(
+        "style",
+        /object-position:\s*(?:5[5-9]|[6-9]\d|100)%\s*(?:0|[1-3]\d|4[0-4])%/,
+      );
     }
     await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(

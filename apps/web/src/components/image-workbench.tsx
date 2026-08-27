@@ -5,6 +5,7 @@ import {
   type CropFocalPointPosition,
   clampImageDimension,
   focalPointForCropPosition,
+  focalPointFromNormalizedPosition,
 } from "@hereisit/image-tool";
 import type {
   BatchHandle,
@@ -18,6 +19,7 @@ import type { AvailableToolId, FileKind } from "@hereisit/tool-registry/catalog"
 import {
   type ChangeEvent,
   type DragEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -330,6 +332,7 @@ export function ImageWorkbench({
   const itemsRef = useRef(items);
   const objectUrlsRef = useRef(new Set<string>());
   const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const cropPointerIdRef = useRef<number | null>(null);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const detecting = detectionProgress !== null;
   const busy = processing || archiving || detecting;
@@ -659,6 +662,47 @@ export function ImageWorkbench({
         resize: { ...current.resize, focalPoint: focalPointForCropPosition(position) },
       };
     });
+  };
+
+  const changeCropFocalPoint = (x: number, y: number) => {
+    const focalPoint = focalPointFromNormalizedPosition(x, y);
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      return { ...current, resize: { ...current.resize, focalPoint } };
+    });
+  };
+
+  const updateCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    changeCropFocalPoint(
+      (event.clientX - bounds.left) / bounds.width,
+      (event.clientY - bounds.top) / bounds.height,
+    );
+  };
+
+  const beginCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (busy || !isCropIntent || spec.resize.kind !== "cover") return;
+    invalidateResults();
+    cropPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    updateCropPointer(event);
+  };
+
+  const moveCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateCropPointer(event);
+  };
+
+  const endCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropPointerIdRef.current !== event.pointerId) return;
+    cropPointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const changeCropDimension = (axis: "width" | "height", value: number) => {
@@ -1428,12 +1472,47 @@ export function ImageWorkbench({
                     ) : (
                       <>
                         <figure>
-                          {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                          <img
-                            src={selected.previewUrl}
-                            alt={`${selected.file.name} 원본`}
-                            decoding="async"
-                          />
+                          {isCropIntent &&
+                          selected.resultUrl === undefined &&
+                          spec.resize.kind === "cover" ? (
+                            <button
+                              type="button"
+                              className={styles.cropPreviewFrame}
+                              data-testid="crop-preview"
+                              aria-label="자르기 미리보기. 드래그해서 위치를 조정할 수 있어요."
+                              style={{
+                                aspectRatio: `${spec.resize.width} / ${spec.resize.height}`,
+                              }}
+                              onPointerDown={beginCropPointer}
+                              onPointerMove={moveCropPointer}
+                              onPointerUp={endCropPointer}
+                              onPointerCancel={endCropPointer}
+                              onLostPointerCapture={() => {
+                                cropPointerIdRef.current = null;
+                              }}
+                            >
+                              {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                              <img
+                                src={selected.previewUrl}
+                                alt={`${selected.file.name} 자르기 미리보기`}
+                                decoding="async"
+                                draggable={false}
+                                style={{
+                                  objectPosition: `${(spec.resize.focalPoint?.x ?? 0.5) * 100}% ${(spec.resize.focalPoint?.y ?? 0.5) * 100}%`,
+                                }}
+                              />
+                              <span className={styles.cropPreviewHint} aria-hidden="true">
+                                드래그해서 위치 조정
+                              </span>
+                            </button>
+                          ) : (
+                            /* biome-ignore lint/performance/noImgElement: local object URL preview */
+                            <img
+                              src={selected.previewUrl}
+                              alt={`${selected.file.name} 원본`}
+                              decoding="async"
+                            />
+                          )}
                           <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
                         </figure>
                         {selected.resultUrl !== undefined && selected.result !== undefined && (

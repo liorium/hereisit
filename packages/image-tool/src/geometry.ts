@@ -41,6 +41,10 @@ const CROP_FOCAL_POINTS: Readonly<
 
 const MAX_IMAGE_DIMENSION = 16_384;
 
+function clampUnit(value: number, fallback = 0.5): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+}
+
 export function clampImageDimension(value: number, fallback = 1): number {
   const safeFallback = Number.isFinite(fallback)
     ? Math.max(1, Math.min(MAX_IMAGE_DIMENSION, Math.round(fallback)))
@@ -55,6 +59,16 @@ export function focalPointForCropPosition(position: CropFocalPointPosition): {
 } {
   const focalPoint = CROP_FOCAL_POINTS[position];
   return { x: focalPoint.x, y: focalPoint.y };
+}
+
+export function focalPointFromNormalizedPosition(
+  x: number,
+  y: number,
+): {
+  x: number;
+  y: number;
+} {
+  return { x: clampUnit(x), y: clampUnit(y) };
 }
 
 function roundDimension(value: number): number {
@@ -146,8 +160,8 @@ export function computeDrawGeometry(
     };
   }
 
-  const focalX = resize.focalPoint?.x ?? 0.5;
-  const focalY = resize.focalPoint?.y ?? 0.5;
+  const focalX = clampUnit(resize.focalPoint?.x ?? 0.5);
+  const focalY = clampUnit(resize.focalPoint?.y ?? 0.5);
   const sourceRatio = sourceWidth / sourceHeight;
   const targetRatio = resize.width / resize.height;
 
