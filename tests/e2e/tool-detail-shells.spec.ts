@@ -74,6 +74,13 @@ test("renders image resize in the catalog-driven file shell", async ({ page }) =
   await expectRelatedLinks(page, ["/image/compress", "/image/convert", "/image/watermark"]);
 });
 
+test("renders image cropping in the catalog-driven file shell", async ({ page }) => {
+  await page.goto("/image/crop");
+
+  await expectCatalogShell(page, "이미지 자르기", "파일 작업 영역");
+  await expectRelatedLinks(page, ["/image/resize", "/image/rotate", "/image/compress"]);
+});
+
 test("renders image conversion in the catalog-driven file shell", async ({ page }) => {
   await page.goto("/image/convert");
 
@@ -82,6 +89,13 @@ test("renders image conversion in the catalog-driven file shell", async ({ page 
     page.getByText("HEIC 변환은 Safari 17 이상에서 지원해요.", { exact: true }),
   ).toBeVisible();
   await expectRelatedLinks(page, ["/image/compress", "/image/resize", "/pdf/image-to-pdf"]);
+});
+
+test("renders image rotation in the catalog-driven file shell", async ({ page }) => {
+  await page.goto("/image/rotate");
+
+  await expectCatalogShell(page, "이미지 회전", "파일 작업 영역");
+  await expectRelatedLinks(page, ["/image/crop", "/image/resize", "/image/convert"]);
 });
 
 test("renders image watermarking in the catalog-driven file shell", async ({ page }) => {

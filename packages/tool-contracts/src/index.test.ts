@@ -4,6 +4,7 @@ import {
   IMAGE_WATERMARK_TOOL_ID,
   IMAGE_WATERMARK_TOOL_VERSION,
   imagePipelineSpecSchema,
+  imagePipelineSpecV2Schema,
   imageWatermarkSpecSchema,
   JSON_FORMAT_TOOL_ID,
   JSON_FORMAT_TOOL_VERSION,
@@ -139,6 +140,22 @@ describe("imagePipelineSpecSchema", () => {
       minQuality: 35,
       maxAttempts: 6,
     });
+  });
+
+  it("publishes quarter-turn rotation for image transform tools", () => {
+    const base = {
+      version: 2,
+      resize: { kind: "none" },
+      output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+      autoOrient: true,
+      metadata: "strip",
+    } as const;
+
+    expect(imagePipelineSpecV2Schema.parse(base).rotation).toBe(0);
+    for (const rotation of [0, 90, 180, 270] as const) {
+      expect(imagePipelineSpecV2Schema.parse({ ...base, rotation }).rotation).toBe(rotation);
+    }
+    expect(imagePipelineSpecSchema.safeParse({ ...base, rotation: 45 }).success).toBe(false);
   });
 });
 

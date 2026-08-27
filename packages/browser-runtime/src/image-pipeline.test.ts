@@ -175,6 +175,8 @@ function installCanvasResult(
         return {
           clearRect: vi.fn(),
           drawImage: vi.fn(),
+          rotate: vi.fn(),
+          translate: vi.fn(),
           fillRect: vi.fn(),
           fillStyle: "#ffffff",
           imageSmoothingEnabled: false,
@@ -200,6 +202,31 @@ afterEach(() => {
 });
 
 describe("processImagePipeline size goal", () => {
+  it("rotates a source image and swaps the result dimensions", async () => {
+    installCanvasResult(40, 7, 5);
+
+    const result = await processImagePipeline(
+      {
+        name: "photo.jpg",
+        mimeHint: "image/jpeg",
+        byteLength: jpegHeader(7, 5).byteLength,
+        bytes: jpegHeader(7, 5).slice().buffer as ArrayBuffer,
+      },
+      {
+        version: 2,
+        resize: { kind: "none" },
+        rotation: 90,
+        output: { format: "webp", compression: { mode: "quality", quality: 90 } },
+        sizeGoal: { mode: "allow-growth" },
+        autoOrient: true,
+        metadata: "strip",
+      },
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({ mime: "image/webp", width: 5, height: 7 });
+  });
+
   it.each([
     {
       bytes: jpegHeader(7, 5),

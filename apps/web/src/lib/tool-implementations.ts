@@ -24,7 +24,7 @@ export interface ToolNotice {
   text: string;
 }
 
-export type ImageToolIntent = "compress" | "resize" | "convert" | "watermark";
+export type ImageToolIntent = "compress" | "resize" | "crop" | "convert" | "rotate" | "watermark";
 export type PdfToolIntent =
   | "merge"
   | "split"
@@ -138,6 +138,15 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     defaultSummary: "기본값은 비율을 유지해 긴 변을 최대 1920px로 줄이고 WebP로 저장해요.",
     notices: [],
   },
+  "image.crop": {
+    family: "image",
+    bundleProfile: "image",
+    intent: "crop",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE CROPPER",
+    defaultSummary: "원하는 비율로 이미지의 필요한 부분만 잘라내고 원본 형식으로 저장해요.",
+    notices: [],
+  },
   "image.convert": {
     family: "image",
     bundleProfile: "image",
@@ -146,6 +155,15 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     eyebrow: "IMAGE CONVERTER",
     defaultSummary: "기본값은 이미지 크기를 유지하면서 가벼운 WebP 파일로 변환해요.",
     notices: [{ tone: "support", text: "HEIC 변환은 Safari 17 이상에서 지원해요." }],
+  },
+  "image.rotate": {
+    family: "image",
+    bundleProfile: "image",
+    intent: "rotate",
+    sourceFileLimits: imageSourceFileLimits,
+    eyebrow: "IMAGE ROTATOR",
+    defaultSummary: "이미지를 90도 단위로 회전하고 원본 형식으로 저장해요.",
+    notices: [],
   },
   "image.watermark": {
     family: "image",

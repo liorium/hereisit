@@ -42,6 +42,8 @@ describe("planFileRecommendations", () => {
     });
     expect(plan.groups[0]?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
       "image.compress",
+      "image.crop",
+      "image.rotate",
       "image.resize",
       "image.convert",
       "image.watermark",
@@ -49,6 +51,8 @@ describe("planFileRecommendations", () => {
     expect(recommendationIds([jpeg, png])).toEqual([
       "pdf.image-to-pdf",
       "image.compress",
+      "image.crop",
+      "image.rotate",
       "image.resize",
       "image.convert",
       "image.watermark",

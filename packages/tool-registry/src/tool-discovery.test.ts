@@ -54,7 +54,9 @@ describe("catalog search and filters", () => {
     expect(availableIds("이미지")).toEqual([
       "image.compress",
       "image.resize",
+      "image.crop",
       "image.convert",
+      "image.rotate",
       "image.watermark",
       "pdf.image-to-pdf",
       "pdf.to-image",
@@ -104,8 +106,10 @@ describe("catalog search and filters", () => {
       "image.compress",
       "pdf.merge",
       "image.resize",
+      "image.crop",
       "pdf.compress-scanned",
       "image.convert",
+      "image.rotate",
       "pdf.split",
       "image.watermark",
       "pdf.organize",
@@ -365,8 +369,8 @@ describe("home tool selection", () => {
       "pdf.to-image",
       "pdf.organize",
     ]);
-    expect(selected.findIndex((tool) => tool.id === "pdf.split")).toBeGreaterThanOrEqual(9);
-    expect(selected).toHaveLength(availableToolEntries.length);
+    expect(selected.findIndex((tool) => tool.id === "pdf.split")).toBe(-1);
+    expect(selected).toHaveLength(12);
   });
 
   it("ignores unknown and planned recent IDs", () => {
@@ -384,7 +388,9 @@ describe("home tool selection", () => {
     ).toEqual([
       "image.compress",
       "image.resize",
+      "image.crop",
       "image.convert",
+      "image.rotate",
       "image.watermark",
       "pdf.to-image",
       "pdf.image-to-pdf",
@@ -459,6 +465,8 @@ describe("file capability recommendations", () => {
     expect(recommendations.map(({ tool }) => tool.id)).toEqual([
       "pdf.image-to-pdf",
       "image.compress",
+      "image.crop",
+      "image.rotate",
       "image.resize",
       "image.convert",
       "image.watermark",

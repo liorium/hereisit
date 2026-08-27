@@ -220,7 +220,8 @@ export async function processImagePipeline(
 
     report("transforming", 0.55);
     const transformStarted = performance.now();
-    const geometry = computeDrawGeometry(bitmap.width, bitmap.height, spec.resize);
+    const rotation = "rotation" in spec ? spec.rotation : 0;
+    const geometry = computeDrawGeometry(bitmap.width, bitmap.height, spec.resize, rotation);
 
     if (
       geometry.canvasWidth > MAX_DIMENSION ||
@@ -248,16 +249,34 @@ export async function processImagePipeline(
 
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
+    if (rotation === 90) {
+      context.translate(canvas.width, 0);
+      context.rotate(Math.PI / 2);
+    } else if (rotation === 180) {
+      context.translate(canvas.width, canvas.height);
+      context.rotate(Math.PI);
+    } else if (rotation === 270) {
+      context.translate(0, canvas.height);
+      context.rotate(-Math.PI / 2);
+    }
+    const drawGeometry =
+      rotation === 0 || spec.resize.kind !== "none"
+        ? geometry
+        : {
+            ...geometry,
+            destinationWidth: bitmap.width,
+            destinationHeight: bitmap.height,
+          };
     context.drawImage(
       bitmap,
-      geometry.sourceX,
-      geometry.sourceY,
-      geometry.sourceWidth,
-      geometry.sourceHeight,
-      geometry.destinationX,
-      geometry.destinationY,
-      geometry.destinationWidth,
-      geometry.destinationHeight,
+      drawGeometry.sourceX,
+      drawGeometry.sourceY,
+      drawGeometry.sourceWidth,
+      drawGeometry.sourceHeight,
+      drawGeometry.destinationX,
+      drawGeometry.destinationY,
+      drawGeometry.destinationWidth,
+      drawGeometry.destinationHeight,
     );
     const transformMs = performance.now() - transformStarted;
 

@@ -34,4 +34,26 @@ describe("computeDrawGeometry", () => {
     expect(result.sourceWidth).toBe(1000);
     expect(result.sourceHeight).toBe(1000);
   });
+
+  it.each([90, 270] as const)("swaps output dimensions for a %d degree turn", (rotation) => {
+    const result = computeDrawGeometry(1600, 900, { kind: "none" }, rotation);
+
+    expect(result).toMatchObject({
+      canvasWidth: 900,
+      canvasHeight: 1600,
+      sourceX: 0,
+      sourceY: 0,
+      sourceWidth: 1600,
+      sourceHeight: 900,
+      destinationWidth: 900,
+      destinationHeight: 1600,
+    });
+  });
+
+  it("keeps dimensions for a half turn", () => {
+    expect(computeDrawGeometry(1600, 900, { kind: "none" }, 180)).toMatchObject({
+      canvasWidth: 1600,
+      canvasHeight: 900,
+    });
+  });
 });

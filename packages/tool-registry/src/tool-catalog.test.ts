@@ -36,7 +36,9 @@ type ExpectedAvailableToolId =
   | "data.json-format"
   | "image.compress"
   | "image.convert"
+  | "image.crop"
   | "image.resize"
+  | "image.rotate"
   | "image.watermark"
   | "pdf.compress-scanned"
   | "pdf.image-to-pdf"
@@ -50,7 +52,9 @@ const expectedAliases = {
   "data.json-format": ["json 정리", "json 포맷", "json 검사", "json 축소"],
   "image.compress": ["사진 압축", "이미지 최적화", "용량 줄이기", "jpg 압축", "png 압축"],
   "image.resize": ["사진 크기", "리사이즈", "해상도 변경", "정사각형 자르기"],
+  "image.crop": ["사진 자르기", "이미지 자르기", "크롭", "비율 자르기"],
   "image.convert": ["이미지 변환", "jpg 변환", "png 변환", "webp 변환", "heic 변환"],
+  "image.rotate": ["사진 회전", "이미지 회전", "90도 회전"],
   "image.watermark": ["사진 워터마크", "로고 넣기", "문구 넣기"],
   "pdf.merge": ["pdf 병합", "pdf 합치기", "문서 합치기"],
   "pdf.split": ["pdf 나누기", "페이지 추출", "pdf 분할"],
@@ -65,7 +69,9 @@ const expectedRelatedToolIds = {
   "data.json-format": ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
   "image.compress": ["image.resize", "image.convert", "image.watermark"],
   "image.resize": ["image.compress", "image.convert", "image.watermark"],
+  "image.crop": ["image.resize", "image.rotate", "image.compress"],
   "image.convert": ["image.compress", "image.resize", "pdf.image-to-pdf"],
+  "image.rotate": ["image.crop", "image.resize", "image.convert"],
   "image.watermark": ["image.compress", "image.resize", "pdf.watermark"],
   "pdf.merge": ["pdf.split", "pdf.organize", "pdf.image-to-pdf"],
   "pdf.split": ["pdf.merge", "pdf.organize", "pdf.to-image"],
@@ -80,7 +86,9 @@ const expectedContracts = {
   "data.json-format": [JSON_FORMAT_TOOL_ID, JSON_FORMAT_TOOL_VERSION],
   "image.compress": ["image.optimize", 1],
   "image.resize": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.crop": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.convert": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.rotate": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.watermark": [IMAGE_WATERMARK_TOOL_ID, IMAGE_WATERMARK_TOOL_VERSION],
   "pdf.merge": [PDF_MERGE_TOOL_ID, PDF_TOOL_VERSION],
   "pdf.split": [PDF_SPLIT_TOOL_ID, PDF_TOOL_VERSION],
@@ -107,10 +115,19 @@ const expectedCopy = {
     shortDescription:
       "사진의 가로·세로 크기를 빠르게 바꾸세요. 업로드 없이 긴 변 축소와 정사각형 자르기를 한 번에 처리합니다.",
   },
+  "image.crop": {
+    name: "이미지 자르기",
+    shortDescription:
+      "원하는 비율로 이미지의 필요한 부분만 잘라내세요. 파일은 서버로 전송되지 않습니다.",
+  },
   "image.convert": {
     name: "이미지 형식 변환",
     shortDescription:
       "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요. 파일은 서버로 전송되지 않습니다.",
+  },
+  "image.rotate": {
+    name: "이미지 회전",
+    shortDescription: "이미지를 90도 단위로 빠르게 회전하세요. 파일은 서버로 전송되지 않습니다.",
   },
   "image.watermark": {
     name: "이미지에 워터마크 넣기",
@@ -163,8 +180,8 @@ function expectInvalidCatalog(
 }
 
 describe("tool catalog", () => {
-  it("publishes 12 real tools and one honest roadmap card", () => {
-    expect(availableToolEntries).toHaveLength(12);
+  it("publishes 14 real tools and one honest roadmap card", () => {
+    expect(availableToolEntries).toHaveLength(14);
     expect(plannedToolEntries.map((tool) => tool.id)).toEqual(["media.video-compress"]);
     expect(getAvailableToolById("image.compress")).toMatchObject({
       route: "/image/compress",
@@ -192,7 +209,7 @@ describe("tool catalog", () => {
 
   it("keeps IDs, routes, aliases, and intentional relations valid", () => {
     expect(new Set(toolCatalog.map((tool) => tool.id)).size).toBe(toolCatalog.length);
-    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(12);
+    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(14);
     expect(getRelatedAvailableTools("pdf.merge").map((tool) => tool.id)).toEqual([
       "pdf.split",
       "pdf.organize",
@@ -322,8 +339,10 @@ describe("tool catalog", () => {
       "image.compress",
       "pdf.merge",
       "image.resize",
+      "image.crop",
       "pdf.compress-scanned",
       "image.convert",
+      "image.rotate",
       "pdf.split",
       "image.watermark",
       "pdf.organize",
@@ -344,8 +363,22 @@ describe("tool catalog", () => {
       ],
       "pdf.merge": [["application/pdf"], 2, 20, false, ["application/pdf"]],
       "image.resize": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.crop": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp"],
+      ],
       "pdf.compress-scanned": [["application/pdf"], 1, 1, false, ["application/pdf"]],
       "image.convert": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.rotate": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp"],
+      ],
       "pdf.split": [["application/pdf"], 1, 1, false, ["application/pdf", "application/zip"]],
       "image.watermark": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
       "pdf.organize": [["application/pdf"], 1, 1, false, ["application/pdf"]],

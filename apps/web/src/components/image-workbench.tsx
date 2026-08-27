@@ -44,13 +44,21 @@ const COMPRESSION_IMAGE_KINDS = new Set<FileKind>(["image/jpeg", "image/png", "i
 const HEIC_KINDS = new Set<FileKind>(["image/heic", "image/heif"]);
 const HEIC_COMPRESSION_MESSAGE =
   "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
-export type ImageWorkbenchIntent = "general" | "compress" | "resize" | "convert";
+export type ImageWorkbenchIntent =
+  | "general"
+  | "compress"
+  | "resize"
+  | "crop"
+  | "convert"
+  | "rotate";
 
 const INTENT_PRESET_IDS: Record<ImageWorkbenchIntent, readonly string[] | null> = {
   general: null,
   compress: ["balanced"],
   resize: ["web-1920", "product-square", "social-square"],
+  crop: ["crop-square", "crop-landscape", "crop-portrait"],
   convert: ["convert-webp"],
+  rotate: ["rotate-90", "rotate-180", "rotate-270"],
 };
 
 const INTENT_CONFIG: Record<
@@ -84,12 +92,26 @@ const INTENT_CONFIG: Record<
     runLabel: "이미지 크기 조절",
     workbenchTitle: "크기 조절 작업대",
   },
+  crop: {
+    defaultPresetId: "crop-square",
+    emptyTitle: "자를 이미지를 놓거나 선택하세요",
+    selectLabel: "자를 이미지 선택",
+    runLabel: "이미지 자르기",
+    workbenchTitle: "이미지 자르기 작업대",
+  },
   convert: {
     defaultPresetId: "convert-webp",
     emptyTitle: "변환할 이미지를 놓거나 선택하세요",
     selectLabel: "변환할 이미지 선택",
     runLabel: "이미지 형식 변환",
     workbenchTitle: "형식 변환 작업대",
+  },
+  rotate: {
+    defaultPresetId: "rotate-90",
+    emptyTitle: "회전할 이미지를 놓거나 선택하세요",
+    selectLabel: "회전할 이미지 선택",
+    runLabel: "이미지 회전",
+    workbenchTitle: "이미지 회전 작업대",
   },
 };
 
@@ -134,7 +156,12 @@ function makeId(): string {
 function phaseLabel(phase: ImagePhase | undefined, intent: ImageWorkbenchIntent): string {
   if (phase === "validating") return "확인 중";
   if (phase === "decoding") return "읽는 중";
-  if (phase === "transforming") return intent === "resize" ? "크기 조절 중" : "이미지 준비 중";
+  if (phase === "transforming") {
+    if (intent === "resize") return "크기 조절 중";
+    if (intent === "crop") return "자르는 중";
+    if (intent === "rotate") return "회전 중";
+    return "이미지 준비 중";
+  }
   if (phase === "encoding") return "압축 중";
   if (phase === "finalizing") return "마무리 중";
   return "대기 중";
@@ -206,7 +233,7 @@ function isAcceptedKind(
   intent: ImageWorkbenchIntent,
 ): detectedKind is FileKind {
   if (detectedKind === null) return false;
-  return intent === "compress"
+  return intent === "compress" || intent === "crop" || intent === "rotate"
     ? COMPRESSION_IMAGE_KINDS.has(detectedKind)
     : IMAGE_KINDS.has(detectedKind);
 }
@@ -226,6 +253,24 @@ function getValidatedImageImplementation(
   return implementation;
 }
 
+const CROP_RATIOS = [
+  ["3:2", 3, 2],
+  ["4:3", 4, 3],
+  ["5:4", 5, 4],
+  ["1:1", 1, 1],
+  ["4:5", 4, 5],
+  ["3:4", 3, 4],
+  ["2:3", 2, 3],
+] as const;
+
+function cropRatioKey(resize: ImagePipelineSpecV2["resize"]): string {
+  if (resize.kind !== "cover") return "1:1";
+  const ratio = resize.width / resize.height;
+  return (
+    CROP_RATIOS.find(([, width, height]) => Math.abs(ratio - width / height) < 0.01)?.[0] ?? "1:1"
+  );
+}
+
 export function ImageWorkbench({
   intent,
   toolId,
@@ -237,6 +282,15 @@ export function ImageWorkbench({
   const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const intentCopy = INTENT_CONFIG[intent];
   const isCompressionIntent = intent === "compress";
+  const isCropIntent = intent === "crop";
+  const isRotateIntent = intent === "rotate";
+  const operationLabel = isCompressionIntent
+    ? "압축"
+    : isCropIntent
+      ? "자르기"
+      : isRotateIntent
+        ? "회전"
+        : "변환";
   const [initialPreset] = useState(() => resolveInitialPreset(intent));
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -494,11 +548,7 @@ export function ImageWorkbench({
     if (!hasResultOrError) return;
     for (const item of itemsRef.current) revokeOwnedUrl(item.resultUrl);
     commitItems((current) => current.map((item) => resetWorkItem(item)));
-    setMessage(
-      isCompressionIntent
-        ? "설정이 바뀌었어요. 새 설정으로 다시 압축해 주세요."
-        : "설정이 바뀌었어요. 새 설정으로 다시 변환해 주세요.",
-    );
+    setMessage(`설정이 바뀌었어요. 새 설정으로 다시 ${operationLabel} 작업을 해 주세요.`);
   };
 
   const choosePreset = (id: string) => {
@@ -559,6 +609,30 @@ export function ImageWorkbench({
             ? { kind: "inside", maxWidth: 1920, maxHeight: 1920 }
             : { kind: "cover", width: 1000, height: 1000 },
     }));
+  };
+
+  const changeCropRatio = (ratioKey: string) => {
+    const ratio = CROP_RATIOS.find(([key]) => key === ratioKey);
+    if (ratio === undefined) return;
+    const [, widthRatio, heightRatio] = ratio;
+    const longEdge = 1200;
+    const scale = longEdge / Math.max(widthRatio, heightRatio);
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({
+      ...current,
+      resize: {
+        kind: "cover",
+        width: Math.max(1, Math.round(widthRatio * scale)),
+        height: Math.max(1, Math.round(heightRatio * scale)),
+      },
+    }));
+  };
+
+  const changeRotation = (rotation: 0 | 90 | 180 | 270) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({ ...current, rotation }));
   };
 
   const changeSize = (value: number) => {
@@ -679,11 +753,7 @@ export function ImageWorkbench({
     itemsRef.current = queuedItems;
     setItems(queuedItems);
     setProcessing(true);
-    setMessage(
-      isCompressionIntent
-        ? `${sourceItems.length}개 이미지를 압축하고 있어요.`
-        : `${sourceItems.length}개 이미지를 변환하고 있어요.`,
-    );
+    setMessage(`${sourceItems.length}개 이미지 ${operationLabel} 작업 중이에요.`);
 
     let handle: BatchHandle | undefined;
     try {
@@ -712,11 +782,7 @@ export function ImageWorkbench({
         (result) => result.status === "rejected" && result.error.code !== "NO_SIZE_REDUCTION",
       ).length;
       if (successes === results.length) {
-        setMessage(
-          String(successes).concat(
-            isCompressionIntent ? "개 이미지 압축을 완료했어요." : "개 이미지 변환을 완료했어요.",
-          ),
-        );
+        setMessage(String(successes).concat(`개 이미지 ${operationLabel} 작업을 완료했어요.`));
       } else if (unchanged === results.length) {
         setMessage("이미 충분히 작아 더 줄이지 못했어요.");
       } else if (successes > 0) {
@@ -867,7 +933,7 @@ export function ImageWorkbench({
         className={styles.hiddenInput}
         type="file"
         accept={
-          intent === "compress"
+          intent === "compress" || intent === "crop" || intent === "rotate"
             ? "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
             : "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
         }
@@ -901,7 +967,9 @@ export function ImageWorkbench({
             <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
             <h2 id="workbench-title">{intentCopy.emptyTitle}</h2>
             <p>
-              {intent === "compress" ? "JPG, PNG, WebP" : "JPG, PNG, WebP · HEIC(Safari 17+)"}
+              {intent === "compress" || intent === "crop" || intent === "rotate"
+                ? "JPG, PNG, WebP"
+                : "JPG, PNG, WebP · HEIC(Safari 17+)"}
               {" · 파일당 50MB · 총 250MB · 최대 100개"}
             </p>
           </div>
@@ -1006,7 +1074,7 @@ export function ImageWorkbench({
                       <span
                         className={styles.rowProgress}
                         role="progressbar"
-                        aria-label={`${item.file.name} ${isCompressionIntent ? "압축" : "변환"} 진행률`}
+                        aria-label={`${item.file.name} ${operationLabel} 진행률`}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(item.progress * 100)}
@@ -1018,10 +1086,7 @@ export function ImageWorkbench({
               </div>
             </aside>
 
-            <aside
-              className={styles.settingsPanel}
-              aria-label={isCompressionIntent ? "압축 설정" : "변환 설정"}
-            >
+            <aside className={styles.settingsPanel} aria-label={`${operationLabel} 설정`}>
               <div className={styles.panelTitle}>
                 <strong>설정</strong>
                 <span>{presetId === "custom" ? "직접 설정" : "모두 적용"}</span>
@@ -1048,7 +1113,53 @@ export function ImageWorkbench({
                 </div>
               </fieldset>
 
-              {intent !== "compress" && (
+              {isCropIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>자르기 비율</legend>
+                  <div className={styles.segmented}>
+                    {CROP_RATIOS.map(([ratio]) => (
+                      <button
+                        className={cropRatioKey(spec.resize) === ratio ? styles.activeSegment : ""}
+                        type="button"
+                        key={ratio}
+                        aria-pressed={cropRatioKey(spec.resize) === ratio}
+                        onClick={() => changeCropRatio(ratio)}
+                      >
+                        {ratio}
+                      </button>
+                    ))}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>가운데를 기준으로 선택한 비율만 남겨요.</span>
+                  </p>
+                </fieldset>
+              )}
+
+              {isRotateIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>회전 방향</legend>
+                  <div className={styles.segmented}>
+                    {[
+                      [0, "원본"],
+                      [90, "오른쪽 90°"],
+                      [180, "180°"],
+                      [270, "왼쪽 90°"],
+                    ].map(([value, label]) => (
+                      <button
+                        className={(spec.rotation ?? 0) === value ? styles.activeSegment : ""}
+                        type="button"
+                        key={value}
+                        aria-pressed={(spec.rotation ?? 0) === value}
+                        onClick={() => changeRotation(value as 0 | 90 | 180 | 270)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+
+              {!isCompressionIntent && !isCropIntent && !isRotateIntent && (
                 <fieldset className={styles.settingsGroup} disabled={busy}>
                   <legend>크기</legend>
                   <div className={styles.segmented}>
@@ -1183,9 +1294,7 @@ export function ImageWorkbench({
                         ? "메모리 절약 모드"
                         : selected.resultUrl === undefined
                           ? "원본 미리보기"
-                          : isCompressionIntent
-                            ? "압축 전 · 후"
-                            : "변환 전 · 후"}
+                          : `${operationLabel} 전 · 후`}
                     </span>
                     {selected.result !== undefined && (
                       <span>
@@ -1199,10 +1308,7 @@ export function ImageWorkbench({
                     {processing ? (
                       <div className={styles.previewMemoryNotice} role="status">
                         <strong>메모리를 아끼고 있어요</strong>
-                        <span>
-                          {isCompressionIntent ? "압축" : "변환"} 중에는 고해상도 원본 미리보기를
-                          잠시 숨겨요.
-                        </span>
+                        <span>{operationLabel} 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
                       </div>
                     ) : (
                       <>
@@ -1220,7 +1326,7 @@ export function ImageWorkbench({
                             {/* biome-ignore lint/performance/noImgElement: local generated result */}
                             <img
                               src={selected.resultUrl}
-                              alt={`${selected.file.name} ${isCompressionIntent ? "압축" : "변환"} 결과`}
+                              alt={`${selected.file.name} ${operationLabel} 결과`}
                               decoding="async"
                             />
                             <figcaption>
@@ -1274,7 +1380,7 @@ export function ImageWorkbench({
                     disabled={busy}
                     onClick={startProcessing}
                   >
-                    {isCompressionIntent ? "다시 압축" : "다시 변환"}
+                    다시 {operationLabel}
                   </button>
                   <button
                     className={styles.runButton}

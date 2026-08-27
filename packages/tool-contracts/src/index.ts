@@ -27,6 +27,13 @@ export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 2 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
+export const imageRotationSchema = z.union([
+  z.literal(0),
+  z.literal(90),
+  z.literal(180),
+  z.literal(270),
+]);
+export type ImageRotation = z.infer<typeof imageRotationSchema>;
 
 function isSafeWatermarkText(value: string): boolean {
   return Array.from(value).every((character) => {
@@ -168,6 +175,7 @@ export const imagePipelineSpecV1Schema = z.object({
 export const imagePipelineSpecV2Schema = z.object({
   version: z.literal(2),
   resize: resizeSpecSchema,
+  rotation: imageRotationSchema.default(0),
   output: imageOutputSchema,
   sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
   autoOrient: z.literal(true),

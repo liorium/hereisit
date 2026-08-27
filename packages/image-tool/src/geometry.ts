@@ -1,4 +1,4 @@
-import type { ResizeSpec } from "@hereisit/tool-contracts";
+import type { ImageRotation, ResizeSpec } from "@hereisit/tool-contracts";
 
 export interface DrawGeometry {
   canvasWidth: number;
@@ -22,6 +22,7 @@ export function computeDrawGeometry(
   sourceWidth: number,
   sourceHeight: number,
   resize: ResizeSpec,
+  rotation: ImageRotation = 0,
 ): DrawGeometry {
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
     throw new Error("이미지 크기가 올바르지 않습니다.");
@@ -40,6 +41,26 @@ export function computeDrawGeometry(
     destinationY: 0,
     upscalingSkipped: false,
   };
+
+  if (resize.kind === "none" && rotation % 180 === 90) {
+    return {
+      ...base,
+      canvasWidth: sourceHeight,
+      canvasHeight: sourceWidth,
+      destinationWidth: sourceHeight,
+      destinationHeight: sourceWidth,
+    };
+  }
+
+  if (resize.kind === "none" && rotation === 180) {
+    return {
+      ...base,
+      canvasWidth: sourceWidth,
+      canvasHeight: sourceHeight,
+      destinationWidth: sourceWidth,
+      destinationHeight: sourceHeight,
+    };
+  }
 
   if (resize.kind === "none") {
     return {
