@@ -64,9 +64,9 @@ export const liveQualityFloor = {
   smallest: {
     defaultSsim: 0.94,
     screenshotTextSsim: 0.97,
-    maxMeanChannelDelta: 8 / 255,
+    maxMeanChannelDelta: 10 / 255,
     screenshotTextMaxMeanChannelDelta: 3 / 255,
-    maxEdgeLoss: 0.04,
+    maxEdgeLoss: 0.055,
     screenshotTextMaxEdgeLoss: 0.04,
   },
 } as const;

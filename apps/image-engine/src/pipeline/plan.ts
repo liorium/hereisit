@@ -109,7 +109,11 @@ function planJpeg(
     contentClass === "photo" || contentClass === "noisy" || contentClass === "already-optimized"
       ? "420"
       : "444";
-  const qualities = spec.preset === "balanced" ? [82, 78, 86] : [74, 68, 80];
+  const smallestFallbackQuality =
+    contentClass === "photo" || contentClass === "noisy" || contentClass === "already-optimized"
+      ? 74
+      : 80;
+  const qualities = spec.preset === "balanced" ? [82, 78, 86] : [74, 68, smallestFallbackQuality];
   return finalize(
     contentClass,
     qualities.map((quality, index) => {

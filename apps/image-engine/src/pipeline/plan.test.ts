@@ -59,7 +59,7 @@ describe("planOptimization", () => {
 
   it.each([
     ["balanced", 86],
-    ["smallest", 80],
+    ["smallest", 74],
   ] as const)("keeps a 4:4:4 fallback for %s photo JPEGs", (preset, quality) => {
     const result = planOptimization(inspection({}), "photo", { ...balanced, preset });
 
@@ -67,6 +67,20 @@ describe("planOptimization", () => {
       kind: "plan",
       plan: {
         candidates: [{ chroma: "420" }, { chroma: "420" }, { chroma: "444", quality }],
+      },
+    });
+  });
+
+  it("keeps the higher 4:4:4 fallback for smallest text and graphics", () => {
+    const result = planOptimization(inspection({}), "screenshot-text", {
+      ...balanced,
+      preset: "smallest",
+    });
+
+    expect(result).toMatchObject({
+      kind: "plan",
+      plan: {
+        candidates: [{ chroma: "444" }, { chroma: "444" }, { chroma: "444", quality: 80 }],
       },
     });
   });

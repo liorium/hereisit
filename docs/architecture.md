@@ -78,6 +78,10 @@ The source-relative `smaller-only` goal is a hard postcondition. The runtime ada
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
 
+The server `image.optimize@1` path keeps the same-format output and uses MozJPEG/WebP/OxiPNG candidates.
+Its `smallest` JPEG plan tries a photographic 4:4:4 quality-74 fallback with a bounded relaxed visual
+gate; screenshot and graphic classes retain the quality-80 fallback and stricter text gate.
+
 - 파일 선택 검사와 로컬 무손실 메타데이터 작업은 전용 optimize Worker가 네이티브 `File`을 읽어 수행한다.
 - 스마트 로컬 압축은 공통 이미지 Worker에서 원본을 읽고 인코드한다.
 - UI는 네이티브 `File` 참조와 검증된 메타데이터·결과만 보관한다.
