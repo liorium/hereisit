@@ -210,7 +210,7 @@ export const toolImplementationConfig = defineToolImplementationConfig({
       maxTotalBytes: 30 * MEBIBYTE,
     },
     eyebrow: "PHOTO EDITOR",
-    defaultSummary: "밝기·대비·채도·필터와 문구를 조절해 사진을 가볍게 편집해요.",
+    defaultSummary: "밝기·대비·채도·필터·프레임·스티커와 문구를 조절해 사진을 편집해요.",
     notices: [],
   },
   "image.meme": {
@@ -271,9 +271,12 @@ export const toolImplementationConfig = defineToolImplementationConfig({
       maxTotalBytes: 30 * MEBIBYTE,
     },
     eyebrow: "PRIVACY BLUR",
-    defaultSummary: "얼굴·번호판·이름 등 가릴 영역을 드래그해 흐리게 처리해요.",
+    defaultSummary: "얼굴·번호판·이름을 자동으로 찾거나 가릴 영역을 드래그해 흐리게 처리해요.",
     notices: [
-      { tone: "warning", text: "자동 얼굴 인식 대신 지정한 사각형 영역을 확실하게 흐립니다." },
+      {
+        tone: "support",
+        text: "지원 브라우저에서는 얼굴 자동 감지를 먼저 시도하고, 필요하면 사각형을 직접 지정할 수 있어요.",
+      },
     ],
   },
   "image.remove-background": {

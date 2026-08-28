@@ -85,6 +85,13 @@
   gap: 12px;
 }
 
+.controls {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .controls label,
 .inlineControls label,
 .htmlEditor label {

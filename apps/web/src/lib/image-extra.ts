@@ -176,6 +176,77 @@ export function sanitizeHtmlMarkup(value: string): string {
     );
 }
 
+export type EditorFilter = "none" | "warm" | "cool" | "vintage" | "mono";
+
+const EDITOR_FILTERS: Record<EditorFilter, string> = {
+  none: "",
+  warm: "sepia(0.12) saturate(1.15) hue-rotate(-8deg)",
+  cool: "saturate(1.05) hue-rotate(12deg) contrast(1.03)",
+  vintage: "sepia(0.28) contrast(1.08) saturate(0.82)",
+  mono: "grayscale(1)",
+};
+
+export function editorFilterCss(filter: EditorFilter): string {
+  return EDITOR_FILTERS[filter];
+}
+
+export interface DetectedFaceBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface NormalizedFaceRegion {
+  readonly id: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export function normalizeFaceRegions(
+  boxes: readonly DetectedFaceBox[],
+  imageWidth: number,
+  imageHeight: number,
+): NormalizedFaceRegion[] {
+  if (
+    !Number.isFinite(imageWidth) ||
+    !Number.isFinite(imageHeight) ||
+    imageWidth <= 0 ||
+    imageHeight <= 0
+  ) {
+    return [];
+  }
+  const regions: NormalizedFaceRegion[] = [];
+  for (const box of boxes.slice(0, 20)) {
+    if (
+      !Number.isFinite(box.x) ||
+      !Number.isFinite(box.y) ||
+      !Number.isFinite(box.width) ||
+      !Number.isFinite(box.height) ||
+      box.width <= 0 ||
+      box.height <= 0
+    ) {
+      continue;
+    }
+    const padding = Math.max(box.width, box.height) * 0.2;
+    const left = Math.max(0, box.x - padding);
+    const top = Math.max(0, box.y - padding);
+    const right = Math.min(imageWidth, box.x + box.width + padding);
+    const bottom = Math.min(imageHeight, box.y + box.height + padding);
+    if (right <= left || bottom <= top) continue;
+    regions.push({
+      id: `face-${regions.length}`,
+      x: left / imageWidth,
+      y: top / imageHeight,
+      width: (right - left) / imageWidth,
+      height: (bottom - top) / imageHeight,
+    });
+  }
+  return regions;
+}
+
 export function removeBackgroundPixels(
   pixels: Uint8ClampedArray,
   width: number,

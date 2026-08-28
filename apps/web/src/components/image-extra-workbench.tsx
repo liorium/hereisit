@@ -13,7 +13,9 @@ import {
 import { createZipArchive, downloadUrl, formatBytes } from "../lib/files";
 import {
   clampControl,
+  editorFilterCss,
   encodeAnimatedGif,
+  normalizeFaceRegions,
   removeBackgroundPixels,
   sanitizeHtmlMarkup,
 } from "../lib/image-extra";
@@ -31,6 +33,9 @@ export type ImageExtraIntent =
   | "remove-background";
 
 type ExtraOutputFormat = "jpeg" | "png" | "gif";
+type EditorFilter = "none" | "warm" | "cool" | "vintage" | "mono";
+type EditorFrame = "none" | "line" | "shadow" | "film";
+type EditorSticker = "none" | "✨" | "❤️" | "🔥" | "😎";
 type ItemStatus = "ready" | "processing" | "completed" | "failed";
 type BlurRegion = {
   readonly id: string;
@@ -62,6 +67,9 @@ interface ExtraOptions {
   readonly contrast: number;
   readonly saturation: number;
   readonly grayscale: number;
+  readonly filter: EditorFilter;
+  readonly frame: EditorFrame;
+  readonly sticker: EditorSticker;
   readonly text: string;
   readonly topText: string;
   readonly bottomText: string;
@@ -93,6 +101,9 @@ const INITIAL_OPTIONS: ExtraOptions = {
   contrast: 100,
   saturation: 100,
   grayscale: 0,
+  filter: "none",
+  frame: "none",
+  sticker: "none",
   text: "",
   topText: "",
   bottomText: "",
@@ -154,6 +165,23 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
+interface FaceDetectorLike {
+  detect(source: HTMLImageElement): Promise<readonly { boundingBox: DOMRectReadOnly }[]>;
+}
+
+type FaceDetectorConstructor = new (options?: {
+  readonly fastMode?: boolean;
+  readonly maxDetectedFaces?: number;
+}) => FaceDetectorLike;
+
+function createFaceDetector(): FaceDetectorLike | undefined {
+  const detectorConstructor = (globalThis as unknown as { FaceDetector?: FaceDetectorConstructor })
+    .FaceDetector;
+  return typeof detectorConstructor === "function"
+    ? new detectorConstructor({ fastMode: true, maxDetectedFaces: 20 })
+    : undefined;
+}
+
 function canvasBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -202,6 +230,66 @@ function drawText(
   context.fillStyle = "#fff";
   context.strokeText(text, x, y, Math.max(40, context.canvas.width - 32));
   context.fillText(text, x, y, Math.max(40, context.canvas.width - 32));
+  context.restore();
+}
+
+function drawSticker(
+  context: CanvasRenderingContext2D,
+  sticker: EditorSticker,
+  width: number,
+  height: number,
+): void {
+  if (sticker === "none") return;
+  context.save();
+  context.font = `${Math.max(28, Math.round(Math.min(width, height) * 0.16))}px sans-serif`;
+  context.textAlign = "right";
+  context.textBaseline = "bottom";
+  context.fillText(sticker, width - 18, height - 18);
+  context.restore();
+}
+
+function drawFrame(
+  context: CanvasRenderingContext2D,
+  frame: EditorFrame,
+  width: number,
+  height: number,
+): void {
+  if (frame === "none") return;
+  context.save();
+  if (frame === "line") {
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = Math.max(4, Math.round(Math.min(width, height) * 0.018));
+    context.strokeRect(
+      context.lineWidth,
+      context.lineWidth,
+      width - context.lineWidth * 2,
+      height - context.lineWidth * 2,
+    );
+  } else if (frame === "shadow") {
+    context.shadowColor = "rgba(17,24,39,0.42)";
+    context.shadowBlur = Math.max(8, Math.round(Math.min(width, height) * 0.035));
+    context.shadowOffsetY = Math.max(3, Math.round(Math.min(width, height) * 0.012));
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = Math.max(5, Math.round(Math.min(width, height) * 0.024));
+    context.strokeRect(
+      context.lineWidth,
+      context.lineWidth,
+      width - context.lineWidth * 2,
+      height - context.lineWidth * 2,
+    );
+  } else {
+    const band = Math.max(14, Math.round(Math.min(width, height) * 0.06));
+    context.fillStyle = "#111827";
+    context.fillRect(0, 0, width, band);
+    context.fillRect(0, height - band, width, band);
+    context.fillStyle = "#f9fafb";
+    const hole = Math.max(4, Math.round(band * 0.3));
+    const gap = Math.max(12, Math.round(band * 0.8));
+    for (let x = gap / 2; x < width; x += gap) {
+      context.fillRect(x, (band - hole) / 2, hole, hole);
+      context.fillRect(x, height - band + (band - hole) / 2, hole, hole);
+    }
+  }
   context.restore();
 }
 
@@ -263,7 +351,14 @@ async function renderFile(
   if (context === null) throw new Error("렌더링 공간을 만들지 못했습니다.");
 
   if (intent === "editor") {
-    context.filter = `brightness(${options.brightness}%) contrast(${options.contrast}%) saturate(${options.saturation}%) grayscale(${options.grayscale}%)`;
+    const filterParts = [
+      editorFilterCss(options.filter),
+      `brightness(${options.brightness}%)`,
+      `contrast(${options.contrast}%)`,
+      `saturate(${options.saturation}%)`,
+      `grayscale(${options.grayscale}%)`,
+    ].filter(Boolean);
+    context.filter = filterParts.join(" ");
   }
   if (intent === "convert-to-jpg" || options.output === "jpeg" || intent === "meme") {
     context.fillStyle = "#fff";
@@ -315,6 +410,10 @@ async function renderFile(
       canvas.height - padding - options.fontSize / 2,
       options.fontSize,
     );
+  }
+  if (intent === "editor") {
+    drawSticker(context, options.sticker, canvas.width, canvas.height);
+    drawFrame(context, options.frame, canvas.width, canvas.height);
   }
 
   const output =
@@ -660,6 +759,43 @@ export function ImageExtraWorkbench({
     setDragStart(undefined);
   }
 
+  async function detectFaces(): Promise<void> {
+    if (intent !== "blur-face" || selected === undefined || processing) return;
+    const detector = createFaceDetector();
+    if (detector === undefined) {
+      setMessage("자동 얼굴 찾기는 이 브라우저에서 지원되지 않아요. 영역을 직접 드래그해 주세요.");
+      return;
+    }
+    setProcessing(true);
+    try {
+      const image = await loadImage(selected.file);
+      const detections = await detector.detect(image);
+      const imageWidth = image.naturalWidth || image.width;
+      const imageHeight = image.naturalHeight || image.height;
+      image.removeAttribute("src");
+      const detected = normalizeFaceRegions(
+        detections.map(({ boundingBox }) => ({
+          x: boundingBox.x,
+          y: boundingBox.y,
+          width: boundingBox.width,
+          height: boundingBox.height,
+        })),
+        imageWidth,
+        imageHeight,
+      );
+      if (detected.length === 0) {
+        setMessage("얼굴을 찾지 못했어요. 영역을 직접 드래그해 주세요.");
+        return;
+      }
+      setRegions(detected);
+      setMessage(`${detected.length}개 얼굴 영역을 찾았어요. 필요하면 직접 조절해 주세요.`);
+    } catch {
+      setMessage("자동 얼굴 찾기에 실패했어요. 영역을 직접 드래그해 주세요.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   const previewClass = useMemo(
     () => `${styles.preview} ${intent === "blur-face" ? styles.blurPreview : ""}`,
     [intent],
@@ -771,7 +907,8 @@ export function ImageExtraWorkbench({
       ) : null}
 
       {intent !== "html-to-image" ? (
-        <div className={styles.controls}>
+        <fieldset className={styles.controls} disabled={processing}>
+          <legend className={styles.srOnly}>이미지 추가 설정</legend>
           {intent === "editor" ||
           intent === "meme" ||
           intent === "upscale" ||
@@ -859,12 +996,71 @@ export function ImageExtraWorkbench({
             </label>
           ) : null}
           {intent === "blur-face" ? (
-            <button className={styles.secondaryButton} onClick={() => setRegions([])} type="button">
-              영역 지우기
-            </button>
+            <>
+              <button
+                className={styles.secondaryButton}
+                disabled={processing}
+                onClick={() => void detectFaces()}
+                type="button"
+              >
+                자동으로 얼굴 찾기
+              </button>
+              <button
+                className={styles.secondaryButton}
+                disabled={processing}
+                onClick={() => setRegions([])}
+                type="button"
+              >
+                영역 지우기
+              </button>
+            </>
           ) : null}
           {intent === "editor" ? (
             <>
+              <label>
+                필터
+                <select
+                  value={options.filter}
+                  onChange={(event) =>
+                    updateOption("filter", event.currentTarget.value as EditorFilter)
+                  }
+                >
+                  <option value="none">원본</option>
+                  <option value="warm">따뜻하게</option>
+                  <option value="cool">차갑게</option>
+                  <option value="vintage">빈티지</option>
+                  <option value="mono">흑백</option>
+                </select>
+              </label>
+              <label>
+                프레임
+                <select
+                  value={options.frame}
+                  onChange={(event) =>
+                    updateOption("frame", event.currentTarget.value as EditorFrame)
+                  }
+                >
+                  <option value="none">없음</option>
+                  <option value="line">흰색 라인</option>
+                  <option value="shadow">그림자</option>
+                  <option value="film">필름</option>
+                </select>
+              </label>
+              <label>
+                스티커
+                <select
+                  value={options.sticker}
+                  onChange={(event) =>
+                    updateOption("sticker", event.currentTarget.value as EditorSticker)
+                  }
+                >
+                  <option value="none">없음</option>
+                  <option value="✨">✨</option>
+                  <option value="❤️">❤️</option>
+                  <option value="🔥">🔥</option>
+                  <option value="😎">😎</option>
+                </select>
+              </label>
               <label>
                 밝기{" "}
                 <input
@@ -952,7 +1148,7 @@ export function ImageExtraWorkbench({
               </label>
             </>
           ) : null}
-        </div>
+        </fieldset>
       ) : null}
 
       <div className={styles.actions}>

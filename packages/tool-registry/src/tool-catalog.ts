@@ -602,7 +602,8 @@ export const toolCatalog = defineToolCatalog([
   {
     id: "image.editor",
     name: "사진 편집",
-    shortDescription: "밝기·대비·채도·필터를 조절하고 문구를 올려 사진을 내 기기에서 편집하세요.",
+    shortDescription:
+      "밝기·대비·채도·필터·프레임·스티커와 문구를 조절해 사진을 내 기기에서 편집하세요.",
     domains: ["image"],
     purposes: ["edit", "create"],
     searchAliases: aliases["image.editor"],
@@ -693,7 +694,7 @@ export const toolCatalog = defineToolCatalog([
     id: "image.blur-face",
     name: "얼굴·개인정보 흐리기",
     shortDescription:
-      "사진에서 얼굴·번호판처럼 가릴 영역을 직접 지정해 브라우저에서 흐리게 처리하세요.",
+      "사진에서 얼굴·번호판처럼 가릴 영역을 자동으로 찾거나 직접 지정해 브라우저에서 흐리게 처리하세요.",
     domains: ["image"],
     purposes: ["protect", "edit"],
     searchAliases: aliases["image.blur-face"],

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   clampControl,
+  editorFilterCss,
   encodeAnimatedGif,
+  normalizeFaceRegions,
   removeBackgroundPixels,
   sanitizeHtmlMarkup,
 } from "./image-extra";
@@ -12,6 +14,27 @@ describe("image extra utilities", () => {
     expect(clampControl(-5, 0, 100)).toBe(0);
     expect(clampControl(42, 0, 100)).toBe(42);
     expect(clampControl(105, 0, 100)).toBe(100);
+  });
+
+  it("maps editor filters to deterministic canvas filter strings", () => {
+    expect(editorFilterCss("none")).toBe("");
+    expect(editorFilterCss("warm")).toContain("sepia");
+    expect(editorFilterCss("cool")).toContain("hue-rotate");
+    expect(editorFilterCss("vintage")).toContain("contrast");
+    expect(editorFilterCss("mono")).toBe("grayscale(1)");
+  });
+
+  it("normalizes and expands detected face boxes without leaving the image", () => {
+    expect(
+      normalizeFaceRegions(
+        [
+          { x: 90, y: 30, width: 40, height: 50 },
+          { x: -20, y: -10, width: 0, height: 8 },
+        ],
+        100,
+        100,
+      ),
+    ).toEqual([{ id: "face-0", x: 0.8, y: 0.2, width: 0.2, height: 0.7 }]);
   });
 
   it("removes only connected pixels matching the corner background", () => {
