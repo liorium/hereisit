@@ -14,10 +14,9 @@ iLoveIMG의 현재 공개 이미지 도구는 홈페이지 기준 13개 기능�
 세지 않았다. [iLoveIMG 홈페이지](https://www.iloveimg.com/),
 [Premium 도구 목록](https://www.iloveimg.com/user/premium)
 
-현재 HereIsIt은 이미지 압축·크기 조절·자르기·회전·형식 변환·워터마크를 제공하므로 핵심 기반은
-있다. 다만 iLoveIMG와의 기능 수·입력 형식·AI/편집 기능은 아직 동등하지 않다. 다음 개발은
-`기능 목록을 늘리는 것`과 `성능이 같은 것`을 섞지 말고, 각 기능을 버전 계약·입력 한도·출력
-검증·속도 지표와 함께 추가해야 한다.
+현재 HereIsIt은 위 13개 이미지 작업 화면을 모두 제공한다. 다만 iLoveIMG와 입력 형식,
+AI 복원 품질, 서버·브라우저 실행 방식은 다르므로 기능 이름이 같다는 이유로 동등한 품질을
+주장하지 않는다. 각 도구는 버전 계약·입력 한도·출력 검증·속도 지표를 기준으로 관리한다.
 
 공식 자료는 iLoveIMG의 정확한 P50/P95 처리 시간, 압축률, 장치별 처리 속도를 공개하지 않는다.
 따라서 “iLoveIMG만큼 빠르다/압축된다”는 주장은 현재 자료만으로 검증할 수 없다. iLoveIMG가
@@ -36,15 +35,15 @@ iLoveIMG의 현재 공개 이미지 도구는 홈페이지 기준 13개 기능�
 | Resize IMAGE | JPG, PNG, SVG, GIF를 픽셀 또는 백분율로 일괄 조절. 비율 유지, 최대 크기, 작은 이미지를 확대하지 않기 옵션이 있다. | **부분 대응.** 브라우저 기반 크기 조절과 비율·프리셋은 있으나 SVG/GIF 및 iLoveIMG 옵션 전체는 별도 확인이 필요하다. [리사이즈 화면](https://www.iloveimg.com/resize-image) |
 | Crop IMAGE | JPG, PNG, GIF를 픽셀 직사각형으로 자른다. 도움말에는 일괄 자르기 비율 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3이 설명되어 있다. | **1차 대응.** `image.crop@1` 전용 화면에서 JPG/PNG/WebP를 가운데 기준 7개 비율로 자른다. 자유로운 드래그 영역은 다음 단계다. [자르기 화면](https://www.iloveimg.com/crop-image), [도움말](https://www.iloveimg.com/help/documentation) |
 | Convert to JPG | PNG, GIF, TIF, PSD, SVG, WEBP, HEIC, RAW를 JPG로 변환. 추천 품질과 Premium 고품질(원본 픽셀 크기 유지) 옵션이 있다. | **부분 대응.** 브라우저 JPEG/PNG/WebP/HEIC 계열 변환은 있으나 현재 입력·출력 목록에 GIF/TIF/PSD/SVG/RAW가 없다. [변환 화면](https://www.iloveimg.com/convert-to-jpg) |
-| Convert from JPG | JPG를 PNG 또는 GIF로 변환. GIF는 정적 또는 애니메이션이며 프레임당 시간과 반복 여부를 설정한다. | **미제공(전용 동작 기준).** 현재 형식 변환 계약은 있지만 GIF 생성·프레임 시간·loop 계약이 없다. [JPG 변환 화면](https://www.iloveimg.com/jpg-to-image), [도움말](https://www.iloveimg.com/help/documentation) |
-| Photo editor | 텍스트, 스티커, 효과, 필터를 추가하는 단일 이미지 편집기. | **미제공.** [사진 편집 화면](https://www.iloveimg.com/photo-editor) |
-| Upscale image | JPG/PNG를 6MP 미만으로 받아 2x 또는 4x 확대한다. 공식 화면은 Premium 기능으로 표시한다. | **미제공.** [업스케일 화면](https://www.iloveimg.com/upscale-image) |
-| Remove background | JPG/PNG의 배경을 자동으로 제거한다. | **미제공.** 서버·AI 비용과 개인정보 공개가 필요한 기능이다. [배경 제거 화면](https://www.iloveimg.com/remove-background) |
+| Convert from JPG | JPG를 PNG 또는 GIF로 변환. GIF는 정적 또는 애니메이션이며 프레임당 시간과 반복 여부를 설정한다. | **1차 대응.** JPG→PNG와 다중 JPG→애니메이션 GIF, 프레임 간격·반복 재생을 브라우저에서 제공한다. 브라우저가 읽을 수 있는 JPG만 받는다. [JPG 변환 화면](https://www.iloveimg.com/jpg-to-image), [도움말](https://www.iloveimg.com/help/documentation) |
+| Photo editor | 텍스트, 스티커, 효과, 필터를 추가하는 단일 이미지 편집기. | **1차 대응.** 밝기·대비·채도·회색조, 필터·프레임·스티커·문구를 로컬 캔버스에서 제공한다. [사진 편집 화면](https://www.iloveimg.com/photo-editor) |
+| Upscale image | JPG/PNG를 6MP 미만으로 받아 2x 또는 4x 확대한다. 공식 화면은 Premium 기능으로 표시한다. | **1차 대응.** 2배·4배 고품질 픽셀 보간과 25MP 메모리 상한을 제공하며 AI 복원은 아니다. [업스케일 화면](https://www.iloveimg.com/upscale-image) |
+| Remove background | JPG/PNG의 배경을 자동으로 제거한다. | **1차 대응.** 가장자리 표본과 연결 영역을 기준으로 투명 PNG를 만들며 의미 기반 AI 누끼는 아니다. [배경 제거 화면](https://www.iloveimg.com/remove-background) |
 | Watermark IMAGE | JPG, PNG, GIF에 이미지 또는 텍스트를 일괄 삽입한다. 화면에는 글꼴·투명도·색상·그림자 등 설정과 품질 경고가 보인다. API 문서의 이미지 워터마크는 PNG/JPG, 1MB 이하로 제한한다. | **부분 대응.** 텍스트·JPG/PNG/WebP 로고·9개 앵커를 브라우저에서 제공한다. GIF와 iLoveIMG의 편집 옵션 전체는 별도 범위다. [워터마크 화면](https://www.iloveimg.com/watermark-image), [API 워터마크 가이드](https://www.iloveapi.com/docs/image-guides/watermark) |
-| Meme generator | JPG/GIF/PNG 또는 템플릿으로 밈을 만들고, 텍스트를 이미지 안/밖에 배치하며 이미지·텍스트를 추가한다. | **미제공.** [밈 생성기](https://www.iloveimg.com/meme-generator) |
+| Meme generator | JPG/GIF/PNG 또는 템플릿으로 밈을 만들고, 텍스트를 이미지 안/밖에 배치하며 이미지·텍스트를 추가한다. | **1차 대응.** JPG/PNG/WebP에 위·아래 문구를 넣어 로컬에서 생성한다. 템플릿·추가 이미지 레이어는 제공하지 않는다. [밈 생성기](https://www.iloveimg.com/meme-generator) |
 | Rotate IMAGE | JPG, PNG, GIF를 일괄 회전하고 전체·세로·가로 방향만 선택할 수 있다. API는 0/90/180/270도를 지원한다. | **1차 대응.** `image.rotate@1` 전용 화면에서 JPG/PNG/WebP를 0/90/180/270도로 일괄 회전한다. GIF는 아직 계약에 없다. [회전 화면](https://www.iloveimg.com/rotate-image), [API 회전 가이드](https://www.iloveapi.com/docs/image-guides/rotate) |
-| HTML to IMAGE | 웹페이지 URL을 JPG 또는 SVG로 변환하고, 미리보기 전에 URL 콘텐츠를 스캔한다. | **미제공.** 외부 URL fetch, SSRF 방어, 서버 공개 고지가 필요하다. [HTML 변환 화면](https://www.iloveimg.com/html-to-image) |
-| Blur face | 얼굴 자동 탐지 또는 사용자 지정 영역을 흐림 처리한다. 낮음/높음 탐지, 특정 얼굴 포함·제외, 사용자 지정 blur 영역이 화면에 있다. | **미제공.** 자동 탐지 모델과 오탐·누락 검증이 필요하다. [얼굴 흐림 화면](https://www.iloveimg.com/blur-face) |
+| HTML to IMAGE | 웹페이지 URL을 JPG 또는 SVG로 변환하고, 미리보기 전에 URL 콘텐츠를 스캔한다. | **1차 대응.** 붙여 넣은 HTML/CSS만 정제해 로컬 PNG로 렌더링하며 외부 URL을 가져오지 않는다. [HTML 변환 화면](https://www.iloveimg.com/html-to-image) |
+| Blur face | 얼굴 자동 탐지 또는 사용자 지정 영역을 흐림 처리한다. 낮음/높음 탐지, 특정 얼굴 포함·제외, 사용자 지정 blur 영역이 화면에 있다. | **1차 대응.** 지원 브라우저의 FaceDetector 자동 탐지와 수동 드래그 영역을 제공하며 전용 AI 모델은 사용하지 않는다. [얼굴 흐림 화면](https://www.iloveimg.com/blur-face) |
 
 ### 기능 수를 해석할 때의 주의점
 
@@ -125,12 +124,12 @@ API를 별도 비용 기준으로 사용할 경우 공식 API 가격표는 가�
 
 | 항목 | iLoveIMG 공개 기준 | HereIsIt 현재 기준 | 판단 |
 | --- | --- | --- | --- |
-| 핵심 이미지 도구 | 13개 공개 화면, 일괄 작업 중심 | 압축·크기 조절·자르기·회전·변환·워터마크 6개 이미지 도구와 PDF/JSON 도구 | 기본 이미지 작업은 갖췄지만 기능 수는 아직 크게 부족 |
+| 핵심 이미지 도구 | 13개 공개 화면, 일괄 작업 중심 | 13개 이미지 도구 화면과 PDF/JSON 도구 | 화면 수는 대응하지만 세부 입력·품질 정책은 다름 |
 | 압축 | JPG/PNG/SVG/GIF, 자동 품질·크기 균형, 서버 처리 | JPG/PNG/WebP, 공개된 네이티브 서버 엔진, 더 작아질 때만 결과 제공 | 서버 엔진은 운영 중이나 SVG/GIF 및 비교 corpus가 필요 |
 | 크기 조절 | 픽셀/%·비율 유지·최대 크기·확대 금지·일괄 | 브라우저 처리, WebP 중심 추천 프리셋과 원본 형식/품질 정책 | 옵션·입력 형식 차이를 계약으로 먼저 정리 |
 | 자르기·회전 | 전용 화면 및 일괄 방향/비율 동작 | `image.crop@1` 가운데 기준 비율 자르기, `image.rotate@1` 90도 단위 회전 | 자유 영역·GIF·방향 필터는 후속 계약으로 분리 |
-| 변환 | JPG↔PNG/GIF, JPG 대상 TIF/PSD/SVG/WEBP/HEIC/RAW | JPG/PNG/WebP/HEIC 계열 브라우저 변환, animated GIF 없음 | 브라우저 기본 API가 지원하는 범위부터 명시적으로 확장 |
-| AI/편집 | 업스케일·배경 제거·얼굴 흐림·사진 편집·밈 | 없음 | 비용·모델·검증이 커서 로그인/쿼터 후순위 |
+| 변환 | JPG↔PNG/GIF, JPG 대상 TIF/PSD/SVG/WEBP/HEIC/RAW | JPG↔PNG와 다중 JPG→GIF, 브라우저 기본 디코더 범위 | 미지원 디코더는 라이선스·품질 검증 후 별도 계약 |
+| AI/편집 | 업스케일·배경 제거·얼굴 흐림·사진 편집·밈 | 로컬 픽셀 보간·연결 배경 제거·FaceDetector·편집기·밈 1차 대응 | AI 모델·서버 비용이 필요한 고급 품질은 별도 제품 범위 |
 | 일괄 한도 | Basic도 일반 작업 30개·200MB, Premium 120개·4GB 표기 | 압축 20개·파일당 30MiB·총 600MiB, 일반 이미지 파이프라인 100개·파일당 50MiB·총 250MiB | 숫자만 키우지 말고 실제 메모리·비용·큐 용량으로 정해야 함 |
 | 개인정보 | 서버 처리와 2시간 삭제, HTTPS/암호화·GDPR 설명 | 기본 이미지 압축은 공개된 서버 처리, UI에서 처리 경계와 삭제 정책 고지 | HereIsIt의 공개 서버 기본값은 유지하되, 로컬 옵션도 정직하게 표시 |
 | 속도 근거 | 대규모 처리·가용성 설명은 있으나 공개 P50/P95/압축률 없음 | CI/카나리와 엔진 테스트는 있으나 iLoveIMG와 동일 corpus의 외부 비교는 없음 | “동급” 대신 동일 corpus·네트워크 조건의 내부 목표를 수립해야 함 |
@@ -141,13 +140,12 @@ HereIsIt의 현재 지원 범위와 한도는 [README의 Current limits](../../R
 
 ## 권장 다음 순서
 
-1. **완료된 1차 계약을 검증한다.** `image.crop@1`은 가운데 기준 7개 비율, `image.rotate@1`은
-   0/90/180/270도 회전을 제공하며 기존 브라우저 Worker·검증·다운로드 흐름을 공유한다. 자유
-   픽셀 영역, GIF와 방향 필터는 별도 계약으로 추가한다.
-2. **변환 패리티를 다음으로 한다.** JPG→PNG, JPG→정적/애니메이션 GIF를 별도 옵션으로 추가하되,
-   브라우저에 없는 GIF 인코더를 억지로 추가하지 않는다. 먼저 현재 설치 의존성/플랫폼 가능성을
-   확인하고, 필요하면 서버 계약을 만들며 업로드 고지와 파일 삭제를 포함한다. TIF/PSD/RAW/SVG
-   입력은 지원 여부를 추측하지 말고 각 디코더의 라이선스·메모리·품질을 검증한 뒤 추가한다.
+1. **현재 1차 계약을 유지한다.** crop의 7개 비율·초점 위치, rotate의 0/90/180/270도,
+   JPG→GIF의 프레임 간격·반복 재생을 기존 Worker·검증·다운로드 흐름으로 계속 회귀 검증한다.
+   자유 픽셀 영역과 추가 디코더는 별도 계약으로 분리한다.
+2. **변환 확장은 검증 후에만 한다.** TIF/PSD/RAW/SVG/HEIC 입력은 브라우저 지원을 추측하지
+   말고 디코더의 라이선스·메모리·품질을 확인한 뒤 추가한다. GIF 인코더를 새로 도입하지 않고
+   현재의 제한된 로컬 구현을 유지한다.
 3. **압축 성능을 수치화한다.** JPEG/PNG/WebP의 원본 크기·픽셀 수·메타데이터·이미지 복잡도를
    섞은 라이선스 보유 corpus를 고정하고, iLoveIMG와 비교할 때는 동일 입력·동일 출력 형식·동일
    품질 허용오차·동일 네트워크 조건을 기록한다. 최소 기록값은 결과 크기, SSIM/시각 허용오차,
@@ -156,10 +154,9 @@ HereIsIt의 현재 지원 범위와 한도는 [README의 Current limits](../../R
 4. **AI 기능은 수익화/쿼터 뒤에 둔다.** 업스케일·배경 제거·얼굴 흐림은 무료 무제한으로
    공개하면 비용과 악용 위험이 크다. 로그인·익명 세션 rate limit·작업별 비용·결과 검증·
    서버 공개 고지를 갖춘 뒤 하나씩 도입한다.
-5. **HTML-to-image와 편집기/밈은 별도 제품 범위다.** HTML-to-image는 URL fetch와 SSRF,
-   robots·인증 페이지·외부 리소스·렌더링 timeout을 해결해야 하고, 사진 편집기/밈 생성기는
-   기능 표면이 크다. 이미지 압축 품질 개선과 핵심 변환 패리티가 검증되기 전에는 동시에
-   착수하지 않는다.
+5. **URL HTML 캡처와 AI 품질은 별도 제품 범위다.** 현재 HTML-to-image는 외부 URL을 읽지
+   않고, 업스케일·배경 제거·얼굴 흐림도 로컬 휴리스틱/브라우저 API 범위다. 서버 모델을
+   추가할 때는 로그인·쿼터·결과 검증·처리 고지를 먼저 갖춘다.
 
 이 순서라면 iLoveIMG의 기능을 무작정 복제하는 대신 HereIsIt의 기존 local-first/서버 계약
 경계를 보존하면서, 사용자 가치가 큰 기본 이미지 작업부터 성능 증거와 함께 확장할 수 있다.
