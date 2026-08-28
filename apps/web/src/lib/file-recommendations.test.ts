@@ -35,27 +35,33 @@ describe("planFileRecommendations", () => {
           kind: "mixed",
           items: [jpeg, png],
           primaryRecommendation: {
-            tool: { id: "pdf.image-to-pdf" },
+            tool: { id: "image.upscale" },
           },
         },
       ],
     });
     expect(plan.groups[0]?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
-      "image.compress",
-      "image.crop",
-      "image.rotate",
-      "image.resize",
-      "image.convert",
-      "image.watermark",
-    ]);
-    expect(recommendationIds([jpeg, png])).toEqual([
       "pdf.image-to-pdf",
       "image.compress",
+      "image.remove-background",
       "image.crop",
       "image.rotate",
       "image.resize",
       "image.convert",
       "image.watermark",
+      "image.convert-to-jpg",
+    ]);
+    expect(recommendationIds([jpeg, png])).toEqual([
+      "image.upscale",
+      "pdf.image-to-pdf",
+      "image.compress",
+      "image.remove-background",
+      "image.crop",
+      "image.rotate",
+      "image.resize",
+      "image.convert",
+      "image.watermark",
+      "image.convert-to-jpg",
     ]);
   });
 

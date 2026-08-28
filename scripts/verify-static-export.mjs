@@ -91,6 +91,7 @@ const bundleProfileMarkers = {
   "json-quick": [],
   image: [IMAGE_WORKER_MARKER],
   "image-compression-server": [IMAGE_SERVER_RUNTIME_MARKER, IMAGE_WORKER_MARKER],
+  "image-extra": [],
   "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
   "pdf-editing": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER],
   "pdf-organize": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER, PDFJS_MARKER],

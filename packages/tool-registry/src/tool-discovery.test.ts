@@ -53,13 +53,21 @@ describe("catalog search and filters", () => {
   it("orders name prefixes before lower-tier alias substrings", () => {
     expect(availableIds("이미지")).toEqual([
       "image.compress",
+      "image.upscale",
       "image.resize",
       "image.crop",
       "image.convert",
       "image.rotate",
       "image.watermark",
       "pdf.image-to-pdf",
+      "image.editor",
       "pdf.to-image",
+      "image.html-to-image",
+      "image.remove-background",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
+      "image.meme",
+      "image.blur-face",
     ]);
   });
 
@@ -69,6 +77,8 @@ describe("catalog search and filters", () => {
 
   it("orders alias prefixes before name and alias substrings", () => {
     expect(availableIds("JPG")).toEqual([
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
       "image.compress",
       "image.convert",
       "pdf.image-to-pdf",
@@ -86,7 +96,14 @@ describe("catalog search and filters", () => {
   });
 
   it("searches domain labels and IDs, then ranks matches", () => {
-    const expected = ["data.json-format", "image.convert", "pdf.to-image", "pdf.image-to-pdf"];
+    const expected = [
+      "data.json-format",
+      "image.convert",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
+      "pdf.to-image",
+      "pdf.image-to-pdf",
+    ];
     expect(availableIds("data")).toEqual(expected);
     expect(availableIds("데이터")).toEqual(expected);
   });
@@ -94,9 +111,12 @@ describe("catalog search and filters", () => {
   it("suppresses duplicate matches and returns a newly frozen ranked array", () => {
     expect(availableIds("변환")).toEqual([
       "image.convert",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
       "pdf.to-image",
       "pdf.image-to-pdf",
       "data.json-format",
+      "image.html-to-image",
     ]);
 
     const first = searchAvailableTools("");
@@ -104,6 +124,8 @@ describe("catalog search and filters", () => {
     expect(first.map((tool) => tool.id)).toEqual([
       "data.json-format",
       "image.compress",
+      "image.remove-background",
+      "image.upscale",
       "pdf.merge",
       "image.resize",
       "image.crop",
@@ -112,8 +134,14 @@ describe("catalog search and filters", () => {
       "image.rotate",
       "pdf.split",
       "image.watermark",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
       "pdf.organize",
+      "image.editor",
+      "image.meme",
       "pdf.to-image",
+      "image.html-to-image",
+      "image.blur-face",
       "pdf.image-to-pdf",
       "pdf.watermark",
     ]);
@@ -130,8 +158,11 @@ describe("catalog search and filters", () => {
     });
     expect(selected.map((tool) => tool.id)).toEqual([
       "image.convert",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
       "pdf.to-image",
       "pdf.image-to-pdf",
+      "image.html-to-image",
     ]);
     expect(selectAvailableTools({ query: "병합", domain: "image", purpose: "convert" })).toEqual(
       [],
@@ -387,13 +418,17 @@ describe("home tool selection", () => {
       selectHomeTools({ domain: "image", recentToolIds: ["pdf.merge"] }).map((tool) => tool.id),
     ).toEqual([
       "image.compress",
+      "image.remove-background",
+      "image.upscale",
       "image.resize",
       "image.crop",
       "image.convert",
       "image.rotate",
       "image.watermark",
-      "pdf.to-image",
-      "pdf.image-to-pdf",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
+      "image.editor",
+      "image.meme",
     ]);
     expect(selectHomeTools({ domain: "media", recentToolIds: [] })).toEqual([]);
   });
@@ -463,13 +498,16 @@ describe("file capability recommendations", () => {
       { index: 1, kind: "image/png" },
     ]);
     expect(recommendations.map(({ tool }) => tool.id)).toEqual([
+      "image.upscale",
       "pdf.image-to-pdf",
       "image.compress",
+      "image.remove-background",
       "image.crop",
       "image.rotate",
       "image.resize",
       "image.convert",
       "image.watermark",
+      "image.convert-to-jpg",
     ]);
     expect(recommendations.find(({ tool }) => tool.id === "image.convert")).toMatchObject({
       readiness: "ready",

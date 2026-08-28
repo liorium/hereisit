@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "routes": {
-    "/": 16985,
-    "/tools": 3042,
-    "/my-tools": 1906,
+    "/": 18912,
+    "/tools": 3272,
+    "/my-tools": 1954,
     "/workflows": 0
   },
-  "discoveryShared": 11369,
-  "frameworkSharedReported": 185272
+  "discoveryShared": 12685,
+  "frameworkSharedReported": 185303
 }
