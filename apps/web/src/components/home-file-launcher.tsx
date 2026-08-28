@@ -192,7 +192,7 @@ export function HomeFileLauncher(): ReactNode {
         onDrop={handleDrop}
       >
         <input
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/tiff,image/svg+xml,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.svg,.heic,.heif,.pdf"
           className={styles.fileInput}
           id="home-file-input"
           multiple

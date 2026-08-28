@@ -513,40 +513,78 @@ export function ImageExtraWorkbench({
     try {
       let gifResult: { blob: Blob; width: number; height: number } | undefined;
       if (intent === "convert-from-jpg" && itemOutputFormat === "gif")
-        gifResult = await renderGif(
-          items.map((item) => item.file),
-          options,
-        );
-      for (const item of items) {
-        const baseItem = {
-          id: item.id,
-          file: item.file,
-          previewUrl: item.previewUrl,
-        };
         try {
-          const rendered =
-            gifResult ??
-            (await renderFile(
+          gifResult = await renderGif(
+            items.map((item) => item.file),
+            options,
+          );
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "GIF를 만들지 못했어요.";
+          setItems(
+            items.map((item) => ({
+              id: item.id,
+              file: item.file,
+              previewUrl: item.previewUrl,
+              status: "failed",
+              error: reason,
+            })),
+          );
+          setMessage(reason);
+          return;
+        }
+      if (gifResult !== undefined) {
+        const first = items[0];
+        if (first !== undefined) {
+          const resultUrl = createOwnedUrl(gifResult.blob);
+          next.push({
+            id: first.id,
+            file: first.file,
+            previewUrl: first.previewUrl,
+            status: "completed",
+            resultUrl,
+            result: gifResult.blob,
+            width: gifResult.width,
+            height: gifResult.height,
+          });
+          for (const item of items.slice(1)) {
+            next.push({
+              id: item.id,
+              file: item.file,
+              previewUrl: item.previewUrl,
+              status: "completed",
+            });
+          }
+        }
+      } else {
+        for (const item of items) {
+          const baseItem = {
+            id: item.id,
+            file: item.file,
+            previewUrl: item.previewUrl,
+          };
+          try {
+            const rendered = await renderFile(
               item.file,
               intent,
               { ...options, output: itemOutputFormat },
               regions,
-            ));
-          const resultUrl = createOwnedUrl(rendered.blob);
-          next.push({
-            ...baseItem,
-            status: "completed",
-            resultUrl,
-            result: rendered.blob,
-            width: rendered.width,
-            height: rendered.height,
-          });
-        } catch (error) {
-          next.push({
-            ...baseItem,
-            status: "failed",
-            error: error instanceof Error ? error.message : "이미지를 처리하지 못했어요.",
-          });
+            );
+            const resultUrl = createOwnedUrl(rendered.blob);
+            next.push({
+              ...baseItem,
+              status: "completed",
+              resultUrl,
+              result: rendered.blob,
+              width: rendered.width,
+              height: rendered.height,
+            });
+          } catch (error) {
+            next.push({
+              ...baseItem,
+              status: "failed",
+              error: error instanceof Error ? error.message : "이미지를 처리하지 못했어요.",
+            });
+          }
         }
       }
       setItems(next);
