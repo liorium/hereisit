@@ -484,41 +484,48 @@ async function renderGif(
 ): Promise<{ blob: Blob; width: number; height: number }> {
   const first = files[0] === undefined ? undefined : await loadImage(files[0]);
   if (first === undefined) throw new Error("GIF에 사용할 JPG를 선택해 주세요.");
-  const sourceWidth = first.naturalWidth || first.width;
-  const sourceHeight = first.naturalHeight || first.height;
-  const baseDimensions = fitDimensions(sourceWidth, sourceHeight, 1);
-  const gifPixelRatio = Math.min(
-    1,
-    Math.sqrt(4_000_000 / Math.max(1, baseDimensions.width * baseDimensions.height)),
-  );
-  const dimensions = {
-    width: Math.max(1, Math.floor(baseDimensions.width * gifPixelRatio)),
-    height: Math.max(1, Math.floor(baseDimensions.height * gifPixelRatio)),
-  };
-  const frames = [];
-  for (const [index, file] of files.entries()) {
-    const image = index === 0 ? first : await loadImage(file);
-    const canvas = document.createElement("canvas");
-    canvas.width = dimensions.width;
-    canvas.height = dimensions.height;
-    const context = canvas.getContext("2d");
-    if (context === null) throw new Error("GIF 렌더링 공간을 만들지 못했습니다.");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    frames.push({
-      width: canvas.width,
-      height: canvas.height,
-      pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
-    });
-    image.removeAttribute("src");
+  try {
+    const sourceWidth = first.naturalWidth || first.width;
+    const sourceHeight = first.naturalHeight || first.height;
+    const baseDimensions = fitDimensions(sourceWidth, sourceHeight, 1);
+    const gifPixelRatio = Math.min(
+      1,
+      Math.sqrt(4_000_000 / Math.max(1, baseDimensions.width * baseDimensions.height)),
+    );
+    const dimensions = {
+      width: Math.max(1, Math.floor(baseDimensions.width * gifPixelRatio)),
+      height: Math.max(1, Math.floor(baseDimensions.height * gifPixelRatio)),
+    };
+    const frames = [];
+    for (const [index, file] of files.entries()) {
+      const image = index === 0 ? first : await loadImage(file);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = dimensions.width;
+        canvas.height = dimensions.height;
+        const context = canvas.getContext("2d");
+        if (context === null) throw new Error("GIF 렌더링 공간을 만들지 못했습니다.");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        frames.push({
+          width: canvas.width,
+          height: canvas.height,
+          pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
+        });
+      } finally {
+        image.removeAttribute("src");
+      }
+    }
+    const bytes = encodeAnimatedGif(frames, { delayMs: options.delayMs, loop: options.loop });
+    return {
+      blob: new Blob([bytes], { type: "image/gif" }),
+      width: dimensions.width,
+      height: dimensions.height,
+    };
+  } finally {
+    first.removeAttribute("src");
   }
-  const bytes = encodeAnimatedGif(frames, { delayMs: options.delayMs, loop: options.loop });
-  return {
-    blob: new Blob([bytes], { type: "image/gif" }),
-    width: dimensions.width,
-    height: dimensions.height,
-  };
 }
 
 function statusLabel(status: ItemStatus): string {
@@ -995,17 +1002,29 @@ export function ImageExtraWorkbench({
                 </select>
               </label>
               {options.output === "gif" ? (
-                <label>
-                  프레임 간격{" "}
-                  <input
-                    max={3000}
-                    min={80}
-                    onChange={(event) => updateOption("delayMs", Number(event.currentTarget.value))}
-                    type="number"
-                    value={options.delayMs}
-                  />
-                  ms
-                </label>
+                <>
+                  <label>
+                    프레임 간격{" "}
+                    <input
+                      max={3000}
+                      min={80}
+                      onChange={(event) =>
+                        updateOption("delayMs", Number(event.currentTarget.value))
+                      }
+                      type="number"
+                      value={options.delayMs}
+                    />
+                    ms
+                  </label>
+                  <label>
+                    반복 재생
+                    <input
+                      checked={options.loop}
+                      onChange={(event) => updateOption("loop", event.currentTarget.checked)}
+                      type="checkbox"
+                    />
+                  </label>
+                </>
               ) : null}
             </>
           ) : null}

@@ -97,4 +97,14 @@ describe("image extra utilities", () => {
     expect(bytes.at(-1)).toBe(0x3b);
     expect(bytes.byteLength).toBeLessThan(10_000);
   });
+
+  it("omits the loop extension when repeat playback is disabled", () => {
+    const bytes = new Uint8Array(
+      encodeAnimatedGif([{ width: 1, height: 1, pixels: new Uint8ClampedArray([0, 0, 0, 255]) }], {
+        delayMs: 80,
+        loop: false,
+      }),
+    );
+    expect(new TextDecoder().decode(bytes)).not.toContain("NETSCAPE2.0");
+  });
 });
