@@ -979,7 +979,8 @@
 
 .numberField,
 .selectField,
-.qualityField {
+.qualityField,
+.checkboxField {
   margin-top: 12px;
   display: flex;
   align-items: center;
@@ -988,6 +989,15 @@
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
+}
+
+.checkboxField {
+  justify-content: flex-start;
+}
+
+.checkboxField input {
+  margin: 0;
+  accent-color: var(--blue);
 }
 
 .numberField > span:last-child {

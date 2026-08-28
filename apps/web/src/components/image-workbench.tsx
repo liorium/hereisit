@@ -626,7 +626,13 @@ export function ImageWorkbench({
         mode === "none"
           ? { kind: "none" }
           : mode === "inside"
-            ? { kind: "inside", maxWidth: 1920, maxHeight: 1920 }
+            ? {
+                kind: "inside",
+                maxWidth: 1920,
+                maxHeight: 1920,
+                allowUpscale:
+                  current.resize.kind === "inside" ? (current.resize.allowUpscale ?? false) : false,
+              }
             : { kind: "cover", width: 1000, height: 1000 },
     }));
   };
@@ -730,7 +736,15 @@ export function ImageWorkbench({
     setPresetId("custom");
     setSpec((current) => {
       if (current.resize.kind === "inside") {
-        return { ...current, resize: { kind: "inside", maxWidth: size, maxHeight: size } };
+        return {
+          ...current,
+          resize: {
+            kind: "inside",
+            maxWidth: size,
+            maxHeight: size,
+            allowUpscale: current.resize.allowUpscale ?? false,
+          },
+        };
       }
       if (current.resize.kind === "cover") {
         return { ...current, resize: { ...current.resize, width: size, height: size } };
@@ -1358,6 +1372,30 @@ export function ImageWorkbench({
                       </span>
                     </label>
                   )}
+                  {intent === "resize" && spec.resize.kind === "inside" ? (
+                    <label className={styles.checkboxField}>
+                      <input
+                        checked={spec.resize.allowUpscale ?? false}
+                        onChange={(event) => {
+                          invalidateResults();
+                          setPresetId("custom");
+                          setSpec((current) =>
+                            current.resize.kind === "inside"
+                              ? {
+                                  ...current,
+                                  resize: {
+                                    ...current.resize,
+                                    allowUpscale: event.currentTarget.checked,
+                                  },
+                                }
+                              : current,
+                          );
+                        }}
+                        type="checkbox"
+                      />
+                      작은 이미지는 확대하기
+                    </label>
+                  ) : null}
                 </fieldset>
               )}
 
