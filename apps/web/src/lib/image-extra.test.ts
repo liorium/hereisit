@@ -49,6 +49,26 @@ describe("image extra utilities", () => {
     ]);
   });
 
+  it("uses the border majority when one edge pixel is not background", () => {
+    const pixels = new Uint8ClampedArray(5 * 3 * 4).fill(255);
+    const blue = 2 * 4 + 0;
+    pixels[blue] = 0;
+    pixels[blue + 1] = 0;
+    pixels[blue + 2] = 255;
+    pixels[blue + 3] = 255;
+    const object = (1 * 5 + 2) * 4;
+    pixels[object] = 20;
+    pixels[object + 1] = 30;
+    pixels[object + 2] = 40;
+    pixels[object + 3] = 255;
+
+    removeBackgroundPixels(pixels, 5, 3, 8);
+
+    expect(pixels[blue + 3]).toBe(255);
+    expect(pixels[object + 3]).toBe(255);
+    expect(pixels[3]).toBe(0);
+  });
+
   it("sanitizes executable and remote markup before local rendering", () => {
     const sanitized = sanitizeHtmlMarkup(
       '<script>alert(1)</script><style>font-size:99px</style><div onclick="bad()" style="color:red;background:url(https://example.com/x.png)"><img src=https://example.com/x.png>안전</div>',

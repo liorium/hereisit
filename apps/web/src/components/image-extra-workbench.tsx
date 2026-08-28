@@ -211,6 +211,47 @@ function fitDimensions(
   };
 }
 
+interface RenderSource {
+  readonly source: CanvasImageSource;
+  readonly image?: HTMLImageElement;
+  readonly width: number;
+  readonly height: number;
+  readonly release: () => void;
+}
+
+async function loadRenderSource(file: File, scale: number): Promise<RenderSource> {
+  if (scale > 1 && typeof createImageBitmap === "function") {
+    let original: ImageBitmap | undefined;
+    try {
+      original = await createImageBitmap(file);
+      const dimensions = fitDimensions(original.width, original.height, scale);
+      const resized = await createImageBitmap(original, {
+        resizeWidth: dimensions.width,
+        resizeHeight: dimensions.height,
+        resizeQuality: "high",
+      });
+      original.close();
+      original = undefined;
+      return {
+        source: resized,
+        width: dimensions.width,
+        height: dimensions.height,
+        release: () => resized.close(),
+      };
+    } catch {
+      original?.close();
+    }
+  }
+  const image = await loadImage(file);
+  return {
+    source: image,
+    image,
+    width: image.naturalWidth || image.width,
+    height: image.naturalHeight || image.height,
+    release: () => image.removeAttribute("src"),
+  };
+}
+
 function drawText(
   context: CanvasRenderingContext2D,
   text: string,
@@ -337,104 +378,104 @@ async function renderFile(
   options: ExtraOptions,
   regions: readonly BlurRegion[],
 ): Promise<{ blob: Blob; width: number; height: number }> {
-  const image = await loadImage(file);
   const scale = intent === "upscale" ? options.scale : 1;
-  const dimensions = fitDimensions(
-    image.naturalWidth || image.width,
-    image.naturalHeight || image.height,
-    scale,
-  );
-  const canvas = document.createElement("canvas");
-  canvas.width = dimensions.width;
-  canvas.height = dimensions.height;
-  const context = canvas.getContext("2d");
-  if (context === null) throw new Error("렌더링 공간을 만들지 못했습니다.");
+  const renderSource = await loadRenderSource(file, scale);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = renderSource.width;
+    canvas.height = renderSource.height;
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("렌더링 공간을 만들지 못했습니다.");
 
-  if (intent === "editor") {
-    const filterParts = [
-      editorFilterCss(options.filter),
-      `brightness(${options.brightness}%)`,
-      `contrast(${options.contrast}%)`,
-      `saturate(${options.saturation}%)`,
-      `grayscale(${options.grayscale}%)`,
-    ].filter(Boolean);
-    context.filter = filterParts.join(" ");
-  }
-  if (intent === "convert-to-jpg" || options.output === "jpeg" || intent === "meme") {
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-  }
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  context.filter = "none";
+    if (intent === "editor") {
+      const filterParts = [
+        editorFilterCss(options.filter),
+        `brightness(${options.brightness}%)`,
+        `contrast(${options.contrast}%)`,
+        `saturate(${options.saturation}%)`,
+        `grayscale(${options.grayscale}%)`,
+      ].filter(Boolean);
+      context.filter = filterParts.join(" ");
+    }
+    if (intent === "convert-to-jpg" || options.output === "jpeg" || intent === "meme") {
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(renderSource.source, 0, 0, canvas.width, canvas.height);
+    context.filter = "none";
 
-  if (intent === "remove-background") {
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-    removeBackgroundPixels(pixels.data, canvas.width, canvas.height, options.tolerance);
-    context.putImageData(pixels, 0, 0);
-  }
-  if (intent === "blur-face") {
-    if (regions.length === 0) throw new Error("흐리게 할 영역을 하나 이상 드래그해 주세요.");
-    drawRegions(context, image, regions, canvas.width, canvas.height);
-  }
-  if (intent === "editor")
-    drawText(
-      context,
-      options.text,
-      canvas.width / 2,
-      canvas.height - options.fontSize,
-      options.fontSize,
-    );
-  if (intent === "meme") {
-    const padding = Math.max(16, options.fontSize * 0.75);
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, padding * 2 + options.fontSize);
-    context.fillRect(
-      0,
-      canvas.height - padding * 2 - options.fontSize,
-      canvas.width,
-      padding * 2 + options.fontSize,
-    );
-    drawText(
-      context,
-      options.topText,
-      canvas.width / 2,
-      padding + options.fontSize / 2,
-      options.fontSize,
-    );
-    drawText(
-      context,
-      options.bottomText,
-      canvas.width / 2,
-      canvas.height - padding - options.fontSize / 2,
-      options.fontSize,
-    );
-  }
-  if (intent === "editor") {
-    drawSticker(context, options.sticker, canvas.width, canvas.height);
-    drawFrame(context, options.frame, canvas.width, canvas.height);
-  }
+    if (intent === "remove-background") {
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      removeBackgroundPixels(pixels.data, canvas.width, canvas.height, options.tolerance);
+      context.putImageData(pixels, 0, 0);
+    }
+    if (intent === "blur-face") {
+      if (regions.length === 0) throw new Error("흐리게 할 영역을 하나 이상 드래그해 주세요.");
+      if (renderSource.image === undefined) throw new Error("이미지를 다시 읽지 못했습니다.");
+      drawRegions(context, renderSource.image, regions, canvas.width, canvas.height);
+    }
+    if (intent === "editor")
+      drawText(
+        context,
+        options.text,
+        canvas.width / 2,
+        canvas.height - options.fontSize,
+        options.fontSize,
+      );
+    if (intent === "meme") {
+      const padding = Math.max(16, options.fontSize * 0.75);
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, padding * 2 + options.fontSize);
+      context.fillRect(
+        0,
+        canvas.height - padding * 2 - options.fontSize,
+        canvas.width,
+        padding * 2 + options.fontSize,
+      );
+      drawText(
+        context,
+        options.topText,
+        canvas.width / 2,
+        padding + options.fontSize / 2,
+        options.fontSize,
+      );
+      drawText(
+        context,
+        options.bottomText,
+        canvas.width / 2,
+        canvas.height - padding - options.fontSize / 2,
+        options.fontSize,
+      );
+    }
+    if (intent === "editor") {
+      drawSticker(context, options.sticker, canvas.width, canvas.height);
+      drawFrame(context, options.frame, canvas.width, canvas.height);
+    }
 
-  const output =
-    intent === "convert-to-jpg" ||
-    intent === "meme" ||
-    intent === "editor" ||
-    intent === "blur-face" ||
-    intent === "upscale"
-      ? options.output === "gif"
-        ? "png"
-        : options.output
-      : intent === "remove-background"
-        ? "png"
-        : options.output === "gif"
+    const output =
+      intent === "convert-to-jpg" ||
+      intent === "meme" ||
+      intent === "editor" ||
+      intent === "blur-face" ||
+      intent === "upscale"
+        ? options.output === "gif"
           ? "png"
-          : options.output;
-  return {
-    blob: await canvasBlob(canvas, outputMime(output), options.quality),
-    width: canvas.width,
-    height: canvas.height,
-  };
+          : options.output
+        : intent === "remove-background"
+          ? "png"
+          : options.output === "gif"
+            ? "png"
+            : options.output;
+    return {
+      blob: await canvasBlob(canvas, outputMime(output), options.quality),
+      width: canvas.width,
+      height: canvas.height,
+    };
+  } finally {
+    renderSource.release();
+  }
 }
 
 async function renderGif(

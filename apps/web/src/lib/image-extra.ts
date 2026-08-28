@@ -258,12 +258,26 @@ export function removeBackgroundPixels(
   const total = width * height;
   if (pixels.length !== total * 4) throw new RangeError("RGBA image length mismatch.");
   const threshold = Math.min(255, Math.max(0, Math.round(tolerance))) ** 2;
-  const cornerColors = [0, width - 1, (height - 1) * width, total - 1].map((index) => {
+  const borderIndices = new Set<number>();
+  const borderStep = Math.max(1, Math.ceil(Math.max(width, height) / 64));
+  for (let x = 0; x < width; x += borderStep) {
+    borderIndices.add(x);
+    borderIndices.add((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y += borderStep) {
+    borderIndices.add(y * width);
+    borderIndices.add(y * width + width - 1);
+  }
+  borderIndices.add(0);
+  borderIndices.add(width - 1);
+  borderIndices.add((height - 1) * width);
+  borderIndices.add(total - 1);
+  const borderColors = [...borderIndices].map((index) => {
     const offset = index * 4;
     return [pixels[offset] ?? 0, pixels[offset + 1] ?? 0, pixels[offset + 2] ?? 0] as const;
   });
   const medianChannel = (channel: 0 | 1 | 2): number => {
-    const values = cornerColors.map((color) => color[channel]).sort((left, right) => left - right);
+    const values = borderColors.map((color) => color[channel]).sort((left, right) => left - right);
     return values[Math.floor(values.length / 2)] ?? 0;
   };
   const background = [medianChannel(0), medianChannel(1), medianChannel(2)] as const;
@@ -271,12 +285,6 @@ export function removeBackgroundPixels(
   const queue = new Int32Array(total);
   let head = 0;
   let tail = 0;
-  for (const index of [0, width - 1, (height - 1) * width, total - 1]) {
-    if (visited[index] === 1) continue;
-    visited[index] = 1;
-    queue[tail] = index;
-    tail += 1;
-  }
   const matchesBackground = (index: number): boolean => {
     const offset = index * 4;
     const dr = (pixels[offset] ?? 0) - background[0];
@@ -284,6 +292,13 @@ export function removeBackgroundPixels(
     const db = (pixels[offset + 2] ?? 0) - background[2];
     return dr * dr + dg * dg + db * db <= threshold;
   };
+  for (const index of borderIndices) {
+    if (!matchesBackground(index)) continue;
+    if (visited[index] === 1) continue;
+    visited[index] = 1;
+    queue[tail] = index;
+    tail += 1;
+  }
   while (head < tail) {
     const index = queue[head] ?? 0;
     head += 1;
