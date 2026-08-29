@@ -401,15 +401,27 @@ jobs:
             --mode discover --input .artifacts/runtime/container-inventory.json --environment staging \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
             --container-class-name PdfEngineContainer)"
-          pnpm exec wrangler containers info "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
-            > .artifacts/runtime/pdf-container-application.json
-          node scripts/resolve-cloudflare-container-application.mjs \
-            --mode verify --input .artifacts/runtime/pdf-container-application.json \
-            --output .artifacts/runtime/pdf-container-provider-scope.json --environment staging \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name PdfEngineContainer \
-            --application-id "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
-            --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          for attempt in {1..90}; do
+            if pnpm exec wrangler containers info "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
+                > .artifacts/runtime/pdf-container-application.json \
+                2> .artifacts/runtime/pdf-container-application-verify.stderr &&
+              node scripts/resolve-cloudflare-container-application.mjs \
+                --mode verify --input .artifacts/runtime/pdf-container-application.json \
+                --output .artifacts/runtime/pdf-container-provider-scope.json --environment staging \
+                --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+                --container-class-name PdfEngineContainer \
+                --application-id "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
+                --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                2>> .artifacts/runtime/pdf-container-application-verify.stderr; then
+              break
+            fi
+            if (( attempt == 90 )); then
+              cat .artifacts/runtime/pdf-container-application-verify.stderr >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          rm -f .artifacts/runtime/pdf-container-application-verify.stderr
           generate_config active "$STAGING_CONTAINER_APPLICATION_ID" "$STAGING_PDF_CONTAINER_APPLICATION_ID"
           node scripts/verify-worker-version-chain.mjs \
             --mode capture-bootstrap \

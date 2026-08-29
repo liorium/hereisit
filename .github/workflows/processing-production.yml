@@ -494,15 +494,27 @@ jobs:
             --mode discover --input .artifacts/runtime/container-inventory.json --environment production \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
             --container-class-name PdfEngineContainer)"
-          pnpm exec wrangler containers info "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
-            > .artifacts/runtime/pdf-container-application.json
-          node scripts/resolve-cloudflare-container-application.mjs \
-            --mode verify --input .artifacts/runtime/pdf-container-application.json \
-            --output .artifacts/runtime/pdf-container-provider-scope.json --environment production \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name PdfEngineContainer \
-            --application-id "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
-            --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          for attempt in {1..90}; do
+            if pnpm exec wrangler containers info "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+                > .artifacts/runtime/pdf-container-application.json \
+                2> .artifacts/runtime/pdf-container-application-verify.stderr &&
+              node scripts/resolve-cloudflare-container-application.mjs \
+                --mode verify --input .artifacts/runtime/pdf-container-application.json \
+                --output .artifacts/runtime/pdf-container-provider-scope.json --environment production \
+                --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+                --container-class-name PdfEngineContainer \
+                --application-id "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID" \
+                --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                2>> .artifacts/runtime/pdf-container-application-verify.stderr; then
+              break
+            fi
+            if (( attempt == 90 )); then
+              cat .artifacts/runtime/pdf-container-application-verify.stderr >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          rm -f .artifacts/runtime/pdf-container-application-verify.stderr
           generate_config active "$PRODUCTION_CONTAINER_APPLICATION_ID" "$PRODUCTION_PDF_CONTAINER_APPLICATION_ID"
           node scripts/verify-worker-version-chain.mjs \
             --mode capture-bootstrap \
@@ -707,6 +719,28 @@ jobs:
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
           node scripts/verify-queue-delivery-state.mjs --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
           node scripts/verify-queue-delivery-state.mjs --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1
+          RESTORE_WRANGLER_CONFIG=".wrangler/generated/wrangler.production.restore.jsonc"
+          if [[ "$status" -eq 0 ]]; then
+            node --input-type=module - "$WRANGLER_CONFIG" "$RESTORE_WRANGLER_CONFIG" \
+              "$PRIOR_IMAGE" "$PRIOR_PDF_IMAGE" "$PRIOR_PDF_PRESENT" <<'NODE' || status=1
+          import { readFile, writeFile } from "node:fs/promises";
+          const [sourcePath, restorePath, image, pdfImage, pdfPresent] = process.argv.slice(2);
+          const config = JSON.parse(await readFile(sourcePath, "utf8"));
+          if (!Array.isArray(config.containers) || !config.vars) throw new Error("invalid active Wrangler config");
+          const imageContainer = config.containers.find((entry) => entry.class_name === "ImageEngineContainer");
+          const pdfContainer = config.containers.find((entry) => entry.class_name === "PdfEngineContainer");
+          if (!imageContainer || (pdfPresent === "true" && !pdfContainer)) throw new Error("missing container config");
+          imageContainer.image = image;
+          config.vars.ENGINE_IMAGE_DIGEST = image;
+          if (pdfPresent === "true") {
+            pdfContainer.image = pdfImage;
+            config.vars.PDF_ENGINE_IMAGE_DIGEST = pdfImage;
+          }
+          await writeFile(restorePath, `${JSON.stringify(config)}\n`, { flag: "wx", mode: 0o600 });
+          NODE
+            pnpm exec wrangler deploy "$WORKER_MODULE" \
+              --config "$RESTORE_WRANGLER_CONFIG" --no-bundle --containers-rollout immediate || status=1
+          fi
           RESTORE_VERSION_ID="$PREVIOUS_ACTIVE_VERSION_ID"
           pnpm exec wrangler versions deploy "$RESTORE_VERSION_ID@100%" \
             --config "$WRANGLER_CONFIG" --yes || status=1
@@ -723,19 +757,47 @@ jobs:
           );
           verifyActiveWorkerDeployment(deployment, process.argv[2], "restored Worker");
           NODE
-          pnpm exec wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID" > .artifacts/runtime/image-container-restored.json || status=1
-          node scripts/resolve-cloudflare-container-application.mjs --mode verify \
-            --input .artifacts/runtime/image-container-restored.json --output .artifacts/runtime/image-container-restored-scope.json \
-            --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name ImageEngineContainer --application-id "$PRIOR_IMAGE_APPLICATION_ID" \
-            --engine-image "$PRIOR_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || status=1
+          for attempt in {1..90}; do
+            if pnpm exec wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID" \
+                > .artifacts/runtime/image-container-restored.json \
+                2> .artifacts/runtime/image-container-restored-verify.stderr &&
+              node scripts/resolve-cloudflare-container-application.mjs --mode verify \
+                --input .artifacts/runtime/image-container-restored.json --output .artifacts/runtime/image-container-restored-scope.json \
+                --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+                --container-class-name ImageEngineContainer --application-id "$PRIOR_IMAGE_APPLICATION_ID" \
+                --engine-image "$PRIOR_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                2>> .artifacts/runtime/image-container-restored-verify.stderr; then
+              break
+            fi
+            if (( attempt == 90 )); then
+              cat .artifacts/runtime/image-container-restored-verify.stderr >&2
+              status=1
+              break
+            fi
+            sleep 10
+          done
+          rm -f .artifacts/runtime/image-container-restored-verify.stderr
           if [[ "$PRIOR_PDF_PRESENT" == true ]]; then
-            pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" > .artifacts/runtime/pdf-container-restored.json || status=1
-            node scripts/resolve-cloudflare-container-application.mjs --mode verify \
-              --input .artifacts/runtime/pdf-container-restored.json --output .artifacts/runtime/pdf-container-restored-scope.json \
-              --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-              --container-class-name PdfEngineContainer --application-id "$PRIOR_PDF_APPLICATION_ID" \
-              --engine-image "$PRIOR_PDF_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" || status=1
+            for attempt in {1..90}; do
+              if pnpm exec wrangler containers info "$PRIOR_PDF_APPLICATION_ID" \
+                  > .artifacts/runtime/pdf-container-restored.json \
+                  2> .artifacts/runtime/pdf-container-restored-verify.stderr &&
+                node scripts/resolve-cloudflare-container-application.mjs --mode verify \
+                  --input .artifacts/runtime/pdf-container-restored.json --output .artifacts/runtime/pdf-container-restored-scope.json \
+                  --environment production --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
+                  --container-class-name PdfEngineContainer --application-id "$PRIOR_PDF_APPLICATION_ID" \
+                  --engine-image "$PRIOR_PDF_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                  2>> .artifacts/runtime/pdf-container-restored-verify.stderr; then
+                break
+              fi
+              if (( attempt == 90 )); then
+                cat .artifacts/runtime/pdf-container-restored-verify.stderr >&2
+                status=1
+                break
+              fi
+              sleep 10
+            done
+            rm -f .artifacts/runtime/pdf-container-restored-verify.stderr
           fi
           node scripts/processing-admission-rollback-state.mjs \
             --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID" \
