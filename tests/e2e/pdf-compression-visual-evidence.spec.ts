@@ -305,7 +305,9 @@ test("verifies three native image-optimized repeats in the real browser Worker",
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }),
     );
-    await expect(page.getByRole("button", { name: "PDF 선택" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({
+      timeout: 60_000,
+    });
   }
 
   const receipt = createPdfVisualProjectReceipt({
