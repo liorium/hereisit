@@ -578,7 +578,7 @@ describe("image engine native supply-chain policy", () => {
         allowedScopes: ["engine", "pdf-engine"],
       }),
     ).not.toThrow();
-    expect(exceptions.exceptions).toHaveLength(9);
+    expect(exceptions.exceptions).toHaveLength(10);
     expect(
       new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
     ).toEqual(
@@ -591,12 +591,13 @@ describe("image engine native supply-chain policy", () => {
         "CVE-2026-58014:libglib2.0-0t64",
         "CVE-2026-58015:libglib2.0-0t64",
         "CVE-2026-58016:libglib2.0-0t64",
+        "CVE-2026-66046:libexpat1",
       ]),
     );
     expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
       new Set([
-        "sha256:8859df7527f5ff64984db1f55e94927b28fb989674b1da657d0330ab50e06aea",
-        "sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
+        "sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
+        "sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
       ]),
     );
     expect(
@@ -607,8 +608,8 @@ describe("image engine native supply-chain policy", () => {
         )
         .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
     ).toEqual([
-      "engine:sha256:8859df7527f5ff64984db1f55e94927b28fb989674b1da657d0330ab50e06aea",
-      "pdf-engine:sha256:53da27375ee705eadf4136998cced1256d70c9d8e3897f2868fcd36b15349281",
+      "engine:sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
+      "pdf-engine:sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
     ]);
   });
 
