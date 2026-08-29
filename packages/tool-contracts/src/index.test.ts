@@ -175,6 +175,30 @@ describe("imagePipelineSpecSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts a bounded percentage resize in the v2 contract", () => {
+    expect(
+      imagePipelineSpecV2Schema.safeParse({
+        version: 2,
+        resize: { kind: "percentage", percent: 75 },
+        output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([0, 400.5, 401, Number.NaN])("rejects an invalid percentage resize: %s", (percent) => {
+    expect(
+      imagePipelineSpecV2Schema.safeParse({
+        version: 2,
+        resize: { kind: "percentage", percent },
+        output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+  });
+
   it("keeps free-form source rectangles out of the v1 contract", () => {
     expect(
       imagePipelineSpecSchema.safeParse({
@@ -185,6 +209,18 @@ describe("imagePipelineSpecSchema", () => {
           height: 720,
           sourceRect: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
         },
+        output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps percentage resize out of the v1 contract", () => {
+    expect(
+      imagePipelineSpecSchema.safeParse({
+        version: 1,
+        resize: { kind: "percentage", percent: 75 },
         output: { format: "webp", compression: { mode: "quality", quality: 82 } },
         autoOrient: true,
         metadata: "strip",

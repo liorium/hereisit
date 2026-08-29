@@ -32,7 +32,7 @@ AI 복원 품질, 서버·브라우저 실행 방식은 다르므로 기능 이�
 | iLoveIMG 기능 | 공식 입력·동작 | HereIsIt 현재 대응 |
 | --- | --- | --- |
 | Compress IMAGE | JPG, PNG, SVG, GIF를 일괄 압축. 품질과 파일 크기의 균형을 자동 선택하며 사용자가 압축 레벨을 직접 고르지 않는다. | **부분 대응.** JPG/PNG/WebP 서버 압축이 있으며 SVG/GIF는 현재 계약에 없다. [압축 화면](https://www.iloveimg.com/compress-image), [FAQ](https://www.iloveimg.com/help/faq) |
-| Resize IMAGE | JPG, PNG, SVG, GIF를 픽셀 또는 백분율로 일괄 조절. 비율 유지, 최대 크기, 작은 이미지를 확대하지 않기 옵션이 있다. | **부분 대응.** 브라우저 기반 크기 조절과 비율·프리셋은 있으나 SVG/GIF 및 iLoveIMG 옵션 전체는 별도 확인이 필요하다. [리사이즈 화면](https://www.iloveimg.com/resize-image) |
+| Resize IMAGE | JPG, PNG, SVG, GIF를 픽셀 또는 백분율로 일괄 조절. 비율 유지, 최대 크기, 작은 이미지를 확대하지 않기 옵션이 있다. | **대응.** 브라우저 기반 픽셀·백분율 크기 조절, 비율·프리셋, 작은 이미지 확대 금지 옵션을 제공한다. SVG/GIF는 현재 계약에 없다. [리사이즈 화면](https://www.iloveimg.com/resize-image) |
 | Crop IMAGE | JPG, PNG, GIF를 픽셀 직사각형으로 자른다. 도움말에는 일괄 자르기 비율 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3이 설명되어 있다. | **대응.** `image.crop@1` 전용 화면에서 JPG/PNG/WebP를 7개 비율·초점 위치 또는 미리보기의 자유 사각형으로 자른다. [자르기 화면](https://www.iloveimg.com/crop-image), [도움말](https://www.iloveimg.com/help/documentation) |
 | Convert to JPG | PNG, GIF, TIF, PSD, SVG, WEBP, HEIC, RAW를 JPG로 변환. 추천 품질과 Premium 고품질(원본 픽셀 크기 유지) 옵션이 있다. | **부분 대응.** 브라우저 JPEG/PNG/WebP/HEIC 계열 변환은 있으나 현재 입력·출력 목록에 GIF/TIF/PSD/SVG/RAW가 없다. [변환 화면](https://www.iloveimg.com/convert-to-jpg) |
 | Convert from JPG | JPG를 PNG 또는 GIF로 변환. GIF는 정적 또는 애니메이션이며 프레임당 시간과 반복 여부를 설정한다. | **1차 대응.** JPG→PNG와 다중 JPG→애니메이션 GIF, 프레임 간격·반복 재생을 브라우저에서 제공한다. 브라우저가 읽을 수 있는 JPG만 받는다. [JPG 변환 화면](https://www.iloveimg.com/jpg-to-image), [도움말](https://www.iloveimg.com/help/documentation) |
@@ -126,7 +126,7 @@ API를 별도 비용 기준으로 사용할 경우 공식 API 가격표는 가�
 | --- | --- | --- | --- |
 | 핵심 이미지 도구 | 13개 공개 화면, 일괄 작업 중심 | 13개 이미지 도구 화면과 PDF/JSON 도구 | 화면 수는 대응하지만 세부 입력·품질 정책은 다름 |
 | 압축 | JPG/PNG/SVG/GIF, 자동 품질·크기 균형, 서버 처리 | JPG/PNG/WebP, 공개된 네이티브 서버 엔진, 더 작아질 때만 결과 제공 | 서버 엔진은 운영 중이나 SVG/GIF 및 비교 corpus가 필요 |
-| 크기 조절 | 픽셀/%·비율 유지·최대 크기·확대 금지·일괄 | 브라우저 처리, WebP 중심 추천 프리셋과 원본 형식/품질 정책 | 옵션·입력 형식 차이를 계약으로 먼저 정리 |
+| 크기 조절 | 픽셀/%·비율 유지·최대 크기·확대 금지·일괄 | 브라우저 픽셀/% 처리, WebP 중심 추천 프리셋과 원본 형식/품질 정책 | SVG/GIF 입력과 외부 서비스의 압축률은 별도 비교 필요 |
 | 자르기·회전 | 전용 화면 및 일괄 방향/비율 동작 | `image.crop@1` 가운데 기준 비율 자르기, `image.rotate@1` 90도 단위 회전 | 자유 영역·GIF·방향 필터는 후속 계약으로 분리 |
 | 변환 | JPG↔PNG/GIF, JPG 대상 TIF/PSD/SVG/WEBP/HEIC/RAW | JPG↔PNG와 다중 JPG→GIF, 브라우저 기본 디코더 범위 | 미지원 디코더는 라이선스·품질 검증 후 별도 계약 |
 | AI/편집 | 업스케일·배경 제거·얼굴 흐림·사진 편집·밈 | 로컬 픽셀 보간·연결 배경 제거·FaceDetector·편집기·밈 1차 대응 | AI 모델·서버 비용이 필요한 고급 품질은 별도 제품 범위 |

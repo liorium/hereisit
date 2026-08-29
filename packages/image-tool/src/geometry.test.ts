@@ -30,6 +30,21 @@ describe("computeDrawGeometry", () => {
     expect(result.upscalingSkipped).toBe(true);
   });
 
+  it("resizes by percentage and only upscales when explicitly allowed", () => {
+    expect(computeDrawGeometry(400, 300, { kind: "percentage", percent: 50 })).toMatchObject({
+      canvasWidth: 200,
+      canvasHeight: 150,
+    });
+    expect(computeDrawGeometry(400, 300, { kind: "percentage", percent: 200 })).toMatchObject({
+      canvasWidth: 400,
+      canvasHeight: 300,
+      upscalingSkipped: true,
+    });
+    expect(
+      computeDrawGeometry(400, 300, { kind: "percentage", percent: 200, allowUpscale: true }),
+    ).toMatchObject({ canvasWidth: 800, canvasHeight: 600, upscalingSkipped: false });
+  });
+
   it("computes a centered landscape crop for a square output", () => {
     const result = computeDrawGeometry(2000, 1000, {
       kind: "cover",

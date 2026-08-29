@@ -671,7 +671,7 @@ export function ImageWorkbench({
     );
   };
 
-  const changeResizeMode = (mode: "none" | "inside" | "cover") => {
+  const changeResizeMode = (mode: "none" | "inside" | "percentage" | "cover") => {
     invalidateResults();
     if (isCropIntent) setCropEditMode("position");
     setPresetId("custom");
@@ -688,7 +688,9 @@ export function ImageWorkbench({
                 allowUpscale:
                   current.resize.kind === "inside" ? (current.resize.allowUpscale ?? false) : false,
               }
-            : { kind: "cover", width: 1000, height: 1000 },
+            : mode === "percentage"
+              ? { kind: "percentage", percent: 100, allowUpscale: false }
+              : { kind: "cover", width: 1000, height: 1000 },
     }));
   };
 
@@ -940,6 +942,17 @@ export function ImageWorkbench({
       }
       return current;
     });
+  };
+
+  const changePercentage = (value: number) => {
+    const percent = Math.max(1, Math.min(400, Math.round(value || 100)));
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) =>
+      current.resize.kind === "percentage"
+        ? { ...current, resize: { ...current.resize, percent } }
+        : current,
+    );
   };
 
   const removeItem = (id: string) => {
@@ -1563,6 +1576,7 @@ export function ImageWorkbench({
                     {[
                       ["none", "유지"],
                       ["inside", "최대 크기"],
+                      ["percentage", "백분율"],
                       ["cover", "정사각 자르기"],
                     ].map(([value, label]) => (
                       <button
@@ -1570,13 +1584,31 @@ export function ImageWorkbench({
                         type="button"
                         key={value}
                         aria-pressed={spec.resize.kind === value}
-                        onClick={() => changeResizeMode(value as "none" | "inside" | "cover")}
+                        onClick={() =>
+                          changeResizeMode(value as "none" | "inside" | "percentage" | "cover")
+                        }
                       >
                         {label}
                       </button>
                     ))}
                   </div>
-                  {spec.resize.kind !== "none" && spec.resize.kind !== "stretch" && (
+                  {spec.resize.kind === "percentage" ? (
+                    <label className={styles.numberField}>
+                      <span>크기 비율</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="400"
+                          step="1"
+                          value={spec.resize.percent}
+                          aria-label="크기 비율"
+                          onChange={(event) => changePercentage(Number(event.target.value))}
+                        />
+                        %
+                      </span>
+                    </label>
+                  ) : spec.resize.kind !== "none" && spec.resize.kind !== "stretch" ? (
                     <label className={styles.numberField}>
                       <span>{spec.resize.kind === "cover" ? "정사각형 한 변" : "긴 변 최대"}</span>
                       <span>
@@ -1595,8 +1627,9 @@ export function ImageWorkbench({
                         px
                       </span>
                     </label>
-                  )}
-                  {intent === "resize" && spec.resize.kind === "inside" ? (
+                  ) : null}
+                  {intent === "resize" &&
+                  (spec.resize.kind === "inside" || spec.resize.kind === "percentage") ? (
                     <label className={styles.checkboxField}>
                       <input
                         checked={spec.resize.allowUpscale ?? false}
@@ -1604,7 +1637,7 @@ export function ImageWorkbench({
                           invalidateResults();
                           setPresetId("custom");
                           setSpec((current) =>
-                            current.resize.kind === "inside"
+                            current.resize.kind === "inside" || current.resize.kind === "percentage"
                               ? {
                                   ...current,
                                   resize: {

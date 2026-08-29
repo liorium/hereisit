@@ -193,6 +193,23 @@ export function computeDrawGeometry(
     };
   }
 
+  if (resize.kind === "percentage") {
+    const requestedScale = resize.percent / 100;
+    const allowUpscale = resize.allowUpscale ?? false;
+    const scale = allowUpscale ? requestedScale : Math.min(1, requestedScale);
+    const width = roundDimension(sourceWidth * scale);
+    const height = roundDimension(sourceHeight * scale);
+
+    return {
+      ...base,
+      canvasWidth: width,
+      canvasHeight: height,
+      destinationWidth: width,
+      destinationHeight: height,
+      upscalingSkipped: !allowUpscale && requestedScale > 1,
+    };
+  }
+
   const focalX = clampUnit(resize.focalPoint?.x ?? 0.5);
   const focalY = clampUnit(resize.focalPoint?.y ?? 0.5);
 

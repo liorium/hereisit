@@ -111,6 +111,11 @@ export const resizeSpecSchema = z.discriminatedUnion("kind", [
       message: "최대 너비 또는 높이 중 하나가 필요합니다.",
     }),
   z.object({
+    kind: z.literal("percentage"),
+    percent: z.number().int().min(1).max(400),
+    allowUpscale: z.boolean().default(false),
+  }),
+  z.object({
     kind: z.literal("cover"),
     width: positiveDimension,
     height: positiveDimension,
@@ -192,7 +197,10 @@ export const imagePipelineSpecV1Schema = z
     metadata: z.literal("strip"),
   })
   .superRefine((value, context) => {
-    if (value.resize.kind === "cover" && value.resize.sourceRect !== undefined) {
+    if (
+      (value.resize.kind === "cover" && value.resize.sourceRect !== undefined) ||
+      value.resize.kind === "percentage"
+    ) {
       context.addIssue({
         code: "custom",
         path: ["resize", "sourceRect"],
