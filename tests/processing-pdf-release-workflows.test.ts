@@ -301,6 +301,59 @@ describe("native PDF processing release workflows", () => {
     expectIsolatedCanaries(workflow);
   });
 
+  it.each([
+    "processing-staging",
+    "processing-production",
+  ])("%s waits for both container images to converge after rollout", (name) => {
+    const workflow = read(name);
+    const imageApplication = name === "processing-staging" ? "STAGING" : "PRODUCTION";
+    const pdfInfo = workflow.indexOf(
+      `containers info "$${imageApplication}_PDF_CONTAINER_APPLICATION_ID"`,
+    );
+    const pdfRetry = workflow.lastIndexOf("for attempt in {1..90}; do", pdfInfo);
+    const nextConfig = workflow.indexOf("generate_config active", pdfRetry);
+    expect(pdfInfo).toBeGreaterThanOrEqual(0);
+    expect(pdfRetry).toBeGreaterThanOrEqual(0);
+    expect(pdfInfo).toBeGreaterThan(pdfRetry);
+    expect(nextConfig).toBeGreaterThan(pdfInfo);
+    expect(workflow.slice(pdfRetry, nextConfig)).toContain(
+      "--container-class-name PdfEngineContainer",
+    );
+    expect(workflow.slice(pdfRetry, nextConfig)).toContain("if (( attempt == 90 )); then");
+    expect(workflow.slice(pdfRetry, nextConfig)).toContain("sleep 10");
+  });
+
+  it("restores container images before accepting the prior production release", () => {
+    const workflow = read("processing-production");
+    const recovery = workflow.indexOf(
+      "Restore the D1-attested Worker after failed canary mutation",
+    );
+    const restoreConfig = workflow.indexOf("RESTORE_WRANGLER_CONFIG", recovery);
+    const restoreDeploy = workflow.indexOf('wrangler deploy "$WORKER_MODULE"', restoreConfig);
+    const priorWorkerDeploy = workflow.indexOf(
+      'wrangler versions deploy "$RESTORE_VERSION_ID@100%"',
+      restoreDeploy,
+    );
+    const imageInfo = workflow.indexOf(
+      'wrangler containers info "$PRIOR_IMAGE_APPLICATION_ID"',
+      priorWorkerDeploy,
+    );
+    expect(recovery).toBeGreaterThanOrEqual(0);
+    expect(restoreConfig).toBeGreaterThan(recovery);
+    expect(restoreDeploy).toBeGreaterThan(restoreConfig);
+    expect(priorWorkerDeploy).toBeGreaterThan(restoreDeploy);
+    expect(imageInfo).toBeGreaterThan(priorWorkerDeploy);
+    expect(workflow.slice(restoreConfig, restoreDeploy)).toContain(
+      '"$PRIOR_IMAGE" "$PRIOR_PDF_IMAGE" "$PRIOR_PDF_PRESENT"',
+    );
+    expect(workflow.slice(restoreConfig, restoreDeploy)).toContain(
+      "config.vars.ENGINE_IMAGE_DIGEST = image",
+    );
+    expect(workflow.slice(restoreConfig, restoreDeploy)).toContain("pdfContainer.image = pdfImage");
+    expect(workflow.slice(priorWorkerDeploy)).toContain("for attempt in {1..90}; do");
+    expect(workflow.slice(priorWorkerDeploy)).toContain("sleep 10");
+  });
+
   it("reruns the authenticated PDF lifecycle against the sealed staging deployment", () => {
     const workflow = read("processing-staging-smoke");
     expect(workflow).toContain("PDF_QUEUE_NAME: hereisit-pdf-jobs-staging");
