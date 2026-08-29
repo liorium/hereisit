@@ -227,6 +227,32 @@ describe("processImagePipeline size goal", () => {
     expect(result).toMatchObject({ mime: "image/webp", width: 5, height: 7 });
   });
 
+  it("skips rotation for items outside the selected orientation", async () => {
+    installCanvasResult(40, 7, 5);
+
+    const result = await processImagePipeline(
+      {
+        name: "landscape.jpg",
+        mimeHint: "image/jpeg",
+        byteLength: jpegHeader(7, 5).byteLength,
+        bytes: jpegHeader(7, 5).slice().buffer as ArrayBuffer,
+      },
+      {
+        version: 2,
+        resize: { kind: "none" },
+        rotation: 90,
+        rotationScope: "portrait",
+        output: { format: "webp", compression: { mode: "quality", quality: 90 } },
+        sizeGoal: { mode: "allow-growth" },
+        autoOrient: true,
+        metadata: "strip",
+      },
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({ mime: "image/webp", width: 7, height: 5 });
+  });
+
   it.each([
     {
       bytes: jpegHeader(7, 5),

@@ -4,6 +4,7 @@ import {
   IMAGE_WATERMARK_TOOL_ID,
   IMAGE_WATERMARK_TOOL_VERSION,
   imagePipelineSpecSchema,
+  imagePipelineSpecV1Schema,
   imagePipelineSpecV2Schema,
   imageWatermarkSpecSchema,
   JSON_FORMAT_TOOL_ID,
@@ -156,6 +157,25 @@ describe("imagePipelineSpecSchema", () => {
       expect(imagePipelineSpecV2Schema.parse({ ...base, rotation }).rotation).toBe(rotation);
     }
     expect(imagePipelineSpecSchema.safeParse({ ...base, rotation: 45 }).success).toBe(false);
+  });
+
+  it("accepts rotation direction filters only in the v2 contract", () => {
+    const base = {
+      version: 2,
+      resize: { kind: "none" },
+      output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+      autoOrient: true,
+      metadata: "strip",
+    } as const;
+
+    for (const rotationScope of ["all", "portrait", "landscape"] as const) {
+      expect(imagePipelineSpecV2Schema.parse({ ...base, rotationScope }).rotationScope).toBe(
+        rotationScope,
+      );
+    }
+    expect(
+      imagePipelineSpecV1Schema.safeParse({ ...base, version: 1, rotationScope: "all" }).success,
+    ).toBe(false);
   });
 
   it("accepts a bounded source rectangle for free-form cover crops", () => {

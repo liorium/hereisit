@@ -1,4 +1,9 @@
-import { computeDrawGeometry, inspectImageHeader, suggestOutputName } from "@hereisit/image-tool";
+import {
+  computeDrawGeometry,
+  inspectImageHeader,
+  rotationForScope,
+  suggestOutputName,
+} from "@hereisit/image-tool";
 import {
   type ImagePhase,
   type ImagePipelineResult,
@@ -220,8 +225,21 @@ export async function processImagePipeline(
 
     report("transforming", 0.55);
     const transformStarted = performance.now();
-    const rotation = "rotation" in spec ? spec.rotation : 0;
-    const geometry = computeDrawGeometry(bitmap.width, bitmap.height, spec.resize, rotation);
+    const requestedRotation = "rotation" in spec ? spec.rotation : 0;
+    const rotationScope = "rotationScope" in spec ? (spec.rotationScope ?? "all") : "all";
+    const rotation = rotationForScope(
+      bitmap.width,
+      bitmap.height,
+      requestedRotation,
+      rotationScope,
+    );
+    const geometry = computeDrawGeometry(
+      bitmap.width,
+      bitmap.height,
+      spec.resize,
+      rotation,
+      rotationScope,
+    );
 
     if (
       geometry.canvasWidth > MAX_DIMENSION ||

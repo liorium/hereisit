@@ -52,6 +52,8 @@ export const imageRotationSchema = z.union([
   z.literal(270),
 ]);
 export type ImageRotation = z.infer<typeof imageRotationSchema>;
+export const imageRotationScopeSchema = z.enum(["all", "portrait", "landscape"]);
+export type ImageRotationScope = z.infer<typeof imageRotationScopeSchema>;
 
 function isSafeWatermarkText(value: string): boolean {
   return Array.from(value).every((character) => {
@@ -192,11 +194,19 @@ export const imagePipelineSpecV1Schema = z
     version: z.literal(1),
     resize: resizeSpecSchema,
     output: imageOutputV1Schema,
+    rotationScope: imageRotationScopeSchema.optional(),
     sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
     autoOrient: z.literal(true),
     metadata: z.literal("strip"),
   })
   .superRefine((value, context) => {
+    if (value.rotationScope !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["rotationScope"],
+        message: "회전 방향 필터는 이미지 파이프라인 v2에서만 사용할 수 있습니다.",
+      });
+    }
     if (
       (value.resize.kind === "cover" && value.resize.sourceRect !== undefined) ||
       value.resize.kind === "percentage"
@@ -213,6 +223,7 @@ export const imagePipelineSpecV2Schema = z.object({
   version: z.literal(2),
   resize: resizeSpecSchema,
   rotation: imageRotationSchema.default(0),
+  rotationScope: imageRotationScopeSchema.default("all"),
   output: imageOutputSchema,
   sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
   autoOrient: z.literal(true),

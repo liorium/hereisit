@@ -41,7 +41,7 @@ AI 복원 품질, 서버·브라우저 실행 방식은 다르므로 기능 이�
 | Remove background | JPG/PNG의 배경을 자동으로 제거한다. | **1차 대응.** 가장자리 표본과 연결 영역을 기준으로 투명 PNG를 만들며 의미 기반 AI 누끼는 아니다. [배경 제거 화면](https://www.iloveimg.com/remove-background) |
 | Watermark IMAGE | JPG, PNG, GIF에 이미지 또는 텍스트를 일괄 삽입한다. 화면에는 글꼴·투명도·색상·그림자 등 설정과 품질 경고가 보인다. API 문서의 이미지 워터마크는 PNG/JPG, 1MB 이하로 제한한다. | **부분 대응.** 텍스트·JPG/PNG/WebP 로고·9개 앵커를 브라우저에서 제공한다. GIF와 iLoveIMG의 편집 옵션 전체는 별도 범위다. [워터마크 화면](https://www.iloveimg.com/watermark-image), [API 워터마크 가이드](https://www.iloveapi.com/docs/image-guides/watermark) |
 | Meme generator | JPG/GIF/PNG 또는 템플릿으로 밈을 만들고, 텍스트를 이미지 안/밖에 배치하며 이미지·텍스트를 추가한다. | **1차 대응.** JPG/PNG/WebP에 위·아래 문구를 넣어 로컬에서 생성한다. 템플릿·추가 이미지 레이어는 제공하지 않는다. [밈 생성기](https://www.iloveimg.com/meme-generator) |
-| Rotate IMAGE | JPG, PNG, GIF를 일괄 회전하고 전체·세로·가로 방향만 선택할 수 있다. API는 0/90/180/270도를 지원한다. | **1차 대응.** `image.rotate@1` 전용 화면에서 JPG/PNG/WebP를 0/90/180/270도로 일괄 회전한다. GIF는 아직 계약에 없다. [회전 화면](https://www.iloveimg.com/rotate-image), [API 회전 가이드](https://www.iloveapi.com/docs/image-guides/rotate) |
+| Rotate IMAGE | JPG, PNG, GIF를 일괄 회전하고 전체·세로·가로 방향만 선택할 수 있다. API는 0/90/180/270도를 지원한다. | **대응.** `image.rotate@1` 전용 화면에서 JPG/PNG/WebP를 0/90/180/270도로 회전하고 전체·세로·가로 방향을 고를 수 있다. GIF는 아직 계약에 없다. [회전 화면](https://www.iloveimg.com/rotate-image), [API 회전 가이드](https://www.iloveapi.com/docs/image-guides/rotate) |
 | HTML to IMAGE | 웹페이지 URL을 JPG 또는 SVG로 변환하고, 미리보기 전에 URL 콘텐츠를 스캔한다. | **1차 대응.** 붙여 넣은 HTML/CSS만 정제해 로컬 PNG로 렌더링하며 외부 URL을 가져오지 않는다. [HTML 변환 화면](https://www.iloveimg.com/html-to-image) |
 | Blur face | 얼굴 자동 탐지 또는 사용자 지정 영역을 흐림 처리한다. 낮음/높음 탐지, 특정 얼굴 포함·제외, 사용자 지정 blur 영역이 화면에 있다. | **1차 대응.** 지원 브라우저의 FaceDetector 자동 탐지와 수동 드래그 영역을 제공하며 전용 AI 모델은 사용하지 않는다. [얼굴 흐림 화면](https://www.iloveimg.com/blur-face) |
 
@@ -127,7 +127,7 @@ API를 별도 비용 기준으로 사용할 경우 공식 API 가격표는 가�
 | 핵심 이미지 도구 | 13개 공개 화면, 일괄 작업 중심 | 13개 이미지 도구 화면과 PDF/JSON 도구 | 화면 수는 대응하지만 세부 입력·품질 정책은 다름 |
 | 압축 | JPG/PNG/SVG/GIF, 자동 품질·크기 균형, 서버 처리 | JPG/PNG/WebP, 공개된 네이티브 서버 엔진, 더 작아질 때만 결과 제공 | 서버 엔진은 운영 중이나 SVG/GIF 및 비교 corpus가 필요 |
 | 크기 조절 | 픽셀/%·비율 유지·최대 크기·확대 금지·일괄 | 브라우저 픽셀/% 처리, WebP 중심 추천 프리셋과 원본 형식/품질 정책 | SVG/GIF 입력과 외부 서비스의 압축률은 별도 비교 필요 |
-| 자르기·회전 | 전용 화면 및 일괄 방향/비율 동작 | `image.crop@1` 가운데 기준 비율 자르기, `image.rotate@1` 90도 단위 회전 | 자유 영역·GIF·방향 필터는 후속 계약으로 분리 |
+| 자르기·회전 | 전용 화면 및 일괄 방향/비율 동작 | `image.crop@1` 가운데 기준 비율 자르기, `image.rotate@1` 90도 단위 회전과 방향 필터 | GIF 입력은 후속 계약으로 분리 |
 | 변환 | JPG↔PNG/GIF, JPG 대상 TIF/PSD/SVG/WEBP/HEIC/RAW | JPG↔PNG와 다중 JPG→GIF, 브라우저 기본 디코더 범위 | 미지원 디코더는 라이선스·품질 검증 후 별도 계약 |
 | AI/편집 | 업스케일·배경 제거·얼굴 흐림·사진 편집·밈 | 로컬 픽셀 보간·연결 배경 제거·FaceDetector·편집기·밈 1차 대응 | AI 모델·서버 비용이 필요한 고급 품질은 별도 제품 범위 |
 | 일괄 한도 | Basic도 일반 작업 30개·200MB, Premium 120개·4GB 표기 | 압축 20개·파일당 30MiB·총 600MiB, 일반 이미지 파이프라인 100개·파일당 50MiB·총 250MiB | 숫자만 키우지 말고 실제 메모리·비용·큐 용량으로 정해야 함 |

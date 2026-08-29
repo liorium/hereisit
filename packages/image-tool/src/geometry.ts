@@ -1,4 +1,9 @@
-import type { ImageRotation, ImageSourceRect, ResizeSpec } from "@hereisit/tool-contracts";
+import type {
+  ImageRotation,
+  ImageRotationScope,
+  ImageSourceRect,
+  ResizeSpec,
+} from "@hereisit/tool-contracts";
 
 export interface DrawGeometry {
   canvasWidth: number;
@@ -108,11 +113,23 @@ function roundDimension(value: number): number {
   return Math.max(1, Math.round(value));
 }
 
+export function rotationForScope(
+  sourceWidth: number,
+  sourceHeight: number,
+  rotation: ImageRotation,
+  scope: ImageRotationScope,
+): ImageRotation {
+  if (scope === "portrait" && sourceHeight <= sourceWidth) return 0;
+  if (scope === "landscape" && sourceWidth <= sourceHeight) return 0;
+  return rotation;
+}
+
 export function computeDrawGeometry(
   sourceWidth: number,
   sourceHeight: number,
   resize: ResizeSpec,
   rotation: ImageRotation = 0,
+  rotationScope: ImageRotationScope = "all",
 ): DrawGeometry {
   if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight)) {
     throw new Error("이미지 크기가 올바르지 않습니다.");
@@ -121,6 +138,8 @@ export function computeDrawGeometry(
   if (sourceWidth < 1 || sourceHeight < 1) {
     throw new Error("이미지 크기는 1픽셀 이상이어야 합니다.");
   }
+
+  const appliedRotation = rotationForScope(sourceWidth, sourceHeight, rotation, rotationScope);
 
   const base = {
     sourceX: 0,
@@ -132,7 +151,7 @@ export function computeDrawGeometry(
     upscalingSkipped: false,
   };
 
-  if (resize.kind === "none" && rotation % 180 === 90) {
+  if (resize.kind === "none" && appliedRotation % 180 === 90) {
     return {
       ...base,
       canvasWidth: sourceHeight,
@@ -142,7 +161,7 @@ export function computeDrawGeometry(
     };
   }
 
-  if (resize.kind === "none" && rotation === 180) {
+  if (resize.kind === "none" && appliedRotation === 180) {
     return {
       ...base,
       canvasWidth: sourceWidth,

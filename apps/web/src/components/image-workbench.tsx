@@ -15,6 +15,7 @@ import type {
   ImagePhase,
   ImagePipelineResult,
   ImagePipelineSpecV2,
+  ImageRotationScope,
 } from "@hereisit/tool-contracts";
 import { findImagePreset, imagePresets } from "@hereisit/tool-registry";
 import type { AvailableToolId, FileKind } from "@hereisit/tool-registry/catalog";
@@ -921,6 +922,12 @@ export function ImageWorkbench({
     setSpec((current) => ({ ...current, rotation }));
   };
 
+  const changeRotationScope = (rotationScope: ImageRotationScope) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({ ...current, rotationScope }));
+  };
+
   const changeSize = (value: number) => {
     const size = Math.max(64, Math.min(16_384, Math.round(value || 64)));
     invalidateResults();
@@ -1566,6 +1573,28 @@ export function ImageWorkbench({
                       </button>
                     ))}
                   </div>
+                  <div className={styles.segmented}>
+                    {[
+                      ["all", "모든 이미지"],
+                      ["portrait", "세로만"],
+                      ["landscape", "가로만"],
+                    ].map(([value, label]) => (
+                      <button
+                        className={
+                          (spec.rotationScope ?? "all") === value ? styles.activeSegment : ""
+                        }
+                        type="button"
+                        key={value}
+                        aria-pressed={(spec.rotationScope ?? "all") === value}
+                        onClick={() => changeRotationScope(value as ImageRotationScope)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>선택한 방향의 이미지만 회전해요. 정사각형은 제외됩니다.</span>
+                  </p>
                 </fieldset>
               )}
 

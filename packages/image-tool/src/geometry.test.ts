@@ -152,6 +152,25 @@ describe("computeDrawGeometry", () => {
     });
   });
 
+  it("applies an orientation filter before rotating a batch item", () => {
+    expect(computeDrawGeometry(1600, 900, { kind: "none" }, 90, "portrait")).toMatchObject({
+      canvasWidth: 1600,
+      canvasHeight: 900,
+      destinationWidth: 1600,
+      destinationHeight: 900,
+    });
+    expect(computeDrawGeometry(900, 1600, { kind: "none" }, 90, "portrait")).toMatchObject({
+      canvasWidth: 1600,
+      canvasHeight: 900,
+      destinationWidth: 1600,
+      destinationHeight: 900,
+    });
+    expect(computeDrawGeometry(1600, 900, { kind: "none" }, 90, "landscape")).toMatchObject({
+      canvasWidth: 900,
+      canvasHeight: 1600,
+    });
+  });
+
   it("keeps dimensions for a half turn", () => {
     expect(computeDrawGeometry(1600, 900, { kind: "none" }, 180)).toMatchObject({
       canvasWidth: 1600,
