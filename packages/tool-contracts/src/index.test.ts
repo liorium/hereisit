@@ -655,6 +655,36 @@ describe("imageWatermarkSpecSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts bounded text shadow options without allowing them on logo watermarks", () => {
+    const withShadow = imageWatermarkSpecSchema.safeParse({
+      ...baseImageWatermarkSpec,
+      watermark: {
+        ...baseImageWatermarkSpec.watermark,
+        shadow: { color: "#000000", blurPercent: 8, offsetPercent: 2 },
+      },
+    });
+    expect(withShadow.success).toBe(true);
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: {
+          kind: "logo",
+          widthPercent: 20,
+          shadow: { color: "#000000", blurPercent: 8, offsetPercent: 2 },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      imageWatermarkSpecSchema.safeParse({
+        ...baseImageWatermarkSpec,
+        watermark: {
+          ...baseImageWatermarkSpec.watermark,
+          shadow: { color: "#000000", blurPercent: 21, offsetPercent: 2 },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts text at the 80-code-point ceiling", () => {
     expect(
       imageWatermarkSpecSchema.safeParse({

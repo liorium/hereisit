@@ -138,6 +138,8 @@ function buildSpec(options: {
   position: ImageWatermarkPosition;
   marginPercent: number;
   opacityPercent: number;
+  shadowEnabled: boolean;
+  shadowColor: string;
   outputFormat: OutputFormat;
   quality: number;
 }): ImageWatermarkSpecV1 {
@@ -159,6 +161,9 @@ function buildSpec(options: {
             text: options.text,
             color: options.color,
             sizePercent: options.sizePercent,
+            ...(options.shadowEnabled
+              ? { shadow: { color: options.shadowColor, blurPercent: 8, offsetPercent: 2 } }
+              : {}),
           }
         : { kind: "logo", widthPercent: options.sizePercent },
     position: options.position,
@@ -190,6 +195,8 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
   const [position, setPosition] = useState<ImageWatermarkPosition>("bottom-right");
   const [marginPercent, setMarginPercent] = useState(3);
   const [opacityPercent, setOpacityPercent] = useState(55);
+  const [shadowEnabled, setShadowEnabled] = useState(false);
+  const [shadowColor, setShadowColor] = useState("#000000");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("source");
   const [quality, setQuality] = useState(90);
   const [processing, setProcessing] = useState(false);
@@ -441,6 +448,8 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
       position,
       marginPercent,
       opacityPercent,
+      shadowEnabled,
+      shadowColor,
       outputFormat,
       quality,
     });
@@ -954,6 +963,30 @@ export function ImageWatermarkWorkbench({ toolId }: { toolId: AvailableToolId })
                         }}
                       />
                     </label>
+                    <label className={styles.checkboxField}>
+                      <input
+                        type="checkbox"
+                        checked={shadowEnabled}
+                        onChange={(event) => {
+                          const enabled = event.target.checked;
+                          changeSetting(() => setShadowEnabled(enabled));
+                        }}
+                      />
+                      그림자
+                    </label>
+                    {shadowEnabled ? (
+                      <label className={styles.colorField}>
+                        <span>그림자 색상</span>
+                        <input
+                          type="color"
+                          value={shadowColor}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            changeSetting(() => setShadowColor(value));
+                          }}
+                        />
+                      </label>
+                    ) : null}
                     {!textIsValid ? (
                       <p className={styles.itemError}>문구는 줄바꿈 없이 1~80자로 입력해 주세요.</p>
                     ) : null}

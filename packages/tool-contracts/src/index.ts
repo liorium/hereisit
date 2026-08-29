@@ -245,6 +245,14 @@ export const imageWatermarkSpecSchema = z
           text: imageWatermarkTextSchema,
           color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
           sizePercent: z.number().int().min(4).max(30),
+          shadow: z
+            .object({
+              color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+              blurPercent: z.number().int().min(0).max(20),
+              offsetPercent: z.number().int().min(0).max(10),
+            })
+            .strict()
+            .optional(),
         })
         .strict(),
       z

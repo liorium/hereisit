@@ -253,6 +253,10 @@ class FakeContext {
   private _font = "10px sans-serif";
   private _globalAlpha = 1;
   private _textBaseline: CanvasTextBaseline = "alphabetic";
+  private _shadowColor = "transparent";
+  private _shadowBlur = 0;
+  private _shadowOffsetX = 0;
+  private _shadowOffsetY = 0;
   imageSmoothingEnabled = false;
   imageSmoothingQuality: ImageSmoothingQuality = "low";
 
@@ -294,6 +298,42 @@ class FakeContext {
 
   get textBaseline(): CanvasTextBaseline {
     return this._textBaseline;
+  }
+
+  set shadowColor(value: string) {
+    this._shadowColor = value;
+    this.calls.push({ name: "shadowColor", args: [value] });
+  }
+
+  get shadowColor(): string {
+    return this._shadowColor;
+  }
+
+  set shadowBlur(value: number) {
+    this._shadowBlur = value;
+    this.calls.push({ name: "shadowBlur", args: [value] });
+  }
+
+  get shadowBlur(): number {
+    return this._shadowBlur;
+  }
+
+  set shadowOffsetX(value: number) {
+    this._shadowOffsetX = value;
+    this.calls.push({ name: "shadowOffsetX", args: [value] });
+  }
+
+  get shadowOffsetX(): number {
+    return this._shadowOffsetX;
+  }
+
+  set shadowOffsetY(value: number) {
+    this._shadowOffsetY = value;
+    this.calls.push({ name: "shadowOffsetY", args: [value] });
+  }
+
+  get shadowOffsetY(): number {
+    return this._shadowOffsetY;
   }
 
   fillRect(...args: readonly unknown[]): void {
@@ -518,6 +558,41 @@ describe("processImageWatermarkPipeline text composition", () => {
       height: 1,
     });
     expect(runtime.bitmaps[0]?.close).toHaveBeenCalledOnce();
+    expectReleased(runtime.canvases);
+  });
+
+  it("applies a bounded text shadow before drawing the watermark", async () => {
+    const sourceBytes = pngBytes(100, 60);
+    const runtime = installRuntime();
+    const spec = textSpec();
+    if (spec.watermark.kind !== "text") throw new Error("textSpec must create text watermark");
+    spec.watermark = {
+      ...spec.watermark,
+      shadow: { color: "#000000", blurPercent: 8, offsetPercent: 2 },
+    };
+
+    await processImageWatermarkPipeline(
+      inputFromBytes(sourceBytes),
+      spec,
+      undefined,
+      vi.fn(),
+      new AbortController().signal,
+    );
+
+    const calls = (runtime.canvases[0] as FakeCanvas).context.calls;
+    const shadowColor = calls.findIndex(
+      (call) => call.name === "shadowColor" && call.args[0] === "#000000",
+    );
+    const shadowBlur = calls.findIndex((call) => call.name === "shadowBlur");
+    const shadowOffsetX = calls.findIndex((call) => call.name === "shadowOffsetX");
+    const shadowOffsetY = calls.findIndex((call) => call.name === "shadowOffsetY");
+    const fillText = calls.findIndex((call) => call.name === "fillText");
+    expect(shadowColor).toBeGreaterThanOrEqual(0);
+    expect(shadowBlur).toBeGreaterThan(shadowColor);
+    expect(shadowOffsetX).toBeGreaterThan(shadowBlur);
+    expect(shadowOffsetY).toBeGreaterThan(shadowOffsetX);
+    expect(fillText).toBeGreaterThan(shadowOffsetY);
+    expect(calls.find((call) => call.name === "shadowBlur")?.args[0]).toBeGreaterThan(0);
     expectReleased(runtime.canvases);
   });
 
