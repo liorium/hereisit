@@ -27,6 +27,24 @@ export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 2 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
+const sourceRectSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().gt(0).max(1),
+    height: z.number().gt(0).max(1),
+  })
+  .strict()
+  .refine((value) => value.x + value.width <= 1, {
+    message: "자르기 영역이 이미지 너비를 벗어날 수 없습니다.",
+    path: ["width"],
+  })
+  .refine((value) => value.y + value.height <= 1, {
+    message: "자르기 영역이 이미지 높이를 벗어날 수 없습니다.",
+    path: ["height"],
+  });
+
+export type ImageSourceRect = z.input<typeof sourceRectSchema>;
 export const imageRotationSchema = z.union([
   z.literal(0),
   z.literal(90),
@@ -96,6 +114,7 @@ export const resizeSpecSchema = z.discriminatedUnion("kind", [
     kind: z.literal("cover"),
     width: positiveDimension,
     height: positiveDimension,
+    sourceRect: sourceRectSchema.optional(),
     focalPoint: z
       .object({
         x: z.number().min(0).max(1),
@@ -163,14 +182,24 @@ export const imageOutputSchema = z.discriminatedUnion("format", [
   pngImageOutputSchema,
 ]);
 
-export const imagePipelineSpecV1Schema = z.object({
-  version: z.literal(1),
-  resize: resizeSpecSchema,
-  output: imageOutputV1Schema,
-  sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
-  autoOrient: z.literal(true),
-  metadata: z.literal("strip"),
-});
+export const imagePipelineSpecV1Schema = z
+  .object({
+    version: z.literal(1),
+    resize: resizeSpecSchema,
+    output: imageOutputV1Schema,
+    sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
+    autoOrient: z.literal(true),
+    metadata: z.literal("strip"),
+  })
+  .superRefine((value, context) => {
+    if (value.resize.kind === "cover" && value.resize.sourceRect !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["resize", "sourceRect"],
+        message: "자유 자르기 영역은 이미지 파이프라인 v2에서만 사용할 수 있습니다.",
+      });
+    }
+  });
 
 export const imagePipelineSpecV2Schema = z.object({
   version: z.literal(2),

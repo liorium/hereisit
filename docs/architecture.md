@@ -72,7 +72,9 @@ output performs one encode; target-byte mode may encode repeatedly against the a
 v2 `source` output policy. The current catalog and Worker handshake advertise tool version 2, so an old
 v1 Worker cannot be mistaken for a processor that understands source-preserving compression. The
 runtime resolves `source` from inspected bytes, then validates the encoded result's signature, MIME,
-dimensions, and animation state before assigning its download name.
+dimensions, and animation state before assigning its download name. Its `cover` resize may also carry
+a bounded normalized `sourceRect` for the crop screen's free-form selection; older specs without that
+field keep the ratio-and-focal-point behavior.
 
 The source-relative `smaller-only` goal is a hard postcondition. The runtime adaptively encodes against
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet

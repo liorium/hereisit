@@ -1,4 +1,4 @@
-import type { ImageRotation, ResizeSpec } from "@hereisit/tool-contracts";
+import type { ImageRotation, ImageSourceRect, ResizeSpec } from "@hereisit/tool-contracts";
 
 export interface DrawGeometry {
   canvasWidth: number;
@@ -69,6 +69,39 @@ export function focalPointFromNormalizedPosition(
   y: number;
 } {
   return { x: clampUnit(x), y: clampUnit(y) };
+}
+
+export function normalizedSourceRectFromPoints(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  minimumWidth = 0.01,
+  minimumHeight = 0.01,
+): ImageSourceRect {
+  const minWidth = Math.max(0.000001, clampUnit(minimumWidth, 0.01));
+  const minHeight = Math.max(0.000001, clampUnit(minimumHeight, 0.01));
+  const normalizedStartX = clampUnit(startX);
+  const normalizedStartY = clampUnit(startY);
+  const normalizedEndX = clampUnit(endX);
+  const normalizedEndY = clampUnit(endY);
+  const left = Math.min(normalizedStartX, normalizedEndX);
+  const top = Math.min(normalizedStartY, normalizedEndY);
+  const right = Math.max(normalizedStartX, normalizedEndX);
+  const bottom = Math.max(normalizedStartY, normalizedEndY);
+  const width = Math.max(minWidth, right - left);
+  const height = Math.max(minHeight, bottom - top);
+
+  const roundUnit = (value: number) => Number(value.toFixed(6));
+  const normalizedWidth = roundUnit(Math.min(width, 1));
+  const normalizedHeight = roundUnit(Math.min(height, 1));
+
+  return {
+    x: roundUnit(Math.min(left, 1 - normalizedWidth)),
+    y: roundUnit(Math.min(top, 1 - normalizedHeight)),
+    width: normalizedWidth,
+    height: normalizedHeight,
+  };
 }
 
 function roundDimension(value: number): number {
@@ -162,6 +195,21 @@ export function computeDrawGeometry(
 
   const focalX = clampUnit(resize.focalPoint?.x ?? 0.5);
   const focalY = clampUnit(resize.focalPoint?.y ?? 0.5);
+
+  if (resize.sourceRect !== undefined) {
+    return {
+      ...base,
+      canvasWidth: resize.width,
+      canvasHeight: resize.height,
+      sourceX: sourceWidth * resize.sourceRect.x,
+      sourceY: sourceHeight * resize.sourceRect.y,
+      sourceWidth: sourceWidth * resize.sourceRect.width,
+      sourceHeight: sourceHeight * resize.sourceRect.height,
+      destinationWidth: resize.width,
+      destinationHeight: resize.height,
+    };
+  }
+
   const sourceRatio = sourceWidth / sourceHeight;
   const targetRatio = resize.width / resize.height;
 

@@ -33,7 +33,7 @@ AI 복원 품질, 서버·브라우저 실행 방식은 다르므로 기능 이�
 | --- | --- | --- |
 | Compress IMAGE | JPG, PNG, SVG, GIF를 일괄 압축. 품질과 파일 크기의 균형을 자동 선택하며 사용자가 압축 레벨을 직접 고르지 않는다. | **부분 대응.** JPG/PNG/WebP 서버 압축이 있으며 SVG/GIF는 현재 계약에 없다. [압축 화면](https://www.iloveimg.com/compress-image), [FAQ](https://www.iloveimg.com/help/faq) |
 | Resize IMAGE | JPG, PNG, SVG, GIF를 픽셀 또는 백분율로 일괄 조절. 비율 유지, 최대 크기, 작은 이미지를 확대하지 않기 옵션이 있다. | **부분 대응.** 브라우저 기반 크기 조절과 비율·프리셋은 있으나 SVG/GIF 및 iLoveIMG 옵션 전체는 별도 확인이 필요하다. [리사이즈 화면](https://www.iloveimg.com/resize-image) |
-| Crop IMAGE | JPG, PNG, GIF를 픽셀 직사각형으로 자른다. 도움말에는 일괄 자르기 비율 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3이 설명되어 있다. | **1차 대응.** `image.crop@1` 전용 화면에서 JPG/PNG/WebP를 가운데 기준 7개 비율로 자른다. 자유로운 드래그 영역은 다음 단계다. [자르기 화면](https://www.iloveimg.com/crop-image), [도움말](https://www.iloveimg.com/help/documentation) |
+| Crop IMAGE | JPG, PNG, GIF를 픽셀 직사각형으로 자른다. 도움말에는 일괄 자르기 비율 3:2, 4:3, 5:4, 1:1, 4:5, 3:4, 2:3이 설명되어 있다. | **대응.** `image.crop@1` 전용 화면에서 JPG/PNG/WebP를 7개 비율·초점 위치 또는 미리보기의 자유 사각형으로 자른다. [자르기 화면](https://www.iloveimg.com/crop-image), [도움말](https://www.iloveimg.com/help/documentation) |
 | Convert to JPG | PNG, GIF, TIF, PSD, SVG, WEBP, HEIC, RAW를 JPG로 변환. 추천 품질과 Premium 고품질(원본 픽셀 크기 유지) 옵션이 있다. | **부분 대응.** 브라우저 JPEG/PNG/WebP/HEIC 계열 변환은 있으나 현재 입력·출력 목록에 GIF/TIF/PSD/SVG/RAW가 없다. [변환 화면](https://www.iloveimg.com/convert-to-jpg) |
 | Convert from JPG | JPG를 PNG 또는 GIF로 변환. GIF는 정적 또는 애니메이션이며 프레임당 시간과 반복 여부를 설정한다. | **1차 대응.** JPG→PNG와 다중 JPG→애니메이션 GIF, 프레임 간격·반복 재생을 브라우저에서 제공한다. 브라우저가 읽을 수 있는 JPG만 받는다. [JPG 변환 화면](https://www.iloveimg.com/jpg-to-image), [도움말](https://www.iloveimg.com/help/documentation) |
 | Photo editor | 텍스트, 스티커, 효과, 필터를 추가하는 단일 이미지 편집기. | **1차 대응.** 밝기·대비·채도·회색조, 필터·프레임·스티커·문구를 로컬 캔버스에서 제공한다. [사진 편집 화면](https://www.iloveimg.com/photo-editor) |
@@ -140,9 +140,9 @@ HereIsIt의 현재 지원 범위와 한도는 [README의 Current limits](../../R
 
 ## 권장 다음 순서
 
-1. **현재 1차 계약을 유지한다.** crop의 7개 비율·초점 위치, rotate의 0/90/180/270도,
-   JPG→GIF의 프레임 간격·반복 재생을 기존 Worker·검증·다운로드 흐름으로 계속 회귀 검증한다.
-   자유 픽셀 영역과 추가 디코더는 별도 계약으로 분리한다.
+1. **현재 계약을 유지한다.** crop의 7개 비율·초점 위치·자유 사각형, rotate의
+   0/90/180/270도, JPG→GIF의 프레임 간격·반복 재생을 기존 Worker·검증·다운로드 흐름으로
+   계속 회귀 검증한다. 추가 디코더는 별도 계약으로 분리한다.
 2. **변환 확장은 검증 후에만 한다.** TIF/PSD/RAW/SVG/HEIC 입력은 브라우저 지원을 추측하지
    말고 디코더의 라이선스·메모리·품질을 확인한 뒤 추가한다. GIF 인코더를 새로 도입하지 않고
    현재의 제한된 로컬 구현을 유지한다.

@@ -157,6 +157,57 @@ describe("imagePipelineSpecSchema", () => {
     }
     expect(imagePipelineSpecSchema.safeParse({ ...base, rotation: 45 }).success).toBe(false);
   });
+
+  it("accepts a bounded source rectangle for free-form cover crops", () => {
+    const result = imagePipelineSpecV2Schema.safeParse({
+      version: 2,
+      resize: {
+        kind: "cover",
+        width: 1200,
+        height: 720,
+        sourceRect: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+      },
+      output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+      autoOrient: true,
+      metadata: "strip",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("keeps free-form source rectangles out of the v1 contract", () => {
+    expect(
+      imagePipelineSpecSchema.safeParse({
+        version: 1,
+        resize: {
+          kind: "cover",
+          width: 1200,
+          height: 720,
+          sourceRect: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+        },
+        output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    { x: 0.5, y: 0, width: 0.6, height: 0.5 },
+    { x: 0, y: 0.5, width: 0.5, height: 0.6 },
+    { x: -0.1, y: 0, width: 0.5, height: 0.5 },
+    { x: 0, y: 0, width: 0, height: 0.5 },
+  ])("rejects a source rectangle outside the image bounds: %o", (sourceRect) => {
+    expect(
+      imagePipelineSpecV2Schema.safeParse({
+        version: 2,
+        resize: { kind: "cover", width: 1200, height: 720, sourceRect },
+        output: { format: "webp", compression: { mode: "quality", quality: 82 } },
+        autoOrient: true,
+        metadata: "strip",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("pdfToImagesSpecSchema", () => {

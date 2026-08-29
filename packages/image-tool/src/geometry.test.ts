@@ -4,6 +4,7 @@ import {
   computeDrawGeometry,
   focalPointForCropPosition,
   focalPointFromNormalizedPosition,
+  normalizedSourceRectFromPoints,
 } from "./geometry";
 
 describe("computeDrawGeometry", () => {
@@ -40,6 +41,24 @@ describe("computeDrawGeometry", () => {
     expect(result.sourceHeight).toBe(1000);
   });
 
+  it("maps a free-form source rectangle to exact source pixels", () => {
+    const result = computeDrawGeometry(2000, 1000, {
+      kind: "cover",
+      width: 1200,
+      height: 720,
+      sourceRect: { x: 0.1, y: 0.2, width: 0.5, height: 0.6 },
+    });
+
+    expect(result).toMatchObject({
+      sourceX: 200,
+      sourceY: 200,
+      sourceWidth: 1000,
+      sourceHeight: 600,
+      destinationWidth: 1200,
+      destinationHeight: 720,
+    });
+  });
+
   it.each([
     ["top-left", 0, 0],
     ["top-center", 0.5, 0],
@@ -72,6 +91,35 @@ describe("computeDrawGeometry", () => {
     [Number.NaN, Number.POSITIVE_INFINITY, 0.5, 0.5],
   ] as const)("clamps a dragged crop position to the image bounds", (x, y, expectedX, expectedY) => {
     expect(focalPointFromNormalizedPosition(x, y)).toEqual({ x: expectedX, y: expectedY });
+  });
+
+  it.each([
+    [0.1, 0.2, 0.6, 0.8, 0.01, 0.01, { x: 0.1, y: 0.2, width: 0.5, height: 0.6 }],
+    [0.8, 0.9, 0.2, 0.1, 0.01, 0.01, { x: 0.2, y: 0.1, width: 0.6, height: 0.8 }],
+    [-1, -1, -1, -1, 0.25, 0.5, { x: 0, y: 0, width: 0.25, height: 0.5 }],
+    [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      0.01,
+      0.01,
+      { x: 0.5, y: 0.5, width: 0.01, height: 0.01 },
+    ],
+    [
+      0.999999,
+      0.1,
+      1,
+      0.2,
+      0.000001,
+      0.000001,
+      { x: 0.999999, y: 0.1, width: 0.000001, height: 0.1 },
+    ],
+  ] as const)("normalizes a free crop drag into a bounded source rectangle", (...args) => {
+    const [startX, startY, endX, endY, minimumWidth, minimumHeight, expected] = args;
+    expect(
+      normalizedSourceRectFromPoints(startX, startY, endX, endY, minimumWidth, minimumHeight),
+    ).toEqual(expected);
   });
 
   it.each([90, 270] as const)("swaps output dimensions for a %d degree turn", (rotation) => {
