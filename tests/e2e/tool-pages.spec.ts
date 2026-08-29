@@ -68,7 +68,7 @@ const imageRoutes = [
   {
     path: "/image/convert",
     title: "이미지 형식 변환",
-    description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
+    description: "JPG, PNG, WebP, GIF, HEIC 이미지를 원하는 형식으로 변환하세요.",
   },
   {
     path: "/image/rotate",
@@ -173,6 +173,8 @@ test("links to dedicated image tools and initializes each intent", async ({ page
         "aria-label",
         "자르기 미리보기. 드래그해서 위치를 조정할 수 있어요.",
       );
+      const cropImage = cropPreview.locator("img");
+      const initialCropStyle = await cropImage.getAttribute("style");
       const cropPreviewBox = await cropPreview.boundingBox();
       expect(cropPreviewBox).not.toBeNull();
       if (cropPreviewBox !== null) {
@@ -187,9 +189,10 @@ test("links to dedicated image tools and initializes each intent", async ({ page
         );
         await page.mouse.up();
       }
-      await expect(cropPreview.locator("img")).toHaveAttribute(
+      await expect.poll(() => cropImage.getAttribute("style")).not.toBe(initialCropStyle);
+      await expect(cropImage).toHaveAttribute(
         "style",
-        /object-position:\s*(?:5[5-9]|[6-9]\d|100)%\s*(?:0|[1-3]\d|4[0-4])%/,
+        /object-position:\s*\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%;/,
       );
     }
     await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();

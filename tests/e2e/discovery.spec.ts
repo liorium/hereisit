@@ -199,8 +199,12 @@ test("recovers invalid catalog values and resets an empty AND-filtered result", 
   await page.getByRole("button", { name: "모든 필터 초기화" }).click();
   await expect(page).toHaveURL(/\/tools$/);
   await expect(page.getByRole("combobox", { name: "도구 검색" })).toHaveValue("");
-  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(12);
-  await expect(page.getByText("검색 결과 12개", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("available-tool-grid").locator("article")).toHaveCount(
+    availableToolEntries.length,
+  );
+  await expect(
+    page.getByText(`검색 결과 ${availableToolEntries.length}개`, { exact: true }),
+  ).toBeVisible();
 });
 
 test("resets through client navigation without losing memory-only favorites", async ({ page }) => {
