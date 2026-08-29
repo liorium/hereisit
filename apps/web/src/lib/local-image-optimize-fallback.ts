@@ -155,6 +155,13 @@ function smartResult(
     }
     return { status: "rejected", itemId: source.itemId, message: result.error.message };
   }
+  if (result.value.mime === "image/gif") {
+    return {
+      status: "rejected",
+      itemId: source.itemId,
+      message: "GIF는 이미지 용량 줄이기에서 지원하지 않습니다.",
+    };
+  }
   return {
     status: "fulfilled",
     itemId: source.itemId,

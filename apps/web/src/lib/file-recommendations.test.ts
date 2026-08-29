@@ -46,9 +46,9 @@ describe("planFileRecommendations", () => {
       "image.remove-background",
       "image.crop",
       "image.rotate",
+      "image.watermark",
       "image.resize",
       "image.convert",
-      "image.watermark",
       "image.convert-to-jpg",
     ]);
     expect(recommendationIds([jpeg, png])).toEqual([
@@ -58,9 +58,9 @@ describe("planFileRecommendations", () => {
       "image.remove-background",
       "image.crop",
       "image.rotate",
+      "image.watermark",
       "image.resize",
       "image.convert",
-      "image.watermark",
       "image.convert-to-jpg",
     ]);
   });

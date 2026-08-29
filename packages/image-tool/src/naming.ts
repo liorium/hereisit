@@ -1,17 +1,19 @@
 import type { ImageOutput } from "@hereisit/tool-contracts";
 
-type EncodableImageFormat = Exclude<ImageOutput["format"], "source">;
+type EncodableImageFormat = Exclude<ImageOutput["format"], "source"> | "gif";
 
 const extensionByFormat: Record<EncodableImageFormat, string> = {
   jpeg: "jpg",
   png: "png",
   webp: "webp",
+  gif: "gif",
 };
 
 const matchingExtensionsByFormat: Record<EncodableImageFormat, ReadonlySet<string>> = {
   jpeg: new Set(["jpg", "jpeg"]),
   png: new Set(["png"]),
   webp: new Set(["webp"]),
+  gif: new Set(["gif"]),
 };
 
 function isSafePublicFilenameCharacter(character: string): boolean {

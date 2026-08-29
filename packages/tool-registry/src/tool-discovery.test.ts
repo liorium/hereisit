@@ -504,9 +504,9 @@ describe("file capability recommendations", () => {
       "image.remove-background",
       "image.crop",
       "image.rotate",
+      "image.watermark",
       "image.resize",
       "image.convert",
-      "image.watermark",
       "image.convert-to-jpg",
     ]);
     expect(recommendations.find(({ tool }) => tool.id === "image.convert")).toMatchObject({

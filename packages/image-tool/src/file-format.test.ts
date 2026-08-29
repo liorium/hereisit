@@ -46,6 +46,57 @@ function joinBytes(...parts: readonly Uint8Array[]): Uint8Array {
   return bytes;
 }
 
+function gifWithFrames(width: number, height: number, frameCount: number): ArrayBuffer {
+  const header = Uint8Array.from([
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    width & 0xff,
+    (width >>> 8) & 0xff,
+    height & 0xff,
+    (height >>> 8) & 0xff,
+    0x80,
+    0,
+    0,
+    0xff,
+    0,
+    0,
+    0,
+    0xff,
+    0,
+  ]);
+  const frame = Uint8Array.from([
+    0x21,
+    0xf9,
+    0x04,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x2c,
+    0,
+    0,
+    0,
+    0,
+    width & 0xff,
+    (width >>> 8) & 0xff,
+    height & 0xff,
+    (height >>> 8) & 0xff,
+    0x00,
+    0x02,
+    0x02,
+    0x44,
+    0x05,
+    0x00,
+  ]);
+  return joinBytes(header, ...Array.from({ length: frameCount }, () => frame), Uint8Array.of(0x3b))
+    .buffer as ArrayBuffer;
+}
+
 function isoBox(type: string, data: Uint8Array): Uint8Array {
   const bytes = new Uint8Array(8 + data.byteLength);
   writeUint32BE(bytes, 0, bytes.byteLength);
@@ -286,6 +337,39 @@ describe("inspectImageHeader", () => {
       ]),
     );
     expect(result.animated).toBe(true);
+  });
+
+  it.each([
+    ["a single-frame GIF", 1, false],
+    ["an animated GIF", 2, true],
+  ])("reads dimensions and animation state from %s", (_label, frameCount, animated) => {
+    expect(inspectImageHeader(gifWithFrames(320, 240, frameCount))).toEqual({
+      format: "gif",
+      mime: "image/gif",
+      width: 320,
+      height: 240,
+      animated,
+    });
+  });
+
+  it("rejects a truncated GIF block", () => {
+    const bytes = new Uint8Array(gifWithFrames(2, 1, 1));
+    expect(() => inspectImageHeader(bytes.slice(0, -2).buffer)).toThrow(
+      "지원하지 않거나 손상된 이미지",
+    );
+  });
+
+  it("accepts GIF extensions with multiple data sub-blocks", () => {
+    const source = new Uint8Array(gifWithFrames(2, 1, 1));
+    const comment = Uint8Array.of(0x21, 0xfe, 3, 0x61, 0x62, 0x63, 2, 0x64, 0x65, 0);
+    const bytes = joinBytes(source.slice(0, 19), comment, source.slice(19));
+    expect(inspectImageHeader(bytes.buffer as ArrayBuffer)).toMatchObject({
+      format: "gif",
+      mime: "image/gif",
+      width: 2,
+      height: 1,
+      animated: false,
+    });
   });
 });
 

@@ -12,6 +12,7 @@ import {
   type ParsedImagePipelineSpec,
   type ToolErrorCode,
 } from "@hereisit/tool-contracts";
+import { decodeGifAnimation, encodeAnimatedGif, MAX_GIF_TOTAL_PIXELS } from "./gif";
 
 const MAX_INPUT_BYTES = 50 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 50_000_000;
@@ -39,18 +40,21 @@ interface PipelineInput {
 
 type ProgressReporter = (phase: ImagePhase, fraction: number) => void;
 type ResolvedOutput = Exclude<ParsedImagePipelineSpec["output"], { format: "source" }>;
+type GifResolvedOutput = { format: "gif"; compression: { mode: "lossless" } };
+type PipelineOutput = ResolvedOutput | GifResolvedOutput;
 type LossyCompression = Extract<ResolvedOutput, { format: "jpeg" | "webp" }>["compression"];
 
-function outputMime(format: ResolvedOutput["format"]): ImagePipelineResult["mime"] {
+function outputMime(format: PipelineOutput["format"]): ImagePipelineResult["mime"] {
   if (format === "jpeg") return "image/jpeg";
   if (format === "webp") return "image/webp";
+  if (format === "gif") return "image/gif";
   return "image/png";
 }
 
 function resolveOutput(
   output: ParsedImagePipelineSpec["output"],
-  sourceFormat: "jpeg" | "png" | "webp",
-): ResolvedOutput {
+  sourceFormat: "jpeg" | "png" | "webp" | "gif",
+): PipelineOutput {
   if (output.format !== "source") return output;
   if (sourceFormat === "jpeg") {
     return {
@@ -62,6 +66,7 @@ function resolveOutput(
   if (sourceFormat === "webp") {
     return { format: "webp", compression: output.compression };
   }
+  if (sourceFormat === "gif") return { format: "gif", compression: { mode: "lossless" } };
   return { format: "png", compression: { mode: "lossless" } };
 }
 
@@ -71,7 +76,7 @@ function decodeHexColor(value: string): string {
 
 async function encodeCanvas(
   canvas: OffscreenCanvas,
-  mime: ImagePipelineResult["mime"],
+  mime: Exclude<ImagePipelineResult["mime"], "image/gif">,
   quality?: number,
 ): Promise<Blob> {
   const blob = await canvas.convertToBlob({
@@ -140,10 +145,232 @@ function smallerOnlyTargetBytes(
   return Math.max(0, inputByteLength - Math.max(1, ratioSavings));
 }
 
+function closeGifCanvas(canvas: OffscreenCanvas | undefined): void {
+  if (canvas === undefined) return;
+  try {
+    canvas.width = 0;
+  } catch {
+    // Releasing a failed frame must not replace its public error.
+  }
+  try {
+    canvas.height = 0;
+  } catch {
+    // Releasing a failed frame must not replace its public error.
+  }
+}
+
+async function processGifPipeline(
+  input: PipelineInput,
+  spec: ParsedImagePipelineSpec,
+  inspected: ReturnType<typeof inspectImageHeader>,
+  report: ProgressReporter,
+  signal: AbortSignal,
+  totalStarted: number,
+  inspectMs: number,
+): Promise<ImagePipelineResult> {
+  if (inspected.format !== "gif") {
+    throw new ImagePipelineError("UNSUPPORTED_INPUT", "GIF 입력을 확인하지 못했습니다.");
+  }
+  if (spec.output.format !== "source") {
+    throw new ImagePipelineError(
+      "UNSUPPORTED_INPUT",
+      "GIF는 원본 형식 유지로만 움직임을 보존할 수 있습니다.",
+    );
+  }
+
+  const decodeStarted = performance.now();
+  let animation: Awaited<ReturnType<typeof decodeGifAnimation>>;
+  try {
+    animation = await decodeGifAnimation(input.bytes, inspected.width, inspected.height, signal);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    if (error instanceof RangeError) {
+      throw new ImagePipelineError("MEMORY_LIMIT", "GIF 프레임이 너무 크거나 많습니다.");
+    }
+    throw new ImagePipelineError(
+      "DECODE_FAILED",
+      "이 브라우저는 GIF 애니메이션을 읽지 못했습니다.",
+    );
+  }
+  const decodeMs = performance.now() - decodeStarted;
+
+  const requestedRotation = "rotation" in spec ? spec.rotation : 0;
+  const rotationScope = "rotationScope" in spec ? (spec.rotationScope ?? "all") : "all";
+  const rotation = rotationForScope(
+    inspected.width,
+    inspected.height,
+    requestedRotation,
+    rotationScope,
+  );
+  const geometry = computeDrawGeometry(
+    inspected.width,
+    inspected.height,
+    spec.resize,
+    rotation,
+    rotationScope,
+  );
+  if (
+    geometry.canvasWidth > MAX_DIMENSION ||
+    geometry.canvasHeight > MAX_DIMENSION ||
+    geometry.canvasWidth * geometry.canvasHeight > MAX_OUTPUT_PIXELS
+  ) {
+    throw new ImagePipelineError("DIMENSION_LIMIT", "출력 이미지 해상도가 너무 큽니다.");
+  }
+  const outputPixelsPerFrame = geometry.canvasWidth * geometry.canvasHeight;
+  const totalOutputPixels = outputPixelsPerFrame * animation.frames.length;
+  if (!Number.isSafeInteger(totalOutputPixels) || totalOutputPixels > MAX_GIF_TOTAL_PIXELS) {
+    throw new ImagePipelineError("MEMORY_LIMIT", "GIF 결과 프레임이 너무 크거나 많습니다.");
+  }
+
+  report("decoding", 0.4);
+  report("transforming", 0.55);
+  const transformStarted = performance.now();
+  const transformedFrames: Array<{
+    width: number;
+    height: number;
+    pixels: Uint8ClampedArray<ArrayBuffer>;
+    delayMs?: number;
+  }> = [];
+  let sourceCanvas: OffscreenCanvas | undefined;
+  try {
+    sourceCanvas = new OffscreenCanvas(inspected.width, inspected.height);
+    const sourceContext = sourceCanvas.getContext("2d", {
+      alpha: true,
+      desynchronized: true,
+    });
+    if (sourceContext === null) {
+      throw new ImagePipelineError("MEMORY_LIMIT", "GIF 작업 공간을 만들지 못했습니다.");
+    }
+    for (const frame of animation.frames) {
+      signal.throwIfAborted();
+      sourceContext.clearRect(0, 0, inspected.width, inspected.height);
+      sourceContext.putImageData(new ImageData(frame.pixels, frame.width, frame.height), 0, 0);
+
+      let canvas: OffscreenCanvas | undefined;
+      try {
+        canvas = new OffscreenCanvas(geometry.canvasWidth, geometry.canvasHeight);
+        const context = canvas.getContext("2d", { alpha: true, desynchronized: true });
+        if (context === null) {
+          throw new ImagePipelineError("MEMORY_LIMIT", "GIF 작업 공간을 만들지 못했습니다.");
+        }
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
+        if (rotation === 90) {
+          context.translate(canvas.width, 0);
+          context.rotate(Math.PI / 2);
+        } else if (rotation === 180) {
+          context.translate(canvas.width, canvas.height);
+          context.rotate(Math.PI);
+        } else if (rotation === 270) {
+          context.translate(0, canvas.height);
+          context.rotate(-Math.PI / 2);
+        }
+        const drawGeometry =
+          rotation === 0 || spec.resize.kind !== "none"
+            ? geometry
+            : {
+                ...geometry,
+                destinationWidth: inspected.width,
+                destinationHeight: inspected.height,
+              };
+        context.drawImage(
+          sourceCanvas,
+          drawGeometry.sourceX,
+          drawGeometry.sourceY,
+          drawGeometry.sourceWidth,
+          drawGeometry.sourceHeight,
+          drawGeometry.destinationX,
+          drawGeometry.destinationY,
+          drawGeometry.destinationWidth,
+          drawGeometry.destinationHeight,
+        );
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        const transformedFrame: {
+          width: number;
+          height: number;
+          pixels: Uint8ClampedArray<ArrayBuffer>;
+          delayMs?: number;
+        } = {
+          width: canvas.width,
+          height: canvas.height,
+          pixels: new Uint8ClampedArray(pixels) as Uint8ClampedArray<ArrayBuffer>,
+        };
+        if (frame.delayMs !== undefined) transformedFrame.delayMs = frame.delayMs;
+        transformedFrames.push(transformedFrame);
+      } finally {
+        closeGifCanvas(canvas);
+      }
+    }
+  } catch (error) {
+    if (signal.aborted) throw error;
+    if (error instanceof ImagePipelineError) throw error;
+    throw new ImagePipelineError("MEMORY_LIMIT", "GIF 작업 공간을 만들지 못했습니다.");
+  } finally {
+    closeGifCanvas(sourceCanvas);
+  }
+  const transformMs = performance.now() - transformStarted;
+
+  report("encoding", 0.9);
+  const encodeStarted = performance.now();
+  let bytes: ArrayBuffer;
+  try {
+    bytes = encodeAnimatedGif(transformedFrames, { delayMs: 100, loop: animation.loop });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw new ImagePipelineError("MEMORY_LIMIT", "GIF 결과가 너무 크습니다.");
+    }
+    throw new ImagePipelineError("ENCODE_FAILED", "GIF 결과를 만들지 못했습니다.");
+  }
+  const encodeMs = performance.now() - encodeStarted;
+  const sizeTarget = smallerOnlyTargetBytes(input.byteLength, spec.sizeGoal);
+  if (sizeTarget !== undefined && bytes.byteLength > sizeTarget) {
+    throw new ImagePipelineError("NO_SIZE_REDUCTION", "이미 충분히 작아 더 줄이지 못했어요.");
+  }
+  if (bytes.byteLength > MAX_OUTPUT_BYTES) {
+    throw new ImagePipelineError("MEMORY_LIMIT", "결과 파일이 100MB 제한을 넘었습니다.");
+  }
+
+  let outputInspection: ReturnType<typeof inspectImageHeader>;
+  try {
+    outputInspection = inspectImageHeader(bytes);
+  } catch {
+    throw new ImagePipelineError("ENCODE_FAILED", "GIF 결과 형식을 확인하지 못했습니다.");
+  }
+  if (
+    outputInspection.format !== "gif" ||
+    outputInspection.mime !== "image/gif" ||
+    outputInspection.width !== geometry.canvasWidth ||
+    outputInspection.height !== geometry.canvasHeight ||
+    outputInspection.animated !== transformedFrames.length > 1
+  ) {
+    throw new ImagePipelineError("ENCODE_FAILED", "GIF 결과의 형식이나 크기가 요청과 다릅니다.");
+  }
+  report("finalizing", 1);
+  return {
+    bytes,
+    suggestedName: suggestOutputName(input.name, "gif", { preserveMatchingExtension: true }),
+    mime: "image/gif",
+    width: geometry.canvasWidth,
+    height: geometry.canvasHeight,
+    byteLength: bytes.byteLength,
+    warnings: geometry.upscalingSkipped ? ["UPSCALING_SKIPPED"] : [],
+    timing: {
+      inspectMs,
+      decodeMs,
+      transformMs,
+      encodeMs,
+      totalMs: performance.now() - totalStarted,
+      encodeAttempts: 1,
+    },
+  };
+}
+
 export async function processImagePipeline(
   input: PipelineInput,
   rawSpec: unknown,
   report: ProgressReporter,
+  signal: AbortSignal = new AbortController().signal,
 ): Promise<ImagePipelineResult> {
   const totalStarted = performance.now();
   report("validating", 0.02);
@@ -169,14 +396,14 @@ export async function processImagePipeline(
   } catch {
     throw new ImagePipelineError(
       "UNSUPPORTED_INPUT",
-      "JPG, PNG, WebP 또는 HEIC 이미지만 지원합니다.",
+      "JPG, PNG, WebP, GIF 또는 HEIC 이미지만 지원합니다.",
     );
   }
 
-  if (inspected.animated) {
+  if (inspected.animated && inspected.format !== "gif") {
     throw new ImagePipelineError("ANIMATED_INPUT", "움직이는 이미지는 아직 지원하지 않습니다.");
   }
-  let output: ResolvedOutput;
+  let output: PipelineOutput;
   if (spec.output.format === "source") {
     if (inspected.format === "heic") {
       throw new ImagePipelineError(
@@ -196,6 +423,16 @@ export async function processImagePipeline(
     throw new ImagePipelineError("DIMENSION_LIMIT", "이미지 해상도가 너무 큽니다.");
   }
   const inspectMs = performance.now() - inspectStarted;
+
+  if (inspected.format === "gif") {
+    return processGifPipeline(input, spec, inspected, report, signal, totalStarted, inspectMs);
+  }
+  if (output.format === "gif") {
+    throw new ImagePipelineError(
+      "UNSUPPORTED_INPUT",
+      "GIF 출력은 GIF 입력에서만 사용할 수 있습니다.",
+    );
+  }
 
   report("decoding", 0.2);
   const decodeStarted = performance.now();
@@ -307,7 +544,7 @@ export async function processImagePipeline(
     let targetReached = true;
 
     if (output.format === "png") {
-      blob = await encodeCanvas(canvas, mime);
+      blob = await encodeCanvas(canvas, "image/png");
       if (sizeTarget !== undefined) targetReached = blob.size <= sizeTarget;
     } else {
       const lossyMime = output.format === "jpeg" ? "image/jpeg" : "image/webp";

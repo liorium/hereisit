@@ -324,7 +324,7 @@ export type ImageWarning =
 export interface ImagePipelineResult {
   bytes: ArrayBuffer;
   suggestedName: string;
-  mime: "image/jpeg" | "image/png" | "image/webp";
+  mime: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
   width: number;
   height: number;
   byteLength: number;

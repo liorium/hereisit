@@ -47,10 +47,12 @@ const IMAGE_KINDS = new Set<FileKind>([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "image/gif",
   "image/heic",
   "image/heif",
 ]);
 const COMPRESSION_IMAGE_KINDS = new Set<FileKind>(["image/jpeg", "image/png", "image/webp"]);
+const EDIT_IMAGE_KINDS = new Set<FileKind>([...COMPRESSION_IMAGE_KINDS, "image/gif"]);
 const HEIC_KINDS = new Set<FileKind>(["image/heic", "image/heif"]);
 const HEIC_COMPRESSION_MESSAGE =
   "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
@@ -274,9 +276,9 @@ function isAcceptedKind(
   intent: ImageWorkbenchIntent,
 ): detectedKind is FileKind {
   if (detectedKind === null) return false;
-  return intent === "compress" || intent === "crop" || intent === "rotate"
-    ? COMPRESSION_IMAGE_KINDS.has(detectedKind)
-    : IMAGE_KINDS.has(detectedKind);
+  if (intent === "compress") return COMPRESSION_IMAGE_KINDS.has(detectedKind);
+  if (intent === "crop" || intent === "rotate") return EDIT_IMAGE_KINDS.has(detectedKind);
+  return IMAGE_KINDS.has(detectedKind);
 }
 
 function getValidatedImageImplementation(
@@ -482,6 +484,21 @@ export function ImageWorkbench({
           remainingBytes -= file.size;
         }
 
+        const acceptedGif = accepted.some(({ detectedKind }) => detectedKind === "image/gif");
+        if (acceptedGif && !isCompressionIntent) {
+          setPresetId("custom");
+          setSpec((current) => {
+            if (current.output.format === "source") return current;
+            return {
+              ...current,
+              output: {
+                format: "source",
+                compression: { mode: "quality", quality: currentQuality(current) },
+              },
+            };
+          });
+        }
+
         const additions = accepted.map<WorkItem>(({ file, detectedKind }) => ({
           id: makeId(),
           file,
@@ -494,7 +511,11 @@ export function ImageWorkbench({
         if (additions.length > 0) {
           commitItems((current) => [...current, ...additions]);
           setSelectedId((current) => current ?? additions[0]?.id);
-          setMessage(`${additions.length}개 이미지를 준비했어요.`);
+          setMessage(
+            acceptedGif
+              ? "GIF는 원본 형식으로 유지해요."
+              : `${additions.length}개 이미지를 준비했어요.`,
+          );
         }
 
         const rejected = detected.length - additions.length;
@@ -533,7 +554,15 @@ export function ImageWorkbench({
         if (detectionGenerationRef.current === generation) setDetectionProgress(null);
       }
     },
-    [commitItems, createOwnedUrl, intent, maxFileBytes, maxFiles, maxTotalBytes],
+    [
+      commitItems,
+      createOwnedUrl,
+      intent,
+      isCompressionIntent,
+      maxFileBytes,
+      maxFiles,
+      maxTotalBytes,
+    ],
   );
 
   usePendingToolFiles({
@@ -612,6 +641,10 @@ export function ImageWorkbench({
       ),
     [items],
   );
+  const hasGifInput = useMemo(
+    () => items.some((item) => item.detectedKind === "image/gif"),
+    [items],
+  );
 
   const invalidateResults = () => {
     releaseArchiveLeases();
@@ -634,6 +667,10 @@ export function ImageWorkbench({
 
   const changeFormat = (event: ChangeEvent<HTMLSelectElement>) => {
     const format = event.target.value as "jpeg" | "png" | "webp";
+    if (hasGifInput) {
+      setMessage("GIF는 원본 형식 유지에서 처리해요.");
+      return;
+    }
     invalidateResults();
     setPresetId("custom");
     setSpec((current) => withOutputFormat(current, format));
@@ -1249,9 +1286,11 @@ export function ImageWorkbench({
         className={styles.hiddenInput}
         type="file"
         accept={
-          intent === "compress" || intent === "crop" || intent === "rotate"
+          intent === "compress"
             ? "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-            : "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+            : intent === "crop" || intent === "rotate"
+              ? "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+              : "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.gif,.heic,.heif"
         }
         multiple
         tabIndex={-1}
@@ -1696,6 +1735,8 @@ export function ImageWorkbench({
                   >
                     {intent === "compress" ? (
                       <option value="source">원본 형식 유지</option>
+                    ) : hasGifInput ? (
+                      <option value="source">GIF 원본 형식 유지</option>
                     ) : (
                       <>
                         {spec.output.format === "source" && (

@@ -8,7 +8,7 @@ describe("image crop and rotate tools", () => {
       execution: "browser",
       contract: { id: "image.pipeline", version: 2 },
       launcherInput: {
-        kinds: ["image/jpeg", "image/png", "image/webp"],
+        kinds: ["image/jpeg", "image/png", "image/webp", "image/gif"],
         minFiles: 1,
         maxFiles: 100,
       },
@@ -18,7 +18,7 @@ describe("image crop and rotate tools", () => {
       execution: "browser",
       contract: { id: "image.pipeline", version: 2 },
       launcherInput: {
-        kinds: ["image/jpeg", "image/png", "image/webp"],
+        kinds: ["image/jpeg", "image/png", "image/webp", "image/gif"],
         minFiles: 1,
         maxFiles: 100,
       },

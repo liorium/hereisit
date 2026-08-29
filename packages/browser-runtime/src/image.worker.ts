@@ -241,17 +241,22 @@ async function run(request: RunEnvelope): Promise<void> {
     job.controller.signal.throwIfAborted();
     const input = await readFileInput(request.input.value, job.controller.signal);
     job.controller.signal.throwIfAborted();
-    const result = await processImagePipeline(input, parsedSpec, (phase, fraction) => {
-      job.controller.signal.throwIfAborted();
-      post({
-        protocol: WORKER_PROTOCOL_VERSION,
-        type: "progress",
-        jobId: request.jobId,
-        sequence: sequence++,
-        phase,
-        fraction,
-      });
-    });
+    const result = await processImagePipeline(
+      input,
+      parsedSpec,
+      (phase, fraction) => {
+        job.controller.signal.throwIfAborted();
+        post({
+          protocol: WORKER_PROTOCOL_VERSION,
+          type: "progress",
+          jobId: request.jobId,
+          sequence: sequence++,
+          phase,
+          fraction,
+        });
+      },
+      job.controller.signal,
+    );
     job.controller.signal.throwIfAborted();
     post({ protocol: WORKER_PROTOCOL_VERSION, type: "complete", jobId: request.jobId, result }, [
       result.bytes,
@@ -297,8 +302,8 @@ post({
   protocol: WORKER_PROTOCOL_VERSION,
   type: "ready",
   capabilities: {
-    decode: ["image/jpeg", "image/png", "image/webp"],
-    encode: ["image/jpeg", "image/png", "image/webp"],
+    decode: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    encode: ["image/jpeg", "image/png", "image/webp", "image/gif"],
     offscreenCanvas: typeof OffscreenCanvas !== "undefined",
   },
 });

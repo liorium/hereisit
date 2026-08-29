@@ -160,7 +160,7 @@ const expectedCopy = {
   "image.convert": {
     name: "이미지 형식 변환",
     shortDescription:
-      "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요. 파일은 서버로 전송되지 않습니다.",
+      "JPG, PNG, WebP, GIF, HEIC 이미지를 원하는 형식으로 변환하세요. 파일은 서버로 전송되지 않습니다.",
   },
   "image.convert-from-jpg": {
     name: "JPG에서 변환",
@@ -429,6 +429,14 @@ describe("tool catalog", () => {
     ]);
 
     const imageKinds = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+    const animatedImageKinds = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/heic",
+      "image/heif",
+    ];
     const extraImageKinds = [
       "image/jpeg",
       "image/png",
@@ -448,22 +456,34 @@ describe("tool catalog", () => {
         ["image/jpeg", "image/png", "image/webp"],
       ],
       "pdf.merge": [["application/pdf"], 2, 20, false, ["application/pdf"]],
-      "image.resize": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
-      "image.crop": [
-        ["image/jpeg", "image/png", "image/webp"],
+      "image.resize": [
+        animatedImageKinds,
         1,
         100,
         true,
-        ["image/jpeg", "image/png", "image/webp"],
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
+      "image.crop": [
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
       ],
       "pdf.compress-scanned": [["application/pdf"], 1, 1, false, ["application/pdf"]],
-      "image.convert": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
-      "image.rotate": [
-        ["image/jpeg", "image/png", "image/webp"],
+      "image.convert": [
+        animatedImageKinds,
         1,
         100,
         true,
-        ["image/jpeg", "image/png", "image/webp"],
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
+      "image.rotate": [
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
       ],
       "pdf.split": [["application/pdf"], 1, 1, false, ["application/pdf", "application/zip"]],
       "image.watermark": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],

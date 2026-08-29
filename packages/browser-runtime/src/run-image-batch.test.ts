@@ -208,7 +208,7 @@ describe("runImageBatch", () => {
   it.each([
     ["a non-ordinary buffer", () => Object.setPrototypeOf(new ArrayBuffer(12), null)],
     ["a declared result length that differs from its buffer", () => new ArrayBuffer(11)],
-    ["an invalid output MIME", () => new ArrayBuffer(12), { mime: "image/gif" }],
+    ["an invalid output MIME", () => new ArrayBuffer(12), { mime: "image/avif" }],
     ["an unsafe suggested name", () => new ArrayBuffer(12), { suggestedName: " bad.webp" }],
     ["an invalid warning", () => new ArrayBuffer(12), { warnings: ["PRIVATE_WARNING"] }],
     [
