@@ -40,6 +40,19 @@ async function eventuallyGone(pid: number): Promise<boolean> {
   return false;
 }
 
+async function readEventually(path: string, timeoutMs: number): Promise<string> {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    try {
+      return await readFile(path, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error("timed out waiting for child process marker");
+}
+
 describe("runBoundedCommand", () => {
   it("preserves literal arguments, never invokes a shell, and bounds stderr", async () => {
     const cwd = await root();
@@ -99,7 +112,7 @@ describe("runBoundedCommand", () => {
         command: process.execPath,
         args: ["-e", script, childPidPath],
         cwd,
-        timeoutMs: 100,
+        timeoutMs: 1_500,
         signal: new AbortController().signal,
       });
     } catch (caught) {
@@ -108,7 +121,7 @@ describe("runBoundedCommand", () => {
     expect(error).toBeInstanceOf(BoundedCommandError);
     expect(error).toMatchObject({ reason: "timeout" });
     expect(String(error)).not.toContain(script);
-    const childPid = Number(await readFile(childPidPath, "utf8"));
+    const childPid = Number(await readEventually(childPidPath, 1_000));
     expect(await eventuallyGone(childPid)).toBe(true);
   });
 

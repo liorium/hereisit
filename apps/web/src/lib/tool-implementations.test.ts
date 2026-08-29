@@ -10,9 +10,19 @@ import {
 
 const expectedImplementationMapping = {
   "data.json-format": { intent: "json-format", bundleProfile: "json-quick" },
+  "image.blur-face": { intent: "blur-face", bundleProfile: "image-extra" },
   "image.compress": { intent: "compress", bundleProfile: "image-compression-server" },
   "image.resize": { intent: "resize", bundleProfile: "image" },
+  "image.crop": { intent: "crop", bundleProfile: "image" },
   "image.convert": { intent: "convert", bundleProfile: "image" },
+  "image.convert-from-jpg": { intent: "convert-from-jpg", bundleProfile: "image-extra" },
+  "image.convert-to-jpg": { intent: "convert-to-jpg", bundleProfile: "image-extra" },
+  "image.editor": { intent: "editor", bundleProfile: "image-extra" },
+  "image.html-to-image": { intent: "html-to-image", bundleProfile: "image-extra" },
+  "image.meme": { intent: "meme", bundleProfile: "image-extra" },
+  "image.remove-background": { intent: "remove-background", bundleProfile: "image-extra" },
+  "image.rotate": { intent: "rotate", bundleProfile: "image" },
+  "image.upscale": { intent: "upscale", bundleProfile: "image-extra" },
   "image.watermark": { intent: "watermark", bundleProfile: "image-watermark" },
   "pdf.merge": { intent: "merge", bundleProfile: "pdf-editing" },
   "pdf.split": { intent: "split", bundleProfile: "pdf-editing" },
@@ -38,6 +48,7 @@ const supportedBundleProfiles = [
   "json-quick",
   "image",
   "image-compression-server",
+  "image-extra",
   "image-watermark",
   "pdf-editing",
   "pdf-organize",
@@ -113,6 +124,21 @@ describe("tool implementation ownership", () => {
           maxDepth: 100,
           maxOutputBytes: 4 * 1024 * 1024,
         });
+        continue;
+      }
+
+      if (tool.id === "image.html-to-image") {
+        expect(tool.launcherInput).toBeNull();
+        expect(implementation).toMatchObject({
+          family: "image",
+          sourceFileLimits: {
+            minFiles: 0,
+            maxFiles: 0,
+            maxFileBytes: 0,
+            maxTotalBytes: 0,
+          },
+        });
+        expect(supportedBundleProfiles).toContain(implementation.bundleProfile);
         continue;
       }
 

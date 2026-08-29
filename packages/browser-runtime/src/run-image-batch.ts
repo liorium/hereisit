@@ -185,7 +185,7 @@ function parsePipelineResult(value: unknown): ImagePipelineResult | undefined {
     warnings: rawWarnings,
     timing,
   } = value;
-  const mimes = ["image/jpeg", "image/png", "image/webp"] as const;
+  const mimes = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
   const warnings = [
     "TARGET_SIZE_NOT_REACHED",
     "UPSCALING_SKIPPED",

@@ -311,7 +311,7 @@ test("keeps general image result actions touch-safe at every responsive boundary
   ]);
   await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   expect(downloads).toBe(0);
   await expectResponsiveResultActions(page, [

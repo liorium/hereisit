@@ -101,6 +101,62 @@ function webpHeader(width: number, height: number): Uint8Array {
   return output;
 }
 
+function gifWithFrames(width: number, height: number, frameCount: number): ArrayBuffer {
+  const header = Uint8Array.from([
+    0x47,
+    0x49,
+    0x46,
+    0x38,
+    0x39,
+    0x61,
+    width & 0xff,
+    (width >>> 8) & 0xff,
+    height & 0xff,
+    (height >>> 8) & 0xff,
+    0x80,
+    0,
+    0,
+    0xff,
+    0,
+    0,
+    0,
+    0xff,
+    0,
+  ]);
+  const frame = Uint8Array.from([
+    0x21,
+    0xf9,
+    0x04,
+    0x00,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x2c,
+    0,
+    0,
+    0,
+    0,
+    width & 0xff,
+    (width >>> 8) & 0xff,
+    height & 0xff,
+    (height >>> 8) & 0xff,
+    0x00,
+    0x02,
+    0x02,
+    0x44,
+    0x05,
+    0x00,
+  ]);
+  const bytes = new Uint8Array(header.byteLength + frame.byteLength * frameCount + 1);
+  bytes.set(header);
+  for (let index = 0; index < frameCount; index += 1) {
+    bytes.set(frame, header.byteLength + frame.byteLength * index);
+  }
+  bytes[bytes.length - 1] = 0x3b;
+  return bytes.buffer as ArrayBuffer;
+}
+
 function pngResult(width: number, height: number, byteLength: number): Uint8Array {
   if (byteLength < 58) throw new Error("PNG test result must be at least 58 bytes");
   const chunk = (type: string, data: Uint8Array): Uint8Array => {
@@ -175,6 +231,8 @@ function installCanvasResult(
         return {
           clearRect: vi.fn(),
           drawImage: vi.fn(),
+          rotate: vi.fn(),
+          translate: vi.fn(),
           fillRect: vi.fn(),
           fillStyle: "#ffffff",
           imageSmoothingEnabled: false,
@@ -200,6 +258,150 @@ afterEach(() => {
 });
 
 describe("processImagePipeline size goal", () => {
+  it("preserves animated GIF frames through a source-format transform", async () => {
+    const bytes = gifWithFrames(2, 1, 2);
+    const decodedFrames: number[] = [];
+    class FakeImageDecoder {
+      readonly completed = Promise.resolve();
+      readonly tracks = {
+        selectedTrack: { animated: true, frameCount: 2, repetitionCount: 0 },
+      };
+
+      async decode(options: ImageDecodeOptions = {}) {
+        decodedFrames.push(options.frameIndex ?? 0);
+        return {
+          complete: true,
+          image: {
+            displayWidth: 2,
+            displayHeight: 1,
+            duration: 100_000,
+            close: vi.fn(),
+          },
+        };
+      }
+
+      close(): void {}
+    }
+    vi.stubGlobal("ImageDecoder", FakeImageDecoder);
+    vi.stubGlobal(
+      "ImageData",
+      class {
+        readonly data: Uint8ClampedArray;
+        readonly width: number;
+        readonly height: number;
+
+        constructor(data: Uint8ClampedArray, width: number, height: number) {
+          this.data = data;
+          this.width = width;
+          this.height = height;
+        }
+      },
+    );
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        readonly width: number;
+        readonly height: number;
+
+        constructor(width: number, height: number) {
+          this.width = width;
+          this.height = height;
+        }
+
+        getContext() {
+          return {
+            clearRect: vi.fn(),
+            drawImage: vi.fn(),
+            putImageData: vi.fn(),
+            rotate: vi.fn(),
+            translate: vi.fn(),
+            getImageData: vi.fn(() => ({
+              data: new Uint8ClampedArray(this.width * this.height * 4).fill(255),
+            })),
+          };
+        }
+      },
+    );
+
+    const result = await processImagePipeline(
+      {
+        name: "motion.gif",
+        mimeHint: "image/gif",
+        byteLength: bytes.byteLength,
+        bytes,
+      },
+      {
+        version: 2,
+        resize: { kind: "none" },
+        output: { format: "source", compression: { mode: "quality", quality: 82 } },
+        sizeGoal: { mode: "allow-growth" },
+        autoOrient: true,
+        metadata: "strip",
+      },
+      vi.fn(),
+    );
+
+    expect(decodedFrames).toEqual([0, 1]);
+    expect(result).toMatchObject({
+      mime: "image/gif",
+      suggestedName: "motion-hereisit.gif",
+      width: 2,
+      height: 1,
+    });
+    expect(new TextDecoder().decode(new Uint8Array(result.bytes).subarray(0, 6))).toBe("GIF89a");
+  });
+
+  it("rotates a source image and swaps the result dimensions", async () => {
+    installCanvasResult(40, 7, 5);
+
+    const result = await processImagePipeline(
+      {
+        name: "photo.jpg",
+        mimeHint: "image/jpeg",
+        byteLength: jpegHeader(7, 5).byteLength,
+        bytes: jpegHeader(7, 5).slice().buffer as ArrayBuffer,
+      },
+      {
+        version: 2,
+        resize: { kind: "none" },
+        rotation: 90,
+        output: { format: "webp", compression: { mode: "quality", quality: 90 } },
+        sizeGoal: { mode: "allow-growth" },
+        autoOrient: true,
+        metadata: "strip",
+      },
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({ mime: "image/webp", width: 5, height: 7 });
+  });
+
+  it("skips rotation for items outside the selected orientation", async () => {
+    installCanvasResult(40, 7, 5);
+
+    const result = await processImagePipeline(
+      {
+        name: "landscape.jpg",
+        mimeHint: "image/jpeg",
+        byteLength: jpegHeader(7, 5).byteLength,
+        bytes: jpegHeader(7, 5).slice().buffer as ArrayBuffer,
+      },
+      {
+        version: 2,
+        resize: { kind: "none" },
+        rotation: 90,
+        rotationScope: "portrait",
+        output: { format: "webp", compression: { mode: "quality", quality: 90 } },
+        sizeGoal: { mode: "allow-growth" },
+        autoOrient: true,
+        metadata: "strip",
+      },
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({ mime: "image/webp", width: 7, height: 5 });
+  });
+
   it.each([
     {
       bytes: jpegHeader(7, 5),

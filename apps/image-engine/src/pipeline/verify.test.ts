@@ -113,6 +113,8 @@ describe("live quality v1", () => {
     expect(liveQualityFloor.balanced.screenshotTextSsim).toBe(0.985);
     expect(liveQualityFloor.balanced.screenshotTextMaxMeanChannelDelta).toBe(2 / 255);
     expect(liveQualityFloor.balanced.screenshotTextMaxEdgeLoss).toBe(0.02);
+    expect(liveQualityFloor.smallest.maxMeanChannelDelta).toBe(10 / 255);
+    expect(liveQualityFloor.smallest.maxEdgeLoss).toBe(0.055);
   });
 });
 
@@ -181,7 +183,7 @@ describe("verifyCandidate", () => {
     });
   });
 
-  it("accepts a smaller 4:4:4 fallback for the false original-retained JPEG corpus", async () => {
+  it("accepts the stronger 4:4:4 fallback for the false original-retained JPEG corpus", async () => {
     const directory = await root();
     const sourcePath = "tests/image-corpus/public/photo-ordinary-jpeg.jpg";
     const rawPath = join(directory, "normalized.raw");
@@ -199,14 +201,14 @@ describe("verifyCandidate", () => {
         channels: normalized.channels,
       },
     })
-      .jpeg({ quality: 80, progressive: true, chromaSubsampling: "4:4:4", mozjpeg: true })
+      .jpeg({ quality: 74, progressive: true, chromaSubsampling: "4:4:4", mozjpeg: true })
       .toFile(candidatePath);
     const candidateBytes = (await stat(candidatePath)).size;
 
     await expect(
       verifyCandidate({
         candidate: {
-          id: "jpeg-q80-444",
+          id: "jpeg-q74-444",
           path: candidatePath,
           mime: "image/jpeg",
           byteLength: candidateBytes,

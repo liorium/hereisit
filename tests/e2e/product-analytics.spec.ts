@@ -23,7 +23,7 @@ async function convertSelectedImage(page: Page, filename: string, download = tru
   });
   await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "1개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   if (!download) return;
   await Promise.all([

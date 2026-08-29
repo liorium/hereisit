@@ -473,7 +473,7 @@ test("processes and downloads an image without external uploads", async ({ page 
   await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
 
   await expect(
-    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "1개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("1×1", { exact: true })).toBeVisible();
 
@@ -1163,7 +1163,7 @@ test("downloads one image without consulting available Web Share APIs", async ({
   });
   await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "1개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   expect(downloadCount).toBe(0);
 
@@ -1219,7 +1219,7 @@ test("keeps image ZIP results retryable when download activation throws", async 
   ]);
   await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
 
   await setDownloadActivationBlocked(page, true);
@@ -1259,7 +1259,7 @@ test("downloads a selected image and its batch ZIP without Web Share", async ({ 
   ]);
   await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
   await expect(
-    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   expect(downloadCount).toBe(0);
 
@@ -1306,7 +1306,7 @@ test("preserves every completed result across an interleaved finalizing render",
   await page.getByRole("button", { name: "2개 이미지 형식 변환 →" }).click();
 
   await expect(
-    page.getByRole("strong").filter({ hasText: "2개 이미지 변환을 완료했어요." }),
+    page.getByRole("strong").filter({ hasText: "2개 이미지 변환 작업을 완료했어요." }),
   ).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByLabel("선택한 이미지").locator("small").filter({ hasText: "→" }),
@@ -1340,7 +1340,9 @@ test("accepts a real HEIC file without uploading it", async ({ page, browserName
   await expect(page.getByText("rainbow-451x461.HEIC")).toBeVisible();
   await page.getByRole("button", { name: "1개 이미지 형식 변환 →" }).click();
 
-  const completed = page.getByRole("strong").filter({ hasText: "1개 이미지 변환을 완료했어요." });
+  const completed = page
+    .getByRole("strong")
+    .filter({ hasText: "1개 이미지 변환 작업을 완료했어요." });
   const unsupported = page.getByRole("alert").filter({ hasText: "HEIC 디코딩을 지원하지 않아요" });
   if (browserName === "webkit") {
     await expect(completed.or(unsupported)).toBeVisible({ timeout: 20_000 });

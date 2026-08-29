@@ -1,6 +1,6 @@
 import type { FileKind } from "./tool-catalog";
 
-export const FILE_KIND_DETECTOR_VERSION = 1 as const;
+export const FILE_KIND_DETECTOR_VERSION = 2 as const;
 export const MAX_FILE_KIND_PREFIX_BYTES = 64 * 1024;
 
 export interface FileKindHint {
@@ -54,6 +54,24 @@ export function detectFileKindPrefix(
   if (prefix.byteLength >= 12 && ascii(prefix, 0, 4) === "RIFF" && ascii(prefix, 8, 4) === "WEBP") {
     return "image/webp";
   }
+  if (
+    prefix.byteLength >= 6 &&
+    (ascii(prefix, 0, 6) === "GIF87a" || ascii(prefix, 0, 6) === "GIF89a")
+  ) {
+    return "image/gif";
+  }
+  if (
+    hasBytes(prefix, 0, [0x49, 0x49, 0x2a, 0x00]) ||
+    hasBytes(prefix, 0, [0x4d, 0x4d, 0x00, 0x2a])
+  ) {
+    return "image/tiff";
+  }
+  if (
+    (prefix.byteLength >= 5 && ascii(prefix, 0, 5).toLowerCase() === "<?xml") ||
+    (prefix.byteLength >= 4 && ascii(prefix, 0, 4).toLowerCase() === "<svg")
+  ) {
+    return "image/svg+xml";
+  }
   if (hasPdfHeader(prefix)) return "application/pdf";
   if (hasHeicBrand(prefix)) return "image/heic";
   return undefined;
@@ -64,6 +82,9 @@ export function fileKindLabel(kind: FileKind): string {
     "image/jpeg": "JPG 이미지",
     "image/png": "PNG 이미지",
     "image/webp": "WebP 이미지",
+    "image/gif": "GIF 이미지",
+    "image/tiff": "TIFF 이미지",
+    "image/svg+xml": "SVG 이미지",
     "image/heic": "HEIC 이미지",
     "image/heif": "HEIF 이미지",
     "application/pdf": "PDF",

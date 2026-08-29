@@ -1,9 +1,9 @@
-export type SupportedImageFormat = "jpeg" | "png" | "webp" | "heic";
+export type SupportedImageFormat = "jpeg" | "png" | "webp" | "heic" | "gif";
 export type JpegExifOrientation = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export interface InspectedImageFile {
   format: SupportedImageFormat;
-  mime: "image/jpeg" | "image/png" | "image/webp" | "image/heic";
+  mime: "image/jpeg" | "image/png" | "image/webp" | "image/heic" | "image/gif";
   width: number;
   height: number;
   animated: boolean;
@@ -436,6 +436,90 @@ function inspectJpeg(bytes: Uint8Array): InspectedImageFile {
   return invalidImage();
 }
 
+const MAX_GIF_BLOCKS = 4_096;
+const MAX_GIF_FRAMES = 20;
+
+function readGifSubBlocks(bytes: Uint8Array, offset: number): number {
+  let blockCount = 0;
+  while (true) {
+    if (offset >= bytes.length || blockCount >= MAX_GIF_BLOCKS) invalidImage();
+    const length = bytes[offset] ?? 0;
+    offset += 1;
+    if (length === 0) return offset;
+    blockCount += 1;
+    if (offset + length > bytes.length) invalidImage();
+    offset += length;
+  }
+}
+
+function inspectGif(bytes: Uint8Array): InspectedImageFile {
+  if (bytes.length < 13 || (ascii(bytes, 0, 6) !== "GIF87a" && ascii(bytes, 0, 6) !== "GIF89a")) {
+    invalidImage();
+  }
+
+  const width = readUint16LE(bytes, 6);
+  const height = readUint16LE(bytes, 8);
+  if (!validDimensions(width, height)) invalidImage();
+
+  const packed = bytes[10] ?? 0;
+  let offset = 13;
+  if ((packed & 0x80) !== 0) {
+    const tableLength = 3 * (1 << ((packed & 0x07) + 1));
+    if (offset + tableLength > bytes.length) invalidImage();
+    offset += tableLength;
+  }
+
+  let frameCount = 0;
+  let blockCount = 0;
+  let sawTrailer = false;
+  while (offset < bytes.length) {
+    blockCount += 1;
+    if (blockCount > MAX_GIF_BLOCKS) invalidImage();
+    const introducer = bytes[offset];
+    offset += 1;
+    if (introducer === 0x3b) {
+      sawTrailer = true;
+      break;
+    }
+    if (introducer === 0x21) {
+      if (offset >= bytes.length) invalidImage();
+      const label = bytes[offset] ?? 0;
+      offset += 1;
+      const fixedLength = label === 0xf9 ? 4 : label === 0x01 ? 12 : label === 0xff ? 11 : 0;
+      if (fixedLength > 0) {
+        if (offset >= bytes.length || bytes[offset] !== fixedLength) invalidImage();
+        offset += 1;
+        if (offset + fixedLength > bytes.length) invalidImage();
+        offset += fixedLength;
+      }
+      offset = readGifSubBlocks(bytes, offset);
+      continue;
+    }
+    if (introducer !== 0x2c || offset + 9 > bytes.length) invalidImage();
+
+    const frameWidth = readUint16LE(bytes, offset + 4);
+    const frameHeight = readUint16LE(bytes, offset + 6);
+    if (!validDimensions(frameWidth, frameHeight)) invalidImage();
+    const framePacked = bytes[offset + 8] ?? 0;
+    offset += 9;
+    if ((framePacked & 0x80) !== 0) {
+      const tableLength = 3 * (1 << ((framePacked & 0x07) + 1));
+      if (offset + tableLength > bytes.length) invalidImage();
+      offset += tableLength;
+    }
+    if (offset >= bytes.length) invalidImage();
+    const minimumCodeSize = bytes[offset] ?? 0;
+    if (minimumCodeSize < 2 || minimumCodeSize > 8) invalidImage();
+    offset += 1;
+    offset = readGifSubBlocks(bytes, offset);
+    frameCount += 1;
+    if (frameCount > MAX_GIF_FRAMES) invalidImage();
+  }
+
+  if (!sawTrailer || offset !== bytes.length || frameCount < 1) invalidImage();
+  return { format: "gif", mime: "image/gif", width, height, animated: frameCount > 1 };
+}
+
 const MAX_PNG_CHUNKS = 4096;
 const PNG_ANIMATION_CHUNKS = new Set(["acTL", "fcTL", "fdAT"]);
 
@@ -798,6 +882,10 @@ export function inspectImageHeader(buffer: ArrayBuffer): InspectedImageFile {
     bytes[7] === 0x0a
   ) {
     return inspectPng(bytes);
+  }
+
+  if (bytes.length >= 13 && (ascii(bytes, 0, 6) === "GIF87a" || ascii(bytes, 0, 6) === "GIF89a")) {
+    return inspectGif(bytes);
   }
 
   if (bytes.length >= 20 && ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP") {

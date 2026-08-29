@@ -21,6 +21,15 @@ const tools = [
     runLabel: "1개 이미지 크기 조절 →",
   },
   {
+    path: "/image/crop",
+    title: "이미지 자르기",
+    selectLabel: "자를 이미지 선택",
+    preset: /정사각형 자르기/,
+    visiblePresets: [/정사각형 자르기/, /가로 3:2 자르기/, /세로 4:5 자르기/],
+    presetControl: "button",
+    runLabel: "1개 이미지 자르기 →",
+  },
+  {
     path: "/image/convert",
     title: "이미지 형식 변환",
     selectLabel: "변환할 이미지 선택",
@@ -28,6 +37,15 @@ const tools = [
     visiblePresets: [/형식만 바꾸기/],
     presetControl: "button",
     runLabel: "1개 이미지 형식 변환 →",
+  },
+  {
+    path: "/image/rotate",
+    title: "이미지 회전",
+    selectLabel: "회전할 이미지 선택",
+    preset: /오른쪽으로 90°/,
+    visiblePresets: [/오른쪽으로 90°/, /180° 뒤집기/, /왼쪽으로 90°/],
+    presetControl: "button",
+    runLabel: "1개 이미지 회전 →",
   },
 ] as const;
 
@@ -43,9 +61,19 @@ const imageRoutes = [
     description: "사진의 가로·세로 크기를 빠르게 바꾸세요.",
   },
   {
+    path: "/image/crop",
+    title: "이미지 자르기",
+    description: "원하는 비율로 이미지의 필요한 부분만 잘라내세요.",
+  },
+  {
     path: "/image/convert",
     title: "이미지 형식 변환",
-    description: "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요.",
+    description: "JPG, PNG, WebP, GIF, HEIC 이미지를 원하는 형식으로 변환하세요.",
+  },
+  {
+    path: "/image/rotate",
+    title: "이미지 회전",
+    description: "이미지를 90도 단위로 빠르게 회전하세요.",
   },
   {
     path: "/image/watermark",
@@ -131,6 +159,42 @@ test("links to dedicated image tools and initializes each intent", async ({ page
         await expect(presetGroup.getByRole("button", { name: visiblePreset })).toBeVisible();
       }
     }
+    if (tool.path === "/image/crop") {
+      const topLeftCrop = page.getByRole("button", { name: "왼쪽 위 기준으로 자르기" });
+      await expect(topLeftCrop).toBeVisible();
+      await topLeftCrop.click();
+      await expect(topLeftCrop).toHaveAttribute("aria-pressed", "true");
+      const cropWidth = page.getByRole("spinbutton", { name: "자르기 가로" });
+      await expect(cropWidth).toHaveValue("1200");
+      await cropWidth.fill("640");
+      await expect(cropWidth).toHaveValue("640");
+      const cropPreview = page.getByTestId("crop-preview");
+      await expect(cropPreview).toHaveAttribute(
+        "aria-label",
+        "자르기 미리보기. 드래그해서 위치를 조정할 수 있어요.",
+      );
+      const cropImage = cropPreview.locator("img");
+      const initialCropStyle = await cropImage.getAttribute("style");
+      const cropPreviewBox = await cropPreview.boundingBox();
+      expect(cropPreviewBox).not.toBeNull();
+      if (cropPreviewBox !== null) {
+        await page.mouse.move(
+          cropPreviewBox.x + cropPreviewBox.width * 0.2,
+          cropPreviewBox.y + cropPreviewBox.height * 0.8,
+        );
+        await page.mouse.down();
+        await page.mouse.move(
+          cropPreviewBox.x + cropPreviewBox.width * 0.8,
+          cropPreviewBox.y + cropPreviewBox.height * 0.2,
+        );
+        await page.mouse.up();
+      }
+      await expect.poll(() => cropImage.getAttribute("style")).not.toBe(initialCropStyle);
+      await expect(cropImage).toHaveAttribute(
+        "style",
+        /object-position:\s*\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%;/,
+      );
+    }
     await expect(page.getByRole("button", { name: tool.runLabel, exact: true })).toBeVisible();
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",
@@ -140,8 +204,8 @@ test("links to dedicated image tools and initializes each intent", async ({ page
 });
 
 test("publishes every image route with unique metadata", async ({ page }) => {
-  expect(new Set(imageRoutes.map((tool) => tool.path)).size).toBe(4);
-  expect(new Set(imageRoutes.map((tool) => tool.title)).size).toBe(4);
+  expect(new Set(imageRoutes.map((tool) => tool.path)).size).toBe(6);
+  expect(new Set(imageRoutes.map((tool) => tool.title)).size).toBe(6);
 
   await page.goto("/tools");
   for (const tool of imageRoutes) {

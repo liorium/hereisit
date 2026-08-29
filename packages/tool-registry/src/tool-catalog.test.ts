@@ -34,9 +34,19 @@ import {
 
 type ExpectedAvailableToolId =
   | "data.json-format"
+  | "image.blur-face"
   | "image.compress"
   | "image.convert"
+  | "image.convert-from-jpg"
+  | "image.convert-to-jpg"
+  | "image.crop"
+  | "image.editor"
+  | "image.html-to-image"
+  | "image.meme"
+  | "image.remove-background"
   | "image.resize"
+  | "image.rotate"
+  | "image.upscale"
   | "image.watermark"
   | "pdf.compress-scanned"
   | "pdf.image-to-pdf"
@@ -48,9 +58,19 @@ type ExpectedAvailableToolId =
 
 const expectedAliases = {
   "data.json-format": ["json 정리", "json 포맷", "json 검사", "json 축소"],
+  "image.blur-face": ["얼굴 흐리기", "모자이크", "번호판 흐리기", "개인정보 가리기"],
   "image.compress": ["사진 압축", "이미지 최적화", "용량 줄이기", "jpg 압축", "png 압축"],
   "image.resize": ["사진 크기", "리사이즈", "해상도 변경", "정사각형 자르기"],
+  "image.crop": ["사진 자르기", "이미지 자르기", "크롭", "비율 자르기"],
   "image.convert": ["이미지 변환", "jpg 변환", "png 변환", "webp 변환", "heic 변환"],
+  "image.convert-from-jpg": ["jpg에서 변환", "jpg png", "jpg gif", "움짤 만들기"],
+  "image.convert-to-jpg": ["jpg 변환", "jpeg 변환", "사진 jpg"],
+  "image.editor": ["사진 편집", "이미지 편집", "필터", "사진 효과"],
+  "image.html-to-image": ["html 이미지", "웹페이지 이미지", "스크린샷 만들기"],
+  "image.meme": ["밈 만들기", "밈 생성기", "짤 만들기", "meme"],
+  "image.remove-background": ["배경 지우기", "누끼 따기", "배경 제거"],
+  "image.rotate": ["사진 회전", "이미지 회전", "90도 회전"],
+  "image.upscale": ["이미지 확대", "사진 화질 개선", "업스케일"],
   "image.watermark": ["사진 워터마크", "로고 넣기", "문구 넣기"],
   "pdf.merge": ["pdf 병합", "pdf 합치기", "문서 합치기"],
   "pdf.split": ["pdf 나누기", "페이지 추출", "pdf 분할"],
@@ -63,9 +83,19 @@ const expectedAliases = {
 
 const expectedRelatedToolIds = {
   "data.json-format": ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
+  "image.blur-face": ["image.remove-background", "image.watermark", "image.editor"],
   "image.compress": ["image.resize", "image.convert", "image.watermark"],
   "image.resize": ["image.compress", "image.convert", "image.watermark"],
+  "image.crop": ["image.resize", "image.rotate", "image.compress"],
   "image.convert": ["image.compress", "image.resize", "pdf.image-to-pdf"],
+  "image.convert-from-jpg": ["image.convert-to-jpg", "image.convert", "image.editor"],
+  "image.convert-to-jpg": ["image.convert", "image.compress", "image.resize"],
+  "image.editor": ["image.meme", "image.watermark", "image.crop"],
+  "image.html-to-image": ["image.editor", "image.convert", "data.json-format"],
+  "image.meme": ["image.editor", "image.watermark", "image.convert"],
+  "image.remove-background": ["image.upscale", "image.editor", "image.convert"],
+  "image.rotate": ["image.crop", "image.resize", "image.convert"],
+  "image.upscale": ["image.compress", "image.resize", "image.editor"],
   "image.watermark": ["image.compress", "image.resize", "pdf.watermark"],
   "pdf.merge": ["pdf.split", "pdf.organize", "pdf.image-to-pdf"],
   "pdf.split": ["pdf.merge", "pdf.organize", "pdf.to-image"],
@@ -78,9 +108,19 @@ const expectedRelatedToolIds = {
 
 const expectedContracts = {
   "data.json-format": [JSON_FORMAT_TOOL_ID, JSON_FORMAT_TOOL_VERSION],
+  "image.blur-face": ["image.blur-face", 1],
   "image.compress": ["image.optimize", 1],
   "image.resize": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.crop": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.convert": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.convert-from-jpg": ["image.convert-from-jpg", 1],
+  "image.convert-to-jpg": ["image.convert-to-jpg", 1],
+  "image.editor": ["image.editor", 1],
+  "image.html-to-image": ["image.html-to-image", 1],
+  "image.meme": ["image.meme", 1],
+  "image.remove-background": ["image.remove-background", 1],
+  "image.rotate": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
+  "image.upscale": ["image.upscale", 1],
   "image.watermark": [IMAGE_WATERMARK_TOOL_ID, IMAGE_WATERMARK_TOOL_VERSION],
   "pdf.merge": [PDF_MERGE_TOOL_ID, PDF_TOOL_VERSION],
   "pdf.split": [PDF_SPLIT_TOOL_ID, PDF_TOOL_VERSION],
@@ -102,15 +142,60 @@ const expectedCopy = {
     shortDescription:
       "JPG, PNG, WebP 이미지를 원본 형식 그대로 압축하세요. 처리 전에 로컬 또는 임시 서버 처리 여부를 명확히 알려드려요.",
   },
+  "image.blur-face": {
+    name: "얼굴·개인정보 흐리기",
+    shortDescription:
+      "사진에서 얼굴·번호판처럼 가릴 영역을 자동으로 찾거나 직접 지정해 브라우저에서 흐리게 처리하세요.",
+  },
   "image.resize": {
     name: "이미지 크기 조절",
     shortDescription:
       "사진의 가로·세로 크기를 빠르게 바꾸세요. 업로드 없이 긴 변 축소와 정사각형 자르기를 한 번에 처리합니다.",
   },
+  "image.crop": {
+    name: "이미지 자르기",
+    shortDescription:
+      "원하는 비율로 이미지의 필요한 부분만 잘라내세요. 파일은 서버로 전송되지 않습니다.",
+  },
   "image.convert": {
     name: "이미지 형식 변환",
     shortDescription:
-      "JPG, PNG, WebP, HEIC 이미지를 원하는 형식으로 변환하세요. 파일은 서버로 전송되지 않습니다.",
+      "JPG, PNG, WebP, GIF, HEIC 이미지를 원하는 형식으로 변환하세요. 파일은 서버로 전송되지 않습니다.",
+  },
+  "image.convert-from-jpg": {
+    name: "JPG에서 변환",
+    shortDescription:
+      "JPG 이미지를 PNG로 바꾸거나 여러 장을 움직이는 GIF로 만드세요. 파일은 내 기기에서 처리합니다.",
+  },
+  "image.convert-to-jpg": {
+    name: "JPG로 변환",
+    shortDescription:
+      "PNG, GIF, WebP, SVG 등 이미지를 JPG로 바꾸세요. 여러 파일도 내 기기에서 한 번에 처리합니다.",
+  },
+  "image.rotate": {
+    name: "이미지 회전",
+    shortDescription: "이미지를 90도 단위로 빠르게 회전하세요. 파일은 서버로 전송되지 않습니다.",
+  },
+  "image.editor": {
+    name: "사진 편집",
+    shortDescription:
+      "밝기·대비·채도·필터·프레임·스티커와 문구를 조절해 사진을 내 기기에서 편집하세요.",
+  },
+  "image.html-to-image": {
+    name: "HTML을 이미지로",
+    shortDescription: "HTML과 CSS를 붙여 넣어 외부 업로드 없이 PNG 이미지로 렌더링하세요.",
+  },
+  "image.meme": {
+    name: "밈 만들기",
+    shortDescription: "사진 위아래에 문구를 넣어 밈 이미지를 빠르게 만들어 다운로드하세요.",
+  },
+  "image.remove-background": {
+    name: "배경 지우기",
+    shortDescription: "사진 가장자리와 연결된 배경색을 자동으로 지워 투명 PNG로 저장하세요.",
+  },
+  "image.upscale": {
+    name: "이미지 확대",
+    shortDescription: "JPG·PNG 이미지를 2배 또는 4배로 확대해 더 큰 크기로 저장하세요.",
   },
   "image.watermark": {
     name: "이미지에 워터마크 넣기",
@@ -163,8 +248,8 @@ function expectInvalidCatalog(
 }
 
 describe("tool catalog", () => {
-  it("publishes 12 real tools and one honest roadmap card", () => {
-    expect(availableToolEntries).toHaveLength(12);
+  it("publishes 22 real tools and one honest roadmap card", () => {
+    expect(availableToolEntries).toHaveLength(22);
     expect(plannedToolEntries.map((tool) => tool.id)).toEqual(["media.video-compress"]);
     expect(getAvailableToolById("image.compress")).toMatchObject({
       route: "/image/compress",
@@ -192,7 +277,7 @@ describe("tool catalog", () => {
 
   it("keeps IDs, routes, aliases, and intentional relations valid", () => {
     expect(new Set(toolCatalog.map((tool) => tool.id)).size).toBe(toolCatalog.length);
-    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(12);
+    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(22);
     expect(getRelatedAvailableTools("pdf.merge").map((tool) => tool.id)).toEqual([
       "pdf.split",
       "pdf.organize",
@@ -322,10 +407,20 @@ describe("tool catalog", () => {
       "image.compress",
       "pdf.merge",
       "image.resize",
+      "image.crop",
       "pdf.compress-scanned",
       "image.convert",
+      "image.rotate",
       "pdf.split",
       "image.watermark",
+      "image.convert-to-jpg",
+      "image.convert-from-jpg",
+      "image.editor",
+      "image.meme",
+      "image.html-to-image",
+      "image.upscale",
+      "image.blur-face",
+      "image.remove-background",
       "pdf.organize",
       "pdf.to-image",
       "pdf.image-to-pdf",
@@ -334,6 +429,24 @@ describe("tool catalog", () => {
     ]);
 
     const imageKinds = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+    const animatedImageKinds = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/heic",
+      "image/heif",
+    ];
+    const extraImageKinds = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/tiff",
+      "image/svg+xml",
+      "image/heic",
+      "image/heif",
+    ];
     const expectedExecution = {
       "image.compress": [
         ["image/jpeg", "image/png", "image/webp"],
@@ -343,11 +456,75 @@ describe("tool catalog", () => {
         ["image/jpeg", "image/png", "image/webp"],
       ],
       "pdf.merge": [["application/pdf"], 2, 20, false, ["application/pdf"]],
-      "image.resize": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.resize": [
+        animatedImageKinds,
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
+      "image.crop": [
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
       "pdf.compress-scanned": [["application/pdf"], 1, 1, false, ["application/pdf"]],
-      "image.convert": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.convert": [
+        animatedImageKinds,
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
+      "image.rotate": [
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+        1,
+        100,
+        true,
+        ["image/jpeg", "image/png", "image/webp", "image/gif"],
+      ],
       "pdf.split": [["application/pdf"], 1, 1, false, ["application/pdf", "application/zip"]],
       "image.watermark": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
+      "image.convert-to-jpg": [extraImageKinds, 1, 100, true, ["image/jpeg", "application/zip"]],
+      "image.convert-from-jpg": [
+        ["image/jpeg"],
+        1,
+        20,
+        false,
+        ["image/png", "image/gif", "application/zip"],
+      ],
+      "image.editor": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        1,
+        false,
+        ["image/jpeg", "image/png"],
+      ],
+      "image.meme": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        1,
+        false,
+        ["image/jpeg", "image/png"],
+      ],
+      "image.html-to-image": [undefined, undefined, undefined, undefined, ["image/png"]],
+      "image.upscale": [["image/jpeg", "image/png"], 1, 20, true, ["image/jpeg", "image/png"]],
+      "image.blur-face": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        1,
+        false,
+        ["image/jpeg", "image/png"],
+      ],
+      "image.remove-background": [
+        ["image/jpeg", "image/png", "image/webp"],
+        1,
+        20,
+        true,
+        ["image/png"],
+      ],
       "pdf.organize": [["application/pdf"], 1, 1, false, ["application/pdf"]],
       "pdf.to-image": [
         ["application/pdf"],

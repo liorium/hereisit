@@ -295,7 +295,8 @@ function drawTextWatermark(
   const available = availableWatermarkArea(width, height, spec.marginPercent);
   const fitted = fitWatermarkSize(measuredWidth, measuredHeight, available.width, available.height);
   const fontScale = Math.min(fitted.width / measuredWidth, fitted.height / measuredHeight);
-  context.font = font(requestedFontSize * fontScale);
+  const fittedFontSize = requestedFontSize * fontScale;
+  context.font = font(fittedFontSize);
   const rectangle = computeWatermarkRect({
     canvasWidth: width,
     canvasHeight: height,
@@ -311,6 +312,13 @@ function drawTextWatermark(
     context.globalAlpha = spec.opacity;
     context.fillStyle = spec.watermark.color;
     context.textBaseline = "top";
+    if (spec.watermark.shadow !== undefined) {
+      context.shadowColor = spec.watermark.shadow.color;
+      context.shadowBlur = (fittedFontSize * spec.watermark.shadow.blurPercent) / 100;
+      const offset = (fittedFontSize * spec.watermark.shadow.offsetPercent) / 100;
+      context.shadowOffsetX = offset;
+      context.shadowOffsetY = offset;
+    }
     context.fillText(spec.watermark.text, rectangle.x, rectangle.y);
   } finally {
     context.restore();

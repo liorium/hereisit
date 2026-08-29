@@ -72,11 +72,17 @@ output performs one encode; target-byte mode may encode repeatedly against the a
 v2 `source` output policy. The current catalog and Worker handshake advertise tool version 2, so an old
 v1 Worker cannot be mistaken for a processor that understands source-preserving compression. The
 runtime resolves `source` from inspected bytes, then validates the encoded result's signature, MIME,
-dimensions, and animation state before assigning its download name.
+dimensions, and animation state before assigning its download name. Its `cover` resize may also carry
+a bounded normalized `sourceRect` for the crop screen's free-form selection; older specs without that
+field keep the ratio-and-focal-point behavior.
 
 The source-relative `smaller-only` goal is a hard postcondition. The runtime adaptively encodes against
 the input byte length and returns a result only when it is at least 1% smaller. An item that cannot meet
 the target is reported as already optimized; a larger generated file is never offered for download.
+
+The server `image.optimize@1` path keeps the same-format output and uses MozJPEG/WebP/OxiPNG candidates.
+Its `smallest` JPEG plan tries a photographic 4:4:4 quality-74 fallback with a bounded relaxed visual
+gate; screenshot and graphic classes retain the quality-80 fallback and stricter text gate.
 
 - 파일 선택 검사와 로컬 무손실 메타데이터 작업은 전용 optimize Worker가 네이티브 `File`을 읽어 수행한다.
 - 스마트 로컬 압축은 공통 이미지 Worker에서 원본을 읽고 인코드한다.

@@ -25,8 +25,18 @@ const migratedRoutes = [
     expectedWorkbench: "image-workbench",
   },
   {
+    route: "/image/crop",
+    sourcePath: "apps/web/src/app/image/crop/page.tsx",
+    expectedWorkbench: "image-workbench",
+  },
+  {
     route: "/image/convert",
     sourcePath: "apps/web/src/app/image/convert/page.tsx",
+    expectedWorkbench: "image-workbench",
+  },
+  {
+    route: "/image/rotate",
+    sourcePath: "apps/web/src/app/image/rotate/page.tsx",
     expectedWorkbench: "image-workbench",
   },
   {

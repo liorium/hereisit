@@ -197,6 +197,7 @@ async function read(
 
 function inspection(bytes: ArrayBuffer): ImageOptimizeInspection {
   const result = inspectImageHeader(bytes);
+  if (result.format === "gif" || result.mime === "image/gif") throw new Error("unsupported");
   return {
     mime: result.mime,
     width: result.width,

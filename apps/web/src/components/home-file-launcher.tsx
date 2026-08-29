@@ -36,6 +36,9 @@ const KIND_LABELS: Partial<Record<FileKind, string>> = {
   "image/jpeg": "JPG 이미지",
   "image/png": "PNG 이미지",
   "image/webp": "WebP 이미지",
+  "image/gif": "GIF 이미지",
+  "image/tiff": "TIFF 이미지",
+  "image/svg+xml": "SVG 이미지",
   "image/heic": "HEIC 이미지",
   "image/heif": "HEIF 이미지",
   "application/pdf": "PDF 문서",
@@ -189,7 +192,7 @@ export function HomeFileLauncher(): ReactNode {
         onDrop={handleDrop}
       >
         <input
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/tiff,image/svg+xml,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.svg,.heic,.heif,.pdf"
           className={styles.fileInput}
           id="home-file-input"
           multiple

@@ -27,6 +27,33 @@ export const PDF_COMPRESS_SCANNED_TOOL_VERSION = 2 as const;
 
 const positiveDimension = z.number().int().min(1).max(16_384);
 const quality = z.number().int().min(1).max(100);
+const sourceRectSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().gt(0).max(1),
+    height: z.number().gt(0).max(1),
+  })
+  .strict()
+  .refine((value) => value.x + value.width <= 1, {
+    message: "자르기 영역이 이미지 너비를 벗어날 수 없습니다.",
+    path: ["width"],
+  })
+  .refine((value) => value.y + value.height <= 1, {
+    message: "자르기 영역이 이미지 높이를 벗어날 수 없습니다.",
+    path: ["height"],
+  });
+
+export type ImageSourceRect = z.input<typeof sourceRectSchema>;
+export const imageRotationSchema = z.union([
+  z.literal(0),
+  z.literal(90),
+  z.literal(180),
+  z.literal(270),
+]);
+export type ImageRotation = z.infer<typeof imageRotationSchema>;
+export const imageRotationScopeSchema = z.enum(["all", "portrait", "landscape"]);
+export type ImageRotationScope = z.infer<typeof imageRotationScopeSchema>;
 
 function isSafeWatermarkText(value: string): boolean {
   return Array.from(value).every((character) => {
@@ -86,9 +113,15 @@ export const resizeSpecSchema = z.discriminatedUnion("kind", [
       message: "최대 너비 또는 높이 중 하나가 필요합니다.",
     }),
   z.object({
+    kind: z.literal("percentage"),
+    percent: z.number().int().min(1).max(400),
+    allowUpscale: z.boolean().default(false),
+  }),
+  z.object({
     kind: z.literal("cover"),
     width: positiveDimension,
     height: positiveDimension,
+    sourceRect: sourceRectSchema.optional(),
     focalPoint: z
       .object({
         x: z.number().min(0).max(1),
@@ -156,18 +189,41 @@ export const imageOutputSchema = z.discriminatedUnion("format", [
   pngImageOutputSchema,
 ]);
 
-export const imagePipelineSpecV1Schema = z.object({
-  version: z.literal(1),
-  resize: resizeSpecSchema,
-  output: imageOutputV1Schema,
-  sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
-  autoOrient: z.literal(true),
-  metadata: z.literal("strip"),
-});
+export const imagePipelineSpecV1Schema = z
+  .object({
+    version: z.literal(1),
+    resize: resizeSpecSchema,
+    output: imageOutputV1Schema,
+    rotationScope: imageRotationScopeSchema.optional(),
+    sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
+    autoOrient: z.literal(true),
+    metadata: z.literal("strip"),
+  })
+  .superRefine((value, context) => {
+    if (value.rotationScope !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["rotationScope"],
+        message: "회전 방향 필터는 이미지 파이프라인 v2에서만 사용할 수 있습니다.",
+      });
+    }
+    if (
+      (value.resize.kind === "cover" && value.resize.sourceRect !== undefined) ||
+      value.resize.kind === "percentage"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["resize", "sourceRect"],
+        message: "자유 자르기 영역은 이미지 파이프라인 v2에서만 사용할 수 있습니다.",
+      });
+    }
+  });
 
 export const imagePipelineSpecV2Schema = z.object({
   version: z.literal(2),
   resize: resizeSpecSchema,
+  rotation: imageRotationSchema.default(0),
+  rotationScope: imageRotationScopeSchema.default("all"),
   output: imageOutputSchema,
   sizeGoal: imageSizeGoalSchema.default({ mode: "allow-growth" }),
   autoOrient: z.literal(true),
@@ -189,6 +245,14 @@ export const imageWatermarkSpecSchema = z
           text: imageWatermarkTextSchema,
           color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
           sizePercent: z.number().int().min(4).max(30),
+          shadow: z
+            .object({
+              color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+              blurPercent: z.number().int().min(0).max(20),
+              offsetPercent: z.number().int().min(0).max(10),
+            })
+            .strict()
+            .optional(),
         })
         .strict(),
       z
@@ -260,7 +324,7 @@ export type ImageWarning =
 export interface ImagePipelineResult {
   bytes: ArrayBuffer;
   suggestedName: string;
-  mime: "image/jpeg" | "image/png" | "image/webp";
+  mime: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
   width: number;
   height: number;
   byteLength: number;

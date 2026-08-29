@@ -1,18 +1,28 @@
 "use client";
 
 import { runImageBatch, supportsBrowserImageRuntime } from "@hereisit/browser-runtime/image";
+import {
+  type CropFocalPointPosition,
+  clampImageDimension,
+  computeDrawGeometry,
+  focalPointForCropPosition,
+  focalPointFromNormalizedPosition,
+  normalizedSourceRectFromPoints,
+} from "@hereisit/image-tool";
 import type {
   BatchHandle,
   BatchRuntimeEvent,
   ImagePhase,
   ImagePipelineResult,
   ImagePipelineSpecV2,
+  ImageRotationScope,
 } from "@hereisit/tool-contracts";
 import { findImagePreset, imagePresets } from "@hereisit/tool-registry";
 import type { AvailableToolId, FileKind } from "@hereisit/tool-registry/catalog";
 import {
   type ChangeEvent,
   type DragEvent,
+  type PointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -37,20 +47,30 @@ const IMAGE_KINDS = new Set<FileKind>([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "image/gif",
   "image/heic",
   "image/heif",
 ]);
 const COMPRESSION_IMAGE_KINDS = new Set<FileKind>(["image/jpeg", "image/png", "image/webp"]);
+const EDIT_IMAGE_KINDS = new Set<FileKind>([...COMPRESSION_IMAGE_KINDS, "image/gif"]);
 const HEIC_KINDS = new Set<FileKind>(["image/heic", "image/heif"]);
 const HEIC_COMPRESSION_MESSAGE =
   "HEIC는 같은 형식으로 다시 저장할 수 없어 용량 줄이기에서 지원하지 않아요. 이미지 형식 변환 도구를 이용해 주세요.";
-export type ImageWorkbenchIntent = "general" | "compress" | "resize" | "convert";
+export type ImageWorkbenchIntent =
+  | "general"
+  | "compress"
+  | "resize"
+  | "crop"
+  | "convert"
+  | "rotate";
 
 const INTENT_PRESET_IDS: Record<ImageWorkbenchIntent, readonly string[] | null> = {
   general: null,
   compress: ["balanced"],
   resize: ["web-1920", "product-square", "social-square"],
+  crop: ["crop-square", "crop-landscape", "crop-portrait"],
   convert: ["convert-webp"],
+  rotate: ["rotate-90", "rotate-180", "rotate-270"],
 };
 
 const INTENT_CONFIG: Record<
@@ -84,12 +104,26 @@ const INTENT_CONFIG: Record<
     runLabel: "이미지 크기 조절",
     workbenchTitle: "크기 조절 작업대",
   },
+  crop: {
+    defaultPresetId: "crop-square",
+    emptyTitle: "자를 이미지를 놓거나 선택하세요",
+    selectLabel: "자를 이미지 선택",
+    runLabel: "이미지 자르기",
+    workbenchTitle: "이미지 자르기 작업대",
+  },
   convert: {
     defaultPresetId: "convert-webp",
     emptyTitle: "변환할 이미지를 놓거나 선택하세요",
     selectLabel: "변환할 이미지 선택",
     runLabel: "이미지 형식 변환",
     workbenchTitle: "형식 변환 작업대",
+  },
+  rotate: {
+    defaultPresetId: "rotate-90",
+    emptyTitle: "회전할 이미지를 놓거나 선택하세요",
+    selectLabel: "회전할 이미지 선택",
+    runLabel: "이미지 회전",
+    workbenchTitle: "이미지 회전 작업대",
   },
 };
 
@@ -115,6 +149,37 @@ interface WorkItem {
   error?: string | undefined;
 }
 
+type CropSourceRect = NonNullable<
+  Extract<ImagePipelineSpecV2["resize"], { kind: "cover" }>["sourceRect"]
+>;
+
+type CropEditMode = "position" | "area";
+
+function sourceRectForResize(
+  sourceWidth: number,
+  sourceHeight: number,
+  resize: ImagePipelineSpecV2["resize"],
+): CropSourceRect | undefined {
+  if (resize.kind !== "cover") return undefined;
+  if (resize.sourceRect !== undefined) return resize.sourceRect;
+  const geometry = computeDrawGeometry(sourceWidth, sourceHeight, resize);
+  return {
+    x: geometry.sourceX / sourceWidth,
+    y: geometry.sourceY / sourceHeight,
+    width: geometry.sourceWidth / sourceWidth,
+    height: geometry.sourceHeight / sourceHeight,
+  };
+}
+
+function cropPreviewFrameStyle(size: { width: number; height: number } | null) {
+  if (size === null) return undefined;
+  const scale = Math.min(520 / size.width, 390 / size.height, 1);
+  return {
+    width: `${Math.max(1, Math.round(size.width * scale))}px`,
+    aspectRatio: `${size.width} / ${size.height}`,
+  };
+}
+
 function cloneSpec(spec: ImagePipelineSpecV2): ImagePipelineSpecV2 {
   return structuredClone(spec);
 }
@@ -134,7 +199,12 @@ function makeId(): string {
 function phaseLabel(phase: ImagePhase | undefined, intent: ImageWorkbenchIntent): string {
   if (phase === "validating") return "확인 중";
   if (phase === "decoding") return "읽는 중";
-  if (phase === "transforming") return intent === "resize" ? "크기 조절 중" : "이미지 준비 중";
+  if (phase === "transforming") {
+    if (intent === "resize") return "크기 조절 중";
+    if (intent === "crop") return "자르는 중";
+    if (intent === "rotate") return "회전 중";
+    return "이미지 준비 중";
+  }
   if (phase === "encoding") return "압축 중";
   if (phase === "finalizing") return "마무리 중";
   return "대기 중";
@@ -206,9 +276,9 @@ function isAcceptedKind(
   intent: ImageWorkbenchIntent,
 ): detectedKind is FileKind {
   if (detectedKind === null) return false;
-  return intent === "compress"
-    ? COMPRESSION_IMAGE_KINDS.has(detectedKind)
-    : IMAGE_KINDS.has(detectedKind);
+  if (intent === "compress") return COMPRESSION_IMAGE_KINDS.has(detectedKind);
+  if (intent === "crop" || intent === "rotate") return EDIT_IMAGE_KINDS.has(detectedKind);
+  return IMAGE_KINDS.has(detectedKind);
 }
 
 function getValidatedImageImplementation(
@@ -226,6 +296,36 @@ function getValidatedImageImplementation(
   return implementation;
 }
 
+const CROP_RATIOS = [
+  ["3:2", 3, 2],
+  ["4:3", 4, 3],
+  ["5:4", 5, 4],
+  ["1:1", 1, 1],
+  ["4:5", 4, 5],
+  ["3:4", 3, 4],
+  ["2:3", 2, 3],
+] as const;
+
+const CROP_FOCAL_POSITIONS = [
+  ["top-left", "왼쪽 위", "↖"],
+  ["top-center", "가운데 위", "↑"],
+  ["top-right", "오른쪽 위", "↗"],
+  ["center-left", "왼쪽 가운데", "←"],
+  ["center", "가운데", "•"],
+  ["center-right", "오른쪽 가운데", "→"],
+  ["bottom-left", "왼쪽 아래", "↙"],
+  ["bottom-center", "가운데 아래", "↓"],
+  ["bottom-right", "오른쪽 아래", "↘"],
+] as const satisfies readonly [CropFocalPointPosition, string, string][];
+
+function cropRatioKey(resize: ImagePipelineSpecV2["resize"]): string {
+  if (resize.kind !== "cover") return "";
+  const ratio = resize.width / resize.height;
+  return (
+    CROP_RATIOS.find(([, width, height]) => Math.abs(ratio - width / height) < 0.01)?.[0] ?? ""
+  );
+}
+
 export function ImageWorkbench({
   intent,
   toolId,
@@ -237,6 +337,15 @@ export function ImageWorkbench({
   const { minFiles, maxFiles, maxFileBytes, maxTotalBytes } = implementation.sourceFileLimits;
   const intentCopy = INTENT_CONFIG[intent];
   const isCompressionIntent = intent === "compress";
+  const isCropIntent = intent === "crop";
+  const isRotateIntent = intent === "rotate";
+  const operationLabel = isCompressionIntent
+    ? "압축"
+    : isCropIntent
+      ? "자르기"
+      : isRotateIntent
+        ? "회전"
+        : "변환";
   const [initialPreset] = useState(() => resolveInitialPreset(intent));
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -245,6 +354,10 @@ export function ImageWorkbench({
   const [dragging, setDragging] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [cropEditMode, setCropEditMode] = useState<CropEditMode>("position");
+  const [cropImageSize, setCropImageSize] = useState<{ width: number; height: number } | null>(
+    null,
+  );
   const [detectionProgress, setDetectionProgress] = useState<{
     completed: number;
     total: number;
@@ -259,6 +372,10 @@ export function ImageWorkbench({
   const itemsRef = useRef(items);
   const objectUrlsRef = useRef(new Set<string>());
   const archiveLeasesRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const cropPointerIdRef = useRef<number | null>(null);
+  const cropAreaPointerIdRef = useRef<number | null>(null);
+  const cropAreaStartRef = useRef<{ x: number; y: number } | null>(null);
+  const cropImageRef = useRef<HTMLImageElement>(null);
   const productRunRef = useRef<ReturnType<typeof startProductUsageRun> | null>(null);
   const detecting = detectionProgress !== null;
   const busy = processing || archiving || detecting;
@@ -367,6 +484,21 @@ export function ImageWorkbench({
           remainingBytes -= file.size;
         }
 
+        const acceptedGif = accepted.some(({ detectedKind }) => detectedKind === "image/gif");
+        if (acceptedGif && !isCompressionIntent) {
+          setPresetId("custom");
+          setSpec((current) => {
+            if (current.output.format === "source") return current;
+            return {
+              ...current,
+              output: {
+                format: "source",
+                compression: { mode: "quality", quality: currentQuality(current) },
+              },
+            };
+          });
+        }
+
         const additions = accepted.map<WorkItem>(({ file, detectedKind }) => ({
           id: makeId(),
           file,
@@ -379,7 +511,11 @@ export function ImageWorkbench({
         if (additions.length > 0) {
           commitItems((current) => [...current, ...additions]);
           setSelectedId((current) => current ?? additions[0]?.id);
-          setMessage(`${additions.length}개 이미지를 준비했어요.`);
+          setMessage(
+            acceptedGif
+              ? "GIF는 원본 형식으로 유지해요."
+              : `${additions.length}개 이미지를 준비했어요.`,
+          );
         }
 
         const rejected = detected.length - additions.length;
@@ -418,7 +554,15 @@ export function ImageWorkbench({
         if (detectionGenerationRef.current === generation) setDetectionProgress(null);
       }
     },
-    [commitItems, createOwnedUrl, intent, maxFileBytes, maxFiles, maxTotalBytes],
+    [
+      commitItems,
+      createOwnedUrl,
+      intent,
+      isCompressionIntent,
+      maxFileBytes,
+      maxFiles,
+      maxTotalBytes,
+    ],
   );
 
   usePendingToolFiles({
@@ -451,6 +595,19 @@ export function ImageWorkbench({
     () => items.find((item) => item.id === selectedId) ?? items[0],
     [items, selectedId],
   );
+  const cropPreviewRect = useMemo(() => {
+    if (cropImageSize === null) return undefined;
+    return sourceRectForResize(cropImageSize.width, cropImageSize.height, spec.resize);
+  }, [cropImageSize, spec.resize]);
+
+  const selectedCropKey = selected?.id;
+  useEffect(() => {
+    if (selectedCropKey === undefined) return;
+    setCropImageSize(null);
+    setCropEditMode("position");
+    cropAreaPointerIdRef.current = null;
+    cropAreaStartRef.current = null;
+  }, [selectedCropKey]);
   const totalInputBytes = useMemo(
     () => items.reduce((total, item) => total + item.file.size, 0),
     [items],
@@ -484,6 +641,10 @@ export function ImageWorkbench({
       ),
     [items],
   );
+  const hasGifInput = useMemo(
+    () => items.some((item) => item.detectedKind === "image/gif"),
+    [items],
+  );
 
   const invalidateResults = () => {
     releaseArchiveLeases();
@@ -494,21 +655,22 @@ export function ImageWorkbench({
     if (!hasResultOrError) return;
     for (const item of itemsRef.current) revokeOwnedUrl(item.resultUrl);
     commitItems((current) => current.map((item) => resetWorkItem(item)));
-    setMessage(
-      isCompressionIntent
-        ? "설정이 바뀌었어요. 새 설정으로 다시 압축해 주세요."
-        : "설정이 바뀌었어요. 새 설정으로 다시 변환해 주세요.",
-    );
+    setMessage(`설정이 바뀌었어요. 새 설정으로 다시 ${operationLabel} 작업을 해 주세요.`);
   };
 
   const choosePreset = (id: string) => {
     invalidateResults();
+    if (isCropIntent) setCropEditMode("position");
     setPresetId(id);
     setSpec(cloneSpec(findImagePreset(id).spec));
   };
 
   const changeFormat = (event: ChangeEvent<HTMLSelectElement>) => {
     const format = event.target.value as "jpeg" | "png" | "webp";
+    if (hasGifInput) {
+      setMessage("GIF는 원본 형식 유지에서 처리해요.");
+      return;
+    }
     invalidateResults();
     setPresetId("custom");
     setSpec((current) => withOutputFormat(current, format));
@@ -547,8 +709,9 @@ export function ImageWorkbench({
     );
   };
 
-  const changeResizeMode = (mode: "none" | "inside" | "cover") => {
+  const changeResizeMode = (mode: "none" | "inside" | "percentage" | "cover") => {
     invalidateResults();
+    if (isCropIntent) setCropEditMode("position");
     setPresetId("custom");
     setSpec((current) => ({
       ...current,
@@ -556,9 +719,250 @@ export function ImageWorkbench({
         mode === "none"
           ? { kind: "none" }
           : mode === "inside"
-            ? { kind: "inside", maxWidth: 1920, maxHeight: 1920 }
-            : { kind: "cover", width: 1000, height: 1000 },
+            ? {
+                kind: "inside",
+                maxWidth: 1920,
+                maxHeight: 1920,
+                allowUpscale:
+                  current.resize.kind === "inside" ? (current.resize.allowUpscale ?? false) : false,
+              }
+            : mode === "percentage"
+              ? { kind: "percentage", percent: 100, allowUpscale: false }
+              : { kind: "cover", width: 1000, height: 1000 },
     }));
+  };
+
+  const changeCropRatio = (ratioKey: string) => {
+    const ratio = CROP_RATIOS.find(([key]) => key === ratioKey);
+    if (ratio === undefined) return;
+    const [, widthRatio, heightRatio] = ratio;
+    const longEdge = 1200;
+    const scale = longEdge / Math.max(widthRatio, heightRatio);
+    invalidateResults();
+    setCropEditMode("position");
+    setPresetId("custom");
+    setSpec((current) => ({
+      ...current,
+      resize: {
+        kind: "cover",
+        width: Math.max(1, Math.round(widthRatio * scale)),
+        height: Math.max(1, Math.round(heightRatio * scale)),
+        ...(current.resize.kind === "cover" && current.resize.focalPoint !== undefined
+          ? { focalPoint: current.resize.focalPoint }
+          : {}),
+      },
+    }));
+  };
+
+  const changeCropPosition = (position: CropFocalPointPosition) => {
+    invalidateResults();
+    setCropEditMode("position");
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      const { sourceRect: _sourceRect, ...resize } = current.resize;
+      return {
+        ...current,
+        resize: { ...resize, focalPoint: focalPointForCropPosition(position) },
+      };
+    });
+  };
+
+  const changeCropFocalPoint = (x: number, y: number) => {
+    const focalPoint = focalPointFromNormalizedPosition(x, y);
+    setCropEditMode("position");
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      const { sourceRect: _sourceRect, ...resize } = current.resize;
+      return { ...current, resize: { ...resize, focalPoint } };
+    });
+  };
+
+  const updateCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    changeCropFocalPoint(
+      (event.clientX - bounds.left) / bounds.width,
+      (event.clientY - bounds.top) / bounds.height,
+    );
+  };
+
+  const beginCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (busy || !isCropIntent || cropEditMode !== "position" || spec.resize.kind !== "cover") {
+      return;
+    }
+    invalidateResults();
+    cropPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    updateCropPointer(event);
+  };
+
+  const moveCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateCropPointer(event);
+  };
+
+  const endCropPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropPointerIdRef.current !== event.pointerId) return;
+    cropPointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const cropPointForPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    const image = cropImageRef.current;
+    if (image === null) return undefined;
+    const bounds = image.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return undefined;
+    return focalPointFromNormalizedPosition(
+      (event.clientX - bounds.left) / bounds.width,
+      (event.clientY - bounds.top) / bounds.height,
+    );
+  };
+
+  const updateCropArea = (event: PointerEvent<HTMLButtonElement>) => {
+    const start = cropAreaStartRef.current;
+    const point = cropPointForPointer(event);
+    if (start === null || point === undefined) return;
+    const sourceRect = normalizedSourceRectFromPoints(
+      start.x,
+      start.y,
+      point.x,
+      point.y,
+      cropImageSize === null ? 0.01 : 1 / cropImageSize.width,
+      cropImageSize === null ? 0.01 : 1 / cropImageSize.height,
+    );
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      const width =
+        cropImageSize === null
+          ? current.resize.width
+          : clampImageDimension(cropImageSize.width * sourceRect.width, current.resize.width);
+      const height =
+        cropImageSize === null
+          ? current.resize.height
+          : clampImageDimension(cropImageSize.height * sourceRect.height, current.resize.height);
+      return {
+        ...current,
+        resize: { ...current.resize, width, height, sourceRect, focalPoint: undefined },
+      };
+    });
+  };
+
+  const beginCropAreaPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (busy || !isCropIntent || cropEditMode !== "area" || spec.resize.kind !== "cover") {
+      return;
+    }
+    const point = cropPointForPointer(event);
+    if (point === undefined) return;
+    invalidateResults();
+    cropAreaStartRef.current = point;
+    cropAreaPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    updateCropArea(event);
+  };
+
+  const moveCropAreaPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropAreaPointerIdRef.current !== event.pointerId) return;
+    event.preventDefault();
+    updateCropArea(event);
+  };
+
+  const endCropAreaPointer = (event: PointerEvent<HTMLButtonElement>) => {
+    if (cropAreaPointerIdRef.current !== event.pointerId) return;
+    cropAreaPointerIdRef.current = null;
+    cropAreaStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const enableCropArea = () => {
+    if (busy) return;
+    invalidateResults();
+    setCropEditMode("area");
+    if (cropImageSize === null) return;
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      return current.resize.sourceRect === undefined
+        ? {
+            ...current,
+            resize: {
+              ...current.resize,
+              sourceRect: sourceRectForResize(
+                cropImageSize.width,
+                cropImageSize.height,
+                current.resize,
+              ),
+            },
+          }
+        : current;
+    });
+  };
+
+  const disableCropArea = () => {
+    if (cropEditMode === "area") invalidateResults();
+    setCropEditMode("position");
+    cropAreaPointerIdRef.current = null;
+    cropAreaStartRef.current = null;
+    setSpec((current) => {
+      if (current.resize.kind !== "cover" || current.resize.sourceRect === undefined) {
+        return current;
+      }
+      const { sourceRect: _sourceRect, ...resize } = current.resize;
+      return { ...current, resize };
+    });
+  };
+
+  const handleCropImageLoad = (event: { currentTarget: HTMLImageElement }) => {
+    const width = event.currentTarget.naturalWidth;
+    const height = event.currentTarget.naturalHeight;
+    if (width < 1 || height < 1) return;
+    setCropImageSize({ width, height });
+    if (cropEditMode !== "area") return;
+    setSpec((current) => {
+      if (current.resize.kind !== "cover" || current.resize.sourceRect !== undefined) {
+        return current;
+      }
+      return {
+        ...current,
+        resize: {
+          ...current.resize,
+          sourceRect: sourceRectForResize(width, height, current.resize),
+        },
+      };
+    });
+  };
+
+  const changeCropDimension = (axis: "width" | "height", value: number) => {
+    const dimension = clampImageDimension(value, 1200);
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => {
+      if (current.resize.kind !== "cover") return current;
+      return {
+        ...current,
+        resize: { ...current.resize, [axis]: dimension },
+      };
+    });
+  };
+
+  const changeRotation = (rotation: 0 | 90 | 180 | 270) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({ ...current, rotation }));
+  };
+
+  const changeRotationScope = (rotationScope: ImageRotationScope) => {
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) => ({ ...current, rotationScope }));
   };
 
   const changeSize = (value: number) => {
@@ -567,13 +971,32 @@ export function ImageWorkbench({
     setPresetId("custom");
     setSpec((current) => {
       if (current.resize.kind === "inside") {
-        return { ...current, resize: { kind: "inside", maxWidth: size, maxHeight: size } };
+        return {
+          ...current,
+          resize: {
+            kind: "inside",
+            maxWidth: size,
+            maxHeight: size,
+            allowUpscale: current.resize.allowUpscale ?? false,
+          },
+        };
       }
       if (current.resize.kind === "cover") {
         return { ...current, resize: { ...current.resize, width: size, height: size } };
       }
       return current;
     });
+  };
+
+  const changePercentage = (value: number) => {
+    const percent = Math.max(1, Math.min(400, Math.round(value || 100)));
+    invalidateResults();
+    setPresetId("custom");
+    setSpec((current) =>
+      current.resize.kind === "percentage"
+        ? { ...current, resize: { ...current.resize, percent } }
+        : current,
+    );
   };
 
   const removeItem = (id: string) => {
@@ -604,6 +1027,10 @@ export function ImageWorkbench({
     itemsRef.current = [];
     setItems([]);
     setSelectedId(undefined);
+    setCropEditMode("position");
+    setCropImageSize(null);
+    cropAreaPointerIdRef.current = null;
+    cropAreaStartRef.current = null;
     setProcessing(false);
     setArchiving(false);
     setDetectionProgress(null);
@@ -679,11 +1106,7 @@ export function ImageWorkbench({
     itemsRef.current = queuedItems;
     setItems(queuedItems);
     setProcessing(true);
-    setMessage(
-      isCompressionIntent
-        ? `${sourceItems.length}개 이미지를 압축하고 있어요.`
-        : `${sourceItems.length}개 이미지를 변환하고 있어요.`,
-    );
+    setMessage(`${sourceItems.length}개 이미지 ${operationLabel} 작업 중이에요.`);
 
     let handle: BatchHandle | undefined;
     try {
@@ -712,11 +1135,7 @@ export function ImageWorkbench({
         (result) => result.status === "rejected" && result.error.code !== "NO_SIZE_REDUCTION",
       ).length;
       if (successes === results.length) {
-        setMessage(
-          String(successes).concat(
-            isCompressionIntent ? "개 이미지 압축을 완료했어요." : "개 이미지 변환을 완료했어요.",
-          ),
-        );
+        setMessage(String(successes).concat(`개 이미지 ${operationLabel} 작업을 완료했어요.`));
       } else if (unchanged === results.length) {
         setMessage("이미 충분히 작아 더 줄이지 못했어요.");
       } else if (successes > 0) {
@@ -869,7 +1288,9 @@ export function ImageWorkbench({
         accept={
           intent === "compress"
             ? "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-            : "image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+            : intent === "crop" || intent === "rotate"
+              ? "image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
+              : "image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.gif,.heic,.heif"
         }
         multiple
         tabIndex={-1}
@@ -901,7 +1322,9 @@ export function ImageWorkbench({
             <p className={styles.dropEyebrow}>DROP YOUR IMAGES</p>
             <h2 id="workbench-title">{intentCopy.emptyTitle}</h2>
             <p>
-              {intent === "compress" ? "JPG, PNG, WebP" : "JPG, PNG, WebP · HEIC(Safari 17+)"}
+              {intent === "compress" || intent === "crop" || intent === "rotate"
+                ? "JPG, PNG, WebP"
+                : "JPG, PNG, WebP · HEIC(Safari 17+)"}
               {" · 파일당 50MB · 총 250MB · 최대 100개"}
             </p>
           </div>
@@ -1006,7 +1429,7 @@ export function ImageWorkbench({
                       <span
                         className={styles.rowProgress}
                         role="progressbar"
-                        aria-label={`${item.file.name} ${isCompressionIntent ? "압축" : "변환"} 진행률`}
+                        aria-label={`${item.file.name} ${operationLabel} 진행률`}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(item.progress * 100)}
@@ -1018,10 +1441,7 @@ export function ImageWorkbench({
               </div>
             </aside>
 
-            <aside
-              className={styles.settingsPanel}
-              aria-label={isCompressionIntent ? "압축 설정" : "변환 설정"}
-            >
+            <aside className={styles.settingsPanel} aria-label={`${operationLabel} 설정`}>
               <div className={styles.panelTitle}>
                 <strong>설정</strong>
                 <span>{presetId === "custom" ? "직접 설정" : "모두 적용"}</span>
@@ -1048,13 +1468,183 @@ export function ImageWorkbench({
                 </div>
               </fieldset>
 
-              {intent !== "compress" && (
+              {isCropIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>선택 방식</legend>
+                  <div className={styles.segmented}>
+                    <button
+                      className={cropEditMode === "position" ? styles.activeSegment : ""}
+                      type="button"
+                      aria-pressed={cropEditMode === "position"}
+                      onClick={disableCropArea}
+                    >
+                      비율·위치
+                    </button>
+                    <button
+                      className={cropEditMode === "area" ? styles.activeSegment : ""}
+                      type="button"
+                      aria-pressed={cropEditMode === "area"}
+                      onClick={enableCropArea}
+                    >
+                      영역 직접 선택
+                    </button>
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>
+                      {cropEditMode === "area"
+                        ? "미리보기에서 드래그한 사각형만 남겨요."
+                        : "비율을 고른 뒤 위치를 조정해요."}
+                    </span>
+                  </p>
+                </fieldset>
+              )}
+
+              {isCropIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>자르기 비율</legend>
+                  <div className={styles.segmented}>
+                    {CROP_RATIOS.map(([ratio]) => (
+                      <button
+                        className={cropRatioKey(spec.resize) === ratio ? styles.activeSegment : ""}
+                        type="button"
+                        key={ratio}
+                        aria-pressed={cropRatioKey(spec.resize) === ratio}
+                        onClick={() => changeCropRatio(ratio)}
+                      >
+                        {ratio}
+                      </button>
+                    ))}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>선택한 비율과 위치만 남겨요.</span>
+                  </p>
+                  <div className={styles.cropDimensionFields}>
+                    <label className={styles.numberField}>
+                      <span>가로</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="16384"
+                          step="1"
+                          value={spec.resize.kind === "cover" ? spec.resize.width : 1200}
+                          aria-label="자르기 가로"
+                          onChange={(event) =>
+                            changeCropDimension("width", Number(event.target.value))
+                          }
+                        />
+                        px
+                      </span>
+                    </label>
+                    <label className={styles.numberField}>
+                      <span>세로</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="16384"
+                          step="1"
+                          value={spec.resize.kind === "cover" ? spec.resize.height : 1200}
+                          aria-label="자르기 세로"
+                          onChange={(event) =>
+                            changeCropDimension("height", Number(event.target.value))
+                          }
+                        />
+                        px
+                      </span>
+                    </label>
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>가로·세로를 직접 입력하면 사용자 지정 비율로 잘라요.</span>
+                  </p>
+                </fieldset>
+              )}
+
+              {isCropIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>자르기 위치</legend>
+                  <div className={styles.cropPositionGrid}>
+                    {CROP_FOCAL_POSITIONS.map(([position, label, symbol]) => {
+                      const focalPoint =
+                        spec.resize.kind === "cover"
+                          ? (spec.resize.focalPoint ?? { x: 0.5, y: 0.5 })
+                          : { x: 0.5, y: 0.5 };
+                      const target = focalPointForCropPosition(position);
+                      const active = focalPoint.x === target.x && focalPoint.y === target.y;
+                      return (
+                        <button
+                          className={active ? styles.activeSegment : ""}
+                          type="button"
+                          key={position}
+                          aria-label={`${label} 기준으로 자르기`}
+                          aria-pressed={active}
+                          onClick={() => changeCropPosition(position)}
+                        >
+                          {symbol}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>인물이나 상품이 있는 쪽을 고르면 그 부분을 우선해요.</span>
+                  </p>
+                </fieldset>
+              )}
+
+              {isRotateIntent && (
+                <fieldset className={styles.settingsGroup} disabled={busy}>
+                  <legend>회전 방향</legend>
+                  <div className={styles.segmented}>
+                    {[
+                      [0, "원본"],
+                      [90, "오른쪽 90°"],
+                      [180, "180°"],
+                      [270, "왼쪽 90°"],
+                    ].map(([value, label]) => (
+                      <button
+                        className={(spec.rotation ?? 0) === value ? styles.activeSegment : ""}
+                        type="button"
+                        key={value}
+                        aria-pressed={(spec.rotation ?? 0) === value}
+                        onClick={() => changeRotation(value as 0 | 90 | 180 | 270)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.segmented}>
+                    {[
+                      ["all", "모든 이미지"],
+                      ["portrait", "세로만"],
+                      ["landscape", "가로만"],
+                    ].map(([value, label]) => (
+                      <button
+                        className={
+                          (spec.rotationScope ?? "all") === value ? styles.activeSegment : ""
+                        }
+                        type="button"
+                        key={value}
+                        aria-pressed={(spec.rotationScope ?? "all") === value}
+                        onClick={() => changeRotationScope(value as ImageRotationScope)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className={styles.formatWarning}>
+                    <span>선택한 방향의 이미지만 회전해요. 정사각형은 제외됩니다.</span>
+                  </p>
+                </fieldset>
+              )}
+
+              {!isCompressionIntent && !isCropIntent && !isRotateIntent && (
                 <fieldset className={styles.settingsGroup} disabled={busy}>
                   <legend>크기</legend>
                   <div className={styles.segmented}>
                     {[
                       ["none", "유지"],
                       ["inside", "최대 크기"],
+                      ["percentage", "백분율"],
                       ["cover", "정사각 자르기"],
                     ].map(([value, label]) => (
                       <button
@@ -1062,13 +1652,31 @@ export function ImageWorkbench({
                         type="button"
                         key={value}
                         aria-pressed={spec.resize.kind === value}
-                        onClick={() => changeResizeMode(value as "none" | "inside" | "cover")}
+                        onClick={() =>
+                          changeResizeMode(value as "none" | "inside" | "percentage" | "cover")
+                        }
                       >
                         {label}
                       </button>
                     ))}
                   </div>
-                  {spec.resize.kind !== "none" && spec.resize.kind !== "stretch" && (
+                  {spec.resize.kind === "percentage" ? (
+                    <label className={styles.numberField}>
+                      <span>크기 비율</span>
+                      <span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="400"
+                          step="1"
+                          value={spec.resize.percent}
+                          aria-label="크기 비율"
+                          onChange={(event) => changePercentage(Number(event.target.value))}
+                        />
+                        %
+                      </span>
+                    </label>
+                  ) : spec.resize.kind !== "none" && spec.resize.kind !== "stretch" ? (
                     <label className={styles.numberField}>
                       <span>{spec.resize.kind === "cover" ? "정사각형 한 변" : "긴 변 최대"}</span>
                       <span>
@@ -1087,7 +1695,32 @@ export function ImageWorkbench({
                         px
                       </span>
                     </label>
-                  )}
+                  ) : null}
+                  {intent === "resize" &&
+                  (spec.resize.kind === "inside" || spec.resize.kind === "percentage") ? (
+                    <label className={styles.checkboxField}>
+                      <input
+                        checked={spec.resize.allowUpscale ?? false}
+                        onChange={(event) => {
+                          invalidateResults();
+                          setPresetId("custom");
+                          setSpec((current) =>
+                            current.resize.kind === "inside" || current.resize.kind === "percentage"
+                              ? {
+                                  ...current,
+                                  resize: {
+                                    ...current.resize,
+                                    allowUpscale: event.currentTarget.checked,
+                                  },
+                                }
+                              : current,
+                          );
+                        }}
+                        type="checkbox"
+                      />
+                      작은 이미지는 확대하기
+                    </label>
+                  ) : null}
                 </fieldset>
               )}
 
@@ -1102,6 +1735,8 @@ export function ImageWorkbench({
                   >
                     {intent === "compress" ? (
                       <option value="source">원본 형식 유지</option>
+                    ) : hasGifInput ? (
+                      <option value="source">GIF 원본 형식 유지</option>
                     ) : (
                       <>
                         {spec.output.format === "source" && (
@@ -1183,9 +1818,7 @@ export function ImageWorkbench({
                         ? "메모리 절약 모드"
                         : selected.resultUrl === undefined
                           ? "원본 미리보기"
-                          : isCompressionIntent
-                            ? "압축 전 · 후"
-                            : "변환 전 · 후"}
+                          : `${operationLabel} 전 · 후`}
                     </span>
                     {selected.result !== undefined && (
                       <span>
@@ -1199,20 +1832,97 @@ export function ImageWorkbench({
                     {processing ? (
                       <div className={styles.previewMemoryNotice} role="status">
                         <strong>메모리를 아끼고 있어요</strong>
-                        <span>
-                          {isCompressionIntent ? "압축" : "변환"} 중에는 고해상도 원본 미리보기를
-                          잠시 숨겨요.
-                        </span>
+                        <span>{operationLabel} 중에는 고해상도 원본 미리보기를 잠시 숨겨요.</span>
                       </div>
                     ) : (
                       <>
                         <figure>
-                          {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                          <img
-                            src={selected.previewUrl}
-                            alt={`${selected.file.name} 원본`}
-                            decoding="async"
-                          />
+                          {isCropIntent &&
+                          selected.resultUrl === undefined &&
+                          spec.resize.kind === "cover" ? (
+                            cropEditMode === "area" ? (
+                              <button
+                                type="button"
+                                className={styles.cropAreaPreviewFrame}
+                                data-testid="crop-area-preview"
+                                aria-label="자르기 영역 미리보기. 드래그해서 영역을 선택할 수 있어요."
+                                style={cropPreviewFrameStyle(cropImageSize)}
+                                onPointerDown={beginCropAreaPointer}
+                                onPointerMove={moveCropAreaPointer}
+                                onPointerUp={endCropAreaPointer}
+                                onPointerCancel={endCropAreaPointer}
+                                onLostPointerCapture={() => {
+                                  cropAreaPointerIdRef.current = null;
+                                  cropAreaStartRef.current = null;
+                                }}
+                              >
+                                {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                                <img
+                                  ref={cropImageRef}
+                                  src={selected.previewUrl}
+                                  alt={`${selected.file.name} 자르기 영역 미리보기`}
+                                  decoding="async"
+                                  draggable={false}
+                                  onLoad={handleCropImageLoad}
+                                />
+                                {cropPreviewRect !== undefined && (
+                                  <span
+                                    className={styles.cropSelection}
+                                    aria-hidden="true"
+                                    style={{
+                                      left: `${cropPreviewRect.x * 100}%`,
+                                      top: `${cropPreviewRect.y * 100}%`,
+                                      width: `${cropPreviewRect.width * 100}%`,
+                                      height: `${cropPreviewRect.height * 100}%`,
+                                    }}
+                                  />
+                                )}
+                                <span className={styles.cropPreviewHint} aria-hidden="true">
+                                  드래그해서 영역 선택
+                                </span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className={styles.cropPreviewFrame}
+                                data-testid="crop-preview"
+                                aria-label="자르기 미리보기. 드래그해서 위치를 조정할 수 있어요."
+                                style={{
+                                  aspectRatio: `${spec.resize.width} / ${spec.resize.height}`,
+                                }}
+                                onPointerDown={beginCropPointer}
+                                onPointerMove={moveCropPointer}
+                                onPointerUp={endCropPointer}
+                                onPointerCancel={endCropPointer}
+                                onLostPointerCapture={() => {
+                                  cropPointerIdRef.current = null;
+                                }}
+                              >
+                                {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
+                                <img
+                                  src={selected.previewUrl}
+                                  alt={`${selected.file.name} 자르기 미리보기`}
+                                  decoding="async"
+                                  draggable={false}
+                                  onLoad={handleCropImageLoad}
+                                  style={{
+                                    objectPosition: `${(spec.resize.focalPoint?.x ?? 0.5) * 100}% ${(spec.resize.focalPoint?.y ?? 0.5) * 100}%`,
+                                  }}
+                                />
+                                <span className={styles.cropPreviewHint} aria-hidden="true">
+                                  드래그해서 위치 조정
+                                </span>
+                              </button>
+                            )
+                          ) : (
+                            /* biome-ignore lint/performance/noImgElement: local object URL preview */
+                            <img
+                              src={selected.previewUrl}
+                              alt={`${selected.file.name} 원본`}
+                              decoding="async"
+                              onLoad={handleCropImageLoad}
+                            />
+                          )}
                           <figcaption>원본 · {formatBytes(selected.file.size)}</figcaption>
                         </figure>
                         {selected.resultUrl !== undefined && selected.result !== undefined && (
@@ -1220,7 +1930,7 @@ export function ImageWorkbench({
                             {/* biome-ignore lint/performance/noImgElement: local generated result */}
                             <img
                               src={selected.resultUrl}
-                              alt={`${selected.file.name} ${isCompressionIntent ? "압축" : "변환"} 결과`}
+                              alt={`${selected.file.name} ${operationLabel} 결과`}
                               decoding="async"
                             />
                             <figcaption>
@@ -1274,7 +1984,7 @@ export function ImageWorkbench({
                     disabled={busy}
                     onClick={startProcessing}
                   >
-                    {isCompressionIntent ? "다시 압축" : "다시 변환"}
+                    다시 {operationLabel}
                   </button>
                   <button
                     className={styles.runButton}

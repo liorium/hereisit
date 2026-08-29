@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { PDFDocument } from "@cantoo/pdf-lib";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { unzipSync } from "fflate";
 import {
   expectWebShareUnused,
@@ -25,6 +25,18 @@ async function createPdf(widths: readonly number[]): Promise<Buffer> {
 async function downloadedBytes(downloadPath: string | null): Promise<Uint8Array> {
   expect(downloadPath).not.toBeNull();
   return new Uint8Array(await readFile(downloadPath as string));
+}
+
+async function revealCatalogTool(page: Page, route: string): Promise<Locator> {
+  const link = page.locator(`[data-testid="available-tool-grid"] a[href="${route}"]`);
+  await expect(page.getByTestId("available-tool-grid")).toBeVisible();
+  while ((await link.count()) === 0) {
+    const moreButton = page.getByRole("button", { name: "더 보기" });
+    await expect(link.or(moreButton).first()).toBeVisible();
+    if ((await link.count()) > 0) break;
+    await moreButton.click();
+  }
+  return link;
 }
 
 test("product analytics records one PDF merge and download", async ({ page }) => {
@@ -634,9 +646,10 @@ test("publishes every PDF route with unique metadata", async ({ page, request })
     ["/pdf/compress", "PDF 용량 줄이기", "PDF 선택"],
   ] as const;
 
-  await page.goto("/");
-  for (const [path, title] of tools) {
-    await expect(page.getByRole("link", { name: title }).first()).toHaveAttribute("href", path);
+  await page.goto("/tools");
+  for (const [path] of tools) {
+    const link = await revealCatalogTool(page, path);
+    await expect(link).toHaveAttribute("href", path);
   }
 
   for (const [path, title, selectLabel] of tools) {

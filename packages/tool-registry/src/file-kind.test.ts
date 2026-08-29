@@ -22,7 +22,7 @@ function fileTypeBox(majorBrand: string, compatibleBrands: readonly string[] = [
 
 describe("detectFileKindPrefix", () => {
   it("publishes a versioned 64 KiB prefix contract", () => {
-    expect(FILE_KIND_DETECTOR_VERSION).toBe(1);
+    expect(FILE_KIND_DETECTOR_VERSION).toBe(2);
     expect(MAX_FILE_KIND_PREFIX_BYTES).toBe(64 * 1024);
   });
 
@@ -34,6 +34,9 @@ describe("detectFileKindPrefix", () => {
       Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x04, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]),
       "image/webp",
     ],
+    ["GIF", encoder.encode("GIF89a"), "image/gif"],
+    ["TIFF little-endian", Uint8Array.from([0x49, 0x49, 0x2a, 0x00]), "image/tiff"],
+    ["SVG", encoder.encode("<svg"), "image/svg+xml"],
   ] as const)("recognizes a %s structural signature", (_name, prefix, expected) => {
     expect(detectFileKindPrefix(prefix)).toBe(expected);
   });
@@ -126,6 +129,9 @@ describe("fileKindLabel", () => {
     ["image/jpeg", "JPG 이미지"],
     ["image/png", "PNG 이미지"],
     ["image/webp", "WebP 이미지"],
+    ["image/gif", "GIF 이미지"],
+    ["image/tiff", "TIFF 이미지"],
+    ["image/svg+xml", "SVG 이미지"],
     ["image/heic", "HEIC 이미지"],
     ["image/heif", "HEIF 이미지"],
     ["application/pdf", "PDF"],
