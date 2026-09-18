@@ -102,10 +102,30 @@ describe("processing cost provider inspection", () => {
       }),
     ).resolves.toEqual({
       targetHourKey,
-      logpush: { reachable: false },
-      analytics: { reachable: false },
-      container: { reachable: false },
+      logpush: { reachable: false, failure: "no-response" },
+      analytics: { reachable: false, failure: "no-response" },
+      container: { reachable: false, failure: "no-response" },
     });
+  });
+
+  it("distinguishes a contract mismatch before any container request from missing responses", async () => {
+    const requests: string[] = [];
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion("0".repeat(64)),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "logpush-token",
+      fetchImpl: async (input) => {
+        requests.push(String(input));
+        throw new Error("private provider response");
+      },
+    });
+
+    expect(result.container).toEqual({ reachable: false, failure: "contract-mismatch" });
+    expect(result.analytics).toEqual({ reachable: false, failure: "no-response" });
+    expect(requests.some((url) => url.endsWith("/graphql"))).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("private provider response");
   });
 
   it("reports only the bounded HTTP status of rejected provider responses", async () => {

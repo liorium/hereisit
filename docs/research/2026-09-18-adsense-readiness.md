@@ -21,6 +21,23 @@ Google AdSense이며, 목표는 광고 수익에서 운영비를 뺀 수익과 �
   이는 단순 대기만으로 해소된다고 볼 수 없다. 비용 조회 실패의 원인과 지속 시간부터 확인한다.
 - PDF 비용·복구 증거를 입력받는 브랜치 변경은 실제 비용 측정이나 복구 훈련의 완료를 뜻하지 않는다.
 
+## 2026-09-18 공개 경로 재확인
+
+- 홈페이지와 `/image/compress`는 HTTP 200으로 응답했다. 화면 응답만으로 파일 처리 성공을
+  검증한 것은 아니다.
+- `https://api.hereisit.app/health`는 HTTP 200, `status:ok`, `serverJobsEnabled:true`를
+  반환했다. 이는 개별 작업의 서버 사용 허가를 증명하지 않는다.
+- `Origin: https://hereisit.app`과 각각 새 익명 세션으로 `/v1/policy`를 조회한 결과,
+  `image.optimize@1`, `pdf.optimize@1` 모두 HTTP 200,
+  `execution:local`, `reason:SERVER_PROCESSING_DISABLED`였다. 파일은 업로드하지 않았다.
+- 현재 차단의 내부 원인은 아직 확인하지 못했다. 읽기 전용 production preflight
+  [35352668117](https://github.com/liorium/hereisit/actions/runs/35352668117)은 보호 환경 승인
+  대기 상태다. 이 결과를 과거 비용 조회 실패와 동일한 원인으로 단정하지 않는다.
+- 로컬 진단 스크립트는 HTTP 응답 전 실패도 고정된 분류로 표시하도록 보완했다.
+  `contract-mismatch`는 배포 설정과 점검 코드의 사용량 계약 해시 불일치,
+  `no-response`는 HTTP 상태를 얻지 못한 미분류 실패이며 네트워크 장애 확정을 뜻하지 않는다.
+  원본 오류 내용은 출력하지 않는다. 이 수정은 아직 운영 점검에 반영되지 않았다.
+
 ## 다음 실행 순서
 
 1. 공개 도구의 정상 작업 완료와 서버 비용 집계 실패를 확인한다. 기존 예산 차단과 로컬 대체
