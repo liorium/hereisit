@@ -6,6 +6,7 @@ import {
   sha256Bytes,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
+import { nativeCpe } from "./native-advisory-identities.mjs";
 import { artifactSourceByPath, validateSourceLock } from "./verify-image-engine-licenses.mjs";
 
 export async function createImageNativeSbom(root) {
@@ -19,6 +20,7 @@ export async function createImageNativeSbom(root) {
   validateSourceLock(lock);
   const components = [];
   for (const source of lock.sources.filter((entry) => entry.production)) {
+    const cpe = nativeCpe(source.name, source.version);
     const properties = [{ name: "hereisit:source-revision", value: source.revision }];
     const occurrences = [];
     const buildName = source.name === "quantizr" ? "png-smart" : source.name;
@@ -67,6 +69,7 @@ export async function createImageNativeSbom(root) {
       name: source.name,
       version: source.version,
       purl: `pkg:generic/${encodeURIComponent(source.name)}@${encodeURIComponent(source.version)}`,
+      ...(cpe === undefined ? {} : { cpe }),
       licenses: [{ expression: source.licenses.join(" AND ") }],
       externalReferences: [{ type: "vcs", url: `${source.repository}#${source.revision}` }],
       evidence: { occurrences },

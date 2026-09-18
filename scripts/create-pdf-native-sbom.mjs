@@ -6,6 +6,7 @@ import {
   sha256Bytes,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
+import { nativeCpe } from "./native-advisory-identities.mjs";
 import { validatePdfSourceLock } from "./verify-pdf-engine-licenses.mjs";
 
 export async function createPdfNativeSbom(root, buildRoot) {
@@ -63,6 +64,7 @@ export async function createPdfNativeSbom(root, buildRoot) {
         name: source.name,
         version: source.version,
         purl: `pkg:generic/qpdf@${source.version}`,
+        cpe: nativeCpe(source.name, source.version),
         licenses: [{ expression: source.license }],
         externalReferences: [
           {

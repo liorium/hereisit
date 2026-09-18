@@ -166,6 +166,10 @@ function makeSbom(
               name: native.name,
               version: native.version,
               purl: `pkg:generic/${native.name}@${native.version}`,
+              cpe:
+                scope === "pdf-engine"
+                  ? "cpe:2.3:a:qpdf_project:qpdf:12.4.0:*:*:*:*:*:*:*"
+                  : "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
               licenses: [
                 {
                   expression: scope === "pdf-engine" ? pdfSource.license : nativeSource.licenses[0],
@@ -266,6 +270,7 @@ describe("application supply-chain gate", () => {
       "revision",
       "cataloger",
       "location",
+      "cpe",
     ])(`rejects %s ${scope} native SBOM coverage rather than passing an incomplete scan`, async (drift) => {
       const fixture = await makeFixture();
       await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
@@ -276,6 +281,7 @@ describe("application supply-chain gate", () => {
       if (drift === "revision") component["bom-ref"] += "wrong-revision";
       if (drift === "cataloger") component.properties[0].value = "javascript-package-cataloger";
       if (drift === "location") component.properties[1].value = "/unrelated/native.cdx.json";
+      if (drift === "cpe") component.cpe = "cpe:2.3:a:wrong:product:1.2.3:*:*:*:*:*:*:*";
       await writeCanonical(fixture.sboms[scope].path, sbom);
       await expect(
         runApplicationSupplyChain(

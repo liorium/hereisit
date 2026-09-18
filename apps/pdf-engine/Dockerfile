@@ -38,7 +38,7 @@ COPY scripts/copy-distroless-runtime-deps.sh /usr/local/src/copy-distroless-runt
 COPY apps/pdf-engine/native/sources.lock.json /runtime-root/licenses/sources.lock.json
 COPY apps/pdf-engine/licenses/policy.json /runtime-root/licenses/policy.json
 COPY scripts/create-pdf-native-sbom.mjs scripts/image-lab-common.mjs \
-  scripts/verify-pdf-engine-licenses.mjs /usr/local/src/scripts/
+  scripts/verify-pdf-engine-licenses.mjs scripts/native-advisory-identities.mjs /usr/local/src/scripts/
 RUN install -d /runtime-root/usr/local/bin /runtime-root/usr/local/lib \
   && cp -a /opt/qpdf/bin/qpdf /runtime-root/usr/local/bin/qpdf \
   && cp -a /opt/qpdf/lib/. /runtime-root/usr/local/lib/ \

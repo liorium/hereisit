@@ -40,6 +40,7 @@ it("records qpdf's source archive and both shipped binaries without inventing an
     name: "qpdf",
     version: "12.4.0",
     purl: "pkg:generic/qpdf@12.4.0",
+    cpe: "cpe:2.3:a:qpdf_project:qpdf:12.4.0:*:*:*:*:*:*:*",
     evidence: {
       occurrences: [
         { location: "/usr/local/bin/qpdf" },

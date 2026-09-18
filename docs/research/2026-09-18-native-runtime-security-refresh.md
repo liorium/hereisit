@@ -334,3 +334,52 @@ identity detects zero findings. Both use the same cached database with networkin
 Thus adding generic package names alone demonstrably misses known vulnerabilities. Validate native
 advisory identities and bind matcher/database evidence through the existing release contracts before
 claiming complete automated coverage. No new exception, deployment, or public admission was approved.
+
+### Reviewed native advisory identities
+
+The embedded inventories now carry explicit CPE vendor/product identities for the six reviewed
+C/C++ sources below. Their exact numeric release version comes from the already-validated source lock;
+wildcards, delimiters, and whitespace are rejected. The shared application gate requires the matching
+CPE in the actual Syft output, so losing the identity during scanning fails instead of silently passing.
+This does not change the generic package URL, source revision, binary hash, or vulnerability severity.
+
+| Source | CPE vendor/product | Identity evidence |
+| --- | --- | --- |
+| mozjpeg | `mozilla:mozjpeg` | [FreeBSD upstream port update](https://lists.freebsd.org/archives/dev-commits-ports-all/2022-August/036313.html) |
+| libwebp | `webmproject:libwebp` | [NVD CVE-2023-4863](https://nvd.nist.gov/vuln/detail/cve-2023-4863) |
+| Expat | `libexpat_project:libexpat` | [NVD CPE record](https://nvd.nist.gov/products/cpe/detail/1642963) |
+| util-linux | `kernel:util-linux` | [Syft upstream binary identity](https://oss.anchore.com/docs/capabilities/binary/) |
+| libvips | `libvips:libvips` | [NVD CPE record](https://nvd.nist.gov/products/cpe/detail/1AC7308F-4591-41F0-909F-730F9AB846B0) |
+| qpdf | `qpdf_project:qpdf` | [NVD CVE-2017-11624](https://nvd.nist.gov/vuln/detail/CVE-2017-11624) |
+
+The generator deliberately does not invent CPEs for oxipng or quantizr. Their Rust dependency
+lockfile scanning remains separate; a guessed identity is not proof of native advisory coverage.
+New or prerelease versions need explicit identity/encoding review rather than permissive string
+interpolation. Version-only matching can still over-report patched stable revisions and miss advisories
+without appropriate CPE data. Grype release-gate integration, exact artifact/database binding, and
+finding applicability review remain required. No release exception is introduced by these identities.
+
+Verified identity candidates:
+
+- Image ID: `sha256:64eef9fc6b74a8e76e7c59976b813af84bc33b76ad083b92dc0c3b3fa0b8e6b3`.
+- PDF ID: `sha256:09e0aafdb098c92238d1ec6e0bcb73e1ce3f1026ff11b11ef78c4919936e3167`.
+- Both read-only, network-disabled, non-root self-tests pass. The twelve image native hashes and two
+  PDF native hashes match the preceding inventory candidates; all are checked against actual bytes.
+- Pinned Syft retains five explicit image CPEs and one PDF CPE (1345 / 1299 total components).
+  Both actual reports pass the shared coverage guard. All twelve deletion/replacement mutations of
+  those six identities are rejected. Raw scanner reports remain untouched; normalization binds them
+  to the exact Docker image IDs above.
+- With the same pinned Trivy database: image C0/H0/M14/L11; PDF C0/H0/M13/L7. The separate Grype
+  diagnostic, using the same database as the preceding experiment, reports 28 image matches and
+  20 PDF matches. High findings remain four for image and three for PDF; no exceptions were added.
+  Corrected util-linux identity additionally exposes Medium CVE-2026-3184 and CVE-2026-13595 matches
+  previously missed by the guessed vendor. Their exact-revision/runtime applicability remains open.
+- The synthetic libwebp positive control also detects CVE-2023-4863 **after** passing through Syft's
+  embedded cataloger and into Grype, proving the corrected identity survives both scanner boundaries.
+- Initial regression run fails fourteen relevant cases before implementation; the corrected four-file
+  suite passes 63 tests. Final verification including both license gates and report normalization
+  passes seven files / 107 tests. Independent read-only review finds no important defect; the actual
+  six-identity mutation checks above address its suggested extra verification. Lint passes 649 files;
+  all twelve package type checks pass. This is focused verification, not a new aggregate `pnpm verify`.
+- Build logs, raw/normalized scans, mutation proof, runtime hash comparisons, and diagnostic controls
+  are retained in `.artifacts/native-identities-20260918/` for active follow-up. No deployment or approval.

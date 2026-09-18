@@ -45,6 +45,7 @@ it("catalogs production native sources with evidence from the shipped binary, ex
     name: "expat",
     version: "2.8.4",
     purl: "pkg:generic/expat@2.8.4",
+    cpe: "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
     evidence: { occurrences: [{ location: "/usr/local/lib/libexpat.so.1.12.4" }] },
   });
   expect(sbom.components[0].properties).toContainEqual({

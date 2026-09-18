@@ -15,6 +15,7 @@ import {
   sha256Bytes,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
+import { nativeCpe } from "./native-advisory-identities.mjs";
 import { validateSourceLock } from "./verify-image-engine-licenses.mjs";
 import { validatePdfSourceLock } from "./verify-pdf-engine-licenses.mjs";
 
@@ -550,6 +551,7 @@ export function verifyNativeSbomCoverage(scope, sbom, lock) {
     sources = [validatePdfSourceLock(lock)];
   } else throw new TypeError("native SBOM scope is invalid");
   for (const source of sources) {
+    const cpe = nativeCpe(source.name, source.version);
     const purl = `pkg:generic/${encodeURIComponent(source.name)}@${encodeURIComponent(source.version)}`;
     const revision = scope === "engine" ? source.revision : source.sha256;
     const reference = `${purl}?package-id=${encodeURIComponent(`native:${source.name}@${revision}`)}`;
@@ -560,6 +562,7 @@ export function verifyNativeSbomCoverage(scope, sbom, lock) {
           component.version === source.version &&
           component.type === "library" &&
           component.purl === purl &&
+          (cpe === undefined || component.cpe === cpe) &&
           component["bom-ref"] === reference &&
           component.properties?.some(
             (property) =>
