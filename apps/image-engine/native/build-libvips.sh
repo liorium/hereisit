@@ -9,7 +9,7 @@ SOURCE="$(checkout_source "$NAME" https://github.com/libvips/libvips.git "$REVIS
 copy_notices "$NAME" "$SOURCE" LICENSE
 
 export PKG_CONFIG_PATH="/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig"
-export LD_LIBRARY_PATH="/opt/hereisit-native/expat/lib:/opt/hereisit-native/libwebp/lib"
+export LD_LIBRARY_PATH="/opt/hereisit-native/expat/lib:/opt/hereisit-native/util-linux/lib:/opt/hereisit-native/libwebp/lib"
 test "$(pkg-config --modversion expat)" = "2.8.4"
 meson setup "$SOURCE/build" "$SOURCE" \
   --buildtype=release \

@@ -458,6 +458,8 @@ const requiredRuntimeArtifacts = [
   "/usr/local/bin/dwebp",
   "/usr/local/lib/libvips.so",
   "/usr/local/lib/libexpat.so",
+  "/usr/local/lib/libblkid.so",
+  "/usr/local/lib/libmount.so",
   "/app/dist/server.mjs",
   "/app/dist/job/job-runner.mjs",
 ];
@@ -473,6 +475,8 @@ const artifactSourceByPath = new Map([
   ["/usr/local/bin/dwebp", "libwebp"],
   ["/usr/local/lib/libvips.so", "libvips"],
   ["/usr/local/lib/libexpat.so", "expat"],
+  ["/usr/local/lib/libblkid.so", "util-linux"],
+  ["/usr/local/lib/libmount.so", "util-linux"],
 ]);
 
 export function validateRuntimeInventory(inventory, sourceLock, policy) {

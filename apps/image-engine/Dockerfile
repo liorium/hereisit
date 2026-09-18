@@ -45,13 +45,20 @@ RUN sed -i \
       pkg-config \
       python3 \
   && rm -rf /var/lib/apt/lists/*
-COPY apps/image-engine/native/build-common.sh apps/image-engine/native/build-mozjpeg.sh \
-  apps/image-engine/native/build-libwebp.sh apps/image-engine/native/build-libvips.sh \
-  apps/image-engine/native/build-expat.sh apps/image-engine/native/sources.lock.json /build/native/
-RUN /build/native/build-mozjpeg.sh \
-  && /build/native/build-libwebp.sh \
-  && /build/native/build-expat.sh \
-  && /build/native/build-libvips.sh
+COPY apps/image-engine/native/build-common.sh /build/native/
+COPY apps/image-engine/native/build-mozjpeg.sh /build/native/
+RUN /build/native/build-mozjpeg.sh
+COPY apps/image-engine/native/build-libwebp.sh /build/native/
+RUN /build/native/build-libwebp.sh
+COPY apps/image-engine/native/build-expat.sh /build/native/
+RUN /build/native/build-expat.sh
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bison flex \
+  && rm -rf /var/lib/apt/lists/*
+COPY apps/image-engine/native/build-util-linux.sh /build/native/
+RUN /build/native/build-util-linux.sh
+COPY apps/image-engine/native/build-libvips.sh /build/native/
+RUN /build/native/build-libvips.sh
 COPY apps/image-engine/native/jpeg-coeff-verify.c /build/native/jpeg-coeff-verify.c
 RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
       -I/opt/hereisit-native/mozjpeg/include /build/native/jpeg-coeff-verify.c \
@@ -72,7 +79,7 @@ RUN corepack enable \
   && test "$(apps/image-engine/node_modules/@esbuild/linux-x64/bin/esbuild --version)" = "0.28.1" \
   && ! find node_modules apps/image-engine/node_modules -path '*/@img/sharp-*' -print -quit | grep .
 ENV PKG_CONFIG_PATH=/opt/hereisit-native/libvips/lib/pkgconfig:/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig
-ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/expat/lib:/opt/hereisit-native/libwebp/lib
+ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/expat/lib:/opt/hereisit-native/util-linux/lib:/opt/hereisit-native/libwebp/lib
 RUN cd apps/image-engine/node_modules/sharp \
   && PATH=/src/apps/image-engine/node_modules/.bin:$PATH SHARP_FORCE_GLOBAL_LIBVIPS=1 \
     node install/build.js \
@@ -111,6 +118,8 @@ RUN install -d /runtime-root/usr/local/lib \
   && cp -a /opt/hereisit-native/libwebp/lib/. /runtime-root/usr/local/lib/ \
   && cp -a /opt/hereisit-native/libvips/lib/. /runtime-root/usr/local/lib/ \
   && cp -a /opt/hereisit-native/expat/lib/. /runtime-root/usr/local/lib/ \
+  && cp -a /opt/hereisit-native/util-linux/lib/libblkid.so* \
+      /opt/hereisit-native/util-linux/lib/libmount.so* /runtime-root/usr/local/lib/ \
   && cp -a /licenses/. /runtime-root/licenses/ \
   && cp -a /build-metadata/. /runtime-root/build-metadata/ \
   && cp apps/image-engine/native/sources.lock.json /runtime-root/licenses/sources.lock.json \

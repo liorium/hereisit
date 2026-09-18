@@ -168,3 +168,69 @@ The source lock explicitly leaves exact-source commercial review pending.
 
 No push, deployment, or public-admission override was performed. Remaining util-linux findings,
 native-source catalog coverage, exact-source release review, and hosted release evidence still need work.
+
+## util-linux stable-branch follow-up
+
+The image engine replaces Debian's libblkid/libmount runtime libraries with source-built shared
+libraries from the same upstream 2.41 stable line. The pinned revision is
+`ba905a1874959c70fd706aa7d49df61076864e0a` (2026-09-08); its reported upstream version remains 2.41.6.
+This is a post-release stable-branch snapshot, **not** the unchanged v2.41.6 release tag.
+
+The initial release-tag build exposed a missing `fileutils.h` include in `hook_idmap.c`.
+Investigation also found the [upstream symlink-protection flag correction](https://kernel.googlesource.com/pub/scm/utils/util-linux/util-linux/+/20361d66df4d3f32d5e137fe61a55cdf156c91f0):
+the old fallback used `0x02` (magic links) instead of `0x04` (all symlinks). The pinned stable revision
+includes both corrections without local source patches. Its changes relative to the release tag were
+reviewed: eight files, 31 insertions, 15 deletions. The [2.41.6 release notes](https://github.com/util-linux/util-linux/blob/v2.41.6/Documentation/releases/v2.41.6-ReleaseNotes)
+and [restricted-source advisory](https://github.com/util-linux/util-linux/security/advisories/GHSA-rh77-686x-2f2m)
+describe the security updates; [CVE-2026-78409's upstream advisory](https://github.com/util-linux/util-linux/security/advisories/GHSA-8f2p-47x3-43mv)
+lists the affected line as >=2.42, unlike the Debian package-level finding against 2.41.5.
+
+- Bison/flex are build-only requirements of upstream Meson configuration, even with optional features
+  disabled. They are not added to the runtime image.
+- Native COPY/RUN steps are split by library so a util-linux adjustment reuses completed JPEG, WebP,
+  and Expat builds. The corrected-build log confirms those cache hits.
+- Review found that upstream `build-libblkid` also enables the `blkid` executable. Explicit Ninja
+  shared-library targets and exact library/header/pkg-config installation now avoid installing it.
+  Guards still reject any installed `bin` or `sbin` directory. Only `.so` files enter the runtime.
+- Copyright-bearing `lib/crc64.c` and `lib/xxhash.c` notices are copied in addition to the license texts
+  and included in the source lock. Exact-source commercial review remains pending; no approval or
+  vulnerability exception was created.
+
+Verified local candidate:
+
+- Image ID: `sha256:41dfccc2d26b15a68c0dcf2f49bf3819587fb70ecef10baf48d7f35434257cd3`.
+- Read-only, network-disabled, non-root self-test: Sharp 0.35.4 / libvips 8.18.6 / thirteen artifacts.
+- The Sharp process maps only `/usr/local/lib/libblkid.so.1.1.0` and
+  `/usr/local/lib/libmount.so.1.1.0` for these libraries. Their respective SHA-256 values,
+  `c1b9d1a63fd6dbfb4c2d3f680b30a3571d16476c5d01670493113cace0d0b4dc` and
+  `82abe9e323097866d4d874a2f6d2d6125e0893496dea0f189e16814b93c2b69d`, match the pinned source's
+  build record. Actual runtime inventory passes source revision, notice, and hash validation.
+- The old Debian libblkid1/libmount1 package records are absent. Runtime binary paths contain none
+  of blkid, mount, umount, nsenter, unshare, bison, or flex.
+- Same pinned Trivy/database: Critical 0, High 0, Medium 14, Low 11; image identity is checked against
+  the actual Docker image. Syft reports 1337 components but does not catalog the new source-built
+  libraries. **Zero detected High/Critical findings does not establish complete native coverage.**
+  The source revision and loaded-binary proofs support this particular patch; automated native
+  vulnerability matching remains incomplete.
+- Image-engine and native license-policy tests: 24 files / 198 tests passed. This is focused regression
+  verification, not a fresh aggregate `pnpm verify` run. Independent review's build/notice findings were
+  fixed and re-reviewed; that does not grant external commercial approval.
+- Fuzz: seed 20260716, 60 seconds, 108 cases; ten successes, twelve pixel-limit rejections,
+  86 unsupported-input rejections. The harness removed its test container afterward. Image-engine
+  type checking and repository lint (643 files) passed. No local browser testing was run.
+- Production preflight `35352668117` was checked again and remains `waiting`; it was not approved.
+  No push, deployment, or admission override was performed.
+
+### Native scanner coverage investigation
+
+The existing [Syft ELF package-note cataloger](https://oss.anchore.com/docs/capabilities/binary/)
+recognizes Expat 2.8.4 when a `.note.package` section containing its real name, version, MIT license,
+and generic package URL is added to a **separate diagnostic copy** of the library. This was tested
+with the pinned Syft image, not by editing a scanner's output or inventing Debian package metadata.
+The copy was never installed into a production candidate.
+
+The pinned Trivy filesystem scanner still reports zero language packages and an empty result for that
+annotated-library directory. Therefore ELF notes alone improve cataloging but do not establish native
+vulnerability coverage. Integrating artifact-bound native identities and an applicable vulnerability
+matching path remains required before claiming complete security verification. Diagnostic inputs and
+outputs are retained under `.artifacts/util-linux-refresh-20260918/` for this active follow-up.

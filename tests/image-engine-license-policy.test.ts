@@ -91,6 +91,8 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     "/app/dist/server.mjs",
     "/app/dist/job/job-runner.mjs",
     "/usr/local/lib/libexpat.so",
+    "/usr/local/lib/libblkid.so",
+    "/usr/local/lib/libmount.so",
   ];
   const required = requiredPaths.map((path, index) => ({
     path,
@@ -104,6 +106,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     libwebp: requiredPaths.slice(6, 8),
     libvips: [requiredPaths[8]],
     expat: [requiredPaths[11]],
+    "util-linux": requiredPaths.slice(12, 14),
   };
   const buildMetadata = Object.fromEntries(
     sourceLock.sources
@@ -169,7 +172,11 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
-  it("requires the Expat runtime library and binds it to source build metadata", async () => {
+  it.each([
+    ["/usr/local/lib/libexpat.so", "expat"],
+    ["/usr/local/lib/libblkid.so", "util-linux"],
+    ["/usr/local/lib/libmount.so", "util-linux"],
+  ])("requires %s and binds it to %s source build metadata", async (path, source) => {
     const fixture = await licenseGateFixture();
     const validate = (inventory: typeof fixture.inventory) =>
       validateRuntimeInventory(inventory, fixture.documents.sourceLock, fixture.documents.policy);
@@ -177,21 +184,17 @@ describe("image engine native supply-chain policy", () => {
     expect(() =>
       validate({
         ...fixture.inventory,
-        required: fixture.inventory.required.filter(
-          (entry) => entry.path !== "/usr/local/lib/libexpat.so",
-        ),
+        required: fixture.inventory.required.filter((entry) => entry.path !== path),
       }),
-    ).toThrow(/libexpat/);
+    ).toThrow(path);
     expect(() =>
       validate({
         ...fixture.inventory,
         required: fixture.inventory.required.map((entry) =>
-          entry.path === "/usr/local/lib/libexpat.so"
-            ? { ...entry, sha256: "e".repeat(64) }
-            : entry,
+          entry.path === path ? { ...entry, sha256: "e".repeat(64) } : entry,
         ),
       }),
-    ).toThrow(/bound to expat/);
+    ).toThrow(`bound to ${source}`);
   });
 
   it.each([
