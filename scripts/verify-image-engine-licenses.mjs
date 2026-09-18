@@ -464,7 +464,7 @@ const requiredRuntimeArtifacts = [
   "/app/dist/job/job-runner.mjs",
 ];
 
-const artifactSourceByPath = new Map([
+export const artifactSourceByPath = new Map([
   ["/usr/local/bin/cjpeg", "mozjpeg"],
   ["/usr/local/bin/djpeg", "mozjpeg"],
   ["/usr/local/bin/jpegtran", "mozjpeg"],

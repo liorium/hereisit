@@ -234,3 +234,45 @@ annotated-library directory. Therefore ELF notes alone improve cataloging but do
 vulnerability coverage. Integrating artifact-bound native identities and an applicable vulnerability
 matching path remains required before claiming complete security verification. Diagnostic inputs and
 outputs are retained under `.artifacts/util-linux-refresh-20260918/` for this active follow-up.
+
+### Embedded native inventory and CI coverage guard
+
+The image build now creates `/build-metadata/native.cdx.json` from the pinned source lock and the
+actual assembled runtime. It reuses the license gate's artifact map, resolves runtime symlinks, and
+requires each file's SHA-256 and build-time path to match the exact source revision's build record.
+Benchmark-only sources are excluded. Quantizr's occurrence is the `png-smart` wrapper that contains
+it; the wrapper's digest is recorded as runtime evidence, not as a standalone quantizr package hash.
+
+CI enables Syft's existing [embedded SBOM cataloger](https://oss.anchore.com/docs/capabilities/sbom/)
+for the image engine only, preserving other scopes and default catalogers. The existing application
+supply-chain gate now requires every production native source's exact version, revision-bearing
+reference, cataloger, and embedded inventory location. Missing or miswired coverage fails the gate;
+scanner output is not supplemented with invented package records after scanning.
+
+Initial verified inventory candidate:
+
+- Image ID: `sha256:ce4889b4c0f2237e1072dded57780fe8c3b6912088722a7fb41f31c912f01157`.
+- Pinned Syft: 1345 components, including all seven locked production native sources. The actual
+  scanner result passes the new coverage guard. Runtime inventory passes the existing license checks.
+- All twelve required native artifact hashes are identical to the preceding util-linux candidate.
+  Read-only, network-disabled self-test passes: Sharp 0.35.4 / libvips 8.18.6 / thirteen artifacts.
+- Pinned Trivy/database: Critical 0, High 0, Medium 14, Low 11. Results still contain only Debian,
+  Node, and the two Cargo lockfile scopes. The new C/C++ identities are **not** evidence that Trivy
+  matched their vulnerabilities. Syft-generated CPE guesses also need independent validation before
+  being used as proof of vulnerability coverage.
+- Focused generation, coverage, license, and normalization regression tests: four files / 77 tests
+  passed with the standard timeout. Repository lint (645 files) and all twelve type checks passed.
+- Independent read-only review found no blocking defect. Its concurrent focused run hit an existing
+  five-second inventory timeout; a reviewer-only extended-timeout run is not the final acceptance run.
+- The first full unit run passed 3265 tests and timed out in one multi-case supply-chain test while
+  another review test process overlapped. A fresh, isolated `pnpm exec vitest run --maxWorkers=1`
+  then passed all 224 files / 3266 tests in 208.90 seconds, with the original five-second timeout.
+  The timed-out run's leftover temporary fixture was removed. No timeout or acceptance rule changed.
+- Final rebuild after the review and coverage-gate changes produced the **same image ID** above.
+  Its fresh read-only self-test, runtime inventory comparison, and actual-image PR license gate all
+  pass. The retained raw scans therefore still bind to the final runtime artifact; the redundant final
+  archive was removed. This PR license result does not replace exact-source commercial release review.
+
+This closes the image source inventory omission, not the native vulnerability matching gap. PDF native
+inventory and appropriate native advisory matching remain follow-up work. Evidence is retained under
+`.artifacts/native-sbom-20260918/`; no push, deployment, approval, or exception renewal was performed.

@@ -145,7 +145,11 @@ jobs:
               worker) artifact=.artifacts/release-source/api-worker.mjs; artifact_sha256="$WORKER_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
               lockfile) artifact=pnpm-lock.yaml; artifact_sha256="$LOCKFILE_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
             esac
-            docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" -o cyclonedx-json \
+            syft_catalogers=()
+            if [[ "$scope" == engine ]]; then
+              syft_catalogers=(--select-catalogers +sbom-cataloger)
+            fi
+            docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" "${syft_catalogers[@]}" -o cyclonedx-json \
               > ".artifacts/runtime/security-sbom-$scope.raw.json"
             docker run --rm -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
               "${trivy[@]}" --cache-dir /trivy-cache --skip-db-update --offline-scan --format json \

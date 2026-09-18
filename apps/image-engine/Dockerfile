@@ -133,6 +133,7 @@ RUN install -d /runtime-root/usr/local/lib \
   && node apps/image-engine/scripts/write-debian-inventory.mjs \
       /tmp/debian-packages.tsv /tmp/debian-copyright-paths.txt \
       /runtime-root/build-metadata/debian-packages.json \
+  && node scripts/create-image-native-sbom.mjs /runtime-root \
   && chmod -R a=rX /runtime-root/app /runtime-root/licenses \
       /runtime-root/build-metadata /runtime-root/usr \
   && install -d -m 0700 -o 10001 -g 10001 /runtime-root/work /runtime-root/home/hereisit \

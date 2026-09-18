@@ -19,6 +19,17 @@ const scopes = [
 ] as const;
 const syftImage =
   "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d";
+const nativeSource = {
+  name: "expat",
+  version: "2.8.4",
+  revision: "a".repeat(40),
+  repository: "https://github.com/libexpat/libexpat.git",
+  production: true,
+  licenses: ["MIT"],
+  noticePaths: ["expat/COPYING"],
+  buildRole: "runtime-dynamic-library",
+  artifactRecord: "/build-metadata/expat.json",
+};
 const checkedInMit = `Copyright (c) 2020 Cloudflare, Inc. <wrangler@cloudflare.com>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the "Software"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n`;
 
 const policy = {
@@ -128,14 +139,32 @@ function makeSbom(
         name: `hereisit-${scope}:sha256-${artifactSha256}`,
       },
     },
-    components: components.map((entry) => ({
-      "bom-ref": `${entry.name}@${entry.version}`,
-      type: "library",
-      name: entry.name,
-      version: entry.version,
-      licenses: [{ expression: entry.license }],
-      properties: [{ name: "syft:package:type", value: "npm" }],
-    })),
+    components: [
+      ...components.map((entry) => ({
+        "bom-ref": `${entry.name}@${entry.version}`,
+        type: "library",
+        name: entry.name,
+        version: entry.version,
+        licenses: [{ expression: entry.license }],
+        properties: [{ name: "syft:package:type", value: "npm" }],
+      })),
+      ...(scope === "engine"
+        ? [
+            {
+              "bom-ref": `pkg:generic/expat@2.8.4?package-id=native%3Aexpat%40${"a".repeat(40)}`,
+              type: "library",
+              name: "expat",
+              version: "2.8.4",
+              purl: "pkg:generic/expat@2.8.4",
+              licenses: [{ expression: "MIT" }],
+              properties: [
+                { name: "syft:package:foundBy", value: "sbom-cataloger" },
+                { name: "syft:location:0:path", value: "/build-metadata/native.cdx.json" },
+              ],
+            },
+          ]
+        : []),
+    ],
   };
 }
 
@@ -151,6 +180,10 @@ async function makeFixture() {
     checkedInMit,
   );
   await writeCanonical(join(root, "security/application-license-policy.json"), policy);
+  await writeCanonical(join(root, "apps/image-engine/native/sources.lock.json"), {
+    schemaVersion: 1,
+    sources: [nativeSource],
+  });
 
   const inventory: Record<string, ReturnType<typeof pnpmRecord>[]> = {};
   for (const spec of packageSpecs) {
@@ -208,6 +241,32 @@ afterEach(async () => {
 });
 
 describe("application supply-chain gate", () => {
+  it.each([
+    "missing",
+    "version",
+    "revision",
+    "cataloger",
+    "location",
+  ])("rejects %s native SBOM coverage rather than passing an incomplete scan", async (drift) => {
+    const fixture = await makeFixture();
+    await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+    const sbom = makeSbom("engine", fixture.sboms.engine.artifactSha256);
+    const component = sbom.components[sbom.components.length - 1];
+    if (drift === "missing") sbom.components.pop();
+    if (drift === "version") component.version = "2.8.3";
+    if (drift === "revision")
+      component["bom-ref"] = component["bom-ref"].replace("a".repeat(40), "b".repeat(40));
+    if (drift === "cataloger") component.properties[0].value = "javascript-package-cataloger";
+    if (drift === "location") component.properties[1].value = "/unrelated/native.cdx.json";
+    await writeCanonical(fixture.sboms.engine.path, sbom);
+    await expect(
+      runApplicationSupplyChain(
+        { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+        fixture.adapters,
+      ),
+    ).rejects.toThrow(/native.*coverage/i);
+  });
+
   it("exactly regenerates the committed notices from the current production inventory", async () => {
     const repositoryRoot = process.cwd();
     const result = await runApplicationSupplyChain(
@@ -290,7 +349,8 @@ describe("application supply-chain gate", () => {
           {
             artifactSha256: sha(String(index + 1)),
             sbomSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-            componentCount: scope.startsWith("web-") || scope === "worker" ? 16 : 17,
+            componentCount:
+              scope === "engine" ? 18 : scope.startsWith("web-") || scope === "worker" ? 16 : 17,
           },
         ]),
       ),
@@ -317,7 +377,7 @@ describe("application supply-chain gate", () => {
       ),
     ).resolves.toMatchObject({
       passed: true,
-      scopes: { engine: { componentCount: packageSpecs.length + 1 } },
+      scopes: { engine: { componentCount: packageSpecs.length + 2 } },
     });
 
     const versionlessPackage = { ...sbom.components[0] } as Partial<(typeof sbom.components)[0]>;

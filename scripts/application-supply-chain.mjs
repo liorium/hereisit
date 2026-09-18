@@ -5,6 +5,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyImageNativeSbomCoverage } from "./create-image-native-sbom.mjs";
 import {
   assertExactKeys,
   assertObject,
@@ -539,7 +540,7 @@ function verifySyftTool(metadata) {
   }
 }
 
-async function verifySbom(scope, descriptor, policyState) {
+async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   assertExactKeys(descriptor, ["artifactSha256", "path"], `${scope} SBOM descriptor`);
   const artifactSha256 = assertSha256(descriptor.artifactSha256, `${scope} artifact SHA-256`);
   nonEmptyString(descriptor.path, `${scope} SBOM path`);
@@ -581,6 +582,17 @@ async function verifySbom(scope, descriptor, policyState) {
       if (identities.has(prohibited))
         throw new TypeError(`${scope} SBOM contains a must not ship component`);
     }
+  }
+  if (scope === "engine") {
+    const lock = parseJson(
+      await readBoundedRegularFile(
+        join(repositoryRoot, "apps/image-engine/native/sources.lock.json"),
+        1024 * 1024,
+        "image native source lock",
+      ),
+      "image native source lock",
+    );
+    verifyImageNativeSbomCoverage(sbom, lock);
   }
   return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: components.length };
 }
@@ -633,7 +645,7 @@ export async function runApplicationSupplyChain(options, adapters = {}) {
   assertExactKeys(sboms, SCOPES, "application SBOMs");
   const scopeResults = {};
   for (const scope of SCOPES)
-    scopeResults[scope] = await verifySbom(scope, sboms[scope], policyState);
+    scopeResults[scope] = await verifySbom(scope, sboms[scope], policyState, repository.root);
   const lockfileBytes = await readBoundedRegularFile(
     value.lockfilePath,
     16 * 1024 * 1024,
