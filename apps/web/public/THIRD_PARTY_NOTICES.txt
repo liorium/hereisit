@@ -460,10 +460,10 @@ SOFTWARE.
 
 ========================================================================
 Package: @next/env
-Version: 16.2.11
+Version: 16.3.5
 License: MIT
 
---- fallback next@16.2.11: license.md ---
+--- fallback next@16.3.5: license.md ---
 The MIT License (MIT)
 
 Copyright (c) 2025 Vercel, Inc.
@@ -488,10 +488,10 @@ SOFTWARE.
 
 ========================================================================
 Package: @next/swc-linux-x64-gnu
-Version: 16.2.11
+Version: 16.3.5
 License: MIT
 
---- fallback next@16.2.11: license.md ---
+--- fallback next@16.3.5: license.md ---
 The MIT License (MIT)
 
 Copyright (c) 2025 Vercel, Inc.
@@ -788,7 +788,7 @@ available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/b
 
 ========================================================================
 Package: @swc/helpers
-Version: 0.5.15
+Version: 0.5.23
 License: Apache-2.0
 
 --- LICENSE ---
@@ -2106,7 +2106,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Package: next
-Version: 16.2.11
+Version: 16.3.5
 License: MIT
 
 --- license.md ---

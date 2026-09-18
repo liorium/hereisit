@@ -107,3 +107,26 @@ Trixie package remains vulnerable: [attribute processing](https://security-track
 The [util-linux restricted mount issue](https://security-tracker.debian.org/tracker/CVE-2026-78410)
 also remains unfixed in that Trixie package. Do not mix unstable packages into the runtime or silently
 waive findings; review a reproducible compatible patch or exact-image applicability next.
+
+## Next.js dependency follow-up
+
+The web app now pins [Next.js 16.3.5](https://github.com/vercel/next.js/releases/tag/v16.3.5),
+including matching env/SWC packages. React and the static-export configuration are unchanged.
+The generated Next.js root-params type import and bundled-documentation agent pointers are retained.
+
+- Before the update, `pnpm audit --prod --audit-level moderate` reported the two Critical Next.js
+  advisories above. Afterward it exits successfully with no known vulnerabilities. This npm audit
+  does not clear the eleven native OS package findings.
+- Web, header, and application supply-chain tests: 20 files / 156 tests passed.
+- Web production builds pass both without an API override and with
+  `NEXT_PUBLIC_PROCESSING_API_ORIGIN=https://api.hereisit.app`: 31 static pages generated;
+  static export, discovery import boundaries, and bundle budgets pass for both builds.
+- Local `next dev` HTTP smoke: `/`, `/tools`, `/image/compress`, and `/pdf/compress` return 200
+  HTML containing the site identity. The development server is stopped afterward. This does not
+  establish browser interaction correctness; no local Playwright browser was run.
+- The aggregate `pnpm build` attempt stops because its Worker dry-run requires the absent local
+  `hereisit-image-engine:test` tag. Web checks were then run separately; aggregate verification is
+  not claimed. Existing expired-exception failures and hosted release checks remain unresolved.
+- Notices still cover 46 packages; regenerated SHA-256:
+  `bf56e991e52df407445a633f3eab43817c4e040e8a90fc018e7451e1781b695f`.
+  No push, deployment, admission override, or security exception change was made.
