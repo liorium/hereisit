@@ -36,7 +36,6 @@ RUN sed -i \
       git \
       jq \
       libexif-dev \
-      libexpat1-dev \
       libglib2.0-dev \
       liblcms2-dev \
       libpng-dev \
@@ -48,9 +47,10 @@ RUN sed -i \
   && rm -rf /var/lib/apt/lists/*
 COPY apps/image-engine/native/build-common.sh apps/image-engine/native/build-mozjpeg.sh \
   apps/image-engine/native/build-libwebp.sh apps/image-engine/native/build-libvips.sh \
-  apps/image-engine/native/sources.lock.json /build/native/
+  apps/image-engine/native/build-expat.sh apps/image-engine/native/sources.lock.json /build/native/
 RUN /build/native/build-mozjpeg.sh \
   && /build/native/build-libwebp.sh \
+  && /build/native/build-expat.sh \
   && /build/native/build-libvips.sh
 COPY apps/image-engine/native/jpeg-coeff-verify.c /build/native/jpeg-coeff-verify.c
 RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
@@ -71,8 +71,8 @@ RUN corepack enable \
   && test "$(apps/image-engine/node_modules/esbuild/bin/esbuild --version)" = "0.28.1" \
   && test "$(apps/image-engine/node_modules/@esbuild/linux-x64/bin/esbuild --version)" = "0.28.1" \
   && ! find node_modules apps/image-engine/node_modules -path '*/@img/sharp-*' -print -quit | grep .
-ENV PKG_CONFIG_PATH=/opt/hereisit-native/libvips/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig
-ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/libwebp/lib
+ENV PKG_CONFIG_PATH=/opt/hereisit-native/libvips/lib/pkgconfig:/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig
+ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/expat/lib:/opt/hereisit-native/libwebp/lib
 RUN cd apps/image-engine/node_modules/sharp \
   && PATH=/src/apps/image-engine/node_modules/.bin:$PATH SHARP_FORCE_GLOBAL_LIBVIPS=1 \
     node install/build.js \
@@ -110,6 +110,7 @@ RUN install -d /runtime-root/usr/local/lib \
   && cp -a /opt/hereisit-native/libwebp/bin/. /runtime-root/usr/local/bin/ \
   && cp -a /opt/hereisit-native/libwebp/lib/. /runtime-root/usr/local/lib/ \
   && cp -a /opt/hereisit-native/libvips/lib/. /runtime-root/usr/local/lib/ \
+  && cp -a /opt/hereisit-native/expat/lib/. /runtime-root/usr/local/lib/ \
   && cp -a /licenses/. /runtime-root/licenses/ \
   && cp -a /build-metadata/. /runtime-root/build-metadata/ \
   && cp apps/image-engine/native/sources.lock.json /runtime-root/licenses/sources.lock.json \

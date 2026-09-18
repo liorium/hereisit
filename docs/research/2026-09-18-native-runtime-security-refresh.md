@@ -130,3 +130,41 @@ The generated Next.js root-params type import and bundled-documentation agent po
 - Notices still cover 46 packages; regenerated SHA-256:
   `bf56e991e52df407445a633f3eab43817c4e040e8a90fc018e7451e1781b695f`.
   No push, deployment, admission override, or security exception change was made.
+
+## Expat source-patch follow-up
+
+The image engine now builds [Expat 2.8.4](https://github.com/libexpat/libexpat/releases/tag/R_2_8_4)
+from revision `12cf0b1f25f026a022fe728ad8f7e3d017285b80`, using the existing native source,
+license-notice, and artifact-hash pipeline. It does not mix Debian unstable binaries into the runtime.
+The source lock explicitly leaves exact-source commercial review pending.
+
+- New local image: `sha256:ba43bce9ed9a4188786a1e087e0479ff433531eb5a9fe01ea6d76a87d193dd3c`.
+- Upstream CTest: one registered test suite passed; the build checks both pkg-config version 2.8.4
+  and the actual library's `XML_ExpatVersion()` return value. libvips configuration selects Expat 2.8.4.
+- The hardened container self-test passes with eleven required artifacts. Loading Sharp and inspecting
+  the process memory map confirms `/usr/local/lib/libexpat.so.1.12.4` is the loaded Expat library.
+  Its SHA-256 `2ffa7f8d567dbf567d28ee3f4567e3db67515cae0b33096a4a7df17604199d45`
+  matches the pinned source build record. The old Debian libexpat1 package record is absent.
+- The actual runtime inventory passes source revision, notice, package-license, and artifact-hash
+  validation. This is not the separate exact-source commercial release approval.
+- Fuzz: seed 20260716, 60 seconds, 103 cases; nine successes, eleven pixel-limit rejections,
+  83 unsupported-input rejections. The test container was removed by the harness.
+- Same pinned Trivy/database: Critical 0, High 8, Medium 16, Low 13. The eight util-linux package
+  findings listed above remain blocking; no new exception was added for them.
+- Syft reports 1346 components but does **not** catalog the source-built Expat library. Therefore
+  disappearance of Expat package findings is not, by itself, proof of remediation or complete native
+  vulnerability coverage. The upstream patch, tested runtime version, and loaded-binary/source hash
+  checks supply the specific patch evidence. Native-source scanner coverage remains follow-up work.
+- All ten historical exception entries' CVEs are absent from the corresponding exact refreshed
+  image/PDF scans. PDF scan image identity was rechecked against its retained candidate. Those expired,
+  obsolete entries were removed rather than renewed; the exception document is now empty. Old image
+  findings are no longer waived. The checked-in exception test now uses current time instead of an
+  August timestamp; synthetic expiry and validity-window rejection tests remain.
+- Build log, runtime inventory, loaded-library proof, archive, scans, and fuzz output are retained in
+  `.artifacts/expat-refresh-20260918/` for active verification, not as deployment receipts.
+- Full unit suite, run after native/fuzz work with one worker: 223 files / 3251 tests passed in
+  230.68 seconds. Image-engine type checking and shell syntax checks passed. Independent read-only
+  patch review found no actionable defects; it is not external release or commercial approval.
+
+No push, deployment, or public-admission override was performed. Remaining util-linux findings,
+native-source catalog coverage, exact-source release review, and hosted release evidence still need work.

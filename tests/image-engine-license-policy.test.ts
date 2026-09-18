@@ -90,6 +90,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     "/usr/local/lib/libvips.so",
     "/app/dist/server.mjs",
     "/app/dist/job/job-runner.mjs",
+    "/usr/local/lib/libexpat.so",
   ];
   const required = requiredPaths.map((path, index) => ({
     path,
@@ -102,6 +103,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     quantizr: [requiredPaths[5]],
     libwebp: requiredPaths.slice(6, 8),
     libvips: [requiredPaths[8]],
+    expat: [requiredPaths[11]],
   };
   const buildMetadata = Object.fromEntries(
     sourceLock.sources
@@ -167,6 +169,31 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
+  it("requires the Expat runtime library and binds it to source build metadata", async () => {
+    const fixture = await licenseGateFixture();
+    const validate = (inventory: typeof fixture.inventory) =>
+      validateRuntimeInventory(inventory, fixture.documents.sourceLock, fixture.documents.policy);
+    expect(() => validate(fixture.inventory)).not.toThrow();
+    expect(() =>
+      validate({
+        ...fixture.inventory,
+        required: fixture.inventory.required.filter(
+          (entry) => entry.path !== "/usr/local/lib/libexpat.so",
+        ),
+      }),
+    ).toThrow(/libexpat/);
+    expect(() =>
+      validate({
+        ...fixture.inventory,
+        required: fixture.inventory.required.map((entry) =>
+          entry.path === "/usr/local/lib/libexpat.so"
+            ? { ...entry, sha256: "e".repeat(64) }
+            : entry,
+        ),
+      }),
+    ).toThrow(/bound to expat/);
+  });
+
   it.each([
     ".dockerignore",
     "apps/image-engine/Dockerfile.dockerignore",
@@ -589,43 +616,10 @@ describe("image engine native supply-chain policy", () => {
       exceptions: Array<Record<string, string>>;
     };
     expect(() =>
-      validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z"), {
+      validateVulnerabilityExceptions(exceptions, new Date(), {
         allowedScopes: ["engine", "pdf-engine"],
       }),
     ).not.toThrow();
-    expect(exceptions.exceptions).toHaveLength(10);
-    expect(
-      new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
-    ).toEqual(
-      new Set([
-        "CVE-2026-14456:libssl3t64",
-        "CVE-2026-58010:libglib2.0-0t64",
-        "CVE-2026-58011:libglib2.0-0t64",
-        "CVE-2026-58012:libglib2.0-0t64",
-        "CVE-2026-58013:libglib2.0-0t64",
-        "CVE-2026-58014:libglib2.0-0t64",
-        "CVE-2026-58015:libglib2.0-0t64",
-        "CVE-2026-58016:libglib2.0-0t64",
-        "CVE-2026-66046:libexpat1",
-      ]),
-    );
-    expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
-      new Set([
-        "sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
-        "sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
-      ]),
-    );
-    expect(
-      exceptions.exceptions
-        .filter(
-          ({ cve, affectedPackage }) =>
-            cve === "CVE-2026-14456" && affectedPackage === "libssl3t64",
-        )
-        .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
-    ).toEqual([
-      "engine:sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
-      "pdf-engine:sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
-    ]);
   });
 
   it.each([

@@ -12,7 +12,11 @@ const executableArtifacts = [
   "/usr/local/bin/dwebp",
 ] as const;
 
-const readableArtifacts = ["/usr/local/lib/libvips.so", "/app/dist/job/job-runner.mjs"] as const;
+const readableArtifacts = [
+  "/usr/local/lib/libvips.so",
+  "/usr/local/lib/libexpat.so",
+  "/app/dist/job/job-runner.mjs",
+] as const;
 
 export async function runEngineSelfTest(
   dependencies: {

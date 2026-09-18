@@ -14,6 +14,7 @@ const requiredPaths = [
   "/usr/local/bin/cwebp",
   "/usr/local/bin/dwebp",
   "/usr/local/lib/libvips.so",
+  "/usr/local/lib/libexpat.so",
   "/app/dist/server.mjs",
   "/app/dist/job/job-runner.mjs",
 ];

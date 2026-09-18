@@ -9,7 +9,7 @@ describe("image engine runtime self-test", () => {
         access,
         loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.18.6" }),
       }),
-    ).resolves.toEqual({ sharp: "0.35.4", vips: "8.18.6", artifacts: 10 });
+    ).resolves.toEqual({ sharp: "0.35.4", vips: "8.18.6", artifacts: 11 });
     expect(access.mock.calls.map(([path]) => path)).toEqual(
       expect.arrayContaining([
         "/usr/local/bin/cjpeg",
@@ -18,6 +18,7 @@ describe("image engine runtime self-test", () => {
         "/usr/local/bin/png-smart",
         "/usr/local/bin/cwebp",
         "/usr/local/lib/libvips.so",
+        "/usr/local/lib/libexpat.so",
         "/app/dist/job/job-runner.mjs",
       ]),
     );
