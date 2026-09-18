@@ -30,6 +30,14 @@ const nativeSource = {
   buildRole: "runtime-dynamic-library",
   artifactRecord: "/build-metadata/expat.json",
 };
+const pdfSource = {
+  name: "qpdf",
+  version: "12.4.0",
+  license: "Apache-2.0",
+  url: "https://github.com/qpdf/qpdf/releases/download/v12.4.0/qpdf-12.4.0.tar.gz",
+  sha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+  noticePaths: ["LICENSE.txt", "NOTICE.md"],
+};
 const checkedInMit = `Copyright (c) 2020 Cloudflare, Inc. <wrangler@cloudflare.com>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the "Software"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n`;
 
 const policy = {
@@ -123,6 +131,8 @@ function makeSbom(
   artifactSha256: string,
   components = packageSpecs,
 ) {
+  const native = scope === "pdf-engine" ? pdfSource : nativeSource;
+  const nativeRevision = scope === "pdf-engine" ? pdfSource.sha256 : nativeSource.revision;
   return {
     bomFormat: "CycloneDX",
     specVersion: "1.6",
@@ -148,15 +158,19 @@ function makeSbom(
         licenses: [{ expression: entry.license }],
         properties: [{ name: "syft:package:type", value: "npm" }],
       })),
-      ...(scope === "engine"
+      ...(scope === "engine" || scope === "pdf-engine"
         ? [
             {
-              "bom-ref": `pkg:generic/expat@2.8.4?package-id=native%3Aexpat%40${"a".repeat(40)}`,
+              "bom-ref": `pkg:generic/${native.name}@${native.version}?package-id=native%3A${native.name}%40${nativeRevision}`,
               type: "library",
-              name: "expat",
-              version: "2.8.4",
-              purl: "pkg:generic/expat@2.8.4",
-              licenses: [{ expression: "MIT" }],
+              name: native.name,
+              version: native.version,
+              purl: `pkg:generic/${native.name}@${native.version}`,
+              licenses: [
+                {
+                  expression: scope === "pdf-engine" ? pdfSource.license : nativeSource.licenses[0],
+                },
+              ],
               properties: [
                 { name: "syft:package:foundBy", value: "sbom-cataloger" },
                 { name: "syft:location:0:path", value: "/build-metadata/native.cdx.json" },
@@ -183,6 +197,10 @@ async function makeFixture() {
   await writeCanonical(join(root, "apps/image-engine/native/sources.lock.json"), {
     schemaVersion: 1,
     sources: [nativeSource],
+  });
+  await writeCanonical(join(root, "apps/pdf-engine/native/sources.lock.json"), {
+    schemaVersion: 1,
+    sources: [pdfSource],
   });
 
   const inventory: Record<string, ReturnType<typeof pnpmRecord>[]> = {};
@@ -241,31 +259,32 @@ afterEach(async () => {
 });
 
 describe("application supply-chain gate", () => {
-  it.each([
-    "missing",
-    "version",
-    "revision",
-    "cataloger",
-    "location",
-  ])("rejects %s native SBOM coverage rather than passing an incomplete scan", async (drift) => {
-    const fixture = await makeFixture();
-    await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
-    const sbom = makeSbom("engine", fixture.sboms.engine.artifactSha256);
-    const component = sbom.components[sbom.components.length - 1];
-    if (drift === "missing") sbom.components.pop();
-    if (drift === "version") component.version = "2.8.3";
-    if (drift === "revision")
-      component["bom-ref"] = component["bom-ref"].replace("a".repeat(40), "b".repeat(40));
-    if (drift === "cataloger") component.properties[0].value = "javascript-package-cataloger";
-    if (drift === "location") component.properties[1].value = "/unrelated/native.cdx.json";
-    await writeCanonical(fixture.sboms.engine.path, sbom);
-    await expect(
-      runApplicationSupplyChain(
-        { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
-        fixture.adapters,
-      ),
-    ).rejects.toThrow(/native.*coverage/i);
-  });
+  for (const scope of ["engine", "pdf-engine"] as const) {
+    it.each([
+      "missing",
+      "version",
+      "revision",
+      "cataloger",
+      "location",
+    ])(`rejects %s ${scope} native SBOM coverage rather than passing an incomplete scan`, async (drift) => {
+      const fixture = await makeFixture();
+      await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+      const sbom = makeSbom(scope, fixture.sboms[scope].artifactSha256);
+      const component = sbom.components[sbom.components.length - 1];
+      if (drift === "missing") sbom.components.pop();
+      if (drift === "version") component.version = "2.8.3";
+      if (drift === "revision") component["bom-ref"] += "wrong-revision";
+      if (drift === "cataloger") component.properties[0].value = "javascript-package-cataloger";
+      if (drift === "location") component.properties[1].value = "/unrelated/native.cdx.json";
+      await writeCanonical(fixture.sboms[scope].path, sbom);
+      await expect(
+        runApplicationSupplyChain(
+          { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+          fixture.adapters,
+        ),
+      ).rejects.toThrow(/native.*coverage/i);
+    });
+  }
 
   it("exactly regenerates the committed notices from the current production inventory", async () => {
     const repositoryRoot = process.cwd();
@@ -350,7 +369,11 @@ describe("application supply-chain gate", () => {
             artifactSha256: sha(String(index + 1)),
             sbomSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
             componentCount:
-              scope === "engine" ? 18 : scope.startsWith("web-") || scope === "worker" ? 16 : 17,
+              scope === "engine" || scope === "pdf-engine"
+                ? 18
+                : scope.startsWith("web-") || scope === "worker"
+                  ? 16
+                  : 17,
           },
         ]),
       ),

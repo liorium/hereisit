@@ -5,7 +5,6 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { verifyImageNativeSbomCoverage } from "./create-image-native-sbom.mjs";
 import {
   assertExactKeys,
   assertObject,
@@ -16,6 +15,8 @@ import {
   sha256Bytes,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
+import { validateSourceLock } from "./verify-image-engine-licenses.mjs";
+import { validatePdfSourceLock } from "./verify-pdf-engine-licenses.mjs";
 
 const INVENTORY_MAXIMUM_BYTES = 2 * 1024 * 1024;
 const PACKAGE_JSON_MAXIMUM_BYTES = 128 * 1024;
@@ -540,6 +541,41 @@ function verifySyftTool(metadata) {
   }
 }
 
+export function verifyNativeSbomCoverage(scope, sbom, lock) {
+  let sources;
+  if (scope === "engine") {
+    validateSourceLock(lock);
+    sources = lock.sources.filter((entry) => entry.production);
+  } else if (scope === "pdf-engine") {
+    sources = [validatePdfSourceLock(lock)];
+  } else throw new TypeError("native SBOM scope is invalid");
+  for (const source of sources) {
+    const purl = `pkg:generic/${encodeURIComponent(source.name)}@${encodeURIComponent(source.version)}`;
+    const revision = scope === "engine" ? source.revision : source.sha256;
+    const reference = `${purl}?package-id=${encodeURIComponent(`native:${source.name}@${revision}`)}`;
+    if (
+      !sbom.components?.some(
+        (component) =>
+          component.name === source.name &&
+          component.version === source.version &&
+          component.type === "library" &&
+          component.purl === purl &&
+          component["bom-ref"] === reference &&
+          component.properties?.some(
+            (property) =>
+              property.name === "syft:package:foundBy" && property.value === "sbom-cataloger",
+          ) &&
+          component.properties?.some(
+            (property) =>
+              property.name === "syft:location:0:path" &&
+              property.value === "/build-metadata/native.cdx.json",
+          ),
+      )
+    )
+      throw new TypeError(`native SBOM coverage is missing or miswired: ${source.name}`);
+  }
+}
+
 async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   assertExactKeys(descriptor, ["artifactSha256", "path"], `${scope} SBOM descriptor`);
   const artifactSha256 = assertSha256(descriptor.artifactSha256, `${scope} artifact SHA-256`);
@@ -583,16 +619,17 @@ async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
         throw new TypeError(`${scope} SBOM contains a must not ship component`);
     }
   }
-  if (scope === "engine") {
+  if (scope === "engine" || scope === "pdf-engine") {
+    const app = scope === "engine" ? "image-engine" : "pdf-engine";
     const lock = parseJson(
       await readBoundedRegularFile(
-        join(repositoryRoot, "apps/image-engine/native/sources.lock.json"),
+        join(repositoryRoot, "apps", app, "native/sources.lock.json"),
         1024 * 1024,
-        "image native source lock",
+        "native source lock",
       ),
-      "image native source lock",
+      "native source lock",
     );
-    verifyImageNativeSbomCoverage(sbom, lock);
+    verifyNativeSbomCoverage(scope, sbom, lock);
   }
   return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: components.length };
 }

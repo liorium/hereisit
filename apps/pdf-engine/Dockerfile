@@ -32,10 +32,13 @@ RUN /usr/local/src/build-qpdf.sh
 
 FROM native-build AS runtime-files
 COPY --from=app-build /src/apps/pdf-engine/dist/ /runtime-root/app/dist/
+COPY --from=app-build /usr/local/bin/node /usr/local/bin/node
 COPY --from=distroless /usr/share/doc/libssl3t64/copyright /runtime-root/licenses/debian/libssl3/copyright
 COPY scripts/copy-distroless-runtime-deps.sh /usr/local/src/copy-distroless-runtime-deps.sh
 COPY apps/pdf-engine/native/sources.lock.json /runtime-root/licenses/sources.lock.json
 COPY apps/pdf-engine/licenses/policy.json /runtime-root/licenses/policy.json
+COPY scripts/create-pdf-native-sbom.mjs scripts/image-lab-common.mjs \
+  scripts/verify-pdf-engine-licenses.mjs /usr/local/src/scripts/
 RUN install -d /runtime-root/usr/local/bin /runtime-root/usr/local/lib \
   && cp -a /opt/qpdf/bin/qpdf /runtime-root/usr/local/bin/qpdf \
   && cp -a /opt/qpdf/lib/. /runtime-root/usr/local/lib/ \
@@ -46,7 +49,8 @@ RUN install -d /runtime-root/usr/local/bin /runtime-root/usr/local/lib \
       >/tmp/debian-packages.tsv \
   && install -Dm644 /usr/share/doc/libjpeg62-turbo/copyright \
       /runtime-root/licenses/debian/libjpeg62-turbo/copyright \
-  && chmod -R a=rX /runtime-root/app /runtime-root/licenses /runtime-root/usr \
+  && node /usr/local/src/scripts/create-pdf-native-sbom.mjs /runtime-root /opt/qpdf \
+  && chmod -R a=rX /runtime-root/app /runtime-root/licenses /runtime-root/usr /runtime-root/build-metadata \
   && install -d -m 0700 -o 10001 -g 10001 /runtime-root/tmp/hereisit-pdf-engine \
   && test "$(stat -c %a /runtime-root/app)" = 555 \
   && test "$(stat -c %a /runtime-root/licenses)" = 555

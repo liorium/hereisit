@@ -276,3 +276,61 @@ Initial verified inventory candidate:
 This closes the image source inventory omission, not the native vulnerability matching gap. PDF native
 inventory and appropriate native advisory matching remain follow-up work. Evidence is retained under
 `.artifacts/native-sbom-20260918/`; no push, deployment, approval, or exception renewal was performed.
+
+### PDF native inventory follow-up
+
+PDF now embeds the same inventory path and uses the shared application coverage guard. The qpdf
+source archive checksum is validated by the build, retained with its installation, and compared with
+the runtime source lock. Both shipped binaries must match the verified build byte-for-byte before
+their hashes enter the inventory. The generator reuses existing bounded reads and atomic writes.
+The Node interpreter used for generation stays in the builder, not the final runtime.
+
+- Initial real build exposed an incorrect development-library alias in the generator and fixture.
+  The corrected fixture failed before the fix; both now use the installed SONAME `libqpdf.so.30`
+  pointing to `libqpdf.so.30.4.0`. The corrected container build succeeds.
+- PDF image ID: `sha256:2d4216f00e00e60bf8a55b93968d3002536194b236248e1efe99c811f873131e`.
+- Read-only, network-disabled self-test passes: qpdf 12.4.0, UID 10001, seven required artifacts.
+  Direct runtime checks verify both recorded binary hashes and absence of `/usr/local/bin/node`.
+  Both native binary hashes are unchanged from the earlier `security-20260918` PDF candidate.
+- Pinned Syft with the embedded cataloger reports 1299 components including the exact qpdf source
+  archive identity. Both the new PDF SBOM and retained image SBOM pass the shared native coverage guard.
+- Same pinned Trivy/database: Critical 0, High 0, Medium 13, Low 7. The normalizer checks the actual
+  PDF image ID before binding both reports. This still does not establish native advisory coverage.
+- Focused generation, license-policy, and supply-chain regression tests: four files / 55 tests pass.
+  Independent read-only re-review confirms the build blocker is resolved with no remaining important
+  findings. Evidence remains in `.artifacts/pdf-native-sbom-20260918/`, not release receipts.
+- A fixture cleanup initially read the image license from the PDF-only singular field, causing sixteen
+  supply-chain test failures. The fixture now uses each source's real license field. A fresh isolated
+  full run passes all 225 files / 3278 tests in 203.43 seconds with unchanged timeout limits.
+  Repository lint passes 647 files; all twelve package type checks pass. Aggregate `pnpm verify`,
+  hosted browser tests, and deployment are not claimed by these local checks.
+
+### Native vulnerability matcher diagnostic
+
+A separate [Grype 0.119.0](https://github.com/anchore/grype/releases/tag/v0.119.0) diagnostic uses image
+`sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3`, with database built
+`2026-09-18T06:30:15Z` (archive SHA-256
+`5776a9b7190b6e6eccdb47023eb1cb7bffcfc4cb9ed2b11d777484a577ca3336`). It scans the retained image
+candidate's original Syft report. This is not integrated into the release gate or converted into
+fabricated Trivy records. Original reports and clearly labelled synthetic controls are retained in
+`.artifacts/native-vulnerability-20260918/`.
+The local database file SHA-256 is `79f96f4a536f6e8d9f7d3c2c46ca5fe23513aa88692b913bddf3283b8016cc05`.
+
+The diagnostic reports 26 matches, including four High findings: zlib CVE-2026-85091, glibc
+CVE-2026-19499/CVE-2026-5435, and native libvips CVE-2026-2913. These conflict with the earlier
+Trivy severity totals and require per-finding applicability review, not automatic acceptance or waiver.
+The [Debian glibc entries](https://security-tracker.debian.org/tracker/CVE-2026-19499)
+[describe minor, no-DSA issues](https://security-tracker.debian.org/tracker/CVE-2026-5435), while the
+[zlib tracker](https://security-tracker.debian.org/tracker/CVE-2026-85091) still marks Trixie vulnerable.
+For libvips, the locked revision's `vips_source_read_to_memory` already has the length check from the
+[referenced upstream fix](https://github.com/libvips/libvips/commit/a56feecbe9ed66521d9647ec9fbcd2546eccd7ee).
+GitHub's comparison also confirms the fix is an ancestor of the locked revision (129 ahead, zero behind).
+That is evidence against the broad version-only match, not a completed runtime applicability review.
+
+Positive control: synthetic libwebp 1.3.0 metadata with the
+[NVD vendor identity](https://nvd.nist.gov/vuln/detail/cve-2023-4863)
+`webmproject:libwebp` detects CVE-2023-4863; the same control with Syft's guessed `libwebp:libwebp`
+identity detects zero findings. Both use the same cached database with networking disabled.
+Thus adding generic package names alone demonstrably misses known vulnerabilities. Validate native
+advisory identities and bind matcher/database evidence through the existing release contracts before
+claiming complete automated coverage. No new exception, deployment, or public admission was approved.

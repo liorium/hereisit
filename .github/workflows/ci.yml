@@ -146,7 +146,7 @@ jobs:
               lockfile) artifact=pnpm-lock.yaml; artifact_sha256="$LOCKFILE_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
             esac
             syft_catalogers=()
-            if [[ "$scope" == engine ]]; then
+            if [[ "$scope" == engine || "$scope" == pdf-engine ]]; then
               syft_catalogers=(--select-catalogers +sbom-cataloger)
             fi
             docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" "${syft_catalogers[@]}" -o cyclonedx-json \

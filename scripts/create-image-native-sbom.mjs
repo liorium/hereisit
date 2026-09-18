@@ -84,34 +84,6 @@ export async function createImageNativeSbom(root) {
   };
 }
 
-export function verifyImageNativeSbomCoverage(sbom, lock) {
-  validateSourceLock(lock);
-  for (const source of lock.sources.filter((entry) => entry.production)) {
-    const purl = `pkg:generic/${encodeURIComponent(source.name)}@${encodeURIComponent(source.version)}`;
-    const reference = `${purl}?package-id=${encodeURIComponent(`native:${source.name}@${source.revision}`)}`;
-    if (
-      !sbom.components?.some(
-        (component) =>
-          component.name === source.name &&
-          component.version === source.version &&
-          component.type === "library" &&
-          component.purl === purl &&
-          component["bom-ref"] === reference &&
-          component.properties?.some(
-            (property) =>
-              property.name === "syft:package:foundBy" && property.value === "sbom-cataloger",
-          ) &&
-          component.properties?.some(
-            (property) =>
-              property.name === "syft:location:0:path" &&
-              property.value === "/build-metadata/native.cdx.json",
-          ),
-      )
-    )
-      throw new TypeError(`native SBOM coverage is missing or miswired: ${source.name}`);
-  }
-}
-
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     if (process.argv.length !== 3) throw new TypeError("runtime root is required");
