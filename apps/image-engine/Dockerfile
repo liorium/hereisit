@@ -2,13 +2,13 @@
 
 ARG RUST_IMAGE=rust@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
 ARG NODE_IMAGE=node@sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8
-ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a
+ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1
 
 FROM --platform=linux/amd64 ${RUST_IMAGE} AS rust-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260815T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260815T000000Z|g' \
+      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
+      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
       /etc/apt/sources.list.d/debian.sources \
   && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \
@@ -24,8 +24,8 @@ RUN /build/native/build-oxipng.sh \
 FROM --platform=linux/amd64 ${NODE_IMAGE} AS native-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260815T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260815T000000Z|g' \
+      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
+      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
       /etc/apt/sources.list.d/debian.sources \
   && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \

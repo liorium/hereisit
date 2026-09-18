@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.19
 ARG NODE_IMAGE=node@sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8
 ARG DEBIAN_IMAGE=debian@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
-ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a
+ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1
 
 FROM ${DISTROLESS_NODE_IMAGE} AS distroless
 
@@ -19,8 +19,8 @@ RUN corepack enable && corepack prepare pnpm@11.11.0 --activate \
 
 FROM ${DEBIAN_IMAGE} AS native-build
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260815T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260815T000000Z|g' \
+      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
+      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
       /etc/apt/sources.list.d/debian.sources \
   && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \

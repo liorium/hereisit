@@ -40,6 +40,11 @@ Google AdSense이며, 목표는 광고 수익에서 운영비를 뺀 수익과 �
 
 ## 다음 실행 순서
 
+기반 이미지 갱신과 실제 이미지 재검증의 후속 결과는
+[`2026-09-18-native-runtime-security-refresh.md`](2026-09-18-native-runtime-security-refresh.md)에
+기록했다. PDF 후보의 HIGH·CRITICAL 검출은 0건이지만 이미지 후보에는 HIGH 12건이 남아 있어
+보안 작업은 완료되지 않았다.
+
 2026-09-18 회귀 점검에서 추가 확인한 배포 제약:
 
 - `pnpm test`: 223개 파일, 3246개 테스트 중 3239개 통과, 7개 실패.

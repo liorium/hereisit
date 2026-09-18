@@ -121,7 +121,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
   Object.assign(buildMetadata, {
     "debian-packages.json": {
       schemaVersion: 1,
-      snapshot: "20260815T000000Z",
+      snapshot: "20260918T000000Z",
       packages: [{ name: "base-files", version: "1" }],
       copyrightPaths: ["/usr/share/doc/base-files/copyright"],
     },
@@ -167,6 +167,21 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
+  it.each([
+    ".dockerignore",
+    "apps/image-engine/Dockerfile.dockerignore",
+    "apps/pdf-engine/Dockerfile.dockerignore",
+  ])("excludes local evidence and deployment state from %s", async (filename) => {
+    const patterns = (await readFile(join(repositoryRoot, filename), "utf8")).split(/\r?\n/u);
+    for (const excluded of [
+      ".artifacts",
+      ".wrangler",
+      "apps/image-engine/security/vulnerability-exceptions.json",
+    ]) {
+      expect(patterns).toContain(excluded);
+    }
+  });
+
   it("writes a canonical content-free PR gate bound to one runtime inspection", async () => {
     const fixture = await licenseGateFixture();
     const requests: unknown[] = [];
@@ -480,13 +495,13 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain("! -name node_modules ! -name package.json -exec rm -rf {} +");
     expect(dockerfile).toContain("chmod -R a=rX /runtime-root/app /runtime-root/licenses");
     expect(dockerfile).toContain(
-      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
+      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
     );
     const runtimeStage = "FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime";
     expect(dockerfile).toContain(runtimeStage);
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
-    expect(verifier).toContain('debian.snapshot !== "20260815T000000Z"');
+    expect(verifier).toContain('debian.snapshot !== "20260918T000000Z"');
     expect(verifier).toContain('"--entrypoint",\n      "/nodejs/bin/node",');
     expect(verifier).not.toContain('"--entrypoint",\n      "node",');
     const runtime = dockerfile.slice(dockerfile.indexOf(runtimeStage));
