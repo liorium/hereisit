@@ -32,6 +32,42 @@ function expectIsolatedCanaries(workflow: string) {
 }
 
 describe("native PDF processing release workflows", () => {
+  it("requires offline native scans of both release SBOMs and retains bounded failure evidence", () => {
+    const ci = read("ci");
+    expect(ci).toContain(
+      "GRYPE_IMAGE: ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3",
+    );
+    expect(ci).toContain('"$GRYPE_IMAGE" db update');
+    expect(ci).toContain(
+      'GRYPE_DB_SHA256="$(sha256sum .artifacts/runtime/grype-cache/6/vulnerability.db',
+    );
+    expect(ci).toContain("--network none --read-only");
+    expect(ci).toContain('-v "$PWD/.artifacts/runtime/grype-cache:/cache:ro"');
+    for (const flag of [
+      "GRYPE_DB_AUTO_UPDATE=false",
+      "GRYPE_DB_MAX_ALLOWED_BUILT_AGE=24h",
+      "GRYPE_MATCH_UPSTREAM_KERNEL_HEADERS=true",
+      "GRYPE_CHECK_FOR_APP_UPDATE=false",
+    ])
+      expect(ci).toContain(flag);
+    expect(ci).toContain(
+      '"sbom:/repo/.artifacts/release-source/security-sbom-$scope.cdx.json" -o json',
+    );
+    expect(ci).toContain("node scripts/native-vulnerability-evidence.mjs");
+    expect(ci).toContain('--database-sha256 "$GRYPE_DB_SHA256"');
+    for (const scope of ["engine", "pdf-engine"])
+      expect(ci).toContain(
+        `--${scope}-sbom .artifacts/release-source/security-sbom-${scope}.cdx.json`,
+      );
+    const diagnostics = ci.slice(
+      ci.indexOf("- name: Preserve failed security diagnostics"),
+      ci.indexOf("- name: Create signed @2 candidate"),
+    );
+    expect(diagnostics).toContain("if: failure()");
+    expect(diagnostics).toContain(".artifacts/runtime/security-*.json");
+    expect(diagnostics).toContain(".artifacts/release-source/security-*.json");
+    expect(diagnostics).not.toContain("grype-cache");
+  });
   it("builds one exact @2 release authority in CI and verifies it before every mutation", () => {
     const ci = read("ci");
     const staging = read("processing-staging");

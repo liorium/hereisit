@@ -348,8 +348,18 @@ async function fixture() {
   await writeFile(
     join(source, "security-vulnerability-gate.json"),
     canonicalJson({
-      schemaVersion: "hereisit-vulnerability-gate@1",
+      schemaVersion: "hereisit-vulnerability-gate@2",
       passed: true,
+      nativeScanner: {
+        version: "0.119.0",
+        image:
+          "ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3",
+      },
+      nativeScans: ["engine", "pdf-engine"].map((scope) => ({
+        scope,
+        sbomSha256: sbomHashes[scope],
+        databaseSha256: "d".repeat(64),
+      })),
       scanner: {
         policySha256: "1".repeat(64),
         version: "0.69.3",

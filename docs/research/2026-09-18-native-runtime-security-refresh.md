@@ -383,3 +383,39 @@ Verified identity candidates:
   all twelve package type checks pass. This is focused verification, not a new aggregate `pnpm verify`.
 - Build logs, raw/normalized scans, mutation proof, runtime hash comparisons, and diagnostic controls
   are retained in `.artifacts/native-identities-20260918/` for active follow-up. No deployment or approval.
+
+### Mandatory native vulnerability release gate
+
+Both engine vulnerability assets now contain a versioned bundle of the genuine normalized Trivy
+document and unchanged parsed Grype document. Existing signed report hashes cover the full bundle;
+the historical `security-trivy-*.json` filenames and six release assets are retained. Application-only
+reports remain Trivy documents. Dual-engine candidates require `hereisit-vulnerability-gate@2`;
+legacy single-engine candidate verification stays unchanged.
+
+CI downloads the database once with the pinned Grype image, hashes the actual SQLite file, and scans
+both exact normalized SBOMs offline with read-only mounts and no finding filters. The bundler streams
+the database again after each scan and rejects changed bytes. Reports must be at most 30 minutes old;
+the database must be valid and at most 24 hours old at scan time. The gate binds both SBOM hashes and
+the same database hash, merges scanner findings at their highest severity, and retains the existing
+exact-image exception mechanism. No new exception is added. Failed CI runs retain only security JSON
+diagnostics, not database caches or signing keys.
+
+The controlled CI invocation and signed candidate establish provenance: Grype JSON alone is not a
+cryptographic attestation of its input bytes. Empty/mismatched source identities, suppressed findings,
+disabled CPE matching, missing native evidence, and candidate downgrade are rejected.
+
+Fresh local scans at 17:31 UTC confirm genuine image and PDF bundles validate against the current
+clock and the same database hash recorded above. Image retains 28 findings / 4 High; PDF retains
+20 findings / 3 High. The actual vulnerability verifier stops on the image's unexcepted HIGH findings;
+downstream application scans are deliberately not supplied or claimed as verified in that diagnostic.
+The first local normalization attempt correctly rejected an archive-path mismatch; rerunning Trivy
+with the original `/evidence` mount fixed the invocation without modifying scanner output or guards.
+
+The focused eight-file suite passes 173 tests, including both engine native-only HIGH paths, real
+database-file mutation/symlink guards, candidate downgrade/binding guards, legacy compatibility,
+and workflow wiring. An earlier run overlapped with lint and timed out one existing 5-second
+release-report case; the unchanged suite passed in isolation without increasing timeouts or skips.
+Lint passes 652 files; package typecheck reports twelve cached successes.
+CI shell-block syntax checks and independent read-only review pass. This is not a fresh full
+`pnpm verify` or a hosted CI run. Evidence is retained in `.artifacts/native-gate-20260918/` for
+the pending finding-applicability work. No push, deployment, protected approval, or waiver occurred.
