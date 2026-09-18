@@ -38,7 +38,7 @@ const policy = {
       path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
       sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
     },
-    "@img/sharp-libvips-linux-x64@1.3.2": { kind: "root-readme", path: "README.md" },
+    "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
     "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
       kind: "package",
       package: "@napi-rs/canvas@1.0.2",
@@ -47,7 +47,7 @@ const policy = {
     "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "next@16.2.11" },
     "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
   },
-  mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2"],
+  mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2", "@img/sharp-libvips-linux-x64@1.3.3"],
   pnpm: { version: "11.11.0" },
   schemaVersion: 1,
   syft: { image: syftImage, version: "1.44.0" },
@@ -74,7 +74,7 @@ const packageSpecs: PackageSpec[] = [
   { name: "@cloudflare/containers", version: "0.3.7", license: "MIT OR Apache-2.0", text: null },
   {
     name: "@img/sharp-libvips-linux-x64",
-    version: "1.3.2",
+    version: "1.3.3",
     license: "LGPL-3.0-or-later",
     text: "libvips distribution terms\n",
   },
@@ -224,7 +224,7 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "4bd71a5893b38da6acf68484da361c3170fce775c7354c32d0e36507042df17e",
+      noticeSha256: "aa4f525af1b9597f192dd31b409681f00be40b463522f5b3d8f97e99c4a82949",
       packageCount: 46,
     });
   });
@@ -614,11 +614,23 @@ describe("application supply-chain gate", () => {
     ).rejects.toThrow(/control|license text/i);
   });
 
-  it("allows must-not-ship inventory but rejects it from application SBOMs", async () => {
+  it.each([
+    "1.3.2",
+    "1.3.3",
+  ])("rejects prebuilt libvips %s from application SBOMs", async (version) => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
     const worker = fixture.sboms.worker;
-    await writeCanonical(worker.path, makeSbom("worker", worker.artifactSha256, packageSpecs));
+    await writeCanonical(
+      worker.path,
+      makeSbom(
+        "worker",
+        worker.artifactSha256,
+        packageSpecs.map((pkg) =>
+          pkg.name === "@img/sharp-libvips-linux-x64" ? { ...pkg, version } : pkg,
+        ),
+      ),
+    );
     await expect(
       runApplicationSupplyChain(
         { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },

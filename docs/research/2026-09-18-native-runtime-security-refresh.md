@@ -64,3 +64,46 @@ simply be removed. Resolve or explicitly review the remaining exact-image findin
 Next: verify upstream fixes for the remaining packages, perform compatible source/package upgrades,
 rebuild and rescan the resulting exact artifacts, then rerun quality checks and release gates. Keep the
 existing admission and security gates in force; do not renew exceptions merely to obtain a passing CI run.
+
+## Paired Sharp/libvips follow-up
+
+Sharp is now pinned to 0.35.4 and the custom libvips source to 8.18.6, revision
+`426af3f44246fce9cfa8dd51a353aa4dfd48c553`. The source LICENSE SHA-256 is unchanged:
+`dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551`.
+This does not substitute for a new exact-source commercial release review.
+
+- New local image: `sha256:fdc5481233dfcd2776a8deec46a45746103fb9385e4e41106b69597eda2c43e8`.
+- Read-only, network-disabled, non-root container self-test passes: Sharp 0.35.4, libvips 8.18.6,
+  ten required artifacts. Direct runtime assertions confirm HEIF input is disabled and no prebuilt
+  `@img/sharp-*` package is present in the deployed dependency tree.
+- Fuzz: seed 20260716, 60 seconds, 107 cases; nine successes, twelve pixel-limit rejections,
+  86 unsupported-input rejections. The harness exits successfully and removes its test container.
+- With the same pinned Trivy database: Critical 0 / High 11 / Medium 17 / Low 13.
+  GHSA-rgj7-g3m4-5g8c is absent; the eleven OS package findings listed above remain.
+  Syft reports 1349 components, including Sharp 0.35.4.
+- Regenerated public notices cover 46 packages; SHA-256
+  `aa4f525af1b9597f192dd31b409681f00be40b463522f5b3d8f97e99c4a82949`.
+  Both old and new prebuilt libvips versions remain prohibited in application SBOMs.
+- Focused self-test and application supply-chain tests: 27 passed. Image-engine suite and native
+  policy tests: 191 passed, four existing expired-exception failures. Lint: 643 files passed.
+  Type checks: all twelve packages passed.
+- Full unit run: 3243 passed / 7 failed (3250 total). Four failures are the expired exceptions;
+  three are timeouts during concurrent native compilation. After compilation and type checks finish,
+  the affected two test files pass all 61 tests without changing their timeout limits.
+- Evidence is retained under `.artifacts/sharp-refresh-20260918/` for follow-up, not as release receipts.
+  No deployment, admission override, or exception renewal was performed.
+
+The production dependency audit also reports two Critical Next.js advisories requiring >=16.3.3:
+[Windows-hosted RCE](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36)
+and [AVIF image optimization](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4).
+This site's `output: "export"` configuration does not deploy the Next.js server or Image Optimization
+API; that narrows runtime exposure but does not make the dependency audit pass. Upgrade Next.js and
+rerun static build/export and dependency checks before release.
+
+For the remaining OS findings, Debian currently lists Expat 2.8.4 fixes in unstable, while the pinned
+Trixie package remains vulnerable: [attribute processing](https://security-tracker.debian.org/tracker/CVE-2026-66046),
+[hash flooding](https://security-tracker.debian.org/tracker/CVE-2026-76956), and
+[custom encoding callbacks](https://security-tracker.debian.org/tracker/CVE-2026-76957).
+The [util-linux restricted mount issue](https://security-tracker.debian.org/tracker/CVE-2026-78410)
+also remains unfixed in that Trixie package. Do not mix unstable packages into the runtime or silently
+waive findings; review a reproducible compatible patch or exact-image applicability next.

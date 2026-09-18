@@ -479,10 +479,10 @@ describe("image engine native supply-chain policy", () => {
       "! find /opt/app/node_modules -path '*/@img/sharp-*' -print -quit | grep .",
     );
     expect(dockerfile).toContain(
-      "install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node",
+      "install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.4.node",
     );
     expect(dockerfile).toContain(
-      '"$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.3.node"',
+      '"$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.4.node"',
     );
     expect(dockerfile).toContain('require("/opt/app/node_modules/sharp")');
     expect(dockerfile).toContain(
