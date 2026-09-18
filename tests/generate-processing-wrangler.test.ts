@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { providerUsageContractSha256 } from "../apps/api-worker/src/container-provider-usage";
 import { type Env, parseOperationalConfig } from "../apps/api-worker/src/env";
 import {
   canonicalJson,
@@ -514,11 +515,17 @@ describe("processing Wrangler generator", () => {
     ).toThrow(/provider usage schema/i);
   });
 
-  it("binds the runtime contract hash to the exact checked-in file bytes", () => {
+  it("binds the runtime contract hash to the exact checked-in file bytes", async () => {
     const fileHash = createHash("sha256")
       .update(readFileSync(resolve("docs/deployment/provider-usage-schema.v1.json")))
       .digest("hex");
 
     expect(CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256).toBe(fileHash);
+    expect(generateProcessingWrangler(validInput()).vars.PROVIDER_USAGE_SCHEMA_SHA256).toBe(
+      fileHash,
+    );
+    const localConfig = JSON.parse(readFileSync("apps/api-worker/wrangler.local.jsonc", "utf8"));
+    expect(localConfig.vars.PROVIDER_USAGE_SCHEMA_SHA256).toBe(fileHash);
+    await expect(providerUsageContractSha256()).resolves.toBe(fileHash);
   });
 });

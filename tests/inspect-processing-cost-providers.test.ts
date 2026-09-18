@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { providerUsageContractSha256 } from "../apps/api-worker/src/container-provider-usage";
+import { CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 } from "../scripts/generate-processing-wrangler.mjs";
 import { inspectProcessingCostProviders } from "../scripts/inspect-processing-cost-providers.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
@@ -35,7 +36,7 @@ function workerVersion(providerUsageSchemaSha256: string) {
 
 describe("processing cost provider inspection", () => {
   it("projects only bounded provider completion evidence", async () => {
-    const schemaSha256 = await providerUsageContractSha256();
+    const schemaSha256 = CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256;
     const hourEnd = new Date((targetHourKey + 1) * 3_600_000).toISOString();
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
