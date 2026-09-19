@@ -33,6 +33,7 @@ const policy: ImageOptimizePolicyResponseV1 = {
 function item(itemId: string): RemoteImageOptimizeItem {
   return {
     itemId,
+    mime: "image/jpeg",
     file: new File([Uint8Array.of(1, 2, 3)], `${itemId}.jpg`, { type: "image/jpeg" }),
     width: 1,
     height: 1,
@@ -75,6 +76,60 @@ function succeeded(jobId: string): ImageOptimizeStatusResponseV1 {
 }
 
 describe("remote image optimization batch", () => {
+  it.each([
+    "",
+    "application/octet-stream",
+    "image/png",
+    "image/jpeg",
+  ])("uses the inspected format for creation and upload when the browser reports %j", async (type) => {
+    const source = item("a");
+    const file = new File([source.file], "photo.bin", { type, lastModified: 123 });
+    const uploaded: File[] = [];
+    const hints: string[] = [];
+    const handle = runRemoteImageOptimizeBatch([{ ...source, file }], {
+      apiOrigin: "https://processing.example",
+      anonymousSessionId: sessionId,
+      dependencies: {
+        getPolicy: async () => policy,
+        createJob: async (request) => {
+          hints.push(request.input.mimeHint);
+          return {
+            contract: "tool-job@1",
+            mode: "upload-required",
+            jobId: sessionId,
+            upload: {
+              kind: "worker-stream-put",
+              method: "PUT",
+              path: `/v1/jobs/${sessionId}/input`,
+              contentType: "image/jpeg",
+              byteLength: 3,
+              expiresAt: "2026-07-17T00:00:00.000Z",
+            },
+            reservedWeightedUnits: 10,
+          };
+        },
+        upload: async ({ file }) => {
+          uploaded.push(file);
+        },
+        getStatus: async ({ jobId }) => succeeded(jobId),
+        createDownloadHandle: (input) => ({
+          descriptor: input.descriptor,
+          download: vi.fn(),
+          fetchForArchive: vi.fn(),
+          dispose: vi.fn(),
+        }),
+      },
+    });
+    await expect(handle.result).resolves.toMatchObject([{ status: "fulfilled" }]);
+    expect(hints).toEqual(["image/jpeg"]);
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]).toMatchObject({ type: "image/jpeg", name: "photo.bin", lastModified: 123 });
+    const upload = uploaded[0];
+    if (upload === undefined) throw new Error("Missing upload");
+    expect(new Uint8Array(await upload.arrayBuffer())).toEqual(Uint8Array.of(1, 2, 3));
+    expect(file.type).toBe(type);
+  });
+
   it("passes an explicit browser download-handoff acknowledgement into remote handles", async () => {
     const confirmDownloadHandoff = vi.fn(async () => true);
     const createDownloadHandle = vi.fn((input) => ({

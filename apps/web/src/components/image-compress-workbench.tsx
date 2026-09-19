@@ -578,6 +578,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
           sourceItems.map((item) => ({
             itemId: item.id,
             file: item.file,
+            mime: item.mime,
             width: item.width,
             height: item.height,
             spec,

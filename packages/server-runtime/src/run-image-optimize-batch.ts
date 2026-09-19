@@ -36,6 +36,8 @@ export type ProcessingPolicy = ImageOptimizePolicyResponseV1;
 export interface RemoteImageOptimizeItem {
   readonly itemId: string;
   readonly file: File;
+  /** Format detected from file contents, not the browser-supplied MIME label. */
+  readonly mime: ImageOptimizeMime;
   readonly width: number;
   readonly height: number;
   readonly spec: ImageOptimizeSpecV1;
@@ -368,8 +370,19 @@ export function runRemoteImageOptimizeBatch(
       let lastStatus: ImageOptimizeStatusResponseV1 | null = null;
       let itemResult: RemoteImageOptimizeItemResult;
       try {
+        const file =
+          item.file.type === item.mime
+            ? item.file
+            : new File([item.file], item.file.name, {
+                type: item.mime,
+                lastModified: item.file.lastModified,
+              });
         const credentials = createClientJobCredentials();
-        const createRequest = buildCreateRequest(item, options.anonymousSessionId, credentials);
+        const createRequest = buildCreateRequest(
+          { ...item, file },
+          options.anonymousSessionId,
+          credentials,
+        );
         const created = await dependencies.createJob(createRequest, {
           apiOrigin: options.apiOrigin,
           signal: controller.signal,
@@ -381,7 +394,7 @@ export function runRemoteImageOptimizeBatch(
             apiOrigin: options.apiOrigin,
             ...identity,
             descriptor: created.upload,
-            file: item.file,
+            file,
             signal: controller.signal,
             onProgress: (loaded, total) =>
               safeEmit(options.onEvent, {
