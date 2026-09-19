@@ -1,8 +1,6 @@
+import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import {
-  providerUsageContractSha256,
-  queryContainerUsageHour,
-} from "../src/container-provider-usage";
+import { queryContainerUsageHour } from "../src/container-provider-usage";
 
 describe("Container provider usage in workerd", () => {
   it("preserves provider number source text in the production runtime", async () => {
@@ -22,7 +20,7 @@ describe("Container provider usage in workerd", () => {
         token: "analytics-read-token",
         applicationId,
         hourKey: 495_672,
-        expectedSchemaSha256: await providerUsageContractSha256(),
+        expectedSchemaSha256: env.PROVIDER_USAGE_SCHEMA_SHA256,
       }),
     ).resolves.toEqual({
       cpuMicroseconds: "1",

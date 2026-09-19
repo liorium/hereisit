@@ -31,3 +31,4 @@ strip "$PREFIX/bin/qpdf" "$PREFIX/lib/"libqpdf.so.*
 install -Dm644 "$SOURCE/LICENSE.txt" /licenses/qpdf/LICENSE.txt
 install -Dm644 "$SOURCE/NOTICE.md" /licenses/qpdf/NOTICE.md
 test "$("$PREFIX/bin/qpdf" --version | head -n 1)" = "qpdf version $VERSION"
+install -Dm644 "$LOCK" "$PREFIX/source-lock.json"

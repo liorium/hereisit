@@ -19,6 +19,25 @@ const scopes = [
 ] as const;
 const syftImage =
   "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d";
+const nativeSource = {
+  name: "expat",
+  version: "2.8.4",
+  revision: "a".repeat(40),
+  repository: "https://github.com/libexpat/libexpat.git",
+  production: true,
+  licenses: ["MIT"],
+  noticePaths: ["expat/COPYING"],
+  buildRole: "runtime-dynamic-library",
+  artifactRecord: "/build-metadata/expat.json",
+};
+const pdfSource = {
+  name: "qpdf",
+  version: "12.4.0",
+  license: "Apache-2.0",
+  url: "https://github.com/qpdf/qpdf/releases/download/v12.4.0/qpdf-12.4.0.tar.gz",
+  sha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
+  noticePaths: ["LICENSE.txt", "NOTICE.md"],
+};
 const checkedInMit = `Copyright (c) 2020 Cloudflare, Inc. <wrangler@cloudflare.com>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the "Software"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n`;
 
 const policy = {
@@ -38,16 +57,16 @@ const policy = {
       path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
       sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
     },
-    "@img/sharp-libvips-linux-x64@1.3.2": { kind: "root-readme", path: "README.md" },
+    "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
     "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
       kind: "package",
       package: "@napi-rs/canvas@1.0.2",
     },
-    "@next/env@16.2.11": { kind: "package", package: "next@16.2.11" },
-    "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "next@16.2.11" },
+    "@next/env@16.3.5": { kind: "package", package: "next@16.3.5" },
+    "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "next@16.3.5" },
     "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
   },
-  mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2"],
+  mustNotShip: ["@img/sharp-libvips-linux-x64@1.3.2", "@img/sharp-libvips-linux-x64@1.3.3"],
   pnpm: { version: "11.11.0" },
   schemaVersion: 1,
   syft: { image: syftImage, version: "1.44.0" },
@@ -66,15 +85,15 @@ const packageSpecs: PackageSpec[] = [
   { name: "allow-combined", version: "1.0.0", license: "(MIT AND Zlib)" },
   { name: "@napi-rs/canvas", version: "1.0.2", license: "MIT" },
   { name: "@napi-rs/canvas-linux-x64-gnu", version: "1.0.2", license: "MIT", text: null },
-  { name: "next", version: "16.2.11", license: "MIT" },
-  { name: "@next/env", version: "16.2.11", license: "MIT", text: null },
-  { name: "@next/swc-linux-x64-gnu", version: "16.2.11", license: "MIT", text: null },
+  { name: "next", version: "16.3.5", license: "MIT" },
+  { name: "@next/env", version: "16.3.5", license: "MIT", text: null },
+  { name: "@next/swc-linux-x64-gnu", version: "16.3.5", license: "MIT", text: null },
   { name: "react", version: "19.2.7", license: "MIT" },
   { name: "client-only", version: "0.0.1", license: "MIT", text: null },
   { name: "@cloudflare/containers", version: "0.3.7", license: "MIT OR Apache-2.0", text: null },
   {
     name: "@img/sharp-libvips-linux-x64",
-    version: "1.3.2",
+    version: "1.3.3",
     license: "LGPL-3.0-or-later",
     text: "libvips distribution terms\n",
   },
@@ -112,6 +131,8 @@ function makeSbom(
   artifactSha256: string,
   components = packageSpecs,
 ) {
+  const native = scope === "pdf-engine" ? pdfSource : nativeSource;
+  const nativeRevision = scope === "pdf-engine" ? pdfSource.sha256 : nativeSource.revision;
   return {
     bomFormat: "CycloneDX",
     specVersion: "1.6",
@@ -128,14 +149,40 @@ function makeSbom(
         name: `hereisit-${scope}:sha256-${artifactSha256}`,
       },
     },
-    components: components.map((entry) => ({
-      "bom-ref": `${entry.name}@${entry.version}`,
-      type: "library",
-      name: entry.name,
-      version: entry.version,
-      licenses: [{ expression: entry.license }],
-      properties: [{ name: "syft:package:type", value: "npm" }],
-    })),
+    components: [
+      ...components.map((entry) => ({
+        "bom-ref": `${entry.name}@${entry.version}`,
+        type: "library",
+        name: entry.name,
+        version: entry.version,
+        licenses: [{ expression: entry.license }],
+        properties: [{ name: "syft:package:type", value: "npm" }],
+      })),
+      ...(scope === "engine" || scope === "pdf-engine"
+        ? [
+            {
+              "bom-ref": `pkg:generic/${native.name}@${native.version}?package-id=native%3A${native.name}%40${nativeRevision}`,
+              type: "library",
+              name: native.name,
+              version: native.version,
+              purl: `pkg:generic/${native.name}@${native.version}`,
+              cpe:
+                scope === "pdf-engine"
+                  ? "cpe:2.3:a:qpdf_project:qpdf:12.4.0:*:*:*:*:*:*:*"
+                  : "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
+              licenses: [
+                {
+                  expression: scope === "pdf-engine" ? pdfSource.license : nativeSource.licenses[0],
+                },
+              ],
+              properties: [
+                { name: "syft:package:foundBy", value: "sbom-cataloger" },
+                { name: "syft:location:0:path", value: "/build-metadata/native.cdx.json" },
+              ],
+            },
+          ]
+        : []),
+    ],
   };
 }
 
@@ -151,6 +198,14 @@ async function makeFixture() {
     checkedInMit,
   );
   await writeCanonical(join(root, "security/application-license-policy.json"), policy);
+  await writeCanonical(join(root, "apps/image-engine/native/sources.lock.json"), {
+    schemaVersion: 1,
+    sources: [nativeSource],
+  });
+  await writeCanonical(join(root, "apps/pdf-engine/native/sources.lock.json"), {
+    schemaVersion: 1,
+    sources: [pdfSource],
+  });
 
   const inventory: Record<string, ReturnType<typeof pnpmRecord>[]> = {};
   for (const spec of packageSpecs) {
@@ -208,6 +263,35 @@ afterEach(async () => {
 });
 
 describe("application supply-chain gate", () => {
+  for (const scope of ["engine", "pdf-engine"] as const) {
+    it.each([
+      "missing",
+      "version",
+      "revision",
+      "cataloger",
+      "location",
+      "cpe",
+    ])(`rejects %s ${scope} native SBOM coverage rather than passing an incomplete scan`, async (drift) => {
+      const fixture = await makeFixture();
+      await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
+      const sbom = makeSbom(scope, fixture.sboms[scope].artifactSha256);
+      const component = sbom.components[sbom.components.length - 1];
+      if (drift === "missing") sbom.components.pop();
+      if (drift === "version") component.version = "2.8.3";
+      if (drift === "revision") component["bom-ref"] += "wrong-revision";
+      if (drift === "cataloger") component.properties[0].value = "javascript-package-cataloger";
+      if (drift === "location") component.properties[1].value = "/unrelated/native.cdx.json";
+      if (drift === "cpe") component.cpe = "cpe:2.3:a:wrong:product:1.2.3:*:*:*:*:*:*:*";
+      await writeCanonical(fixture.sboms[scope].path, sbom);
+      await expect(
+        runApplicationSupplyChain(
+          { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
+          fixture.adapters,
+        ),
+      ).rejects.toThrow(/native.*coverage/i);
+    });
+  }
+
   it("exactly regenerates the committed notices from the current production inventory", async () => {
     const repositoryRoot = process.cwd();
     const result = await runApplicationSupplyChain(
@@ -224,7 +308,7 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "4bd71a5893b38da6acf68484da361c3170fce775c7354c32d0e36507042df17e",
+      noticeSha256: "bf56e991e52df407445a633f3eab43817c4e040e8a90fc018e7451e1781b695f",
       packageCount: 46,
     });
   });
@@ -290,7 +374,12 @@ describe("application supply-chain gate", () => {
           {
             artifactSha256: sha(String(index + 1)),
             sbomSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-            componentCount: scope.startsWith("web-") || scope === "worker" ? 16 : 17,
+            componentCount:
+              scope === "engine" || scope === "pdf-engine"
+                ? 18
+                : scope.startsWith("web-") || scope === "worker"
+                  ? 16
+                  : 17,
           },
         ]),
       ),
@@ -317,7 +406,7 @@ describe("application supply-chain gate", () => {
       ),
     ).resolves.toMatchObject({
       passed: true,
-      scopes: { engine: { componentCount: packageSpecs.length + 1 } },
+      scopes: { engine: { componentCount: packageSpecs.length + 2 } },
     });
 
     const versionlessPackage = { ...sbom.components[0] } as Partial<(typeof sbom.components)[0]>;
@@ -482,22 +571,22 @@ describe("application supply-chain gate", () => {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.11": { kind: "package", package: "missing@1.0.0" },
+          "@next/env@16.3.5": { kind: "package", package: "missing@1.0.0" },
         },
       },
       {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.11": { kind: "package", package: "react@19.2.7" },
+          "@next/env@16.3.5": { kind: "package", package: "react@19.2.7" },
         },
       },
       {
         ...policy,
         fallbacks: {
           ...policy.fallbacks,
-          "@next/env@16.2.11": { kind: "package", package: "@next/swc-linux-x64-gnu@16.2.11" },
-          "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "@next/env@16.2.11" },
+          "@next/env@16.3.5": { kind: "package", package: "@next/swc-linux-x64-gnu@16.3.5" },
+          "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "@next/env@16.3.5" },
         },
       },
       {
@@ -614,11 +703,23 @@ describe("application supply-chain gate", () => {
     ).rejects.toThrow(/control|license text/i);
   });
 
-  it("allows must-not-ship inventory but rejects it from application SBOMs", async () => {
+  it.each([
+    "1.3.2",
+    "1.3.3",
+  ])("rejects prebuilt libvips %s from application SBOMs", async (version) => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
     const worker = fixture.sboms.worker;
-    await writeCanonical(worker.path, makeSbom("worker", worker.artifactSha256, packageSpecs));
+    await writeCanonical(
+      worker.path,
+      makeSbom(
+        "worker",
+        worker.artifactSha256,
+        packageSpecs.map((pkg) =>
+          pkg.name === "@img/sharp-libvips-linux-x64" ? { ...pkg, version } : pkg,
+        ),
+      ),
+    );
     await expect(
       runApplicationSupplyChain(
         { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },

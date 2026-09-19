@@ -116,6 +116,7 @@ jobs:
         env:
           SYFT_IMAGE: ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d
           TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689
+          GRYPE_IMAGE: ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3
         run: |
           set -euo pipefail
           TRIVY_DB_DIGEST="$(docker buildx imagetools inspect ghcr.io/aquasecurity/trivy-db:2 | awk '$1 == "Digest:" { print $2; exit }')"
@@ -128,6 +129,12 @@ jobs:
           docker run --rm -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
             image --cache-dir /trivy-cache --db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST" \
             --download-db-only
+          mkdir -p .artifacts/runtime/grype-cache
+          docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m \
+            --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+            -e GRYPE_CHECK_FOR_APP_UPDATE=false -e GRYPE_DB_CACHE_DIR=/cache \
+            -v "$PWD/.artifacts/runtime/grype-cache:/cache" "$GRYPE_IMAGE" db update
+          GRYPE_DB_SHA256="$(sha256sum .artifacts/runtime/grype-cache/6/vulnerability.db | cut -d' ' -f1)"
           docker load --input .artifacts/release-source/image-engine-linux-amd64.docker.tar
           docker load --input .artifacts/release-source/pdf-engine-linux-amd64.docker.tar
           IMAGE_ENGINE_SHA256="$(docker image inspect "hereisit-image-engine:$GITHUB_SHA" --format '{{.Id}}' | sed 's/^sha256://')"
@@ -145,7 +152,13 @@ jobs:
               worker) artifact=.artifacts/release-source/api-worker.mjs; artifact_sha256="$WORKER_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
               lockfile) artifact=pnpm-lock.yaml; artifact_sha256="$LOCKFILE_SHA256"; scanner_artifact="/repo/$artifact"; source="file:$scanner_artifact"; trivy=(filesystem "$scanner_artifact") ;;
             esac
-            docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" -o cyclonedx-json \
+            syft_catalogers=()
+            trivy_output=".artifacts/release-source/security-trivy-$scope.json"
+            if [[ "$scope" == engine || "$scope" == pdf-engine ]]; then
+              syft_catalogers=(--select-catalogers +sbom-cataloger)
+              trivy_output=".artifacts/runtime/security-trivy-$scope.normalized.json"
+            fi
+            docker run --rm -v "$PWD:/repo:ro" "$SYFT_IMAGE" "$source" "${syft_catalogers[@]}" -o cyclonedx-json \
               > ".artifacts/runtime/security-sbom-$scope.raw.json"
             docker run --rm -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
               "${trivy[@]}" --cache-dir /trivy-cache --skip-db-update --offline-scan --format json \
@@ -156,7 +169,23 @@ jobs:
               --sbom-input ".artifacts/runtime/security-sbom-$scope.raw.json" \
               --sbom-output ".artifacts/release-source/security-sbom-$scope.cdx.json" \
               --trivy-input ".artifacts/runtime/security-trivy-$scope.raw.json" \
-              --trivy-output ".artifacts/release-source/security-trivy-$scope.json"
+              --trivy-output "$trivy_output"
+            if [[ "$scope" == engine || "$scope" == pdf-engine ]]; then
+              docker run --rm --network none --read-only \
+                --tmpfs /tmp:rw,nosuid,nodev,mode=1777,size=512m \
+                --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+                -e GRYPE_CHECK_FOR_APP_UPDATE=false -e GRYPE_DB_CACHE_DIR=/cache \
+                -e GRYPE_DB_AUTO_UPDATE=false -e GRYPE_DB_MAX_ALLOWED_BUILT_AGE=24h \
+                -e GRYPE_MATCH_UPSTREAM_KERNEL_HEADERS=true \
+                -v "$PWD:/repo:ro" -v "$PWD/.artifacts/runtime/grype-cache:/cache:ro" \
+                "$GRYPE_IMAGE" "sbom:/repo/.artifacts/release-source/security-sbom-$scope.cdx.json" -o json \
+                > ".artifacts/runtime/security-grype-$scope.raw.json"
+              node scripts/native-vulnerability-evidence.mjs \
+                --trivy "$trivy_output" --grype ".artifacts/runtime/security-grype-$scope.raw.json" \
+                --sbom ".artifacts/release-source/security-sbom-$scope.cdx.json" \
+                --database .artifacts/runtime/grype-cache/6/vulnerability.db --database-sha256 "$GRYPE_DB_SHA256" \
+                --artifact-sha256 "$artifact_sha256" --output ".artifacts/release-source/security-trivy-$scope.json"
+            fi
           done
           node scripts/verify-image-engine-licenses.mjs \
             --scope pr \
@@ -180,6 +209,8 @@ jobs:
             --worker-sbom .artifacts/release-source/security-sbom-worker.cdx.json --worker-artifact-sha256 "$WORKER_SHA256" \
             --lockfile-sbom .artifacts/release-source/security-sbom-lockfile.cdx.json --lockfile-artifact-sha256 "$LOCKFILE_SHA256"
           node scripts/verify-vulnerability-results.mjs \
+            --engine-sbom .artifacts/release-source/security-sbom-engine.cdx.json \
+            --pdf-engine-sbom .artifacts/release-source/security-sbom-pdf-engine.cdx.json \
             --engine-report .artifacts/release-source/security-trivy-engine.json --engine-artifact-sha256 "$IMAGE_ENGINE_SHA256" \
             --pdf-engine-report .artifacts/release-source/security-trivy-pdf-engine.json --pdf-engine-artifact-sha256 "$PDF_ENGINE_SHA256" \
             --web-staging-report .artifacts/release-source/security-trivy-web-staging.json --web-staging-artifact-sha256 "$WEB_STAGING_SHA256" \
@@ -191,6 +222,16 @@ jobs:
             --application-exceptions security/application-vulnerability-exceptions.json \
             --trivy-db-digest "$TRIVY_DB_DIGEST" \
             --output .artifacts/release-source/security-vulnerability-gate.json
+      - name: Preserve failed security diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: processing-security-failure-${{ github.sha }}
+          path: |
+            .artifacts/runtime/security-*.json
+            .artifacts/release-source/security-*.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Create signed @2 candidate and exact report authority
         env:
           PROCESSING_EVIDENCE_PRIVATE_KEY: ${{ secrets.PROCESSING_EVIDENCE_PRIVATE_KEY }}

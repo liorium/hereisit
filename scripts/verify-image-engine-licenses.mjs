@@ -457,11 +457,14 @@ const requiredRuntimeArtifacts = [
   "/usr/local/bin/cwebp",
   "/usr/local/bin/dwebp",
   "/usr/local/lib/libvips.so",
+  "/usr/local/lib/libexpat.so",
+  "/usr/local/lib/libblkid.so",
+  "/usr/local/lib/libmount.so",
   "/app/dist/server.mjs",
   "/app/dist/job/job-runner.mjs",
 ];
 
-const artifactSourceByPath = new Map([
+export const artifactSourceByPath = new Map([
   ["/usr/local/bin/cjpeg", "mozjpeg"],
   ["/usr/local/bin/djpeg", "mozjpeg"],
   ["/usr/local/bin/jpegtran", "mozjpeg"],
@@ -471,6 +474,9 @@ const artifactSourceByPath = new Map([
   ["/usr/local/bin/cwebp", "libwebp"],
   ["/usr/local/bin/dwebp", "libwebp"],
   ["/usr/local/lib/libvips.so", "libvips"],
+  ["/usr/local/lib/libexpat.so", "expat"],
+  ["/usr/local/lib/libblkid.so", "util-linux"],
+  ["/usr/local/lib/libmount.so", "util-linux"],
 ]);
 
 export function validateRuntimeInventory(inventory, sourceLock, policy) {
@@ -547,7 +553,7 @@ export function validateRuntimeInventory(inventory, sourceLock, policy) {
   const debian = inventory.buildMetadata["debian-packages.json"];
   if (
     debian?.schemaVersion !== 1 ||
-    debian.snapshot !== "20260815T000000Z" ||
+    debian.snapshot !== "20260918T000000Z" ||
     !Array.isArray(debian.packages) ||
     debian.packages.length === 0 ||
     !Array.isArray(debian.copyrightPaths) ||

@@ -14,9 +14,10 @@ import { ToolVisitTracker } from "./tool-visit-tracker";
 export interface ToolDetailPageProps {
   toolId: AvailableToolId;
   workbench: ReactNode;
+  guide?: ReactNode;
 }
 
-export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): ReactNode {
+export function ToolDetailPage({ toolId, workbench, guide }: ToolDetailPageProps): ReactNode {
   const tool = getAvailableToolById(toolId);
   const implementation = getToolImplementation(toolId);
   const related = getRelatedAvailableTools(toolId);
@@ -70,6 +71,12 @@ export function ToolDetailPage({ toolId, workbench }: ToolDetailPageProps): Reac
         <section aria-label={workArea.label} className={styles[workArea.style]}>
           {workbench}
         </section>
+
+        {guide ? (
+          <section aria-label="사용 안내" className={styles.guide}>
+            {guide}
+          </section>
+        ) : null}
 
         <section aria-label="다음 작업" className={styles.related}>
           <h2>다음 작업</h2>

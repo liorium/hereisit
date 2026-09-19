@@ -280,7 +280,7 @@ export const imageEngineCreateJobRequestSchema = z
     specHash: specHashSchema,
     input: z
       .object({
-        byteLength: positiveSafeIntegerSchema,
+        byteLength: positiveSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
         etag: safeEtagSchema,
         mimeHint: imageOptimizeMimeSchema,
       })

@@ -60,7 +60,7 @@ describe("PDF engine supply-chain policy", () => {
     expect(build).not.toMatch(/git clone|apt-get|\bpip\b|\bcargo\b/u);
     expect(dockerfile).toContain("USER 10001:10001");
     expect(dockerfile).toContain(
-      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
+      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
     );
     expect(dockerfile).toContain("FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime");
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");

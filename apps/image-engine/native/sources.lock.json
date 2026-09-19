@@ -50,10 +50,42 @@
       "complianceReview": "approved-runtime"
     },
     {
+      "name": "expat",
+      "version": "2.8.4",
+      "repository": "https://github.com/libexpat/libexpat.git",
+      "revision": "12cf0b1f25f026a022fe728ad8f7e3d017285b80",
+      "licenses": ["MIT"],
+      "noticePaths": ["expat/COPYING"],
+      "buildRole": "runtime-dynamic-library",
+      "artifactRecord": "/build-metadata/expat.json",
+      "production": true,
+      "complianceReview": "pending-exact-source-commercial-review"
+    },
+    {
+      "name": "util-linux",
+      "version": "2.41.6",
+      "repository": "https://github.com/util-linux/util-linux.git",
+      "revision": "ba905a1874959c70fd706aa7d49df61076864e0a",
+      "licenses": ["LGPL-2.1-or-later", "BSD-2-Clause", "BSD-3-Clause", "MIT"],
+      "noticePaths": [
+        "README.licensing",
+        "Documentation/licenses/COPYING.LGPL-2.1-or-later",
+        "Documentation/licenses/COPYING.BSD-2-Clause",
+        "Documentation/licenses/COPYING.BSD-3-Clause",
+        "Documentation/licenses/COPYING.MIT",
+        "lib/crc64.c",
+        "lib/xxhash.c"
+      ],
+      "buildRole": "runtime-dynamic-library",
+      "artifactRecord": "/build-metadata/util-linux.json",
+      "production": true,
+      "complianceReview": "pending-exact-source-commercial-review"
+    },
+    {
       "name": "libvips",
-      "version": "8.18.4",
+      "version": "8.18.6",
       "repository": "https://github.com/libvips/libvips.git",
-      "revision": "e01a4797cabe77d457fdfa7d776b7a7e7ca6d6a7",
+      "revision": "426af3f44246fce9cfa8dd51a353aa4dfd48c553",
       "licenses": ["LGPL-2.1-or-later"],
       "noticePaths": ["LICENSE"],
       "buildRole": "runtime-dynamic-library",

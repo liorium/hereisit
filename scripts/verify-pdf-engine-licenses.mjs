@@ -15,6 +15,23 @@ const EXPECTED = Object.freeze({
 });
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+export function validatePdfSourceLock(lock) {
+  const source =
+    lock?.schemaVersion === 1 && Array.isArray(lock.sources) && lock.sources.length === 1
+      ? lock.sources[0]
+      : null;
+  if (
+    source?.name !== "qpdf" ||
+    source.version !== EXPECTED.version ||
+    source.url !== EXPECTED.url ||
+    source.sha256 !== EXPECTED.sha256 ||
+    source.license !== "Apache-2.0"
+  )
+    throw new TypeError("qpdf source lock is invalid");
+  return source;
+}
+
 async function regular(path, maximum = 256 * 1024) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > maximum)
@@ -34,18 +51,7 @@ export async function verifyPdfEngineLicenses({ root }) {
   ]);
   const lock = JSON.parse(lockBytes.toString("utf8"));
   const policy = JSON.parse(policyBytes.toString("utf8"));
-  const source =
-    lock?.schemaVersion === 1 && Array.isArray(lock.sources) && lock.sources.length === 1
-      ? lock.sources[0]
-      : null;
-  if (
-    source?.name !== "qpdf" ||
-    source.version !== EXPECTED.version ||
-    source.url !== EXPECTED.url ||
-    source.sha256 !== EXPECTED.sha256 ||
-    source.license !== "Apache-2.0"
-  )
-    throw new TypeError("qpdf source lock is invalid");
+  validatePdfSourceLock(lock);
   if (sha256(license) !== EXPECTED.licenseSha256 || sha256(notice) !== EXPECTED.noticeSha256)
     throw new TypeError("qpdf license material is invalid");
   if (

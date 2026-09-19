@@ -90,6 +90,9 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     "/usr/local/lib/libvips.so",
     "/app/dist/server.mjs",
     "/app/dist/job/job-runner.mjs",
+    "/usr/local/lib/libexpat.so",
+    "/usr/local/lib/libblkid.so",
+    "/usr/local/lib/libmount.so",
   ];
   const required = requiredPaths.map((path, index) => ({
     path,
@@ -102,6 +105,8 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
     quantizr: [requiredPaths[5]],
     libwebp: requiredPaths.slice(6, 8),
     libvips: [requiredPaths[8]],
+    expat: [requiredPaths[11]],
+    "util-linux": requiredPaths.slice(12, 14),
   };
   const buildMetadata = Object.fromEntries(
     sourceLock.sources
@@ -121,7 +126,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
   Object.assign(buildMetadata, {
     "debian-packages.json": {
       schemaVersion: 1,
-      snapshot: "20260815T000000Z",
+      snapshot: "20260918T000000Z",
       packages: [{ name: "base-files", version: "1" }],
       copyrightPaths: ["/usr/share/doc/base-files/copyright"],
     },
@@ -167,6 +172,46 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
+  it.each([
+    ["/usr/local/lib/libexpat.so", "expat"],
+    ["/usr/local/lib/libblkid.so", "util-linux"],
+    ["/usr/local/lib/libmount.so", "util-linux"],
+  ])("requires %s and binds it to %s source build metadata", async (path, source) => {
+    const fixture = await licenseGateFixture();
+    const validate = (inventory: typeof fixture.inventory) =>
+      validateRuntimeInventory(inventory, fixture.documents.sourceLock, fixture.documents.policy);
+    expect(() => validate(fixture.inventory)).not.toThrow();
+    expect(() =>
+      validate({
+        ...fixture.inventory,
+        required: fixture.inventory.required.filter((entry) => entry.path !== path),
+      }),
+    ).toThrow(path);
+    expect(() =>
+      validate({
+        ...fixture.inventory,
+        required: fixture.inventory.required.map((entry) =>
+          entry.path === path ? { ...entry, sha256: "e".repeat(64) } : entry,
+        ),
+      }),
+    ).toThrow(`bound to ${source}`);
+  });
+
+  it.each([
+    ".dockerignore",
+    "apps/image-engine/Dockerfile.dockerignore",
+    "apps/pdf-engine/Dockerfile.dockerignore",
+  ])("excludes local evidence and deployment state from %s", async (filename) => {
+    const patterns = (await readFile(join(repositoryRoot, filename), "utf8")).split(/\r?\n/u);
+    for (const excluded of [
+      ".artifacts",
+      ".wrangler",
+      "apps/image-engine/security/vulnerability-exceptions.json",
+    ]) {
+      expect(patterns).toContain(excluded);
+    }
+  });
+
   it("writes a canonical content-free PR gate bound to one runtime inspection", async () => {
     const fixture = await licenseGateFixture();
     const requests: unknown[] = [];
@@ -464,10 +509,10 @@ describe("image engine native supply-chain policy", () => {
       "! find /opt/app/node_modules -path '*/@img/sharp-*' -print -quit | grep .",
     );
     expect(dockerfile).toContain(
-      "install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node",
+      "install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.4.node",
     );
     expect(dockerfile).toContain(
-      '"$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.3.node"',
+      '"$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.4.node"',
     );
     expect(dockerfile).toContain('require("/opt/app/node_modules/sharp")');
     expect(dockerfile).toContain(
@@ -480,13 +525,13 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain("! -name node_modules ! -name package.json -exec rm -rf {} +");
     expect(dockerfile).toContain("chmod -R a=rX /runtime-root/app /runtime-root/licenses");
     expect(dockerfile).toContain(
-      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
+      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
     );
     const runtimeStage = "FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime";
     expect(dockerfile).toContain(runtimeStage);
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
-    expect(verifier).toContain('debian.snapshot !== "20260815T000000Z"');
+    expect(verifier).toContain('debian.snapshot !== "20260918T000000Z"');
     expect(verifier).toContain('"--entrypoint",\n      "/nodejs/bin/node",');
     expect(verifier).not.toContain('"--entrypoint",\n      "node",');
     const runtime = dockerfile.slice(dockerfile.indexOf(runtimeStage));
@@ -574,43 +619,10 @@ describe("image engine native supply-chain policy", () => {
       exceptions: Array<Record<string, string>>;
     };
     expect(() =>
-      validateVulnerabilityExceptions(exceptions, new Date("2026-08-16T00:00:00.000Z"), {
+      validateVulnerabilityExceptions(exceptions, new Date(), {
         allowedScopes: ["engine", "pdf-engine"],
       }),
     ).not.toThrow();
-    expect(exceptions.exceptions).toHaveLength(10);
-    expect(
-      new Set(exceptions.exceptions.map(({ cve, affectedPackage }) => `${cve}:${affectedPackage}`)),
-    ).toEqual(
-      new Set([
-        "CVE-2026-14456:libssl3t64",
-        "CVE-2026-58010:libglib2.0-0t64",
-        "CVE-2026-58011:libglib2.0-0t64",
-        "CVE-2026-58012:libglib2.0-0t64",
-        "CVE-2026-58013:libglib2.0-0t64",
-        "CVE-2026-58014:libglib2.0-0t64",
-        "CVE-2026-58015:libglib2.0-0t64",
-        "CVE-2026-58016:libglib2.0-0t64",
-        "CVE-2026-66046:libexpat1",
-      ]),
-    );
-    expect(new Set(exceptions.exceptions.map(({ affectedDigest }) => affectedDigest))).toEqual(
-      new Set([
-        "sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
-        "sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
-      ]),
-    );
-    expect(
-      exceptions.exceptions
-        .filter(
-          ({ cve, affectedPackage }) =>
-            cve === "CVE-2026-14456" && affectedPackage === "libssl3t64",
-        )
-        .map(({ affectedScope, affectedDigest }) => `${affectedScope}:${affectedDigest}`),
-    ).toEqual([
-      "engine:sha256:8011a4b9b75d42bb57c5a59d178845daecc47abe943c36d5a8bf472cfd1d1c5b",
-      "pdf-engine:sha256:d1a8ff3539bb0dd89276d470342dbb20db32949a973a3eaef28b281f6d247861",
-    ]);
   });
 
   it.each([

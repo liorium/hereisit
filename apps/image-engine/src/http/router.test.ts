@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +102,21 @@ describe("image engine HTTP lifecycle", () => {
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("rejects oversized image jobs before reserving a workspace or accepting an upload", async () => {
+    const response = await fetch(`${origin}/v1/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...createBody,
+        input: { ...createBody.input, byteLength: 31_457_281 },
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(controller.get(jobId)).toBeNull();
+    expect(controller.expectedInput(jobId)).toBeNull();
+    expect(await readdir(root)).toEqual([]);
   });
 
   const request = (path: string, init?: RequestInit) => fetch(`${origin}${path}`, init);

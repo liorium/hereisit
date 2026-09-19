@@ -2,13 +2,13 @@
 
 ARG RUST_IMAGE=rust@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
 ARG NODE_IMAGE=node@sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8
-ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a
+ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1
 
 FROM --platform=linux/amd64 ${RUST_IMAGE} AS rust-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260815T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260815T000000Z|g' \
+      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
+      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
       /etc/apt/sources.list.d/debian.sources \
   && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \
@@ -24,8 +24,8 @@ RUN /build/native/build-oxipng.sh \
 FROM --platform=linux/amd64 ${NODE_IMAGE} AS native-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260815T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260815T000000Z|g' \
+      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
+      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
       /etc/apt/sources.list.d/debian.sources \
   && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \
@@ -36,7 +36,6 @@ RUN sed -i \
       git \
       jq \
       libexif-dev \
-      libexpat1-dev \
       libglib2.0-dev \
       liblcms2-dev \
       libpng-dev \
@@ -46,12 +45,20 @@ RUN sed -i \
       pkg-config \
       python3 \
   && rm -rf /var/lib/apt/lists/*
-COPY apps/image-engine/native/build-common.sh apps/image-engine/native/build-mozjpeg.sh \
-  apps/image-engine/native/build-libwebp.sh apps/image-engine/native/build-libvips.sh \
-  apps/image-engine/native/sources.lock.json /build/native/
-RUN /build/native/build-mozjpeg.sh \
-  && /build/native/build-libwebp.sh \
-  && /build/native/build-libvips.sh
+COPY apps/image-engine/native/build-common.sh /build/native/
+COPY apps/image-engine/native/build-mozjpeg.sh /build/native/
+RUN /build/native/build-mozjpeg.sh
+COPY apps/image-engine/native/build-libwebp.sh /build/native/
+RUN /build/native/build-libwebp.sh
+COPY apps/image-engine/native/build-expat.sh /build/native/
+RUN /build/native/build-expat.sh
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends bison flex \
+  && rm -rf /var/lib/apt/lists/*
+COPY apps/image-engine/native/build-util-linux.sh /build/native/
+RUN /build/native/build-util-linux.sh
+COPY apps/image-engine/native/build-libvips.sh /build/native/
+RUN /build/native/build-libvips.sh
 COPY apps/image-engine/native/jpeg-coeff-verify.c /build/native/jpeg-coeff-verify.c
 RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
       -I/opt/hereisit-native/mozjpeg/include /build/native/jpeg-coeff-verify.c \
@@ -71,21 +78,21 @@ RUN corepack enable \
   && test "$(apps/image-engine/node_modules/esbuild/bin/esbuild --version)" = "0.28.1" \
   && test "$(apps/image-engine/node_modules/@esbuild/linux-x64/bin/esbuild --version)" = "0.28.1" \
   && ! find node_modules apps/image-engine/node_modules -path '*/@img/sharp-*' -print -quit | grep .
-ENV PKG_CONFIG_PATH=/opt/hereisit-native/libvips/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig
-ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/libwebp/lib
+ENV PKG_CONFIG_PATH=/opt/hereisit-native/libvips/lib/pkgconfig:/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig
+ENV LD_LIBRARY_PATH=/opt/hereisit-native/libvips/lib:/opt/hereisit-native/expat/lib:/opt/hereisit-native/util-linux/lib:/opt/hereisit-native/libwebp/lib
 RUN cd apps/image-engine/node_modules/sharp \
   && PATH=/src/apps/image-engine/node_modules/.bin:$PATH SHARP_FORCE_GLOBAL_LIBVIPS=1 \
     node install/build.js \
   && cd /src \
-  && node -e 'const sharp = require("./apps/image-engine/node_modules/sharp"); if (sharp.versions.vips !== "8.18.4") throw new Error(`unexpected libvips ${sharp.versions.vips}`)' \
+  && node -e 'const sharp = require("./apps/image-engine/node_modules/sharp"); if (sharp.versions.vips !== "8.18.6") throw new Error(`unexpected libvips ${sharp.versions.vips}`)' \
   && pnpm --filter @hereisit/image-engine build \
   && test -f apps/image-engine/dist/server.mjs \
   && test -f apps/image-engine/dist/job/job-runner.mjs \
   && pnpm --filter @hereisit/image-engine deploy --prod --no-optional --legacy /opt/app \
   && ! find /opt/app/node_modules -path '*/@img/sharp-*' -print -quit | grep . \
-  && install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.3.node \
-      "$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.3.node" \
-  && node -e 'const sharp = require("/opt/app/node_modules/sharp"); if (sharp.versions.vips !== "8.18.4") throw new Error(`unexpected deployed libvips ${sharp.versions.vips}`)' \
+  && install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.4.node \
+      "$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.4.node" \
+  && node -e 'const sharp = require("/opt/app/node_modules/sharp"); if (sharp.versions.vips !== "8.18.6") throw new Error(`unexpected deployed libvips ${sharp.versions.vips}`)' \
   && test "$(readlink /opt/app/node_modules/.pnpm/node_modules/@hereisit/image-engine)" = "../../../../../../src/apps/image-engine" \
   && unlink /opt/app/node_modules/.pnpm/node_modules/@hereisit/image-engine \
   && rm /opt/app/node_modules/.modules.yaml \
@@ -110,6 +117,9 @@ RUN install -d /runtime-root/usr/local/lib \
   && cp -a /opt/hereisit-native/libwebp/bin/. /runtime-root/usr/local/bin/ \
   && cp -a /opt/hereisit-native/libwebp/lib/. /runtime-root/usr/local/lib/ \
   && cp -a /opt/hereisit-native/libvips/lib/. /runtime-root/usr/local/lib/ \
+  && cp -a /opt/hereisit-native/expat/lib/. /runtime-root/usr/local/lib/ \
+  && cp -a /opt/hereisit-native/util-linux/lib/libblkid.so* \
+      /opt/hereisit-native/util-linux/lib/libmount.so* /runtime-root/usr/local/lib/ \
   && cp -a /licenses/. /runtime-root/licenses/ \
   && cp -a /build-metadata/. /runtime-root/build-metadata/ \
   && cp apps/image-engine/native/sources.lock.json /runtime-root/licenses/sources.lock.json \
@@ -123,6 +133,7 @@ RUN install -d /runtime-root/usr/local/lib \
   && node apps/image-engine/scripts/write-debian-inventory.mjs \
       /tmp/debian-packages.tsv /tmp/debian-copyright-paths.txt \
       /runtime-root/build-metadata/debian-packages.json \
+  && node scripts/create-image-native-sbom.mjs /runtime-root \
   && chmod -R a=rX /runtime-root/app /runtime-root/licenses \
       /runtime-root/build-metadata /runtime-root/usr \
   && install -d -m 0700 -o 10001 -g 10001 /runtime-root/work /runtime-root/home/hereisit \

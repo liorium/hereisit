@@ -2,6 +2,10 @@
 
 ## Product principles
 
+- Primary business goal: useful free tools funded by Google AdSense, with low ongoing manual
+  maintenance. Prioritize successful tasks, organic discovery, repeat use, and revenue after operating
+  costs. Paid login features are a later option. Do not trade usability for ad clicks or imply guaranteed
+  revenue; automate routine checks and surface actionable failures. See `apps/web/PRODUCT.md`.
 - Prefer local browser processing, except that `/image/compress` defaults to the disclosed native server
   engine and keeps local processing as an explicit option. A file must not leave the device unless the UI
   explicitly says so.

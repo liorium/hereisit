@@ -3,13 +3,14 @@ set -euo pipefail
 source "$(dirname "$0")/build-common.sh"
 
 NAME=libvips
-REVISION=e01a4797cabe77d457fdfa7d776b7a7e7ca6d6a7
+REVISION=426af3f44246fce9cfa8dd51a353aa4dfd48c553
 PREFIX=/opt/hereisit-native/libvips
 SOURCE="$(checkout_source "$NAME" https://github.com/libvips/libvips.git "$REVISION")"
 copy_notices "$NAME" "$SOURCE" LICENSE
 
-export PKG_CONFIG_PATH="/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig"
-export LD_LIBRARY_PATH="/opt/hereisit-native/libwebp/lib"
+export PKG_CONFIG_PATH="/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig"
+export LD_LIBRARY_PATH="/opt/hereisit-native/expat/lib:/opt/hereisit-native/util-linux/lib:/opt/hereisit-native/libwebp/lib"
+test "$(pkg-config --modversion expat)" = "2.8.4"
 meson setup "$SOURCE/build" "$SOURCE" \
   --buildtype=release \
   --prefix="$PREFIX" \

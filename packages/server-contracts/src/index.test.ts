@@ -280,6 +280,8 @@ describe("internal server messages", () => {
 
   it.each([
     ["zero input bytes", { byteLength: 0 }],
+    ["input above the 30 MiB limit", { byteLength: 31_457_281 }],
+    ["multi-gigabyte input", { byteLength: 4_294_968_320 }],
     ["negative input bytes", { byteLength: -1 }],
     ["fractional input bytes", { byteLength: 1.5 }],
     ["unsafe input bytes", { byteLength: Number.MAX_SAFE_INTEGER + 1 }],
@@ -295,6 +297,13 @@ describe("internal server messages", () => {
         }),
       ).success,
     ).toBe(false);
+  });
+  it("accepts an image exactly at the 30 MiB limit through both request schemas", () => {
+    const request = createEngineRequest({
+      input: { byteLength: 31_457_280, etag: "input-etag", mimeHint: "image/jpeg" },
+    });
+    expect(engineCreateJobRequestSchema.safeParse(request).success).toBe(true);
+    expect(anyEngineCreateJobRequestSchema.safeParse(request).success).toBe(true);
   });
 });
 

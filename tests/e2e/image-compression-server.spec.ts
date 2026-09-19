@@ -245,7 +245,7 @@ test("supports keyboard setup with named compression presets", async ({ page }) 
 test.describe("configured processing server", () => {
   test.skip(!serverModeEnabled, "requires a build with NEXT_PUBLIC_PROCESSING_API_ORIGIN");
 
-  test("discloses upload before selection and downloads a verified same-format result", async ({
+  test("discloses upload and prepares a same-format result despite a wrong browser MIME label", async ({
     page,
   }) => {
     const calls: string[] = [];
@@ -292,6 +292,7 @@ test.describe("configured processing server", () => {
         await route.fulfill({ status: 200, json: serverPolicy() });
       } else if (path === "/v1/jobs" && request.method() === "POST") {
         requestBodies.push(request.postData() ?? "");
+        expect(request.postDataJSON().input.mimeHint).toBe("image/png");
         await route.fulfill({
           status: 200,
           json: {
@@ -310,6 +311,8 @@ test.describe("configured processing server", () => {
           },
         });
       } else if (path.endsWith("/input")) {
+        expect(request.headers()["content-type"]).toBe("image/png");
+        expect(request.postDataBuffer()).toEqual(progressPng);
         await new Promise((resolve) => setTimeout(resolve, 250));
         await route.fulfill({ status: 204 });
       } else if (path === `/v1/jobs/${jobId}` && request.method() === "GET") {
@@ -398,7 +401,7 @@ test.describe("configured processing server", () => {
     await expect(picker).toBeEnabled();
     await page.locator('input[type="file"]').setInputFiles({
       name: "server.png",
-      mimeType: "image/png",
+      mimeType: "application/octet-stream",
       buffer: progressPng,
     });
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();

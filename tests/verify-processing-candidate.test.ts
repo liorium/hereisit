@@ -405,8 +405,18 @@ async function createFixture({
   );
   fileBytes["security-vulnerability-gate.json"] = Buffer.from(
     canonicalJson({
-      schemaVersion: "hereisit-vulnerability-gate@1",
+      schemaVersion: "hereisit-vulnerability-gate@2",
       passed: true,
+      nativeScanner: {
+        version: "0.119.0",
+        image:
+          "ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3",
+      },
+      nativeScans: ["engine", "pdf-engine"].map((scope) => ({
+        scope,
+        sbomSha256: sbomHashes[scope],
+        databaseSha256: "d".repeat(64),
+      })),
       scanner: {
         policySha256: "1".repeat(64),
         version: "0.69.3",
@@ -590,6 +600,38 @@ function builtOptions(fixture: Awaited<ReturnType<typeof createFixture>>, output
     providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
   };
 }
+
+it("rejects a dual-engine candidate downgraded to Trivy-only evidence", async () => {
+  const fixture = await createFixture();
+  const gate = JSON.parse(
+    await readFile(join(fixture.root, "security-vulnerability-gate.json"), "utf8"),
+  );
+  gate.schemaVersion = "hereisit-vulnerability-gate@1";
+  delete gate.nativeScans;
+  delete gate.nativeScanner;
+  await bindChangedSecurityGate(fixture, "vulnerability", Buffer.from(canonicalJson(gate)));
+  await expect(verifyFixture(fixture)).rejects.toThrow(/vulnerability|native/);
+});
+
+it.each([
+  "sbom",
+  "database",
+  "scanner",
+  "missing",
+  "order",
+])("rejects altered native candidate bindings (%s)", async (kind) => {
+  const fixture = await createFixture();
+  const gate = JSON.parse(
+    await readFile(join(fixture.root, "security-vulnerability-gate.json"), "utf8"),
+  );
+  if (kind === "sbom") gate.nativeScans[0].sbomSha256 = "0".repeat(64);
+  if (kind === "database") gate.nativeScans[1].databaseSha256 = "0".repeat(64);
+  if (kind === "scanner") gate.nativeScanner.image = "unreviewed:latest";
+  if (kind === "missing") gate.nativeScans.pop();
+  if (kind === "order") gate.nativeScans.reverse();
+  await bindChangedSecurityGate(fixture, "vulnerability", Buffer.from(canonicalJson(gate)));
+  await expect(verifyFixture(fixture)).rejects.toThrow(/native/);
+});
 
 async function bindChangedSecurityGate(
   fixture: Awaited<ReturnType<typeof createFixture>>,

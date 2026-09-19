@@ -13,6 +13,7 @@ import {
   parseCliArguments,
   sha256Bytes,
 } from "./image-lab-common.mjs";
+import { grypeImage } from "./native-vulnerability-evidence.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 import { validatePdfBenchmarkEvidence } from "./validate-pdf-benchmark-evidence.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
@@ -284,13 +285,49 @@ function validateApplicationGate(gate, artifactHashes, sboms, scopesToValidate) 
 }
 
 function validateVulnerabilityGate(gate, candidate, artifactHashes, scopesToValidate) {
+  const nativeRequired = candidate.pdfEngine !== undefined;
   assertExactKeys(
     gate,
-    ["schemaVersion", "passed", "scanner", "exceptions", "scans"],
+    [
+      "schemaVersion",
+      "passed",
+      "scanner",
+      "exceptions",
+      "scans",
+      ...(nativeRequired ? ["nativeScanner", "nativeScans"] : []),
+    ],
     "vulnerability gate",
   );
-  assertValue(gate.schemaVersion, "hereisit-vulnerability-gate@1", "vulnerability gate schema");
+  assertValue(
+    gate.schemaVersion,
+    nativeRequired ? "hereisit-vulnerability-gate@2" : "hereisit-vulnerability-gate@1",
+    "vulnerability gate schema",
+  );
   assertTrue(gate.passed, "vulnerability gate");
+  if (nativeRequired) {
+    const nativeScanner = assertObject(gate.nativeScanner, "native vulnerability scanner");
+    assertExactKeys(nativeScanner, ["version", "image"], "native vulnerability scanner");
+    assertValue(nativeScanner.version, "0.119.0", "native vulnerability scanner version");
+    assertValue(nativeScanner.image, grypeImage, "native vulnerability scanner image");
+    if (!Array.isArray(gate.nativeScans) || gate.nativeScans.length !== 2)
+      throw new TypeError("native vulnerability scans must contain both engines");
+    for (const [index, [scope, key]] of securityScopes.slice(0, 2).entries()) {
+      const scan = assertObject(gate.nativeScans[index], "native vulnerability scan");
+      assertExactKeys(scan, ["scope", "sbomSha256", "databaseSha256"], "native vulnerability scan");
+      assertValue(scan.scope, scope, "native vulnerability scope");
+      assertSha256(scan.databaseSha256, "native vulnerability database hash");
+      assertValue(
+        scan.databaseSha256,
+        gate.nativeScans[0].databaseSha256,
+        "native vulnerability database",
+      );
+      assertValue(
+        scan.sbomSha256,
+        candidate.releaseAssets.security.sboms[key].sha256,
+        "native vulnerability SBOM",
+      );
+    }
+  }
   const scanner = assertObject(gate.scanner, "vulnerability scanner");
   assertExactKeys(
     scanner,

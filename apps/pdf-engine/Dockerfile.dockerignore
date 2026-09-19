@@ -1,5 +1,7 @@
 .git
 .worktrees
+.artifacts
+.wrangler
 **/node_modules
 **/.next
 **/.turbo
@@ -8,3 +10,4 @@ coverage
 playwright-report
 test-results
 *.log
+apps/image-engine/security/vulnerability-exceptions.json

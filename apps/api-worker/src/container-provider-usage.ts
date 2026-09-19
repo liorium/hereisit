@@ -85,15 +85,10 @@ export interface ContainerUsageHourResult {
   }[];
 }
 
-let contractHashPromise: Promise<string> | undefined;
-
 export function providerUsageContractSha256(): Promise<string> {
-  contractHashPromise ??= crypto.subtle
-    .digest("SHA-256", new TextEncoder().encode(JSON.stringify(providerUsageContract)))
-    .then((digest) =>
-      Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
-    );
-  return contractHashPromise;
+  // JSON imports discard formatting; releases attest the original file bytes, not reserialized JSON.
+  // ponytail: pin the v1 artifact; contract edits must update this pin and pass the raw-file regression.
+  return Promise.resolve("b7fe0c24941179f85e6c7d0b9cdcd82cb5a60597a606748352bc81f1e63d35af");
 }
 
 async function readBoundedProviderText(response: Response): Promise<string> {

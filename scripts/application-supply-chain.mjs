@@ -15,6 +15,9 @@ import {
   sha256Bytes,
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
+import { nativeCpe } from "./native-advisory-identities.mjs";
+import { validateSourceLock } from "./verify-image-engine-licenses.mjs";
+import { validatePdfSourceLock } from "./verify-pdf-engine-licenses.mjs";
 
 const INVENTORY_MAXIMUM_BYTES = 2 * 1024 * 1024;
 const PACKAGE_JSON_MAXIMUM_BYTES = 128 * 1024;
@@ -25,7 +28,7 @@ const NOTICES_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SBOM_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SCOPES = ["engine", "pdf-engine", "web-staging", "web-production", "worker", "lockfile"];
 const APPLICATION_SCOPES = new Set(["web-staging", "web-production", "worker"]);
-const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.3.2"];
+const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.3.2", "@img/sharp-libvips-linux-x64@1.3.3"];
 const PNPM_VERSION = "11.11.0";
 const SYFT_VERSION = "1.44.0";
 const SYFT_IMAGE =
@@ -46,13 +49,13 @@ const EXPECTED_FALLBACKS = {
     path: "security/license-texts/cloudflare-containers-0.3.7-MIT.txt",
     sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
   },
-  "@img/sharp-libvips-linux-x64@1.3.2": { kind: "root-readme", path: "README.md" },
+  "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
   "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
     kind: "package",
     package: "@napi-rs/canvas@1.0.2",
   },
-  "@next/env@16.2.11": { kind: "package", package: "next@16.2.11" },
-  "@next/swc-linux-x64-gnu@16.2.11": { kind: "package", package: "next@16.2.11" },
+  "@next/env@16.3.5": { kind: "package", package: "next@16.3.5" },
+  "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "next@16.3.5" },
   "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
 };
 const PNPM_REQUEST = Object.freeze({
@@ -539,7 +542,44 @@ function verifySyftTool(metadata) {
   }
 }
 
-async function verifySbom(scope, descriptor, policyState) {
+export function verifyNativeSbomCoverage(scope, sbom, lock) {
+  let sources;
+  if (scope === "engine") {
+    validateSourceLock(lock);
+    sources = lock.sources.filter((entry) => entry.production);
+  } else if (scope === "pdf-engine") {
+    sources = [validatePdfSourceLock(lock)];
+  } else throw new TypeError("native SBOM scope is invalid");
+  for (const source of sources) {
+    const cpe = nativeCpe(source.name, source.version);
+    const purl = `pkg:generic/${encodeURIComponent(source.name)}@${encodeURIComponent(source.version)}`;
+    const revision = scope === "engine" ? source.revision : source.sha256;
+    const reference = `${purl}?package-id=${encodeURIComponent(`native:${source.name}@${revision}`)}`;
+    if (
+      !sbom.components?.some(
+        (component) =>
+          component.name === source.name &&
+          component.version === source.version &&
+          component.type === "library" &&
+          component.purl === purl &&
+          (cpe === undefined || component.cpe === cpe) &&
+          component["bom-ref"] === reference &&
+          component.properties?.some(
+            (property) =>
+              property.name === "syft:package:foundBy" && property.value === "sbom-cataloger",
+          ) &&
+          component.properties?.some(
+            (property) =>
+              property.name === "syft:location:0:path" &&
+              property.value === "/build-metadata/native.cdx.json",
+          ),
+      )
+    )
+      throw new TypeError(`native SBOM coverage is missing or miswired: ${source.name}`);
+  }
+}
+
+async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   assertExactKeys(descriptor, ["artifactSha256", "path"], `${scope} SBOM descriptor`);
   const artifactSha256 = assertSha256(descriptor.artifactSha256, `${scope} artifact SHA-256`);
   nonEmptyString(descriptor.path, `${scope} SBOM path`);
@@ -581,6 +621,18 @@ async function verifySbom(scope, descriptor, policyState) {
       if (identities.has(prohibited))
         throw new TypeError(`${scope} SBOM contains a must not ship component`);
     }
+  }
+  if (scope === "engine" || scope === "pdf-engine") {
+    const app = scope === "engine" ? "image-engine" : "pdf-engine";
+    const lock = parseJson(
+      await readBoundedRegularFile(
+        join(repositoryRoot, "apps", app, "native/sources.lock.json"),
+        1024 * 1024,
+        "native source lock",
+      ),
+      "native source lock",
+    );
+    verifyNativeSbomCoverage(scope, sbom, lock);
   }
   return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: components.length };
 }
@@ -633,7 +685,7 @@ export async function runApplicationSupplyChain(options, adapters = {}) {
   assertExactKeys(sboms, SCOPES, "application SBOMs");
   const scopeResults = {};
   for (const scope of SCOPES)
-    scopeResults[scope] = await verifySbom(scope, sboms[scope], policyState);
+    scopeResults[scope] = await verifySbom(scope, sboms[scope], policyState, repository.root);
   const lockfileBytes = await readBoundedRegularFile(
     value.lockfilePath,
     16 * 1024 * 1024,

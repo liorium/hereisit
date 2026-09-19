@@ -7,9 +7,9 @@ describe("image engine runtime self-test", () => {
     await expect(
       runEngineSelfTest({
         access,
-        loadSharpVersions: async () => ({ sharp: "0.35.3", vips: "8.18.4" }),
+        loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.18.6" }),
       }),
-    ).resolves.toEqual({ sharp: "0.35.3", vips: "8.18.4", artifacts: 10 });
+    ).resolves.toEqual({ sharp: "0.35.4", vips: "8.18.6", artifacts: 13 });
     expect(access.mock.calls.map(([path]) => path)).toEqual(
       expect.arrayContaining([
         "/usr/local/bin/cjpeg",
@@ -18,6 +18,9 @@ describe("image engine runtime self-test", () => {
         "/usr/local/bin/png-smart",
         "/usr/local/bin/cwebp",
         "/usr/local/lib/libvips.so",
+        "/usr/local/lib/libexpat.so",
+        "/usr/local/lib/libblkid.so",
+        "/usr/local/lib/libmount.so",
         "/app/dist/job/job-runner.mjs",
       ]),
     );
@@ -27,7 +30,7 @@ describe("image engine runtime self-test", () => {
     await expect(
       runEngineSelfTest({
         access: vi.fn().mockResolvedValue(undefined),
-        loadSharpVersions: async () => ({ sharp: "0.35.3", vips: "8.17.0" }),
+        loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.17.0" }),
       }),
     ).rejects.toThrow("libvips");
   });

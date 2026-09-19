@@ -12,7 +12,13 @@ const executableArtifacts = [
   "/usr/local/bin/dwebp",
 ] as const;
 
-const readableArtifacts = ["/usr/local/lib/libvips.so", "/app/dist/job/job-runner.mjs"] as const;
+const readableArtifacts = [
+  "/usr/local/lib/libvips.so",
+  "/usr/local/lib/libexpat.so",
+  "/usr/local/lib/libblkid.so",
+  "/usr/local/lib/libmount.so",
+  "/app/dist/job/job-runner.mjs",
+] as const;
 
 export async function runEngineSelfTest(
   dependencies: {
@@ -28,8 +34,8 @@ export async function runEngineSelfTest(
   const versions = await (
     dependencies.loadSharpVersions ?? (async () => (await import("sharp")).default.versions)
   )();
-  if (versions.sharp !== "0.35.3") throw new Error("unexpected Sharp runtime version");
-  if (versions.vips !== "8.18.4") throw new Error("unexpected global libvips runtime version");
+  if (versions.sharp !== "0.35.4") throw new Error("unexpected Sharp runtime version");
+  if (versions.vips !== "8.18.6") throw new Error("unexpected global libvips runtime version");
   return {
     sharp: versions.sharp,
     vips: versions.vips,

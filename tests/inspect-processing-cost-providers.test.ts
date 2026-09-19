@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { providerUsageContractSha256 } from "../apps/api-worker/src/container-provider-usage";
+import { CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 } from "../scripts/generate-processing-wrangler.mjs";
 import { inspectProcessingCostProviders } from "../scripts/inspect-processing-cost-providers.mjs";
 
 const accountId = "0123456789abcdef0123456789abcdef";
@@ -35,7 +36,7 @@ function workerVersion(providerUsageSchemaSha256: string) {
 
 describe("processing cost provider inspection", () => {
   it("projects only bounded provider completion evidence", async () => {
-    const schemaSha256 = await providerUsageContractSha256();
+    const schemaSha256 = CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256;
     const hourEnd = new Date((targetHourKey + 1) * 3_600_000).toISOString();
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
@@ -102,10 +103,30 @@ describe("processing cost provider inspection", () => {
       }),
     ).resolves.toEqual({
       targetHourKey,
-      logpush: { reachable: false },
-      analytics: { reachable: false },
-      container: { reachable: false },
+      logpush: { reachable: false, failure: "no-response" },
+      analytics: { reachable: false, failure: "no-response" },
+      container: { reachable: false, failure: "no-response" },
     });
+  });
+
+  it("distinguishes a contract mismatch before any container request from missing responses", async () => {
+    const requests: string[] = [];
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion("0".repeat(64)),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "logpush-token",
+      fetchImpl: async (input) => {
+        requests.push(String(input));
+        throw new Error("private provider response");
+      },
+    });
+
+    expect(result.container).toEqual({ reachable: false, failure: "contract-mismatch" });
+    expect(result.analytics).toEqual({ reachable: false, failure: "no-response" });
+    expect(requests.some((url) => url.endsWith("/graphql"))).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("private provider response");
   });
 
   it("reports only the bounded HTTP status of rejected provider responses", async () => {

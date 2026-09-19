@@ -42,6 +42,21 @@ export function sha256Canonical(value) {
   return sha256Bytes(canonicalJson(value));
 }
 
+export function parseRfc3339Nano(value, label) {
+  const match =
+    typeof value === "string"
+      ? /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(value)
+      : null;
+  if (match === null) throw new TypeError(`${label} is invalid`);
+  const milliseconds = Date.parse(`${match[1]}.000Z`);
+  if (
+    !Number.isFinite(milliseconds) ||
+    new Date(milliseconds).toISOString().slice(0, 19) !== match[1]
+  )
+    throw new TypeError(`${label} is invalid`);
+  return BigInt(milliseconds) * 1_000_000n + BigInt((match[2] ?? "").padEnd(9, "0") || "0");
+}
+
 export function assertSha256(value, label) {
   if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
     throw new TypeError(`${label} must be a lowercase SHA-256`);

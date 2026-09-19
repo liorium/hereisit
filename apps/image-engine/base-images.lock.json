@@ -17,8 +17,8 @@
     {
       "name": "node-runtime",
       "reference": "gcr.io/distroless/nodejs24-debian13",
-      "indexDigest": "sha256:fbbdda866ea71aef98c4abece17e3d61fbf820cc2ef3961522caa2478716171a",
-      "platformDigest": "sha256:f987682b3ea8d8e22497cb95edc5014d793612f7064e43df8104394db0ce19fe"
+      "indexDigest": "sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
+      "platformDigest": "sha256:979dc379a2fb11d76d9ae0257ea4559e36b533088b062ff2f93d771b11a76f76"
     }
   ]
 }
