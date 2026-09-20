@@ -739,7 +739,7 @@ describe("image engine native supply-chain policy", () => {
     ).toThrow("quantizr@1.4.3");
   });
 
-  it("requires an immutable approved commercial review bound to the exact source lock", () => {
+  it("requires an immutable approved maintainer review bound to the exact source lock", () => {
     const sourceLock = Buffer.from(
       JSON.stringify({
         schemaVersion: 1,
@@ -762,8 +762,7 @@ describe("image engine native supply-chain policy", () => {
           component: "libvips",
           revision: "e".repeat(40),
           reviewedFiles: ["LICENSE"],
-          reviewer: "Independent counsel",
-          organization: "Review organization",
+          reviewer: "Solo maintainer",
           reviewDate: "2026-07-16",
           decision: "approved",
           conditions: [],
@@ -774,6 +773,16 @@ describe("image engine native supply-chain policy", () => {
     expect(() =>
       validateCommercialReview(approved, sourceLock, new Date("2026-07-17T00:00:00Z")),
     ).not.toThrow();
+    for (const organization of ["Review organization", "", "  ", 42, null]) {
+      const check = () =>
+        validateCommercialReview(
+          { ...approved, records: [{ ...approved.records[0], organization }] },
+          sourceLock,
+          new Date("2026-07-17T00:00:00Z"),
+        );
+      if (organization === "Review organization") expect(check).not.toThrow();
+      else expect(check).toThrow("organization");
+    }
     expect(() =>
       validateCommercialReview(
         {
