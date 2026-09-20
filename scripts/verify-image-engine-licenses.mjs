@@ -335,16 +335,16 @@ export function validateCommercialReview(value, sourceLockBytes, now = new Date(
     if (unknownFields.length > 0) {
       throw new TypeError("commercial review record has unknown fields");
     }
-    for (const field of [
-      "component",
-      "revision",
-      "reviewer",
-      "organization",
-      "approvalReference",
-    ]) {
+    for (const field of ["component", "revision", "reviewer", "approvalReference"]) {
       if (typeof record[field] !== "string" || record[field].trim() === "") {
         throw new TypeError(`commercial review ${field} is required`);
       }
+    }
+    if (
+      record.organization !== undefined &&
+      (typeof record.organization !== "string" || record.organization.trim() === "")
+    ) {
+      throw new TypeError("commercial review organization is invalid");
     }
     const source = productionSources.get(record.component);
     if (source === undefined || reviewed.has(record.component)) {

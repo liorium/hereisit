@@ -25,7 +25,7 @@
       "LGPL-2.1-or-later": {
         "linkage": "dynamic-only",
         "requirements": [
-          "external-commercial-review",
+          "documented-license-compliance-review",
           "complete-corresponding-source",
           "license-and-copyright-notices",
           "relinking-materials"
