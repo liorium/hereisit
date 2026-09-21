@@ -6,7 +6,7 @@ import {
   createProcessingHostedCheck,
   hostedReviewSchemas,
 } from "../scripts/create-processing-hosted-check.mjs";
-import { canonicalJson, sha256Bytes } from "../scripts/image-lab-common.mjs";
+import { sha256Bytes } from "../scripts/image-lab-common.mjs";
 
 const roots: string[] = [];
 const gitSha = "a".repeat(40);
@@ -15,38 +15,10 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function visualEvidence(sourceSha256: string) {
-  const results = [0, 1, 2].map((repeat) => ({
-    repeat,
-    sha256: `${repeat + 1}`.repeat(64),
-    byteLength: 100 + repeat,
-    verified: true,
-  }));
-  return {
-    schema: "hereisit.pdf-browser-visual-evidence@1",
-    version: 1,
-    passed: true,
-    gitSha,
-    sourceSha256,
-    checkRunId: 42,
-    execution: "exact-main-hosted-pdf-visual",
-    inputManifestSha256: "4".repeat(64),
-    engineImageDigest: `sha256:${"3".repeat(64)}`,
-    corpusManifestSha256: "b".repeat(64),
-    stratum: "jpeg-heavy",
-    projects: ["chromium", "firefox", "webkit"].map((project) => ({
-      project,
-      passed: true,
-      results,
-    })),
-    visualProfilesMeasured: 9,
-  };
-}
-
 function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256: string) {
   const common = {
     schema: hostedReviewSchemas[reportName],
-    version: 1,
+    version: 2,
     passed: true,
     gitSha,
     sourceSha256,
@@ -64,14 +36,14 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
     competitorComparison: { casesCompared: 12, baselineSha256: "1".repeat(64) },
     blindedHumanReview: {
       visualProfilesMeasured: 9,
-      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visualEvidence(sourceSha256))),
+      evidenceSha256: "c".repeat(64),
     },
     commercialReview: {
       licenseGateSha256: "e".repeat(64),
     },
     privacyReview: {
       testsRun: 6,
-      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visualEvidence(sourceSha256))),
+      evidenceSha256: "c".repeat(64),
     },
     deviceMatrix: {
       projects: [
@@ -83,8 +55,8 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
         "mobile-webkit",
       ],
       productAnalytics: true,
-      pdfVisualEvidenceSha256: sha256Bytes(canonicalJson(visualEvidence(sourceSha256))),
-      pdfVisualProfilesMeasured: 9,
+      evidenceSha256: "c".repeat(64),
+      visualProfilesMeasured: 9,
     },
   };
   return { ...common, ...detail[reportName] };
@@ -109,10 +81,6 @@ describe("exact-main hosted processing checks", () => {
         JSON.stringify(documentFor(reportName, sourceSha256)),
       );
     }
-    await writeFile(
-      join(input, "pdfVisualBrowserEvidence.json"),
-      canonicalJson(visualEvidence(sourceSha256)),
-    );
 
     await createProcessingHostedCheck({
       source,
@@ -135,12 +103,9 @@ describe("exact-main hosted processing checks", () => {
         checkRunId: 42,
       });
     }
-    expect(
-      JSON.parse(await readFile(join(output, "pdfVisualBrowserEvidence.json"), "utf8")),
-    ).toEqual(visualEvidence(sourceSha256));
   });
 
-  it("fails closed when the browser aggregate is missing from otherwise complete reviews", async () => {
+  it("fails closed when image visual evidence is missing from otherwise complete reviews", async () => {
     const root = await mkdtemp(join(tmpdir(), "hereisit-hosted-check-"));
     roots.push(root);
     const source = join(root, "source.tar");
@@ -154,7 +119,11 @@ describe("exact-main hosted processing checks", () => {
     >) {
       await writeFile(
         join(input, `${reportName}.json`),
-        JSON.stringify(documentFor(reportName, sourceSha256)),
+        JSON.stringify(
+          reportName === "deviceMatrix"
+            ? { ...documentFor(reportName, sourceSha256), evidenceSha256: undefined }
+            : documentFor(reportName, sourceSha256),
+        ),
       );
     }
 
@@ -166,7 +135,7 @@ describe("exact-main hosted processing checks", () => {
         gitSha,
         checkRunId: 42,
       }),
-    ).rejects.toThrow(/browser|visual|missing/i);
+    ).rejects.toThrow(/field|visual|missing/i);
   });
 
   it("fails closed without manufacturing a missing hosted review", async () => {

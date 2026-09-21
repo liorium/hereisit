@@ -82,20 +82,6 @@ const imageRoutes = [
   },
 ] as const;
 
-const pdfToImageTool = {
-  path: "/pdf/to-image",
-  title: "PDF를 JPG·PNG로 변환",
-  selectLabel: "PDF 선택",
-} as const;
-
-const pdfCompressionTool = {
-  path: "/pdf/compress",
-  title: "PDF 용량 줄이기",
-  selectLabel: "PDF 선택",
-  description:
-    "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 기본은 임시 서버에서 처리하며 완료 후 자동 삭제합니다.",
-} as const;
-
 const jsonFormatTool = {
   path: "/data/json",
   title: "JSON 정리·검사",
@@ -257,49 +243,6 @@ test("publishes and links the privacy disclosure", async ({ page, request }) => 
   await expect(page.getByRole("heading", { level: 1, name: "개인정보 보호" })).toBeVisible();
   expect(await (await request.get("/sitemap.xml")).text()).toContain(
     "https://hereisit.app/privacy",
-  );
-});
-
-test("publishes the scanned PDF compression tool", async ({ page }) => {
-  await page.goto("/tools");
-  await revealCatalogTool(page, pdfCompressionTool.path);
-  await expect(page.getByRole("link", { name: pdfCompressionTool.title }).first()).toHaveAttribute(
-    "href",
-    pdfCompressionTool.path,
-  );
-
-  const response = await page.goto(pdfCompressionTool.path);
-  expect(response?.ok()).toBe(true);
-  await expect(page).toHaveTitle(`${pdfCompressionTool.title} | HereIsIt`);
-  await expect(
-    page.getByRole("heading", { level: 1, name: pdfCompressionTool.title }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: pdfCompressionTool.selectLabel })).toBeEnabled();
-  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
-    "content",
-    pdfCompressionTool.description,
-  );
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
-    "href",
-    "https://hereisit.app/pdf/compress",
-  );
-});
-
-test("publishes the PDF to image tool", async ({ page }) => {
-  await page.goto("/tools");
-  await revealCatalogTool(page, pdfToImageTool.path);
-  await expect(page.getByRole("link", { name: pdfToImageTool.title }).first()).toHaveAttribute(
-    "href",
-    pdfToImageTool.path,
-  );
-
-  const response = await page.goto(pdfToImageTool.path);
-  expect(response?.ok()).toBe(true);
-  await expect(page.getByRole("heading", { level: 1, name: pdfToImageTool.title })).toBeVisible();
-  await expect(page.getByRole("button", { name: pdfToImageTool.selectLabel })).toBeEnabled();
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
-    "href",
-    new RegExp(`${pdfToImageTool.path.replaceAll("/", "\\/")}\\/?$`),
   );
 });
 

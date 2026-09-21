@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { evaluatePdfEngineReleaseGate } from "../scripts/benchmark-pdf-engine.mjs";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
 import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import { createBuiltProcessingCandidate } from "../scripts/create-processing-candidate.mjs";
@@ -29,15 +28,7 @@ const releaseId = "2026-07-20.1";
 const gitSha = "a".repeat(40);
 const now = "2026-07-20T12:00:00.000Z";
 const temporaryRoots: string[] = [];
-const securityScopes = [
-  "engine",
-  "pdf-engine",
-  "web-staging",
-  "web-production",
-  "worker",
-  "lockfile",
-] as const;
-
+const securityScopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
 async function fixture() {
   const parent = await mkdtemp(join(tmpdir(), "hereisit-release-report-verify-"));
   temporaryRoots.push(parent);
@@ -46,7 +37,6 @@ async function fixture() {
   const candidateRoot = join(parent, "candidate");
   await mkdir(source);
   await mkdir(build);
-
   const makeWeb = async (environment: "staging" | "production") => {
     const tree = join(build, `web-${environment}`);
     await mkdir(tree);
@@ -56,7 +46,6 @@ async function fixture() {
   };
   const staging = await makeWeb("staging");
   const production = await makeWeb("production");
-
   const layerBytes = Buffer.from("canonical uncompressed layer tar bytes\n");
   const diffId = `sha256:${sha256Bytes(layerBytes)}`;
   const configBytes = Buffer.from(
@@ -112,7 +101,6 @@ async function fixture() {
     root: ociTree,
     output: join(source, "image-engine-linux-amd64.oci.tar"),
   });
-
   const dockerTree = join(build, "docker");
   await mkdir(join(dockerTree, "layer"), { recursive: true });
   await writeFile(join(dockerTree, "config.json"), configBytes);
@@ -131,118 +119,9 @@ async function fixture() {
     root: dockerTree,
     output: join(source, "image-engine-linux-amd64.docker.tar"),
   });
-
-  const pdfConfigBytes = Buffer.from(
-    canonicalJson({
-      architecture: "amd64",
-      os: "linux",
-      config: { Labels: { "app.hereisit.engine": "pdf" } },
-      rootfs: { type: "layers", diff_ids: [diffId] },
-    }),
-  );
-  const pdfConfigDigest = `sha256:${sha256Bytes(pdfConfigBytes)}`;
-  const pdfManifestBytes = Buffer.from(
-    canonicalJson({
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.manifest.v1+json",
-      config: {
-        mediaType: "application/vnd.oci.image.config.v1+json",
-        digest: pdfConfigDigest,
-        size: pdfConfigBytes.byteLength,
-      },
-      layers: [
-        {
-          mediaType: "application/vnd.oci.image.layer.v1.tar",
-          digest: layerDigest,
-          size: layerBytes.byteLength,
-        },
-      ],
-    }),
-  );
-  const pdfManifestDigest = `sha256:${sha256Bytes(pdfManifestBytes)}`;
-  const pdfOciTree = join(build, "pdf-oci");
-  await mkdir(join(pdfOciTree, "blobs", "sha256"), { recursive: true });
-  await writeFile(join(pdfOciTree, "oci-layout"), canonicalJson({ imageLayoutVersion: "1.0.0" }));
-  await writeFile(
-    join(pdfOciTree, "index.json"),
-    canonicalJson({
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.index.v1+json",
-      manifests: [
-        {
-          mediaType: "application/vnd.oci.image.manifest.v1+json",
-          digest: pdfManifestDigest,
-          size: pdfManifestBytes.byteLength,
-          platform: { os: "linux", architecture: "amd64" },
-        },
-      ],
-    }),
-  );
-  await writeFile(join(pdfOciTree, "blobs", "sha256", pdfConfigDigest.slice(7)), pdfConfigBytes);
-  await writeFile(
-    join(pdfOciTree, "blobs", "sha256", pdfManifestDigest.slice(7)),
-    pdfManifestBytes,
-  );
-  await writeFile(join(pdfOciTree, "blobs", "sha256", layerDigest.slice(7)), layerBytes);
-  await createDeterministicTreeArchive({
-    root: pdfOciTree,
-    output: join(source, "pdf-engine-linux-amd64.oci.tar"),
-  });
-  const pdfDockerTree = join(build, "pdf-docker");
-  await mkdir(join(pdfDockerTree, "layer"), { recursive: true });
-  await writeFile(join(pdfDockerTree, "config.json"), pdfConfigBytes);
-  await writeFile(join(pdfDockerTree, "layer", "layer.tar"), layerBytes);
-  await writeFile(
-    join(pdfDockerTree, "manifest.json"),
-    canonicalJson([
-      {
-        Config: "config.json",
-        RepoTags: [`hereisit-pdf-engine:${gitSha}`],
-        Layers: ["layer/layer.tar"],
-      },
-    ]),
-  );
-  await createDeterministicTreeArchive({
-    root: pdfDockerTree,
-    output: join(source, "pdf-engine-linux-amd64.docker.tar"),
-  });
-  const pdfBenchmark = JSON.parse(
-    await readFile("docs/deployment/pdf-engine-benchmark.json", "utf8"),
-  );
-  pdfBenchmark.identity.engineImageId = pdfConfigDigest;
-  pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
-  await writeFile(join(source, "pdf-engine-benchmark.json"), canonicalJson(pdfBenchmark));
-  await writeFile(
-    join(source, "pdf-engine-benchmark.schema.json"),
-    await readFile("docs/deployment/pdf-engine-benchmark.schema.json"),
-  );
-  await writeFile(
-    join(source, "pdf-engine-release-gate.json"),
-    canonicalJson(evaluatePdfEngineReleaseGate(pdfBenchmark)),
-  );
-  await writeFile(
-    join(source, "pdf-engine-release-gate.schema.json"),
-    await readFile("docs/deployment/pdf-engine-release-gate.schema.json"),
-  );
-
   const costInput = JSON.parse(
     await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
   );
-  costInput.pdfBenchmark = {
-    ...costInput.pdfBenchmark,
-    evidenceSha256: sha256Bytes(canonicalJson(pdfBenchmark)),
-    engineImageId: pdfConfigDigest,
-    engineImageDigest: pdfConfigDigest,
-    maximumCandidates: Math.max(
-      ...pdfBenchmark.records.map(
-        (record: { native: { maximumCandidateCount: number } }) =>
-          record.native.maximumCandidateCount,
-      ),
-    ),
-    maximumInputBytes: pdfBenchmark.limits.maximumSourceBytes,
-    maximumMeasuredPeakRssBytes: pdfBenchmark.summary.maximumPeakRssBytes,
-    maximumOutputBytes: pdfBenchmark.limits.maximumOutputBytes,
-  };
   const costModel = createLiveCostModel(costInput);
   const releaseInputs = createProcessingReleaseInputs({
     version: 1,
@@ -259,11 +138,11 @@ async function fixture() {
       })(),
     },
     ceilings: {
-      maxCostPer1000JobsMicrousd: 500_000,
-      maxLiveMedianOutputRatioBps: 8_000,
-      maxLiveOriginalRetainedRateBps: 2_500,
-      maxLiveP95WeightedUnits: 12_000,
-      maxProjectedMonthlyCostMicrousd: 5_000_000,
+      maxCostPer1000JobsMicrousd: 500000,
+      maxLiveMedianOutputRatioBps: 8000,
+      maxLiveOriginalRetainedRateBps: 2500,
+      maxLiveP95WeightedUnits: 12000,
+      maxProjectedMonthlyCostMicrousd: 5000000,
     },
     routeCpuBenchmark: {
       artifactSha256: "4".repeat(64),
@@ -273,10 +152,8 @@ async function fixture() {
   await writeFile(join(source, "live-cost-model.json"), canonicalJson(costModel));
   await writeFile(join(source, "processing-release-inputs.json"), canonicalJson(releaseInputs));
   await writeFile(join(source, "api-worker.mjs"), "export default {};\n");
-
   const artifactHashes = {
     engine: configDigest.slice(7),
-    "pdf-engine": pdfConfigDigest.slice(7),
     "web-staging": staging.archiveSha256,
     "web-production": production.archiveSha256,
     worker: sha256Bytes(await readFile(join(source, "api-worker.mjs"))),
@@ -303,19 +180,6 @@ async function fixture() {
       policySha256: "2".repeat(64),
       exceptionsSha256: "3".repeat(64),
       baseImagesSha256: "4".repeat(64),
-    }),
-  );
-  await writeFile(
-    join(source, "security-pdf-engine-license-gate.json"),
-    canonicalJson({
-      schema: "hereisit-pdf-engine-license-gate@1",
-      passed: true,
-      qpdfVersion: "12.4.0",
-      sourceSha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
-      sourceLockSha256: "1".repeat(64),
-      policySha256: "2".repeat(64),
-      licenseSha256: "3".repeat(64),
-      noticeSha256: "4".repeat(64),
     }),
   );
   await writeFile(
@@ -355,7 +219,7 @@ async function fixture() {
         image:
           "ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3",
       },
-      nativeScans: ["engine", "pdf-engine"].map((scope) => ({
+      nativeScans: ["engine"].map((scope) => ({
         scope,
         sbomSha256: sbomHashes[scope],
         databaseSha256: "d".repeat(64),
@@ -378,7 +242,6 @@ async function fixture() {
       })),
     }),
   );
-
   await createBuiltProcessingCandidate({
     sourceRoot: source,
     outputRoot: candidateRoot,
@@ -393,7 +256,6 @@ async function fixture() {
   });
   const candidateManifestPath = join(candidateRoot, "processing-candidate.json");
   const candidate = JSON.parse(await readFile(candidateManifestPath, "utf8"));
-
   const evidenceBundlePath = join(parent, "evidence.json");
   const evidenceSignaturePath = join(parent, "evidence.sig");
   await writeProcessingEvidenceBundle({
@@ -437,7 +299,6 @@ async function fixture() {
     reportPath,
   };
 }
-
 function options(value: Awaited<ReturnType<typeof fixture>>) {
   return {
     candidateRoot: value.candidateRoot,
@@ -449,7 +310,6 @@ function options(value: Awaited<ReturnType<typeof fixture>>) {
     reportPath: value.reportPath,
   };
 }
-
 async function finalizedFixture() {
   const value = await fixture();
   await createAndWriteProcessingReleaseReport(options(value));
@@ -471,13 +331,11 @@ async function finalizedFixture() {
     evidenceSignaturePath: join(candidateRoot, candidate.releaseAssets.evidence.signature.path),
   };
 }
-
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-
 describe("processing release report verification", () => {
   it("binds reread candidate bytes and fields to the exact verified manifest", async () => {
     const value = await fixture();
@@ -513,17 +371,11 @@ describe("processing release report verification", () => {
       }),
     ).toThrow(/verified|manifest|identity/i);
   });
-
   it("creates and verifies an exact report derived only from verified bytes", async () => {
     const value = await fixture();
     const created = await createAndWriteProcessingReleaseReport(options(value));
     expect(created.artifacts).toEqual({
       engineDockerConfigDigest: value.candidate.engine.docker.configDigest,
-      pdfEngineDockerConfigDigest: value.candidate.pdfEngine.docker.configDigest,
-      pdfBenchmarkSha256: value.candidate.pdfQuality.benchmarkSha256,
-      pdfReleaseGateSha256: value.candidate.pdfQuality.releaseGateSha256,
-      pdfVisualProfilesMeasured: value.candidate.pdfQuality.visualProfilesMeasured,
-      pdfPublicAdmissionReady: value.candidate.pdfQuality.publicAdmissionReady,
       webStagingArchiveSha256: value.candidate.web.staging.archiveSha256,
       webProductionArchiveSha256: value.candidate.web.production.archiveSha256,
       workerSha256: value.candidate.releaseAssets.worker.sha256,
@@ -551,11 +403,9 @@ describe("processing release report verification", () => {
       gitSha,
     });
   });
-
   it("verifies a finalized candidate by reconstructing its unique built projection", async () => {
     const value = await finalizedFixture();
     const report = JSON.parse(await readFile(value.reportPath, "utf8"));
-
     await expect(verifyProcessingReleaseReport(options(value))).resolves.toMatchObject({
       schema: "hereisit-processing-release-report-verification@1",
       releaseId,
@@ -565,7 +415,6 @@ describe("processing release report verification", () => {
       evidenceSignatureSha256: value.candidate.releaseAssets.evidence.signature.sha256,
     });
     expect(report.candidateVerificationSha256).not.toBe(value.candidate.verificationSha256);
-
     const writes: string[] = [];
     await runProcessingReleaseReportVerifierCli(
       [
@@ -588,7 +437,6 @@ describe("processing release report verification", () => {
     );
     expect(JSON.parse(writes[0])).toMatchObject({ releaseId, gitSha });
   });
-
   it("keeps report creation built-only", async () => {
     const value = await finalizedFixture();
     const reportPath = join(value.parent, "second-report.json");
@@ -608,12 +456,10 @@ describe("processing release report verification", () => {
       }),
     ).rejects.toThrow(/built|state/i);
   });
-
   it("requires the finalized candidate's exact report path", async () => {
     const value = await finalizedFixture();
     const externalReportPath = join(value.parent, "external-report.json");
     await writeFile(externalReportPath, await readFile(value.reportPath));
-
     await expect(
       verifyProcessingReleaseReport({
         ...options(value),
@@ -621,7 +467,6 @@ describe("processing release report verification", () => {
       }),
     ).rejects.toThrow(/report path|finalized candidate/i);
   });
-
   it("rejects a finalized candidate whose reconstructed built projection is not signed", async () => {
     const value = await finalizedFixture();
     const candidate = JSON.parse(await readFile(value.candidateManifestPath, "utf8"));
@@ -631,12 +476,10 @@ describe("processing release report verification", () => {
     const { verificationSha256: _verificationSha256, ...payload } = candidate;
     candidate.verificationSha256 = sha256Canonical(payload);
     await writeFile(value.candidateManifestPath, canonicalJson(candidate));
-
     await expect(verifyProcessingReleaseReport(options(value))).rejects.toThrow(
       /evidence|candidate|verified release inputs/i,
     );
   });
-
   it("rejects finalized report, evidence, security, candidate, and evidence-path drift", async () => {
     for (const mutate of [
       async (value: Awaited<ReturnType<typeof finalizedFixture>>) =>
@@ -660,7 +503,6 @@ describe("processing release report verification", () => {
       await mutate(value);
       await expect(verifyProcessingReleaseReport(options(value))).rejects.toThrow();
     }
-
     const external = await finalizedFixture();
     const externalBundlePath = join(external.parent, "external-evidence.json");
     await writeFile(externalBundlePath, await readFile(external.evidenceBundlePath));
@@ -670,7 +512,6 @@ describe("processing release report verification", () => {
         evidenceBundlePath: externalBundlePath,
       }),
     ).rejects.toThrow(/evidence bundle path|finalized candidate/i);
-
     const externalSignaturePath = join(external.parent, "external-evidence.sig");
     await writeFile(externalSignaturePath, await readFile(external.evidenceSignaturePath));
     await expect(
@@ -679,8 +520,7 @@ describe("processing release report verification", () => {
         evidenceSignaturePath: externalSignaturePath,
       }),
     ).rejects.toThrow(/evidence signature path|finalized candidate/i);
-  }, 10_000);
-
+  }, 10000);
   it("has exact creator and verifier CLI boundaries with compact canonical output", async () => {
     const value = await fixture();
     const creatorWrites: string[] = [];
@@ -724,7 +564,6 @@ describe("processing release report verification", () => {
     });
     expect(verifierWrites[0]).not.toContain(value.parent);
   });
-
   it("rejects report mutation, noncanonical bytes, unknown fields, size, and symlinks", async () => {
     for (const mutation of [
       "candidate",
@@ -754,7 +593,6 @@ describe("processing release report verification", () => {
       await writeFile(value.reportPath, canonicalJson(report));
       await expect(verifyProcessingReleaseReport(options(value))).rejects.toThrow();
     }
-
     const noncanonical = await fixture();
     await createAndWriteProcessingReleaseReport(options(noncanonical));
     const report = JSON.parse(await readFile(noncanonical.reportPath, "utf8"));
@@ -762,26 +600,22 @@ describe("processing release report verification", () => {
     await expect(verifyProcessingReleaseReport(options(noncanonical))).rejects.toThrow(
       /canonical/i,
     );
-
     const oversized = await fixture();
     await writeFile(oversized.reportPath, Buffer.alloc(1024 * 1024 + 1, 0x20));
     await expect(verifyProcessingReleaseReport(options(oversized))).rejects.toThrow(
       /bounded|size/i,
     );
-
     const linked = await fixture();
     const target = join(linked.parent, "real-report.json");
     await writeFile(target, "{}\n");
     await symlink(target, linked.reportPath);
     await expect(verifyProcessingReleaseReport(options(linked))).rejects.toThrow(/symbolic/i);
-  }, 10_000);
-
+  }, 10000);
   it("rejects stale or drifted candidate, security, evidence, signature, and path inputs", async () => {
     const stale = await fixture();
     await expect(
       createAndWriteProcessingReleaseReport({ ...options(stale), now: "2026-07-21T10:00:00.000Z" }),
     ).rejects.toThrow(/time|valid|expir/i);
-
     for (const mutate of [
       async (value: Awaited<ReturnType<typeof fixture>>) =>
         writeFile(value.candidateManifestPath, "{}\n"),
@@ -796,7 +630,6 @@ describe("processing release report verification", () => {
       await mutate(value);
       await expect(createAndWriteProcessingReleaseReport(options(value))).rejects.toThrow();
     }
-
     const escaped = await fixture();
     await expect(
       createAndWriteProcessingReleaseReport({

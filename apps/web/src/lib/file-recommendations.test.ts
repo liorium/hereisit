@@ -21,6 +21,13 @@ function recommendationIds(items: readonly FileDetectionItem[]): readonly string
 }
 
 describe("planFileRecommendations", () => {
+  it("does not launch a removed PDF tool for a PDF upload", () => {
+    expect(planFileRecommendations([detectedFile("document.pdf", "application/pdf")])).toEqual({
+      state: "unsupported",
+      unknownCount: 0,
+      groups: [],
+    });
+  });
   it("offers mixed-compatible image tools for a JPEG and PNG as one complete group", () => {
     const jpeg = detectedFile("photo.jpg", "image/jpeg");
     const png = detectedFile("graphic.png", "image/png");
@@ -41,7 +48,6 @@ describe("planFileRecommendations", () => {
       ],
     });
     expect(plan.groups[0]?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
-      "pdf.image-to-pdf",
       "image.compress",
       "image.remove-background",
       "image.crop",
@@ -53,7 +59,6 @@ describe("planFileRecommendations", () => {
     ]);
     expect(recommendationIds([jpeg, png])).toEqual([
       "image.upscale",
-      "pdf.image-to-pdf",
       "image.compress",
       "image.remove-background",
       "image.crop",
@@ -65,7 +70,7 @@ describe("planFileRecommendations", () => {
     ]);
   });
 
-  it("falls back to PNG and PDF groups in first-seen order when no tool accepts both", () => {
+  it("keeps the PNG group when the selection also contains an unsupported PDF", () => {
     const png = detectedFile("graphic.png", "image/png");
     const pdf = detectedFile("document.pdf", "application/pdf");
 
@@ -74,13 +79,10 @@ describe("planFileRecommendations", () => {
     expect(plan).toMatchObject({
       state: "grouped",
       unknownCount: 0,
-      groups: [
-        { kind: "image/png", items: [png] },
-        { kind: "application/pdf", items: [pdf] },
-      ],
+      groups: [{ kind: "image/png", items: [png] }],
     });
     expect(plan.groups[0]?.primaryRecommendation).toBeDefined();
-    expect(plan.groups[1]?.primaryRecommendation).toBeDefined();
+    expect(plan.groups).toHaveLength(1);
   });
 
   it("keeps a JPEG plus an unknown file grouped instead of calling the selection complete", () => {
@@ -105,57 +107,6 @@ describe("planFileRecommendations", () => {
 
     expect(ids).not.toContain("image.compress");
     expect(ids).toContain("image.convert");
-  });
-
-  it("reports that PDF merge needs one more file for a single PDF", () => {
-    const plan = planFileRecommendations([detectedFile("document.pdf", "application/pdf")]);
-
-    expect(plan.state).toBe("complete");
-    expect(
-      [
-        plan.groups[0]?.primaryRecommendation,
-        ...(plan.groups[0]?.alternateRecommendations ?? []),
-      ].find((recommendation) => recommendation?.tool.id === "pdf.merge"),
-    ).toMatchObject({
-      readiness: "needs-more",
-      missingFiles: 1,
-      maximumFiles: 20,
-      matchedIndexes: [0],
-    });
-  });
-
-  it("keeps one primary recommendation and puts every other match behind disclosure", () => {
-    const plan = planFileRecommendations([detectedFile("document.pdf", "application/pdf")]);
-    const group = plan.groups[0];
-
-    expect(group?.primaryRecommendation.tool.id).toBe("pdf.compress-scanned");
-    expect(group?.alternateRecommendations.map(({ tool }) => tool.id)).toEqual([
-      "pdf.split",
-      "pdf.organize",
-      "pdf.to-image",
-      "pdf.watermark",
-      "pdf.merge",
-    ]);
-  });
-
-  it("reports PDF merge as too-many for 21 PDFs", () => {
-    const pdfs = Array.from({ length: 21 }, (_, index) =>
-      detectedFile(`document-${index}.pdf`, "application/pdf"),
-    );
-    const plan = planFileRecommendations(pdfs);
-
-    expect(plan.state).toBe("complete");
-    expect(
-      [
-        plan.groups[0]?.primaryRecommendation,
-        ...(plan.groups[0]?.alternateRecommendations ?? []),
-      ].find((recommendation) => recommendation?.tool.id === "pdf.merge"),
-    ).toMatchObject({
-      readiness: "too-many",
-      missingFiles: 0,
-      maximumFiles: 20,
-      matchedIndexes: Array.from({ length: 21 }, (_, index) => index),
-    });
   });
 
   it("never recommends a planned tool and drops known groups with no available match", () => {

@@ -5,16 +5,6 @@ import {
   IMAGE_WATERMARK_TOOL_VERSION,
   JSON_FORMAT_TOOL_ID,
   JSON_FORMAT_TOOL_VERSION,
-  PDF_COMPRESS_SCANNED_TOOL_ID,
-  PDF_COMPRESS_SCANNED_TOOL_VERSION,
-  PDF_IMAGES_TO_PDF_TOOL_ID,
-  PDF_MERGE_TOOL_ID,
-  PDF_ORGANIZE_TOOL_ID,
-  PDF_SPLIT_TOOL_ID,
-  PDF_TO_IMAGES_TOOL_ID,
-  PDF_TO_IMAGES_TOOL_VERSION,
-  PDF_TOOL_VERSION,
-  PDF_WATERMARK_TOOL_ID,
 } from "@hereisit/tool-contracts";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
@@ -47,14 +37,7 @@ type ExpectedAvailableToolId =
   | "image.resize"
   | "image.rotate"
   | "image.upscale"
-  | "image.watermark"
-  | "pdf.compress-scanned"
-  | "pdf.image-to-pdf"
-  | "pdf.merge"
-  | "pdf.organize"
-  | "pdf.split"
-  | "pdf.to-image"
-  | "pdf.watermark";
+  | "image.watermark";
 
 const expectedAliases = {
   "data.json-format": ["json 정리", "json 포맷", "json 검사", "json 축소"],
@@ -72,22 +55,15 @@ const expectedAliases = {
   "image.rotate": ["사진 회전", "이미지 회전", "90도 회전"],
   "image.upscale": ["이미지 확대", "사진 화질 개선", "업스케일"],
   "image.watermark": ["사진 워터마크", "로고 넣기", "문구 넣기"],
-  "pdf.merge": ["pdf 병합", "pdf 합치기", "문서 합치기"],
-  "pdf.split": ["pdf 나누기", "페이지 추출", "pdf 분할"],
-  "pdf.organize": ["페이지 순서", "pdf 회전", "페이지 삭제"],
-  "pdf.watermark": ["문서 워터마크", "pdf 문구", "대외비"],
-  "pdf.to-image": ["pdf jpg", "pdf png", "pdf 이미지 변환"],
-  "pdf.image-to-pdf": ["jpg pdf", "png pdf", "사진 pdf"],
-  "pdf.compress-scanned": ["pdf 압축", "스캔 pdf", "pdf 용량 줄이기"],
 } as const satisfies Record<ExpectedAvailableToolId, readonly string[]>;
 
 const expectedRelatedToolIds = {
-  "data.json-format": ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
+  "data.json-format": ["image.convert", "image.html-to-image", "image.editor"],
   "image.blur-face": ["image.remove-background", "image.watermark", "image.editor"],
   "image.compress": ["image.resize", "image.convert", "image.watermark"],
   "image.resize": ["image.compress", "image.convert", "image.watermark"],
   "image.crop": ["image.resize", "image.rotate", "image.compress"],
-  "image.convert": ["image.compress", "image.resize", "pdf.image-to-pdf"],
+  "image.convert": ["image.compress", "image.resize", "image.watermark"],
   "image.convert-from-jpg": ["image.convert-to-jpg", "image.convert", "image.editor"],
   "image.convert-to-jpg": ["image.convert", "image.compress", "image.resize"],
   "image.editor": ["image.meme", "image.watermark", "image.crop"],
@@ -96,14 +72,7 @@ const expectedRelatedToolIds = {
   "image.remove-background": ["image.upscale", "image.editor", "image.convert"],
   "image.rotate": ["image.crop", "image.resize", "image.convert"],
   "image.upscale": ["image.compress", "image.resize", "image.editor"],
-  "image.watermark": ["image.compress", "image.resize", "pdf.watermark"],
-  "pdf.merge": ["pdf.split", "pdf.organize", "pdf.image-to-pdf"],
-  "pdf.split": ["pdf.merge", "pdf.organize", "pdf.to-image"],
-  "pdf.organize": ["pdf.merge", "pdf.split", "pdf.watermark"],
-  "pdf.watermark": ["pdf.organize", "pdf.merge", "image.watermark"],
-  "pdf.to-image": ["pdf.image-to-pdf", "pdf.split", "image.convert"],
-  "pdf.image-to-pdf": ["pdf.to-image", "pdf.merge", "image.convert"],
-  "pdf.compress-scanned": ["pdf.merge", "pdf.split", "pdf.to-image"],
+  "image.watermark": ["image.compress", "image.resize", "image.editor"],
 } as const satisfies Record<ExpectedAvailableToolId, readonly [string, string, string]>;
 
 const expectedContracts = {
@@ -122,13 +91,6 @@ const expectedContracts = {
   "image.rotate": [IMAGE_TOOL_ID, IMAGE_TOOL_VERSION],
   "image.upscale": ["image.upscale", 1],
   "image.watermark": [IMAGE_WATERMARK_TOOL_ID, IMAGE_WATERMARK_TOOL_VERSION],
-  "pdf.merge": [PDF_MERGE_TOOL_ID, PDF_TOOL_VERSION],
-  "pdf.split": [PDF_SPLIT_TOOL_ID, PDF_TOOL_VERSION],
-  "pdf.organize": [PDF_ORGANIZE_TOOL_ID, PDF_TOOL_VERSION],
-  "pdf.watermark": [PDF_WATERMARK_TOOL_ID, PDF_TOOL_VERSION],
-  "pdf.to-image": [PDF_TO_IMAGES_TOOL_ID, PDF_TO_IMAGES_TOOL_VERSION],
-  "pdf.image-to-pdf": [PDF_IMAGES_TO_PDF_TOOL_ID, PDF_TOOL_VERSION],
-  "pdf.compress-scanned": [PDF_COMPRESS_SCANNED_TOOL_ID, PDF_COMPRESS_SCANNED_TOOL_VERSION],
 } as const satisfies Record<AvailableToolId, readonly [string, number]>;
 
 const expectedCopy = {
@@ -201,41 +163,6 @@ const expectedCopy = {
     name: "이미지에 워터마크 넣기",
     shortDescription: "사진과 이미지에 문구 또는 로고를 넣으세요. 파일은 서버로 전송되지 않습니다.",
   },
-  "pdf.merge": {
-    name: "PDF 합치기",
-    shortDescription:
-      "여러 PDF 파일을 원하는 순서대로 하나로 합치세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
-  },
-  "pdf.split": {
-    name: "PDF 페이지 분할",
-    shortDescription:
-      "PDF를 페이지별로 나누거나 필요한 페이지만 추출하세요. 파일은 기기 안에서만 처리됩니다.",
-  },
-  "pdf.organize": {
-    name: "PDF 페이지 정리",
-    shortDescription:
-      "PDF 페이지 순서를 바꾸고 90도씩 회전하거나 필요 없는 페이지를 빼세요. 파일은 기기 안에서만 처리됩니다.",
-  },
-  "pdf.watermark": {
-    name: "PDF 워터마크 넣기",
-    shortDescription:
-      "PDF 모든 페이지 또는 지정한 페이지에 원하는 문구의 워터마크를 넣으세요. 업로드 없이 브라우저에서 처리합니다.",
-  },
-  "pdf.to-image": {
-    name: "PDF를 JPG·PNG로 변환",
-    shortDescription:
-      "PDF 페이지를 JPG 또는 PNG 이미지로 변환하세요. 업로드 없이 브라우저에서 처리합니다.",
-  },
-  "pdf.image-to-pdf": {
-    name: "이미지를 PDF로 변환",
-    shortDescription:
-      "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요. 업로드 없이 내 기기에서 처리합니다.",
-  },
-  "pdf.compress-scanned": {
-    name: "PDF 용량 줄이기",
-    shortDescription:
-      "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 기본은 임시 서버에서 처리하며 완료 후 자동 삭제합니다.",
-  },
 } as const satisfies Record<ExpectedAvailableToolId, { name: string; shortDescription: string }>;
 
 function expectInvalidCatalog(
@@ -248,8 +175,8 @@ function expectInvalidCatalog(
 }
 
 describe("tool catalog", () => {
-  it("publishes 22 real tools and one honest roadmap card", () => {
-    expect(availableToolEntries).toHaveLength(22);
+  it("publishes 15 real tools and one honest roadmap card", () => {
+    expect(availableToolEntries).toHaveLength(15);
     expect(plannedToolEntries.map((tool) => tool.id)).toEqual(["media.video-compress"]);
     expect(getAvailableToolById("image.compress")).toMatchObject({
       route: "/image/compress",
@@ -261,10 +188,6 @@ describe("tool catalog", () => {
       experience: "file",
       execution: "server",
     });
-    expect(getAvailableToolById("pdf.compress-scanned")).toMatchObject({
-      execution: "server",
-    });
-    expect(getAvailableToolById("pdf.organize").experience).toBe("workspace");
     expect(getAvailableToolById("data.json-format")).toMatchObject({
       route: "/data/json",
       launcherInput: null,
@@ -277,11 +200,11 @@ describe("tool catalog", () => {
 
   it("keeps IDs, routes, aliases, and intentional relations valid", () => {
     expect(new Set(toolCatalog.map((tool) => tool.id)).size).toBe(toolCatalog.length);
-    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(22);
-    expect(getRelatedAvailableTools("pdf.merge").map((tool) => tool.id)).toEqual([
-      "pdf.split",
-      "pdf.organize",
-      "pdf.image-to-pdf",
+    expect(new Set(availableToolEntries.map((tool) => tool.route)).size).toBe(15);
+    expect(getRelatedAvailableTools("image.compress").map((tool) => tool.id)).toEqual([
+      "image.resize",
+      "image.convert",
+      "image.watermark",
     ]);
     expect(
       Object.fromEntries(availableToolEntries.map((tool) => [tool.id, tool.searchAliases])),
@@ -346,11 +269,6 @@ describe("tool catalog", () => {
     expect(domainDefinitions).toEqual([
       { id: "image", label: "이미지", description: "사진과 이미지 작업 도구를 모았어요." },
       {
-        id: "document",
-        label: "PDF·문서",
-        description: "PDF와 문서 작업 도구를 모았어요.",
-      },
-      {
         id: "media",
         label: "영상·오디오",
         description: "영상과 오디오 작업 도구를 모았어요.",
@@ -405,13 +323,10 @@ describe("tool catalog", () => {
   it("publishes the approved order, launch limits, and output kinds", () => {
     expect(availableToolEntries.map((tool) => tool.id)).toEqual([
       "image.compress",
-      "pdf.merge",
       "image.resize",
       "image.crop",
-      "pdf.compress-scanned",
       "image.convert",
       "image.rotate",
-      "pdf.split",
       "image.watermark",
       "image.convert-to-jpg",
       "image.convert-from-jpg",
@@ -421,10 +336,6 @@ describe("tool catalog", () => {
       "image.upscale",
       "image.blur-face",
       "image.remove-background",
-      "pdf.organize",
-      "pdf.to-image",
-      "pdf.image-to-pdf",
-      "pdf.watermark",
       "data.json-format",
     ]);
 
@@ -455,7 +366,6 @@ describe("tool catalog", () => {
         true,
         ["image/jpeg", "image/png", "image/webp"],
       ],
-      "pdf.merge": [["application/pdf"], 2, 20, false, ["application/pdf"]],
       "image.resize": [
         animatedImageKinds,
         1,
@@ -470,7 +380,6 @@ describe("tool catalog", () => {
         true,
         ["image/jpeg", "image/png", "image/webp", "image/gif"],
       ],
-      "pdf.compress-scanned": [["application/pdf"], 1, 1, false, ["application/pdf"]],
       "image.convert": [
         animatedImageKinds,
         1,
@@ -485,7 +394,6 @@ describe("tool catalog", () => {
         true,
         ["image/jpeg", "image/png", "image/webp", "image/gif"],
       ],
-      "pdf.split": [["application/pdf"], 1, 1, false, ["application/pdf", "application/zip"]],
       "image.watermark": [imageKinds, 1, 100, true, ["image/jpeg", "image/png", "image/webp"]],
       "image.convert-to-jpg": [extraImageKinds, 1, 100, true, ["image/jpeg", "application/zip"]],
       "image.convert-from-jpg": [
@@ -525,16 +433,6 @@ describe("tool catalog", () => {
         true,
         ["image/png"],
       ],
-      "pdf.organize": [["application/pdf"], 1, 1, false, ["application/pdf"]],
-      "pdf.to-image": [
-        ["application/pdf"],
-        1,
-        1,
-        false,
-        ["image/jpeg", "image/png", "application/zip"],
-      ],
-      "pdf.image-to-pdf": [["image/jpeg", "image/png"], 1, 100, true, ["application/pdf"]],
-      "pdf.watermark": [["application/pdf"], 1, 1, false, ["application/pdf"]],
       "data.json-format": [
         undefined,
         undefined,
@@ -569,7 +467,7 @@ describe("tool catalog", () => {
     expect(getRelatedAvailableTools("image.convert").map((tool) => tool.id)).toEqual([
       "image.compress",
       "image.resize",
-      "pdf.image-to-pdf",
+      "image.watermark",
     ]);
   });
 

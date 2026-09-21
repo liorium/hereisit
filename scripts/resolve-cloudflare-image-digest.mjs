@@ -27,7 +27,7 @@ function validateRequestedReference(imageRef, accountId, expectedRepository = nu
   }
   if (typeof imageRef !== "string") throw new TypeError("image reference is invalid");
   const pattern = new RegExp(
-    `^registry\\.cloudflare\\.com/${accountId}/(hereisit-(?:image|pdf)-engine):([0-9a-f]{40})(?:-([0-9a-f]{64}))?$`,
+    `^registry\\.cloudflare\\.com/${accountId}/(hereisit-image-engine):([0-9a-f]{40})(?:-([0-9a-f]{64}))?$`,
   );
   const match = pattern.exec(imageRef);
   if (match === null) {

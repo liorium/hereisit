@@ -10,11 +10,6 @@ const sha = (value: string) => value.repeat(64);
 function input() {
   const schemas = {
     imageCanary: "hereisit-processing-production-canary-smoke@1",
-    pdfCanary: "hereisit-processing-pdf-smoke@1",
-    deletion: "hereisit-pdf-deletion-receipt@1",
-    cost: "hereisit-pdf-cost-receipt@1",
-    rollback: "hereisit-pdf-rollback-receipt@1",
-    admission: "hereisit-pdf-public-admission@1",
     gate: "hereisit-processing-deployment-gate@1",
     policy: "hereisit-processing-production-canary-policy-smoke@1",
   };
@@ -28,7 +23,6 @@ function input() {
     },
     engines: {
       imageDigest: `registry.cloudflare.com/${"e".repeat(32)}/hereisit-image-engine@sha256:${sha("f")}`,
-      pdfDigest: `registry.cloudflare.com/${"e".repeat(32)}/hereisit-pdf-engine@sha256:${sha("0")}`,
     },
     deployment: {
       resourcesSha256: sha("1"),
@@ -41,7 +35,7 @@ function input() {
         {
           schema,
           sha256: String(index + 1).repeat(64),
-          passed: name !== "admission" && !["cost", "rollback"].includes(name),
+          passed: true,
         },
       ]),
     ),
@@ -54,16 +48,15 @@ describe("final processing deployment report", () => {
     const report = createProcessingDeploymentReport(input());
     expect(validateProcessingDeploymentReport(report)).toEqual(report);
     expect(report).toMatchObject({
-      schema: "hereisit-processing-deployment-report@1",
-      version: 1,
+      schema: "hereisit-processing-deployment-report@2",
+      version: 2,
       passed: true,
       publicAdmissionReady: false,
     });
   });
 
-  it("requires all public receipts when admission is enabled", () => {
-    const value = input();
-    value.receipts.admission.passed = true;
+  it("never authorizes public admission from canary evidence", () => {
+    const value = { ...input(), publicAdmissionReady: true };
     expect(() => createProcessingDeploymentReport(value)).toThrow(/admission|receipt/i);
   });
 
@@ -71,32 +64,28 @@ describe("final processing deployment report", () => {
     const reportSha = sha("b");
     expect(
       validateProcessingDeploymentReceipt(
-        "deletion",
+        "gate",
         {
-          schema: "hereisit-pdf-deletion-receipt@1",
+          schema: "hereisit-processing-deployment-gate@1",
           version: 1,
           passed: true,
-          releaseReportSha256: reportSha,
-          deleted: true,
-          sweepPassed: true,
+          verified: true,
         },
         reportSha,
       ),
-    ).toMatchObject({ passed: true, deleted: true });
+    ).toMatchObject({ passed: true, verified: true });
     expect(() =>
       validateProcessingDeploymentReceipt(
-        "deletion",
+        "gate",
         {
-          schema: "hereisit-pdf-deletion-receipt@1",
+          schema: "hereisit-processing-deployment-gate@1",
           version: 1,
           passed: true,
-          releaseReportSha256: sha("c"),
-          deleted: true,
-          sweepPassed: true,
+          verified: false,
         },
         reportSha,
       ),
-    ).toThrow(/exact release report/i);
+    ).toThrow(/did not pass/i);
     expect(() =>
       validateProcessingDeploymentReceipt(
         "policy",

@@ -14,10 +14,7 @@ const config = {
   workerScriptName: "hereisit-processing-staging",
   queueName: "hereisit-image-jobs-staging",
   dlqName: "hereisit-image-jobs-dlq-staging",
-  pdfQueueName: "hereisit-pdf-jobs-staging",
-  pdfDlqName: "hereisit-pdf-jobs-dlq-staging",
 };
-
 describe("pre-mutation processing resource state", () => {
   it("models exact resources that were absent before provisioning", () => {
     const state = captureProcessingMutationState({
@@ -34,18 +31,14 @@ describe("pre-mutation processing resource state", () => {
     });
     expect(state.absentResources).toEqual([
       "container.image",
-      "container.pdf",
       "d1",
       "logpush",
       "queue.image.dlq",
-      "queue.pdf.dlq",
-      "queue.pdf.primary",
       "r2.usage",
       "worker",
     ]);
     expect(state.resources.queues.image.primary).toMatchObject({ state: "resumed" });
   });
-
   it("deletes only resources proven absent and refuses drift", async () => {
     const state = captureProcessingMutationState({
       config,
@@ -61,8 +54,6 @@ describe("pre-mutation processing resource state", () => {
         queues: [
           { id: "1".repeat(32), name: config.queueName },
           { id: "2".repeat(32), name: config.dlqName },
-          { id: "3".repeat(32), name: config.pdfQueueName },
-          { id: "4".repeat(32), name: config.pdfDlqName },
         ],
         logpush: [{ id: 41, workerScriptName: config.workerScriptName }],
         workers: [{ name: config.workerScriptName }],
@@ -71,10 +62,6 @@ describe("pre-mutation processing resource state", () => {
             id: "00000000-0000-4000-8000-000000000010",
             name: `${config.workerScriptName}-imageenginecontainer`,
           },
-          {
-            id: "00000000-0000-4000-8000-000000000011",
-            name: `${config.workerScriptName}-pdfenginecontainer`,
-          },
         ],
       },
       applyAction,
@@ -82,10 +69,7 @@ describe("pre-mutation processing resource state", () => {
     expect(applyAction.mock.calls.map(([action]) => action.type)).toEqual([
       "delete-worker",
       "delete-container",
-      "delete-container",
       "delete-logpush",
-      "delete-queue",
-      "delete-queue",
       "delete-queue",
       "delete-queue",
       "delete-r2",

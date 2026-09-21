@@ -3,14 +3,7 @@ import {
   type ImageOptimizePolicyResponseV1,
   imageOptimizePolicyRequestSchema,
 } from "@hereisit/tool-contracts/image-optimize";
-import {
-  type PdfOptimizePolicyResponseV1,
-  pdfOptimizePolicyRequestSchema,
-} from "@hereisit/tool-contracts/pdf-optimize";
-import {
-  imageCompressionProcessingManifest,
-  pdfCompressionProcessingManifest,
-} from "@hereisit/tool-registry/processing";
+import { imageCompressionProcessingManifest } from "@hereisit/tool-registry/processing";
 import { hashAnonymousSessionId, hashNetworkBuckets, sessionRolloutBucket } from "../auth";
 import { readBoundedJson } from "../bounded-json";
 
@@ -27,7 +20,6 @@ export interface PolicyDecisionConfig {
   networkPendingJobLimit?: number;
   maximumQueuedAgeSeconds?: number;
   maintainerSessionHashes?: ReadonlySet<string>;
-  pdfPublicAdmissionEnabled?: boolean;
 }
 
 export interface PolicyRouterConfig extends PolicyDecisionConfig {
@@ -90,23 +82,12 @@ const imagePublicLimits = Object.freeze({
   maxBytesPerFile: imageCompressionProcessingManifest.limits.maxBytesPerFile,
   maxPixelsPerFile: imageCompressionProcessingManifest.limits.maxPixelsPerFile,
 });
-const pdfPublicLimits = Object.freeze({
-  maxFiles: pdfCompressionProcessingManifest.limits.maxFiles,
-  maxBytesPerFile: pdfCompressionProcessingManifest.limits.maxBytesPerFile,
-  maxPagesPerFile: pdfCompressionProcessingManifest.limits.maxPagesPerFile,
-});
 
-type PolicyToolContract = "image.optimize@1" | "pdf.optimize@1";
-type PolicyResponse = ImageOptimizePolicyResponseV1 | PdfOptimizePolicyResponseV1;
+type PolicyToolContract = "image.optimize@1";
+type PolicyResponse = ImageOptimizePolicyResponseV1;
 
 function parsePolicyRequest(value: unknown) {
-  const contract =
-    value !== null && typeof value === "object" && "toolContract" in value
-      ? value.toolContract
-      : null;
-  return contract === "pdf.optimize@1"
-    ? pdfOptimizePolicyRequestSchema.safeParse(value)
-    : imageOptimizePolicyRequestSchema.safeParse(value);
+  return imageOptimizePolicyRequestSchema.safeParse(value);
 }
 
 function normalizedConfig(config: PolicyDecisionConfig): Required<PolicyDecisionConfig> {
@@ -116,7 +97,6 @@ function normalizedConfig(config: PolicyDecisionConfig): Required<PolicyDecision
     networkPendingJobLimit: config.networkPendingJobLimit ?? Number.MAX_SAFE_INTEGER,
     maximumQueuedAgeSeconds: config.maximumQueuedAgeSeconds ?? Number.MAX_SAFE_INTEGER,
     maintainerSessionHashes: config.maintainerSessionHashes ?? new Set<string>(),
-    pdfPublicAdmissionEnabled: config.pdfPublicAdmissionEnabled ?? false,
   };
 }
 
@@ -171,11 +151,7 @@ function makePolicyPayload(input: {
   }
 
   const inRollout =
-    input.rolloutBucket !== null &&
-    (toolContract === "pdf.optimize@1"
-      ? maintainer ||
-        (config.pdfPublicAdmissionEnabled && input.rolloutBucket < config.rolloutPercent)
-      : maintainer || input.rolloutBucket < config.rolloutPercent);
+    input.rolloutBucket !== null && (maintainer || input.rolloutBucket < config.rolloutPercent);
   const execution = admissionAllowed && inRollout ? "server" : "local";
   if (execution === "server") {
     return {
@@ -196,7 +172,7 @@ function makePolicyPayload(input: {
           exceptionalDelayPossible: true,
         },
       },
-      limits: toolContract === "pdf.optimize@1" ? pdfPublicLimits : imagePublicLimits,
+      limits: imagePublicLimits,
     } as PolicyResponse;
   }
 
@@ -211,7 +187,7 @@ function makePolicyPayload(input: {
       inputDeletion: "not-uploaded",
       resultDeletion: { mode: "not-uploaded" },
     },
-    limits: toolContract === "pdf.optimize@1" ? pdfPublicLimits : imagePublicLimits,
+    limits: imagePublicLimits,
   } as PolicyResponse;
 }
 

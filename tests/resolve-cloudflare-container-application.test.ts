@@ -128,22 +128,19 @@ describe("Cloudflare Container application resolver", () => {
   });
 });
 
-it("selects the isolated PDF application and immutable PDF image", () => {
+it("rejects the retired PDF application and image", () => {
   const pdfImage = `registry.cloudflare.com/${accountId}/hereisit-pdf-engine@sha256:${"e".repeat(64)}`;
-  const result = resolveContainerApplication({
-    ...input,
-    containerClassName: "PdfEngineContainer",
-    engineImage: pdfImage,
-    applications: [
-      application({
-        name: "hereisit-processing-staging-pdfenginecontainer",
-        image: pdfImage,
-      }),
-    ],
-  });
-
-  expect(result.application).toMatchObject({
-    name: "hereisit-processing-staging-pdfenginecontainer",
-    image: pdfImage,
-  });
+  expect(() =>
+    resolveContainerApplication({
+      ...input,
+      containerClassName: "PdfEngineContainer",
+      engineImage: pdfImage,
+      applications: [
+        application({
+          name: "hereisit-processing-staging-pdfenginecontainer",
+          image: pdfImage,
+        }),
+      ],
+    }),
+  ).toThrow(/class/i);
 });

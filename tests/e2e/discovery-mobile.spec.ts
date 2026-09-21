@@ -298,7 +298,7 @@ test("keeps home domain tabs in one local row and reveals keyboard selection", a
 
   const tablist = page.getByRole("tablist", { name: "도구 분야" });
   const tabs = tablist.getByRole("tab");
-  await expect(tabs).toHaveCount(8);
+  await expect(tabs).toHaveCount(7);
   await expectOneLocalRow(tablist);
   expect(
     await tablist.evaluate((element) => element.nextElementSibling?.getAttribute("role")),
@@ -431,7 +431,7 @@ test("opens one modal mobile drawer with trapped focus and inert background", as
   await expect(close).toBeFocused();
 
   const domainGrid = drawer.getByTestId("mobile-domain-grid");
-  await expect(domainGrid.getByRole("link")).toHaveCount(7);
+  await expect(domainGrid.getByRole("link")).toHaveCount(6);
   const brandBox = await page.getByRole("link", { name: "HereIsIt 홈" }).boundingBox();
   expect(brandBox?.height ?? 0).toBeGreaterThanOrEqual(44);
   for (const link of await domainGrid.getByRole("link").all()) {
@@ -542,7 +542,7 @@ test("keeps 200 percent root text enlargement reachable without document overflo
 test("keeps key routes bounded across compact widths and the 601 pixel boundary", async ({
   page,
 }) => {
-  const routes = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/pdf/organize"];
+  const routes = ["/", "/tools", "/my-tools", "/workflows", "/image/compress"];
   for (const width of [320, 360, 390, 430, 600, 601]) {
     await page.setViewportSize({ width, height: 844 });
     for (const route of routes) {

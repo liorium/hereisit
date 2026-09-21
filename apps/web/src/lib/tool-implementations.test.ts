@@ -3,7 +3,6 @@ import { type AvailableToolId, availableToolEntries } from "@hereisit/tool-regis
 import { describe, expect, it } from "vitest";
 import {
   getToolImplementation,
-  isPdfEditingIntent,
   type ToolBundleProfile,
   toolImplementationConfig,
 } from "./tool-implementations";
@@ -24,16 +23,6 @@ const expectedImplementationMapping = {
   "image.rotate": { intent: "rotate", bundleProfile: "image" },
   "image.upscale": { intent: "upscale", bundleProfile: "image-extra" },
   "image.watermark": { intent: "watermark", bundleProfile: "image-watermark" },
-  "pdf.merge": { intent: "merge", bundleProfile: "pdf-editing" },
-  "pdf.split": { intent: "split", bundleProfile: "pdf-editing" },
-  "pdf.organize": { intent: "organize", bundleProfile: "pdf-organize" },
-  "pdf.watermark": { intent: "watermark", bundleProfile: "pdf-editing" },
-  "pdf.image-to-pdf": { intent: "image-to-pdf", bundleProfile: "pdf-editing" },
-  "pdf.to-image": { intent: "to-image", bundleProfile: "pdf-to-images" },
-  "pdf.compress-scanned": {
-    intent: "compress",
-    bundleProfile: "pdf-compress-scanned",
-  },
 } as const satisfies Record<AvailableToolId, { intent: string; bundleProfile: ToolBundleProfile }>;
 
 const exactLiteralImplementationMapping = toolImplementationConfig satisfies {
@@ -50,14 +39,7 @@ const supportedBundleProfiles = [
   "image-compression-server",
   "image-extra",
   "image-watermark",
-  "pdf-editing",
-  "pdf-organize",
-  "pdf-to-images",
-  "pdf-compress-scanned",
 ] as const satisfies readonly ToolBundleProfile[];
-
-const smartPdfCompressionNotice =
-  "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.";
 
 describe("tool implementation ownership", () => {
   it("defines the exact available ID set and literal implementation mapping", () => {
@@ -98,12 +80,7 @@ describe("tool implementation ownership", () => {
 
     for (const tool of availableToolEntries) {
       const implementation = getToolImplementation(tool.id);
-      const expectedFields =
-        implementation.family === "data"
-          ? quickFields
-          : implementation.family === "pdf"
-            ? [...fileFields, "intentClass"]
-            : fileFields;
+      const expectedFields = implementation.family === "data" ? quickFields : fileFields;
 
       expect(Object.keys(implementation).sort(), tool.id).toEqual(expectedFields.sort());
     }
@@ -111,9 +88,7 @@ describe("tool implementation ownership", () => {
 
   it("keeps catalog launchers and implementation limits aligned with each execution path", () => {
     for (const tool of availableToolEntries) {
-      expect(tool.execution).toBe(
-        tool.id === "image.compress" || tool.id === "pdf.compress-scanned" ? "server" : "browser",
-      );
+      expect(tool.execution).toBe(tool.id === "image.compress" ? "server" : "browser");
       const implementation = getToolImplementation(tool.id);
 
       if (tool.id === "data.json-format") {
@@ -167,16 +142,7 @@ describe("tool implementation ownership", () => {
     }
   });
 
-  it("preserves the explicit PDF editing intent classification", () => {
-    for (const intent of ["merge", "split", "organize", "watermark", "image-to-pdf"] as const) {
-      expect(isPdfEditingIntent(intent)).toBe(true);
-    }
-    for (const intent of ["compress", "to-image"] as const) {
-      expect(isPdfEditingIntent(intent)).toBe(false);
-    }
-  });
-
-  it("owns the approved image watermark summary and exact PDF compression notice", () => {
+  it("owns the approved image watermark summary", () => {
     expect(getToolImplementation("image.compress")).toMatchObject({
       defaultSummary:
         "원본 형식과 크기를 유지한 채 프로덕션급 압축을 시도하고, 작아지지 않으면 원본을 그대로 유지해요.",
@@ -187,15 +153,6 @@ describe("tool implementation ownership", () => {
     for (const approvedCopy of ["© HereIsIt", "12%", "3%", "55%", "#111827", "품질 90"]) {
       expect(watermarkSummary).toContain(approvedCopy);
     }
-
-    expect(
-      getToolImplementation("pdf.compress-scanned").notices.filter(
-        ({ tone }) => tone === "warning",
-      ),
-    ).toEqual([{ tone: "warning", text: smartPdfCompressionNotice }]);
-    expect(getToolImplementation("pdf.compress-scanned").defaultSummary).toBe(
-      "기본은 고성능 처리 서버에서 압축하고, 원하면 내 기기에서 처리할 수 있어요.",
-    );
   });
 
   it("keeps related tool navigation client-only without automatic prefetch", () => {

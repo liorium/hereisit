@@ -1,23 +1,16 @@
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import {
   type EngineCreateJobRequest,
-  type EngineCreatePdfJobRequest,
   type EngineJobStatus,
   engineCreateJobRequestSchema,
-  engineCreatePdfJobRequestSchema,
   engineJobStatusSchema,
-  type PdfEngineJobStatus,
-  pdfEngineJobStatusSchema,
 } from "@hereisit/server-contracts";
 import type { Env } from "./env";
 
 const ENGINE_ORIGIN = "http://image-engine";
-const PDF_ENGINE_ORIGIN = "http://pdf-engine";
 const MAX_STATUS_BYTES = 64 * 1024;
 const ENGINE_IMAGE_PATTERN =
   /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-image-engine@sha256:([0-9a-f]{64})$/;
-const PDF_ENGINE_IMAGE_PATTERN =
-  /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-pdf-engine@sha256:([0-9a-f]{64})$/;
 
 export function createImageEngineEnvironment(engineImage: string): Record<string, string> {
   const digest = ENGINE_IMAGE_PATTERN.exec(engineImage)?.[1];
@@ -30,17 +23,6 @@ export function createImageEngineEnvironment(engineImage: string): Record<string
     PNG_CODEC_BUILD_ID: "quantizr-1.4.3+oxipng-10.1.1",
     WEBP_CODEC_BUILD_ID: "libwebp-1.6.0+4fa2191",
     TRANSFORM_BUILD_ID: "libvips-8.18.4+e01a479",
-  };
-}
-
-export function createPdfEngineEnvironment(engineImage: string): Record<string, string> {
-  const digest = PDF_ENGINE_IMAGE_PATTERN.exec(engineImage)?.[1];
-  if (digest === undefined && engineImage !== "local-dockerfile") {
-    throw new TypeError("PDF engine image identity is invalid.");
-  }
-  return {
-    ENGINE_BUILD_ID: digest === undefined ? engineImage : `sha256:${digest}`,
-    QPDF_BUILD_ID: "qpdf-12.4.0",
   };
 }
 
@@ -63,7 +45,6 @@ interface TypedEngineClient<CreateRequest, Status> {
 }
 
 export type EngineClient = TypedEngineClient<EngineCreateJobRequest, EngineJobStatus>;
-export type PdfEngineClient = TypedEngineClient<EngineCreatePdfJobRequest, PdfEngineJobStatus>;
 
 export interface EngineContainerStub {
   getState(): Promise<{ readonly status: string; readonly lastChange: number }>;
@@ -118,34 +99,9 @@ export class ImageEngineContainer extends Container<Env> {
   }
 }
 
-export class PdfEngineContainer extends Container<Env> {
-  override defaultPort = 8080;
-  override requiredPorts = [8080];
-  override pingEndpoint = "/healthz";
-  override sleepAfter = "60s";
-  override enableInternet = false;
-
-  constructor(ctx: ConstructorParameters<typeof Container<Env>>[0], env: Env) {
-    super(ctx, env);
-    this.envVars = createPdfEngineEnvironment(env.PDF_ENGINE_IMAGE_DIGEST);
-  }
-
-  override onError(_error: unknown): void {}
-
-  override onStop(params: StopParams): void {
-    console.info({
-      event: "container-stop",
-      exitCode: Number.isSafeInteger(params.exitCode) ? params.exitCode : null,
-    });
-  }
-}
-
 type Assert<T extends true> = T;
 export type ImageEngineBindingTypeAssertion = Assert<
   Env["IMAGE_ENGINE"] extends DurableObjectNamespace<ImageEngineContainer> ? true : false
->;
-export type PdfEngineBindingTypeAssertion = Assert<
-  Env["PDF_ENGINE"] extends DurableObjectNamespace<PdfEngineContainer> ? true : false
 >;
 
 function canonicalJobId(jobId: string): string {
@@ -339,29 +295,8 @@ export function createEngineClientFromStub(
   ) as EngineClient;
 }
 
-export function createPdfEngineClientFromStub(
-  stub: EngineContainerStub,
-  now?: () => number,
-): PdfEngineClient {
-  return createTypedEngineClientFromStub(
-    stub,
-    {
-      origin: PDF_ENGINE_ORIGIN,
-      createSchema: engineCreatePdfJobRequestSchema,
-      statusSchema: pdfEngineJobStatusSchema,
-    },
-    now,
-  ) as PdfEngineClient;
-}
-
 export function createContainerEngineClient(env: Env): EngineClient {
   return createEngineClientFromStub(
     getContainer(env.IMAGE_ENGINE, env.ENGINE_INSTANCE_NAME) as EngineContainerStub,
-  );
-}
-
-export function createContainerPdfEngineClient(env: Env): PdfEngineClient {
-  return createPdfEngineClientFromStub(
-    getContainer(env.PDF_ENGINE, env.PDF_ENGINE_INSTANCE_NAME) as EngineContainerStub,
   );
 }

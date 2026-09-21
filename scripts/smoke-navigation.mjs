@@ -2,15 +2,7 @@ import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 
 const DEFAULT_BASE_URL = "https://hereisit.app";
-const ROUTE_PATHS = [
-  "/",
-  "/tools",
-  "/my-tools",
-  "/workflows",
-  "/image/compress",
-  "/pdf/organize",
-  "/data/json",
-];
+const ROUTE_PATHS = ["/", "/tools", "/my-tools", "/workflows", "/image/compress", "/data/json"];
 const EXPECTED_CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'";
 const EXPECTED_PERMISSIONS_POLICY = "camera=(), geolocation=(), microphone=(), payment=(), usb=()";
@@ -100,7 +92,7 @@ async function assertHome(page) {
 
   const tablist = page.getByRole("tablist", { name: "도구 분야" });
   const tabs = tablist.getByRole("tab");
-  assert.equal(await tabs.count(), 8, "home: eight domain tabs");
+  assert.equal(await tabs.count(), 7, "home: seven domain tabs");
   const selectedTab = tablist.getByRole("tab", { selected: true });
   assert.equal(await selectedTab.count(), 1, "home: one selected tab");
   const selectedTabId = await selectedTab.getAttribute("id");
@@ -256,18 +248,11 @@ try {
     "/image/watermark",
   ]);
 
-  await gotoRoute(page, baseUrl, "/pdf/organize");
-  await assertDetailShell(page, "PDF 페이지 정리", "편집 작업 공간", "이 기기에서 처리", [
-    "/pdf/merge",
-    "/pdf/split",
-    "/pdf/watermark",
-  ]);
-
   await gotoRoute(page, baseUrl, "/data/json");
   await assertDetailShell(page, "JSON 정리·검사", "빠른 작업 영역", "이 기기에서 처리", [
     "/image/convert",
-    "/pdf/to-image",
-    "/pdf/image-to-pdf",
+    "/image/html-to-image",
+    "/image/editor",
   ]);
 
   assert.deepEqual(violations, [], "network: read-only same-origin requests");

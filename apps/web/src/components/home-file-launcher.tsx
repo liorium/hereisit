@@ -41,7 +41,6 @@ const KIND_LABELS: Partial<Record<FileKind, string>> = {
   "image/svg+xml": "SVG 이미지",
   "image/heic": "HEIC 이미지",
   "image/heif": "HEIF 이미지",
-  "application/pdf": "PDF 문서",
   "text/plain": "텍스트 파일",
   "application/json": "JSON 파일",
   "application/zip": "ZIP 파일",
@@ -192,7 +191,7 @@ export function HomeFileLauncher(): ReactNode {
         onDrop={handleDrop}
       >
         <input
-          accept="image/jpeg,image/png,image/webp,image/gif,image/tiff,image/svg+xml,image/heic,image/heif,application/pdf,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.svg,.heic,.heif,.pdf"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/tiff,image/svg+xml,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.tif,.tiff,.svg,.heic,.heif"
           className={styles.fileInput}
           id="home-file-input"
           multiple
@@ -202,7 +201,7 @@ export function HomeFileLauncher(): ReactNode {
           type="file"
         />
         <strong>여기에 파일을 놓으세요</strong>
-        <span>이미지와 PDF · 한 번에 최대 100개</span>
+        <span>이미지 · 한 번에 최대 100개</span>
         <button
           className={styles.selectButton}
           onClick={() => inputRef.current?.click()}

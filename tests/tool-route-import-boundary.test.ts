@@ -7,10 +7,6 @@ const workbenchModuleNames = new Set([
   "image-compress-workbench",
   "image-workbench",
   "image-watermark-workbench",
-  "pdf-workbench",
-  "pdf-organize-workbench",
-  "pdf-to-image-workbench",
-  "pdf-compress-workbench",
 ]);
 
 const migratedRoutes = [
@@ -43,41 +39,6 @@ const migratedRoutes = [
     route: "/image/watermark",
     sourcePath: "apps/web/src/app/image/watermark/page.tsx",
     expectedWorkbench: "image-watermark-workbench",
-  },
-  {
-    route: "/pdf/organize",
-    sourcePath: "apps/web/src/app/pdf/organize/page.tsx",
-    expectedWorkbench: "pdf-organize-workbench",
-  },
-  {
-    route: "/pdf/merge",
-    sourcePath: "apps/web/src/app/pdf/merge/page.tsx",
-    expectedWorkbench: "pdf-workbench",
-  },
-  {
-    route: "/pdf/split",
-    sourcePath: "apps/web/src/app/pdf/split/page.tsx",
-    expectedWorkbench: "pdf-workbench",
-  },
-  {
-    route: "/pdf/watermark",
-    sourcePath: "apps/web/src/app/pdf/watermark/page.tsx",
-    expectedWorkbench: "pdf-workbench",
-  },
-  {
-    route: "/pdf/image-to-pdf",
-    sourcePath: "apps/web/src/app/pdf/image-to-pdf/page.tsx",
-    expectedWorkbench: "pdf-workbench",
-  },
-  {
-    route: "/pdf/to-image",
-    sourcePath: "apps/web/src/app/pdf/to-image/page.tsx",
-    expectedWorkbench: "pdf-to-image-workbench",
-  },
-  {
-    route: "/pdf/compress",
-    sourcePath: "apps/web/src/app/pdf/compress/page.tsx",
-    expectedWorkbench: "pdf-compress-workbench",
   },
 ] as const;
 

@@ -1,5 +1,5 @@
 export type ToolId = `${string}.${string}`;
-export type DomainId = "image" | "document" | "media" | "data" | "text-ai" | "web-dev" | "everyday";
+export type DomainId = "image" | "media" | "data" | "text-ai" | "web-dev" | "everyday";
 export type DiscoveryDomainId = "all" | DomainId;
 export type PurposeId = "optimize" | "convert" | "edit" | "create" | "extract" | "protect";
 export type PurposeFilter = "all" | PurposeId;
@@ -87,11 +87,6 @@ export type ToolCatalogEntry = AvailableToolEntry | PlannedToolEntry;
 
 export const domainDefinitions: readonly DomainDefinition[] = Object.freeze([
   { id: "image", label: "이미지", description: "사진과 이미지 작업 도구를 모았어요." },
-  {
-    id: "document",
-    label: "PDF·문서",
-    description: "PDF와 문서 작업 도구를 모았어요.",
-  },
   {
     id: "media",
     label: "영상·오디오",
@@ -307,13 +302,6 @@ const aliases = {
   "image.upscale": ["이미지 확대", "사진 화질 개선", "업스케일"],
   "image.blur-face": ["얼굴 흐리기", "모자이크", "번호판 흐리기", "개인정보 가리기"],
   "image.remove-background": ["배경 지우기", "누끼 따기", "배경 제거"],
-  "pdf.merge": ["pdf 병합", "pdf 합치기", "문서 합치기"],
-  "pdf.split": ["pdf 나누기", "페이지 추출", "pdf 분할"],
-  "pdf.organize": ["페이지 순서", "pdf 회전", "페이지 삭제"],
-  "pdf.watermark": ["문서 워터마크", "pdf 문구", "대외비"],
-  "pdf.to-image": ["pdf jpg", "pdf png", "pdf 이미지 변환"],
-  "pdf.image-to-pdf": ["jpg pdf", "png pdf", "사진 pdf"],
-  "pdf.compress-scanned": ["pdf 압축", "스캔 pdf", "pdf 용량 줄이기"],
 } as const;
 
 export const toolCatalog = defineToolCatalog([
@@ -341,31 +329,6 @@ export const toolCatalog = defineToolCatalog([
     contract: { id: "image.optimize", version: 1 },
     featured: true,
     relatedToolIds: ["image.resize", "image.convert", "image.watermark"],
-  },
-  {
-    id: "pdf.merge",
-    name: "PDF 합치기",
-    shortDescription:
-      "여러 PDF 파일을 원하는 순서대로 하나로 합치세요. 파일을 서버에 올리지 않고 브라우저에서 바로 처리합니다.",
-    domains: ["document"],
-    purposes: ["create", "edit"],
-    searchAliases: aliases["pdf.merge"],
-    rank: 20,
-    availability: "available",
-    route: "/pdf/merge",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 2,
-      maxFiles: 20,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["application/pdf"],
-    experience: "file",
-    execution: "browser",
-    contract: { id: "pdf.merge", version: 1 },
-    featured: true,
-    relatedToolIds: ["pdf.split", "pdf.organize", "pdf.image-to-pdf"],
   },
   {
     id: "image.resize",
@@ -418,31 +381,6 @@ export const toolCatalog = defineToolCatalog([
     relatedToolIds: ["image.resize", "image.rotate", "image.compress"],
   },
   {
-    id: "pdf.compress-scanned",
-    name: "PDF 용량 줄이기",
-    shortDescription:
-      "텍스트와 링크를 유지하며 PDF 용량을 줄이세요. 기본은 임시 서버에서 처리하며 완료 후 자동 삭제합니다.",
-    domains: ["document"],
-    purposes: ["optimize"],
-    searchAliases: aliases["pdf.compress-scanned"],
-    rank: 40,
-    availability: "available",
-    route: "/pdf/compress",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 1,
-      maxFiles: 1,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["application/pdf"],
-    experience: "file",
-    execution: "server",
-    contract: { id: "pdf.compress-scanned", version: 2 },
-    featured: true,
-    relatedToolIds: ["pdf.merge", "pdf.split", "pdf.to-image"],
-  },
-  {
     id: "image.convert",
     name: "이미지 형식 변환",
     shortDescription:
@@ -465,7 +403,7 @@ export const toolCatalog = defineToolCatalog([
     execution: "browser",
     contract: { id: "image.pipeline", version: 2 },
     featured: true,
-    relatedToolIds: ["image.compress", "image.resize", "pdf.image-to-pdf"],
+    relatedToolIds: ["image.compress", "image.resize", "image.watermark"],
   },
   {
     id: "image.rotate",
@@ -492,31 +430,6 @@ export const toolCatalog = defineToolCatalog([
     relatedToolIds: ["image.crop", "image.resize", "image.convert"],
   },
   {
-    id: "pdf.split",
-    name: "PDF 페이지 분할",
-    shortDescription:
-      "PDF를 페이지별로 나누거나 필요한 페이지만 추출하세요. 파일은 기기 안에서만 처리됩니다.",
-    domains: ["document"],
-    purposes: ["extract", "edit"],
-    searchAliases: aliases["pdf.split"],
-    rank: 60,
-    availability: "available",
-    route: "/pdf/split",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 1,
-      maxFiles: 1,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["application/pdf", "application/zip"],
-    experience: "file",
-    execution: "browser",
-    contract: { id: "pdf.split", version: 1 },
-    featured: false,
-    relatedToolIds: ["pdf.merge", "pdf.organize", "pdf.to-image"],
-  },
-  {
     id: "image.watermark",
     name: "이미지에 워터마크 넣기",
     shortDescription: "사진과 이미지에 문구 또는 로고를 넣으세요. 파일은 서버로 전송되지 않습니다.",
@@ -538,7 +451,7 @@ export const toolCatalog = defineToolCatalog([
     execution: "browser",
     contract: { id: "image.watermark", version: 1 },
     featured: false,
-    relatedToolIds: ["image.compress", "image.resize", "pdf.watermark"],
+    relatedToolIds: ["image.compress", "image.resize", "image.editor"],
   },
   {
     id: "image.convert-to-jpg",
@@ -740,106 +653,6 @@ export const toolCatalog = defineToolCatalog([
     relatedToolIds: ["image.upscale", "image.editor", "image.convert"],
   },
   {
-    id: "pdf.organize",
-    name: "PDF 페이지 정리",
-    shortDescription:
-      "PDF 페이지 순서를 바꾸고 90도씩 회전하거나 필요 없는 페이지를 빼세요. 파일은 기기 안에서만 처리됩니다.",
-    domains: ["document"],
-    purposes: ["edit"],
-    searchAliases: aliases["pdf.organize"],
-    rank: 80,
-    availability: "available",
-    route: "/pdf/organize",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 1,
-      maxFiles: 1,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["application/pdf"],
-    experience: "workspace",
-    execution: "browser",
-    contract: { id: "pdf.organize", version: 1 },
-    featured: false,
-    relatedToolIds: ["pdf.merge", "pdf.split", "pdf.watermark"],
-  },
-  {
-    id: "pdf.to-image",
-    name: "PDF를 JPG·PNG로 변환",
-    shortDescription:
-      "PDF 페이지를 JPG 또는 PNG 이미지로 변환하세요. 업로드 없이 브라우저에서 처리합니다.",
-    domains: ["document", "image", "data"],
-    purposes: ["convert", "extract"],
-    searchAliases: aliases["pdf.to-image"],
-    rank: 90,
-    availability: "available",
-    route: "/pdf/to-image",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 1,
-      maxFiles: 1,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["image/jpeg", "image/png", "application/zip"],
-    experience: "file",
-    execution: "browser",
-    contract: { id: "pdf.to-images", version: 1 },
-    featured: false,
-    relatedToolIds: ["pdf.image-to-pdf", "pdf.split", "image.convert"],
-  },
-  {
-    id: "pdf.image-to-pdf",
-    name: "이미지를 PDF로 변환",
-    shortDescription:
-      "JPG와 PNG 이미지를 원하는 순서대로 한 PDF로 만드세요. 업로드 없이 내 기기에서 처리합니다.",
-    domains: ["image", "document", "data"],
-    purposes: ["convert", "create"],
-    searchAliases: aliases["pdf.image-to-pdf"],
-    rank: 100,
-    availability: "available",
-    route: "/pdf/image-to-pdf",
-    launcherInput: {
-      role: "source",
-      kinds: ["image/jpeg", "image/png"],
-      minFiles: 1,
-      maxFiles: 100,
-      allowMixedKinds: true,
-    },
-    outputKinds: ["application/pdf"],
-    experience: "file",
-    execution: "browser",
-    contract: { id: "pdf.images-to-pdf", version: 1 },
-    featured: false,
-    relatedToolIds: ["pdf.to-image", "pdf.merge", "image.convert"],
-  },
-  {
-    id: "pdf.watermark",
-    name: "PDF 워터마크 넣기",
-    shortDescription:
-      "PDF 모든 페이지 또는 지정한 페이지에 원하는 문구의 워터마크를 넣으세요. 업로드 없이 브라우저에서 처리합니다.",
-    domains: ["document"],
-    purposes: ["edit", "protect"],
-    searchAliases: aliases["pdf.watermark"],
-    rank: 110,
-    availability: "available",
-    route: "/pdf/watermark",
-    launcherInput: {
-      role: "source",
-      kinds: ["application/pdf"],
-      minFiles: 1,
-      maxFiles: 1,
-      allowMixedKinds: false,
-    },
-    outputKinds: ["application/pdf"],
-    experience: "file",
-    execution: "browser",
-    contract: { id: "pdf.watermark", version: 1 },
-    featured: false,
-    relatedToolIds: ["pdf.organize", "pdf.merge", "image.watermark"],
-  },
-  {
     id: "data.json-format",
     name: "JSON 정리·검사",
     shortDescription:
@@ -856,7 +669,7 @@ export const toolCatalog = defineToolCatalog([
     execution: "browser",
     contract: { id: "json.format", version: 1 },
     featured: false,
-    relatedToolIds: ["image.convert", "pdf.to-image", "pdf.image-to-pdf"],
+    relatedToolIds: ["image.convert", "image.html-to-image", "image.editor"],
   },
   {
     id: "media.video-compress",

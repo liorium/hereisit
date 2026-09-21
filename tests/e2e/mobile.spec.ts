@@ -1,10 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { PDFDocument } from "@cantoo/pdf-lib";
 import { expect, type Locator, test } from "@playwright/test";
 import { installPrivacyObserver } from "./support/privacy-observer";
-
-const PDF_COMPRESSION_WARNING =
-  "텍스트와 링크는 유지하고, 이미지로만 된 스캔 PDF는 선택한 압축 수준으로 다시 만들어요. 전자서명은 무효가 될 수 있으며 원본 파일은 수정하지 않아요.";
 
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -141,37 +137,6 @@ function addPngTextChunk(png: Buffer, text: string): Buffer {
   return Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]);
 }
 
-async function createMobileScannedPdf(page: import("@playwright/test").Page): Promise<Buffer> {
-  const jpegBase64 = await page.evaluate(async () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 600;
-    canvas.height = 800;
-    const context = canvas.getContext("2d");
-    if (context === null) throw new Error("2D canvas unavailable");
-    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, "#f4efe6");
-    gradient.addColorStop(1, "#9aa8bd");
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = "#24364f";
-    for (let row = 0; row < 50; row += 1) {
-      context.beginPath();
-      context.moveTo(20, 100 + row * 12);
-      context.lineTo(canvas.width - 20, 100 + row * 12);
-      context.stroke();
-    }
-    return canvas.toDataURL("image/jpeg", 0.9).split(",")[1] ?? "";
-  });
-  const document = await PDFDocument.create();
-  const image = await document.embedJpg(Buffer.from(jpegBase64, "base64"));
-  for (let index = 0; index < 8; index += 1) {
-    await document.embedJpg(Buffer.from(jpegBase64, "base64"));
-  }
-  const outputPage = document.addPage([612, 792]);
-  outputPage.drawImage(image, { x: 0, y: 0, width: 612, height: 792 });
-  return Buffer.from(await document.save());
-}
-
 test("keeps the home discovery flow inside an iPhone viewport", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
@@ -183,7 +148,7 @@ test("keeps the home discovery flow inside an iPhone viewport", async ({ page })
   expect(fileSelectBox).not.toBeNull();
   expect(fileSelectBox?.y ?? -1).toBeGreaterThanOrEqual(0);
   expect((fileSelectBox?.y ?? 0) + (fileSelectBox?.height ?? 569)).toBeLessThanOrEqual(568);
-  await expect(page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab")).toHaveCount(8);
+  await expect(page.getByRole("tablist", { name: "도구 분야" }).getByRole("tab")).toHaveCount(7);
   await expect(page.getByRole("tabpanel")).toBeAttached();
 
   const viewport = page.viewportSize();
@@ -197,14 +162,11 @@ test("keeps the home discovery flow inside an iPhone viewport", async ({ page })
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
 });
 
-test("shows representative image and PDF selectors in the initial 390 by 844 viewport", async ({
+test("shows representative image selectors in the initial 390 by 844 viewport", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const [path, label] of [
-    ["/image/compress", "이미지 선택"],
-    ["/pdf/organize", "정리할 PDF 선택"],
-  ] as const) {
+  for (const [path, label] of [["/image/compress", "이미지 선택"]] as const) {
     await page.goto(path);
     const selector = page.getByRole("button", { name: label, exact: true });
     await expect(selector).toBeEnabled({ timeout: 60_000 });
@@ -223,7 +185,6 @@ test("starts each representative work area inside a 320 by 568 viewport", async 
   await page.setViewportSize({ width: 320, height: 568 });
   for (const [path, regionName] of [
     ["/image/compress", "파일 작업 영역"],
-    ["/pdf/organize", "편집 작업 공간"],
     ["/data/json", "빠른 작업 영역"],
   ] as const) {
     await page.goto(path);
@@ -321,529 +282,6 @@ test("keeps general image result actions touch-safe at every responsive boundary
   expect(downloads).toBe(0);
 });
 
-test("keeps staged PDF compression keyboard-reachable and touch-safe", async ({ page }) => {
-  test.setTimeout(90_000);
-  let downloads = 0;
-  page.on("download", () => {
-    downloads += 1;
-  });
-  await page.addInitScript(() => {
-    localStorage.setItem("hereisit.pdf-compression-location.v1", "local");
-  });
-  await page.goto("/pdf/compress");
-  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
-  await expect(
-    page.getByText("PDF 1개 · 최대 50MB · 최대 100페이지", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("PDF를 업로드하지 않고 이 기기에서 처리해요.")).toBeVisible();
-
-  await page.locator("input[type=file]").setInputFiles({
-    name: "mobile-scan.pdf",
-    mimeType: "application/pdf",
-    buffer: await createMobileScannedPdf(page),
-  });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.").first()).toBeVisible({
-    timeout: 60_000,
-  });
-
-  const settings = page.getByRole("region", { name: "PDF 압축 설정" });
-  await expect(settings).toBeVisible();
-  await expect(settings.getByText(PDF_COMPRESSION_WARNING, { exact: true })).toBeVisible();
-  const balanced = settings.getByRole("radio", { name: /균형 150DPI/ });
-  const minimum = settings.getByRole("radio", { name: /최소 용량 96DPI/ });
-  await expect(balanced).toBeChecked();
-  await expect(minimum).not.toBeChecked();
-  for (const preset of [balanced, minimum]) {
-    const box = await preset.locator("..").boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-  await expectFunctionalTextFloor([
-    {
-      label: "PDF compression heading",
-      locator: settings.getByRole("heading", { name: "압축 수준 선택" }),
-    },
-    { label: "PDF compression file name", locator: settings.getByText("mobile-scan.pdf") },
-    {
-      label: "PDF compression control help",
-      locator: settings.getByText("글자 가독성과 용량의 균형을 맞춰요.", { exact: true }),
-    },
-    {
-      label: "PDF compression action status",
-      locator: settings.getByRole("status").getByText("1페이지 PDF를 불러왔어요."),
-    },
-  ]);
-
-  const run = page.getByRole("button", { name: "1페이지 용량 줄이기" });
-  const runBox = await run.boundingBox();
-  expect(runBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(runBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await page.evaluate(() => {
-    (document.activeElement as HTMLElement | null)?.blur();
-  });
-  let reachedBalanced = false;
-  for (let index = 0; index < 30 && !reachedBalanced; index += 1) {
-    await page.keyboard.press("Tab");
-    reachedBalanced = await balanced.evaluate((element) => document.activeElement === element);
-  }
-  expect(reachedBalanced).toBe(true);
-  await page.keyboard.press("ArrowDown");
-  await expect(minimum).toBeChecked();
-
-  let reachedRun = false;
-  for (let index = 0; index < 12 && !reachedRun; index += 1) {
-    await page.keyboard.press("Tab");
-    reachedRun = await run.evaluate((element) => document.activeElement === element);
-  }
-  expect(reachedRun).toBe(true);
-
-  await page.evaluate(() => {
-    const originalAnimationFrame = window.requestAnimationFrame.bind(window);
-    const pendingFrames: FrameRequestCallback[] = [];
-    const controlledWindow = window as Window & { __hereisitReleaseFrames?: () => void };
-    window.requestAnimationFrame = (callback) => {
-      pendingFrames.push(callback);
-      return pendingFrames.length;
-    };
-    controlledWindow.__hereisitReleaseFrames = () => {
-      window.requestAnimationFrame = originalAnimationFrame;
-      for (const callback of pendingFrames) originalAnimationFrame(callback);
-      pendingFrames.length = 0;
-    };
-  });
-  await page.keyboard.press("Enter");
-  const cancel = page.getByRole("button", { name: "중단", exact: true });
-  await expect(cancel).toBeVisible();
-  const cancelBox = await cancel.boundingBox();
-  expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(cancelBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await cancel.click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitReleaseFrames?: () => void }).__hereisitReleaseFrames?.();
-  });
-  await expect(page.getByText("PDF 압축을 중단했어요.").first()).toBeVisible();
-
-  await page.getByRole("button", { name: "1페이지 용량 줄이기" }).click();
-  await expect(page.getByRole("heading", { name: "용량 줄이기 완료" })).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(page.getByRole("button", { name: "처리 서버에서 더 압축" })).toHaveCount(0);
-  await expect(
-    page.getByText("PDF를 HereIsIt 처리 서버로 보내며, 처리가 끝나면 자동으로 삭제해요."),
-  ).toHaveCount(0);
-  await expect(page.getByText("스캔 페이지를 가볍게 다시 만들었어요.")).toBeVisible();
-  const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
-  const saveBox = await save.boundingBox();
-  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-  expect(downloads).toBe(0);
-  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
-  expect(downloads).toBe(0);
-});
-
-test("keeps PDF image conversion staged, touch-safe, responsive, and cancellable", async ({
-  page,
-}) => {
-  test.setTimeout(90_000);
-  const document = await PDFDocument.create();
-  document.addPage([300, 400]);
-  const pdf = Buffer.from(await document.save());
-
-  await page.goto("/pdf/to-image");
-  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
-  await page.locator("input[type=file]").setInputFiles({
-    name: "mobile-layout.pdf",
-    mimeType: "application/pdf",
-    buffer: pdf,
-  });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
-
-  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "변환 완료" })).toHaveCount(0);
-
-  const settings = page.locator("details").filter({ hasText: "페이지·화질 설정" });
-  await settings.locator("summary").click();
-  await settings.getByRole("radio", { name: /지정 페이지/ }).check();
-  const pageRange = page.getByLabel("페이지 범위");
-  await pageRange.fill("1");
-  expect(
-    await pageRange.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
-  ).toBeGreaterThanOrEqual(16);
-
-  const quality = page.getByRole("slider", { name: "JPG 품질 85" });
-  const run = page.getByRole("button", { name: "1페이지 이미지로 변환" });
-  const controls = [
-    settings.locator("summary"),
-    settings.getByRole("group", { name: "변환할 페이지" }),
-    page.getByRole("group", { name: "출력 형식" }),
-    settings.getByRole("group", { name: "해상도" }),
-    settings.getByRole("group", { name: "JPG 품질 85" }),
-    quality,
-    pageRange,
-    run,
-  ];
-  for (const control of controls) {
-    const box = await control.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-
-  await run.scrollIntoViewIfNeeded();
-  await expect(run).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-    page.viewportSize()?.width ?? 390,
-  );
-
-  await page.evaluate(() => {
-    const originalAnimationFrame = window.requestAnimationFrame.bind(window);
-    const pendingFrames: FrameRequestCallback[] = [];
-    const controlledWindow = window as Window & { __hereisitReleaseFrames?: () => void };
-    window.requestAnimationFrame = (callback) => {
-      pendingFrames.push(callback);
-      return pendingFrames.length;
-    };
-    controlledWindow.__hereisitReleaseFrames = () => {
-      window.requestAnimationFrame = originalAnimationFrame;
-      for (const callback of pendingFrames) originalAnimationFrame(callback);
-      pendingFrames.length = 0;
-    };
-  });
-  await run.click();
-  const cancel = page.getByRole("button", { name: "작업 중단" });
-  await expect(cancel).toBeVisible();
-  const cancelBox = await cancel.boundingBox();
-  expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(cancelBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await cancel.click();
-  await page.evaluate(() => {
-    (window as Window & { __hereisitReleaseFrames?: () => void }).__hereisitReleaseFrames?.();
-  });
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  );
-  await expect(page.getByText("이미지 변환을 중단했어요.").first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "변환 설정" })).toBeVisible();
-
-  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
-  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible({ timeout: 60_000 });
-  const save = page.getByRole("button", { name: "JPG 다운로드 ↓" });
-  const saveBox = await save.boundingBox();
-  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-});
-
-test("keeps PDF image results readable, responsive, and private", async ({ browserName, page }) => {
-  test.setTimeout(90_000);
-  const document = await PDFDocument.create();
-  document.addPage([300, 400]);
-  const pdf = Buffer.from(await document.save());
-  const sentinelFilename = "PRIVATE_MOBILE_PDF_SENTINEL.pdf";
-  const privacy = await installPrivacyObserver(page, {
-    sentinels: [sentinelFilename, "PRIVATE_MOBILE_PDF_BYTES"],
-  });
-
-  await page.goto("/pdf/to-image");
-  await expect(page.getByRole("button", { name: "PDF 선택" })).toBeEnabled({ timeout: 60_000 });
-  await privacy.clear();
-  await page.locator("input[type=file]").setInputFiles({
-    name: sentinelFilename,
-    mimeType: "application/pdf",
-    buffer: Buffer.concat([pdf, Buffer.from("\n% PRIVATE_MOBILE_PDF_BYTES")]),
-  });
-  await expect(page.getByText("1페이지 PDF를 불러왔어요.")).toBeVisible({ timeout: 20_000 });
-
-  const settings = page.locator("details").filter({ hasText: "페이지·화질 설정" });
-  await settings.locator("summary").click();
-  await settings.getByRole("radio", { name: /지정 페이지/ }).check();
-  await page.getByLabel("페이지 범위").fill("1");
-
-  const selectedPages = settings.getByRole("radio", { name: /지정 페이지/ }).locator("..");
-  await expectFunctionalTextFloor([
-    { label: "PDF to-image settings summary", locator: settings.locator("summary") },
-    {
-      label: "PDF to-image option legend",
-      locator: settings.getByText("변환할 페이지", { exact: true }),
-    },
-    { label: "PDF to-image option label", locator: selectedPages },
-    {
-      label: "PDF to-image range label",
-      locator: settings.getByText("페이지 범위", { exact: true }),
-    },
-    {
-      label: "PDF to-image range status",
-      locator: settings.getByText("1페이지를 선택했어요.", { exact: true }),
-    },
-    {
-      label: "PDF to-image format legend",
-      locator: page.getByText("출력 형식", { exact: true }),
-    },
-    {
-      label: "PDF to-image format control",
-      locator: page.getByRole("radio", { name: "JPG", exact: true }).locator(".."),
-    },
-  ]);
-
-  await page.getByRole("button", { name: "1페이지 이미지로 변환" }).click();
-  await expect(page.getByText("PDF 1페이지 → 1개 JPG")).toBeVisible({ timeout: 60_000 });
-  await expectFunctionalTextFloor([
-    {
-      label: "PDF to-image result limitation",
-      locator: page.getByText("이미지로 변환하면 텍스트를 검색하거나 선택할 수 없어요.", {
-        exact: true,
-      }),
-    },
-    {
-      label: "PDF to-image action status",
-      locator: page.getByRole("status").getByText("이미지 한 장을 준비했어요."),
-    },
-  ]);
-  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "JPG 다운로드 ↓" })]);
-  const observation = await privacy.read();
-  expect(observation.externalRequests).toEqual([]);
-  expect(observation.writeRequests).toEqual([]);
-  expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
-    [],
-  );
-  await privacy.assertClean(0, browserName !== "firefox");
-});
-
-test("keeps representative image and PDF error feedback reachable", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 568 });
-
-  await page.goto("/image/compress");
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
-  await page.locator("input[type=file]").setInputFiles({
-    name: "not-an-image.txt",
-    mimeType: "text/plain",
-    buffer: Buffer.from("not an image"),
-  });
-  await expect(page.getByRole("status")).toContainText("JPG, PNG, WebP 정지 이미지");
-  const imageStatus = page.getByTestId("image-workbench-status").filter({ hasText: "파일당 30MB" });
-  await imageStatus.scrollIntoViewIfNeeded();
-  await expect(imageStatus).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
-
-  await page.goto("/pdf/organize");
-  await page.locator("input[type=file]").setInputFiles({
-    name: "broken.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("not a pdf"),
-  });
-  const pdfStatus = page.getByRole("status").filter({ hasText: /확인할 수 없|다시 시도/ });
-  await pdfStatus.scrollIntoViewIfNeeded();
-  await expect(pdfStatus).toBeInViewport();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
-});
-
-test("keeps the staged PDF split flow touch-safe", async ({ page }) => {
-  const document = await PDFDocument.create();
-  document.addPage([200, 300]);
-  document.addPage([300, 200]);
-  const pdf = Buffer.from(await document.save());
-
-  await holdTerminalWorkerEvents(page);
-  await page.goto("/pdf/split");
-  await page.locator("input[type=file]").setInputFiles({
-    name: "sample.pdf",
-    mimeType: "application/pdf",
-    buffer: pdf,
-  });
-
-  const setup = page.getByRole("region", { name: "PDF 나누기 설정" });
-  await expect(setup.getByText("sample.pdf", { exact: true })).toBeVisible();
-  await expect(setup.getByText("2페이지", { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(setup.getByRole("heading", { name: "나눌 방식" })).toBeFocused();
-  await setup.getByRole("radio", { name: /페이지 추출/ }).check();
-
-  const range = setup.getByLabel("페이지 범위");
-  await range.fill("1");
-  expect(
-    await range.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
-  ).toBeGreaterThanOrEqual(16);
-
-  const replace = page.getByRole("button", { name: "PDF 교체" });
-  const run = page.getByRole("button", { name: "선택 페이지 추출하기" });
-  for (const control of [replace, run]) {
-    const box = await control.boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-
-  await expectFunctionalTextFloor([
-    { label: "PDF option legend", locator: setup.getByText("나눌 방식", { exact: true }).first() },
-    { label: "PDF option label", locator: setup.getByText("페이지 추출", { exact: true }) },
-    { label: "PDF range control label", locator: setup.getByText("페이지 범위", { exact: true }) },
-    { label: "PDF range control help", locator: range.locator("..").locator("small") },
-  ]);
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-
-  await run.click();
-  const processingHeading = page.getByRole("heading", { name: "페이지 추출 중" });
-  await expect(processingHeading).toBeFocused();
-  const cancel = page.getByRole("button", { name: "중단" });
-  const cancelBox = await cancel.boundingBox();
-  expect(cancelBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(cancelBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await cancel.click();
-  await expect(setup).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("PDF 작업을 중단했어요.");
-});
-
-test("keeps PDF organizer controls touch-safe without horizontal overflow", async ({ page }) => {
-  let downloads = 0;
-  page.on("download", () => {
-    downloads += 1;
-  });
-  const document = await PDFDocument.create();
-  document.addPage([100, 200]);
-  document.addPage([200, 100]);
-  document.addPage([300, 100]);
-
-  await page.setViewportSize({ width: 320, height: 844 });
-  await page.goto("/pdf/organize");
-  const organizeInput = page.locator("input[type=file]");
-  await expect(organizeInput).toBeEnabled({ timeout: 60_000 });
-  await organizeInput.setInputFiles({
-    name: "organize.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from(await document.save()),
-  });
-  await expect(page.getByRole("heading", { name: "페이지 순서 정리" })).toBeFocused({
-    timeout: 20_000,
-  });
-  const grid = page.getByRole("list", { name: "PDF 페이지 순서" });
-  await expect(grid.locator("img")).toHaveCount(3, { timeout: 20_000 });
-  expect(
-    await grid.evaluate(
-      (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
-    ),
-  ).toBe(2);
-
-  const controls = [
-    page.getByRole("button", { name: "원본 2페이지 위로 이동" }),
-    page.getByRole("button", { name: "원본 2페이지 아래로 이동" }),
-    page.getByRole("button", { name: "원본 2페이지 시계 방향으로 회전" }),
-    page.getByRole("button", { name: "원본 2페이지 삭제" }),
-    page.getByRole("button", { name: "초기화" }),
-    page.getByRole("button", { name: "3페이지로 PDF 만들기" }),
-  ];
-  for (const control of controls) {
-    const box = await control.boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-
-  await page.getByRole("button", { name: "원본 2페이지 시계 방향으로 회전" }).click();
-  await page.getByRole("button", { name: "원본 2페이지 삭제" }).click();
-  await page.getByRole("button", { name: "초기화" }).click();
-  await page.getByRole("button", { name: "3페이지로 PDF 만들기" }).click();
-  await expect(page.getByRole("heading", { name: "페이지 정리 완료" })).toBeVisible({
-    timeout: 20_000,
-  });
-
-  const save = page.getByRole("button", { name: "PDF 다운로드 ↓" });
-  await expect(save).toBeVisible();
-  const saveBox = await save.boundingBox();
-  expect(saveBox?.width ?? 0).toBeGreaterThanOrEqual(44);
-  expect(saveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
-  expect(
-    await save.locator("..").evaluate((element) => getComputedStyle(element).position),
-  ).not.toBe("sticky");
-
-  await expectFunctionalTextFloor([
-    {
-      label: "PDF organizer reset action",
-      locator: page.getByRole("button", { name: "다른 PDF 정리" }),
-    },
-  ]);
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-  expect(downloads).toBe(0);
-  await expectResponsiveResultActions(page, [page.getByRole("button", { name: "PDF 다운로드 ↓" })]);
-  expect(downloads).toBe(0);
-});
-
-test("runs the watermark Worker with touch-safe controls on an iPhone", async ({ page }) => {
-  const document = await PDFDocument.create();
-  document.addPage([300, 400]);
-
-  await page.goto("/pdf/watermark");
-  const watermarkInput = page.locator("input[type=file]");
-  await expect(watermarkInput).toBeEnabled({ timeout: 60_000 });
-  await watermarkInput.setInputFiles({
-    name: "mobile.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from(await document.save()),
-  });
-  const text = page.getByLabel("워터마크 텍스트");
-  await text.fill("대외비");
-  const placement = page.getByRole("group", { name: "배치" }).getByLabel("반복");
-  await placement.check();
-  await page.getByText("글자 모양 설정", { exact: true }).click();
-  const opacity = page.getByLabel(/불투명도/);
-  const scope = page
-    .getByRole("group", { name: "적용 페이지" })
-    .getByRole("radio", { name: /지정 페이지/ });
-  await scope.check();
-  const range = page.getByLabel("페이지 범위", { exact: true });
-  await range.fill("1");
-  const rangeFontSize = await range.evaluate((element) => getComputedStyle(element).fontSize);
-  expect(rangeFontSize).toBe("16px");
-  const run = page.getByRole("button", { name: "워터마크 넣기", exact: true });
-
-  for (const control of [text, placement.locator(".."), opacity, scope.locator(".."), range, run]) {
-    const box = await control.boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-
-  await run.click();
-  await expect(page.getByRole("heading", { name: "워터마크 완료" })).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(page.getByText("선택 1페이지에 적용")).toBeVisible();
-  const resultActions = [
-    page.getByRole("button", { name: "PDF 다운로드 ↓" }),
-    page.getByRole("button", { name: "다른 PDF에 넣기" }),
-  ];
-  for (const control of resultActions) {
-    const box = await control.boundingBox();
-    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
-});
-
 test("puts settings before the preview with touch-safe controls", async ({ page }) => {
   await page.goto("/image/resize");
   const resizeInput = page.locator("input[type=file]");
@@ -917,6 +355,22 @@ test("puts settings before the preview with touch-safe controls", async ({ page 
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+});
+
+test("keeps representative image error feedback reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/image/compress");
+  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await page.locator("input[type=file]").setInputFiles({
+    name: "not-an-image.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+  await expect(page.getByRole("status")).toContainText("JPG, PNG, WebP 정지 이미지");
+  const imageStatus = page.getByTestId("image-workbench-status").filter({ hasText: "파일당 30MB" });
+  await imageStatus.scrollIntoViewIfNeeded();
+  await expect(imageStatus).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
 
 test("keeps image watermark controls ordered, reachable, and inside an iPhone viewport", async ({
@@ -1057,39 +511,5 @@ test("keeps image watermark controls ordered, reachable, and inside an iPhone vi
   expect(observation.consoleMessages.filter((type) => ["error", "assert"].includes(type))).toEqual(
     [],
   );
-  await privacy.assertClean(0, false);
-});
-
-test("keeps PDF merge controls usable in a narrow viewport", async ({ page }) => {
-  const first = await PDFDocument.create();
-  first.addPage([200, 300]);
-  const second = await PDFDocument.create();
-  second.addPage([200, 300]);
-  second.addPage([200, 300]);
-
-  await page.goto("/pdf/merge");
-  const input = page.locator("input[type=file]");
-  await expect(input).toBeEnabled({ timeout: 60_000 });
-  await input.setInputFiles([
-    { name: "first.pdf", mimeType: "application/pdf", buffer: Buffer.from(await first.save()) },
-    { name: "second.pdf", mimeType: "application/pdf", buffer: Buffer.from(await second.save()) },
-  ]);
-  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeEnabled({
-    timeout: 20_000,
-  });
-
-  for (const name of [
-    "second.pdf 위로 이동",
-    "second.pdf 아래로 이동",
-    "second.pdf 제거",
-    "PDF 합치기",
-  ]) {
-    const box = await page.getByRole("button", { name, exact: true }).boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
-  }
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  await privacy.assertClean(0);
 });

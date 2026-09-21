@@ -11,7 +11,6 @@ const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
 const maximumSecurityGateBytes = 1024 * 1024;
 const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
-
 async function pathExists(path) {
   try {
     await lstat(path);
@@ -21,7 +20,6 @@ async function pathExists(path) {
     throw error;
   }
 }
-
 async function readBuiltCandidate(root) {
   const manifestPath = join(root, "processing-candidate.json");
   let handle;
@@ -53,7 +51,6 @@ async function readBuiltCandidate(root) {
     await handle.close();
   }
 }
-
 async function copyAndHash(source, destination, destinationName, maximumBytes = maximumAssetBytes) {
   let sourceHandle;
   let destinationHandle;
@@ -106,7 +103,6 @@ async function copyAndHash(source, destination, destinationName, maximumBytes = 
     await sourceHandle.close();
   }
 }
-
 function assertCopiedIdentity(copied, expected, label, hashField = "sha256") {
   if (
     copied.path !== expected.path ||
@@ -116,7 +112,6 @@ function assertCopiedIdentity(copied, expected, label, hashField = "sha256") {
     throw new TypeError(`${label} changed while finalizing`);
   }
 }
-
 export async function finalizeProcessingCandidate({
   builtRoot,
   outputRoot,
@@ -138,7 +133,6 @@ export async function finalizeProcessingCandidate({
     requiredState: "built",
     expectedGitSha: built.gitSha,
   });
-
   const outputParent = await realpath(dirname(resolve(outputRoot)));
   const finalOutputRoot = join(outputParent, basename(resolve(outputRoot)));
   const outputRelative = relative(canonicalBuiltRoot, finalOutputRoot);
@@ -172,20 +166,6 @@ export async function finalizeProcessingCandidate({
     };
     const copiedOci = await copyBuilt(built.releaseAssets.engine.oci, "OCI asset");
     const copiedDocker = await copyBuilt(built.releaseAssets.engine.docker, "Docker asset");
-    const copiedPdfOci = await copyBuilt(built.releaseAssets.pdfEngine.oci, "PDF OCI asset");
-    const copiedPdfDocker = await copyBuilt(
-      built.releaseAssets.pdfEngine.docker,
-      "PDF Docker asset",
-    );
-    const copiedPdfQuality = {};
-    for (const [name, asset] of Object.entries(built.releaseAssets.pdfQuality)) {
-      copiedPdfQuality[name] = await copyBuilt(
-        asset,
-        `${name} PDF quality asset`,
-        "sha256",
-        maximumSecurityEvidenceBytes,
-      );
-    }
     const copiedWorker = await copyBuilt(built.releaseAssets.worker, "Worker asset");
     const copiedReleaseInputs = await copyBuilt(
       built.releaseAssets.releaseInputs,
@@ -204,7 +184,6 @@ export async function finalizeProcessingCandidate({
         );
       }
     }
-
     const report = await copyAndHash(
       resolve(reportPath),
       join(temporaryRoot, "processing-release-report.json"),
@@ -222,7 +201,6 @@ export async function finalizeProcessingCandidate({
       join(temporaryRoot, signatureName),
       signatureName,
     );
-
     const { verificationSha256: _verificationSha256, ...builtPayload } = built;
     const payload = {
       ...builtPayload,
@@ -230,8 +208,6 @@ export async function finalizeProcessingCandidate({
       releaseAssets: {
         report,
         engine: { oci: copiedOci, docker: copiedDocker },
-        pdfEngine: { oci: copiedPdfOci, docker: copiedPdfDocker },
-        pdfQuality: copiedPdfQuality,
         worker: copiedWorker,
         releaseInputs: copiedReleaseInputs,
         costModel: copiedCostModel,
@@ -262,7 +238,6 @@ export async function finalizeProcessingCandidate({
     if (!published) await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
-
 export async function runProcessingCandidateFinalizer(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   const keys = ["built-root", "output-root", "report", "evidence-bundle", "evidence-signature"];
@@ -289,7 +264,6 @@ export async function runProcessingCandidateFinalizer(argv, stdout = process.std
     }),
   );
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

@@ -18,15 +18,8 @@ export function durationBucket(milliseconds: number): ProductUsageDuration {
   return "gte-30s";
 }
 
-const invalidInputCodes = new Set([
-  "CORRUPT_INPUT",
-  "CORRUPT_PDF",
-  "INVALID_REQUEST",
-  "INVALID_SPEC",
-  "PAGE_RANGE_INVALID",
-]);
+const invalidInputCodes = new Set(["CORRUPT_INPUT", "INVALID_REQUEST", "INVALID_SPEC"]);
 const unsupportedCodes = new Set([
-  "PASSWORD_PROTECTED",
   "PRIVATE",
   "UNSUPPORTED_BROWSER",
   "UNSUPPORTED_FEATURE",
@@ -35,7 +28,6 @@ const unsupportedCodes = new Set([
 const resourceLimitCodes = new Set([
   "INPUT_LIMIT_EXCEEDED",
   "MEMORY_LIMIT",
-  "PAGE_LIMIT",
   "PIXEL_LIMIT_EXCEEDED",
   "QUOTA_EXCEEDED",
 ]);

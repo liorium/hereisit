@@ -14,7 +14,6 @@ import {
   sha256Bytes,
 } from "./image-lab-common.mjs";
 import { verifyCanonicalProcessingEvidenceSignature } from "./processing-evidence-signature.mjs";
-
 export async function verifyProcessingDeploymentReport({
   report,
   signature,
@@ -51,7 +50,6 @@ export async function verifyProcessingDeploymentReport({
     publicAdmissionReady: value.publicAdmissionReady,
   };
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url
@@ -63,14 +61,8 @@ if (
     "candidate",
     "resources",
     "image-digest",
-    "pdf-digest",
     "pages-deployment-id",
     "image-canary",
-    "pdf-canary",
-    "deletion-receipt",
-    "cost-receipt",
-    "rollback-receipt",
-    "admission",
     "gate",
     "policy",
   ];

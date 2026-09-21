@@ -45,9 +45,6 @@ export function generateHeaders({ processingApiOrigin, allowLocalProcessingOrigi
 
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable
-
-/pdfjs/6.2.108/*
-  Cache-Control: public, max-age=31536000, immutable
 `;
 }
 

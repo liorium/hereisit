@@ -1,22 +1,18 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments, sha256Canonical } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
-import { validatePdfBenchmarkEvidence } from "./validate-pdf-benchmark-evidence.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
 import {
   inspectDockerImageArchive,
   inspectOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
 import { verifyProcessingCandidate } from "./verify-processing-candidate.mjs";
-import {
-  assertReviewedPdfCostBinding,
-  verifyProcessingReleaseInputBindings,
-} from "./verify-processing-release-input-bindings.mjs";
+import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
 
 const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
@@ -28,55 +24,42 @@ const maximumSecurityEvidenceBytes = 8 * 1024 * 1024;
 const sourceNames = Object.freeze({
   oci: "image-engine-linux-amd64.oci.tar",
   docker: "image-engine-linux-amd64.docker.tar",
-  pdfOci: "pdf-engine-linux-amd64.oci.tar",
-  pdfDocker: "pdf-engine-linux-amd64.docker.tar",
   worker: "api-worker.mjs",
   stagingWeb: "web-staging.tar",
   productionWeb: "web-production.tar",
   releaseInputs: "processing-release-inputs.json",
   costModel: "live-cost-model.json",
   imageEngineGate: "security-image-engine-license-gate.json",
-  pdfEngineGate: "security-pdf-engine-license-gate.json",
   applicationSupplyChainGate: "security-application-supply-chain-gate.json",
   vulnerabilityGate: "security-vulnerability-gate.json",
   sbomEngine: "security-sbom-engine.cdx.json",
-  sbomPdfEngine: "security-sbom-pdf-engine.cdx.json",
   sbomWebStaging: "security-sbom-web-staging.cdx.json",
   sbomWebProduction: "security-sbom-web-production.cdx.json",
   sbomWorker: "security-sbom-worker.cdx.json",
   sbomLockfile: "security-sbom-lockfile.cdx.json",
   trivyEngine: "security-trivy-engine.json",
-  trivyPdfEngine: "security-trivy-pdf-engine.json",
   trivyWebStaging: "security-trivy-web-staging.json",
   trivyWebProduction: "security-trivy-web-production.json",
   trivyWorker: "security-trivy-worker.json",
   trivyLockfile: "security-trivy-lockfile.json",
-  pdfBenchmark: "pdf-engine-benchmark.json",
-  pdfBenchmarkSchema: "pdf-engine-benchmark.schema.json",
-  pdfReleaseGate: "pdf-engine-release-gate.json",
-  pdfReleaseGateSchema: "pdf-engine-release-gate.schema.json",
 });
 const securityGateKeys = new Set([
   "imageEngineGate",
-  "pdfEngineGate",
   "applicationSupplyChainGate",
   "vulnerabilityGate",
 ]);
 const securityEvidenceKeys = new Set([
   "sbomEngine",
-  "sbomPdfEngine",
   "sbomWebStaging",
   "sbomWebProduction",
   "sbomWorker",
   "sbomLockfile",
   "trivyEngine",
-  "trivyPdfEngine",
   "trivyWebStaging",
   "trivyWebProduction",
   "trivyWorker",
   "trivyLockfile",
 ]);
-
 async function pathExists(path) {
   try {
     await lstat(path);
@@ -86,7 +69,6 @@ async function pathExists(path) {
     throw error;
   }
 }
-
 async function copyAndHashRegularFile(
   source,
   destination,
@@ -145,7 +127,6 @@ async function copyAndHashRegularFile(
     await sourceHandle.close();
   }
 }
-
 async function hashBoundedRegularFile(path, maximumBytes, label) {
   let handle;
   try {
@@ -172,7 +153,6 @@ async function hashBoundedRegularFile(path, maximumBytes, label) {
     await handle.close();
   }
 }
-
 async function verifyWebIdentity(archivePath, asset, treeSha256, environment) {
   const extractionRoot = await mkdtemp(join(tmpdir(), "hereisit-built-web-verification-"));
   try {
@@ -191,12 +171,10 @@ async function verifyWebIdentity(archivePath, asset, treeSha256, environment) {
     await rm(extractionRoot, { recursive: true, force: true });
   }
 }
-
 function assertInput(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) throw new TypeError(`${label} is invalid`);
   return value;
 }
-
 export async function createBuiltProcessingCandidate({
   sourceRoot,
   outputRoot,
@@ -214,7 +192,6 @@ export async function createBuiltProcessingCandidate({
   assertInput(stagingWebTreeSha256, /^[a-f0-9]{64}$/, "staging web tree hash");
   assertInput(productionWebTreeSha256, /^[a-f0-9]{64}$/, "production web tree hash");
   assertInput(trivyDbDigest, digestPattern, "Trivy DB digest");
-
   const requestedSourceRoot = resolve(sourceRoot);
   const canonicalSourceRoot = await realpath(requestedSourceRoot);
   if (canonicalSourceRoot !== requestedSourceRoot) {
@@ -223,7 +200,6 @@ export async function createBuiltProcessingCandidate({
   const sourceMetadata = await lstat(canonicalSourceRoot);
   if (!sourceMetadata.isDirectory())
     throw new TypeError("candidate source root must be a directory");
-
   const outputParent = await realpath(dirname(resolve(outputRoot)));
   const finalOutputRoot = join(outputParent, basename(resolve(outputRoot)));
   const outputRelative = relative(canonicalSourceRoot, finalOutputRoot);
@@ -247,9 +223,7 @@ export async function createBuiltProcessingCandidate({
           ? maximumSecurityEvidenceBytes
           : key === "releaseInputs" || key === "costModel"
             ? maximumProviderSchemaBytes
-            : key.startsWith("pdf") && !key.endsWith("Oci") && !key.endsWith("Docker")
-              ? maximumSecurityEvidenceBytes
-              : maximumAssetBytes;
+            : maximumAssetBytes;
       copied[key] = await copyAndHashRegularFile(
         join(canonicalSourceRoot, name),
         join(temporaryRoot, name),
@@ -257,7 +231,6 @@ export async function createBuiltProcessingCandidate({
         maximumBytes,
       );
     }
-
     const loadedImage = `hereisit-image-engine:${gitSha}`;
     const oci = await inspectOciImageArchive({
       archivePath: join(temporaryRoot, sourceNames.oci),
@@ -275,39 +248,6 @@ export async function createBuiltProcessingCandidate({
     ) {
       throw new TypeError("OCI and Docker source archive identities do not match");
     }
-    const pdfLoadedImage = `hereisit-pdf-engine:${gitSha}`;
-    const pdfOci = await inspectOciImageArchive({
-      archivePath: join(temporaryRoot, sourceNames.pdfOci),
-      asset: copied.pdfOci,
-    });
-    const pdfDocker = await inspectDockerImageArchive({
-      archivePath: join(temporaryRoot, sourceNames.pdfDocker),
-      asset: copied.pdfDocker,
-      expectedRepoTag: pdfLoadedImage,
-    });
-    if (
-      pdfOci.configDigest !== pdfDocker.configDigest ||
-      pdfOci.diffIds.length !== pdfDocker.diffIds.length ||
-      pdfOci.diffIds.some((digest, index) => digest !== pdfDocker.diffIds[index])
-    ) {
-      throw new TypeError("PDF OCI and Docker source archive identities do not match");
-    }
-
-    const pdfBenchmark = JSON.parse(
-      await readFile(join(temporaryRoot, sourceNames.pdfBenchmark), "utf8"),
-    );
-    const pdfQuality = await validatePdfBenchmarkEvidence({
-      report: pdfBenchmark,
-      gate: JSON.parse(await readFile(join(temporaryRoot, sourceNames.pdfReleaseGate), "utf8")),
-      benchmarkSchema: JSON.parse(
-        await readFile(join(temporaryRoot, sourceNames.pdfBenchmarkSchema), "utf8"),
-      ),
-      gateSchema: JSON.parse(
-        await readFile(join(temporaryRoot, sourceNames.pdfReleaseGateSchema), "utf8"),
-      ),
-      expectedEngineImageDigest: pdfDocker.configDigest,
-    });
-
     const stagingWeb = await verifyWebIdentity(
       join(temporaryRoot, sourceNames.stagingWeb),
       copied.stagingWeb,
@@ -330,17 +270,10 @@ export async function createBuiltProcessingCandidate({
       liveCostModelPath: join(temporaryRoot, sourceNames.costModel),
       expectedReleaseId: releaseId,
     });
-    assertReviewedPdfCostBinding(
-      verifiedFinancialInputs.reviewedPdfBenchmark,
-      pdfBenchmark,
-      pdfQuality.benchmarkSha256,
-      pdfDocker.configDigest,
-    );
     const financialInputs = {
       releaseInputs: verifiedFinancialInputs.releaseInputs,
       costModel: verifiedFinancialInputs.costModel,
     };
-
     const webReleaseAsset = (asset, identity) => ({
       path: asset.path,
       sizeBytes: asset.sizeBytes,
@@ -349,27 +282,18 @@ export async function createBuiltProcessingCandidate({
       processingApiOrigin: identity.processingApiOrigin,
     });
     const payload = {
-      schema: "hereisit-processing-candidate@2",
-      version: 2,
+      schema: "hereisit-processing-candidate@3",
+      version: 3,
       state: "built",
       releaseId,
       gitSha,
       engine: { loadedImage, oci, docker },
-      pdfEngine: { loadedImage: pdfLoadedImage, oci: pdfOci, docker: pdfDocker },
-      pdfQuality,
       web: { staging: stagingWeb, production: productionWeb },
       security: { trivyDbDigest },
       providerUsage: { schemaSha256: providerUsageSchemaSha256 },
       ...financialInputs,
       releaseAssets: {
         engine: { oci: copied.oci, docker: copied.docker },
-        pdfEngine: { oci: copied.pdfOci, docker: copied.pdfDocker },
-        pdfQuality: {
-          benchmark: copied.pdfBenchmark,
-          benchmarkSchema: copied.pdfBenchmarkSchema,
-          releaseGate: copied.pdfReleaseGate,
-          releaseGateSchema: copied.pdfReleaseGateSchema,
-        },
         worker: copied.worker,
         releaseInputs: copied.releaseInputs,
         costModel: copied.costModel,
@@ -380,13 +304,11 @@ export async function createBuiltProcessingCandidate({
         security: {
           gates: {
             imageEngine: copied.imageEngineGate,
-            pdfEngine: copied.pdfEngineGate,
             applicationSupplyChain: copied.applicationSupplyChainGate,
             vulnerability: copied.vulnerabilityGate,
           },
           sboms: {
             engine: copied.sbomEngine,
-            pdfEngine: copied.sbomPdfEngine,
             webStaging: copied.sbomWebStaging,
             webProduction: copied.sbomWebProduction,
             worker: copied.sbomWorker,
@@ -394,7 +316,6 @@ export async function createBuiltProcessingCandidate({
           },
           vulnerabilityReports: {
             engine: copied.trivyEngine,
-            pdfEngine: copied.trivyPdfEngine,
             webStaging: copied.trivyWebStaging,
             webProduction: copied.trivyWebProduction,
             worker: copied.trivyWorker,
@@ -423,7 +344,6 @@ export async function createBuiltProcessingCandidate({
     if (!published) await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
-
 export async function runProcessingCandidateCreator(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   const keys = [
@@ -466,7 +386,6 @@ export async function runProcessingCandidateCreator(argv, stdout = process.stdou
     }),
   );
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

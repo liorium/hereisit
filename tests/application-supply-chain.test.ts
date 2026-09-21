@@ -9,14 +9,7 @@ import { runApplicationSupplyChain } from "../scripts/application-supply-chain.m
 const execFileAsync = promisify(execFile);
 const temporaryRoots: string[] = [];
 const sha = (character: string) => character.repeat(64);
-const scopes = [
-  "engine",
-  "pdf-engine",
-  "web-staging",
-  "web-production",
-  "worker",
-  "lockfile",
-] as const;
+const scopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
 const syftImage =
   "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d";
 const nativeSource = {
@@ -30,16 +23,7 @@ const nativeSource = {
   buildRole: "runtime-dynamic-library",
   artifactRecord: "/build-metadata/expat.json",
 };
-const pdfSource = {
-  name: "qpdf",
-  version: "12.4.0",
-  license: "Apache-2.0",
-  url: "https://github.com/qpdf/qpdf/releases/download/v12.4.0/qpdf-12.4.0.tar.gz",
-  sha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
-  noticePaths: ["LICENSE.txt", "NOTICE.md"],
-};
 const checkedInMit = `Copyright (c) 2020 Cloudflare, Inc. <wrangler@cloudflare.com>\n\nPermission is hereby granted, free of charge, to any\nperson obtaining a copy of this software and associated\ndocumentation files (the "Software"), to deal in the\nSoftware without restriction, including without\nlimitation the rights to use, copy, modify, merge,\npublish, distribute, sublicense, and/or sell copies of\nthe Software, and to permit persons to whom the Software\nis furnished to do so, subject to the following\nconditions:\n\nThe above copyright notice and this permission notice\nshall be included in all copies or substantial portions\nof the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF\nANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED\nTO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\nPARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT\nSHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY\nCLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION\nOF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR\nIN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER\nDEALINGS IN THE SOFTWARE.\n`;
-
 const policy = {
   allowedLicenseExpressions: [
     "0BSD",
@@ -58,10 +42,6 @@ const policy = {
       sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
     },
     "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
-    "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
-      kind: "package",
-      package: "@napi-rs/canvas@1.0.2",
-    },
     "@next/env@16.3.5": { kind: "package", package: "next@16.3.5" },
     "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "next@16.3.5" },
     "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
@@ -71,9 +51,12 @@ const policy = {
   schemaVersion: 1,
   syft: { image: syftImage, version: "1.44.0" },
 };
-
-type PackageSpec = { name: string; version: string; license: string; text?: string | null };
-
+type PackageSpec = {
+  name: string;
+  version: string;
+  license: string;
+  text?: string | null;
+};
 const packageSpecs: PackageSpec[] = [
   { name: "allow-0bsd", version: "1.0.0", license: "0BSD" },
   { name: "allow-apache", version: "1.0.0", license: "Apache-2.0" },
@@ -83,8 +66,6 @@ const packageSpecs: PackageSpec[] = [
   { name: "allow-mit", version: "1.0.0", license: "MIT" },
   { name: "allow-dual", version: "1.0.0", license: "MIT OR Apache-2.0" },
   { name: "allow-combined", version: "1.0.0", license: "(MIT AND Zlib)" },
-  { name: "@napi-rs/canvas", version: "1.0.2", license: "MIT" },
-  { name: "@napi-rs/canvas-linux-x64-gnu", version: "1.0.2", license: "MIT", text: null },
   { name: "next", version: "16.3.5", license: "MIT" },
   { name: "@next/env", version: "16.3.5", license: "MIT", text: null },
   { name: "@next/swc-linux-x64-gnu", version: "16.3.5", license: "MIT", text: null },
@@ -98,7 +79,6 @@ const packageSpecs: PackageSpec[] = [
     text: "libvips distribution terms\n",
   },
 ];
-
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -109,12 +89,10 @@ function canonical(value: unknown): string {
   }
   return JSON.stringify(value);
 }
-
 async function writeCanonical(path: string, value: unknown): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
   await writeFile(path, `${canonical(value)}\n`);
 }
-
 function pnpmRecord(spec: PackageSpec, path: string) {
   return {
     name: spec.name,
@@ -125,14 +103,13 @@ function pnpmRecord(spec: PackageSpec, path: string) {
     description: "fixture package",
   };
 }
-
 function makeSbom(
   scope: (typeof scopes)[number],
   artifactSha256: string,
   components = packageSpecs,
 ) {
-  const native = scope === "pdf-engine" ? pdfSource : nativeSource;
-  const nativeRevision = scope === "pdf-engine" ? pdfSource.sha256 : nativeSource.revision;
+  const native = nativeSource;
+  const nativeRevision = nativeSource.revision;
   return {
     bomFormat: "CycloneDX",
     specVersion: "1.6",
@@ -158,7 +135,7 @@ function makeSbom(
         licenses: [{ expression: entry.license }],
         properties: [{ name: "syft:package:type", value: "npm" }],
       })),
-      ...(scope === "engine" || scope === "pdf-engine"
+      ...(scope === "engine"
         ? [
             {
               "bom-ref": `pkg:generic/${native.name}@${native.version}?package-id=native%3A${native.name}%40${nativeRevision}`,
@@ -166,13 +143,10 @@ function makeSbom(
               name: native.name,
               version: native.version,
               purl: `pkg:generic/${native.name}@${native.version}`,
-              cpe:
-                scope === "pdf-engine"
-                  ? "cpe:2.3:a:qpdf_project:qpdf:12.4.0:*:*:*:*:*:*:*"
-                  : "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
+              cpe: "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
               licenses: [
                 {
-                  expression: scope === "pdf-engine" ? pdfSource.license : nativeSource.licenses[0],
+                  expression: nativeSource.licenses[0],
                 },
               ],
               properties: [
@@ -185,7 +159,6 @@ function makeSbom(
     ],
   };
 }
-
 async function makeFixture() {
   const root = await mkdtemp(join(tmpdir(), "hereisit-application-supply-chain-"));
   temporaryRoots.push(root);
@@ -202,11 +175,6 @@ async function makeFixture() {
     schemaVersion: 1,
     sources: [nativeSource],
   });
-  await writeCanonical(join(root, "apps/pdf-engine/native/sources.lock.json"), {
-    schemaVersion: 1,
-    sources: [pdfSource],
-  });
-
   const inventory: Record<string, ReturnType<typeof pnpmRecord>[]> = {};
   for (const spec of packageSpecs) {
     const escapedName = spec.name.replaceAll("/", "+").replace(/^@/, "@");
@@ -230,7 +198,6 @@ async function makeFixture() {
     inventory[spec.license] ??= [];
     inventory[spec.license].push(pnpmRecord(spec, packageRoot));
   }
-
   const noticesPath = join(root, "apps/web/public/THIRD_PARTY_NOTICES.txt");
   const gatePath = join(root, "gate.json");
   const sboms = Object.fromEntries(
@@ -255,15 +222,13 @@ async function makeFixture() {
   const adapters = { listProductionLicenses: async () => JSON.stringify(inventory) };
   return { root, inventory, noticesPath, gatePath, sboms, options, adapters };
 }
-
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
-
 describe("application supply-chain gate", () => {
-  for (const scope of ["engine", "pdf-engine"] as const) {
+  for (const scope of ["engine"] as const) {
     it.each([
       "missing",
       "version",
@@ -291,7 +256,6 @@ describe("application supply-chain gate", () => {
       ).rejects.toThrow(/native.*coverage/i);
     });
   }
-
   it("exactly regenerates the committed notices from the current production inventory", async () => {
     const repositoryRoot = process.cwd();
     const result = await runApplicationSupplyChain(
@@ -308,11 +272,10 @@ describe("application supply-chain gate", () => {
       },
     );
     expect(result).toEqual({
-      noticeSha256: "bf56e991e52df407445a633f3eab43817c4e040e8a90fc018e7451e1781b695f",
-      packageCount: 46,
+      noticeSha256: "411212c2e61007df8d253935603b60249e936819a24094a60db9edc05f427e05",
+      packageCount: 30,
     });
   });
-
   it("requires a byte-canonical application license policy", async () => {
     const fixture = await makeFixture();
     await writeFile(fixture.options.policyPath, JSON.stringify(policy, null, 2));
@@ -320,7 +283,6 @@ describe("application supply-chain gate", () => {
       runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
     ).rejects.toThrow(/policy|canonical|reviewed/i);
   });
-
   it("writes deterministic notices and permits exact regeneration", async () => {
     const fixture = await makeFixture();
     const first = await runApplicationSupplyChain(
@@ -332,11 +294,10 @@ describe("application supply-chain gate", () => {
       { mode: "notices", ...fixture.options },
       fixture.adapters,
     );
-
     expect(second).toEqual(first);
     expect(first).toEqual({
       noticeSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
-      packageCount: 17,
+      packageCount: 15,
     });
     expect(bytes).toContain("HereIsIt Third-Party Notices");
     expect(bytes).toContain("@cloudflare/containers\nVersion: 0.3.7");
@@ -349,7 +310,6 @@ describe("application supply-chain gate", () => {
       runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
     ).rejects.toThrow(/overwrite|different/i);
   });
-
   it("verifies five genuine-shaped Syft SBOMs and writes a content-free canonical gate", async () => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
@@ -359,7 +319,6 @@ describe("application supply-chain gate", () => {
     );
     const gateBytes = await readFile(fixture.gatePath, "utf8");
     const gate = JSON.parse(gateBytes);
-
     expect(result).toEqual(gate);
     expect(gate).toMatchObject({
       schema: "hereisit-application-supply-chain-gate@1",
@@ -367,7 +326,7 @@ describe("application supply-chain gate", () => {
       pnpmVersion: "11.11.0",
       syftVersion: "1.44.0",
       syftImage,
-      reviewedPackageCount: 17,
+      reviewedPackageCount: 15,
       scopes: Object.fromEntries(
         scopes.map((scope, index) => [
           scope,
@@ -375,11 +334,7 @@ describe("application supply-chain gate", () => {
             artifactSha256: sha(String(index + 1)),
             sbomSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
             componentCount:
-              scope === "engine" || scope === "pdf-engine"
-                ? 18
-                : scope.startsWith("web-") || scope === "worker"
-                  ? 16
-                  : 17,
+              scope === "engine" ? 16 : scope.startsWith("web-") || scope === "worker" ? 14 : 15,
           },
         ]),
       ),
@@ -387,7 +342,6 @@ describe("application supply-chain gate", () => {
     expect(gateBytes).toBe(`${canonical(gate)}\n`);
     expect(gateBytes).not.toMatch(/allow-mit|LGPL|node_modules|\.cdx\.json|example\.invalid/);
   });
-
   it("accepts versionless Syft file components without weakening package identities", async () => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
@@ -398,7 +352,6 @@ describe("application supply-chain gate", () => {
       name: "/usr/share/example",
     } as never);
     await writeCanonical(fixture.sboms.engine.path, sbom);
-
     await expect(
       runApplicationSupplyChain(
         { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
@@ -408,7 +361,6 @@ describe("application supply-chain gate", () => {
       passed: true,
       scopes: { engine: { componentCount: packageSpecs.length + 2 } },
     });
-
     const versionlessPackage = { ...sbom.components[0] } as Partial<(typeof sbom.components)[0]>;
     delete versionlessPackage.version;
     sbom.components[0] = versionlessPackage as (typeof sbom.components)[0];
@@ -425,14 +377,12 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/version/i);
   });
-
   it("accepts Syft SBOMs that omit an empty components array", async () => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
     const sbom = makeSbom("worker", fixture.sboms.worker.artifactSha256);
     delete (sbom as Partial<typeof sbom>).components;
     await writeCanonical(fixture.sboms.worker.path, sbom);
-
     await expect(
       runApplicationSupplyChain(
         { mode: "verify", ...fixture.options, sboms: fixture.sboms, gatePath: fixture.gatePath },
@@ -443,7 +393,6 @@ describe("application supply-chain gate", () => {
       scopes: { worker: { componentCount: 0 } },
     });
   });
-
   it("uses the exact pnpm command contract and sanitizes adapter failures", async () => {
     const fixture = await makeFixture();
     let request: unknown;
@@ -468,7 +417,6 @@ describe("application supply-chain gate", () => {
         "--filter",
         "@hereisit/api-worker...",
         "--filter",
-        "@hereisit/pdf-engine...",
       ],
       cwd: fixture.root,
       maxBuffer: 2 * 1024 * 1024,
@@ -483,7 +431,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow("production dependency inventory failed");
   });
-
   it("rejects inventory path escapes, symlinks, malformed shapes, and duplicates", async () => {
     const fixture = await makeFixture();
     const firstLicense = Object.keys(fixture.inventory)[0];
@@ -495,7 +442,6 @@ describe("application supply-chain gate", () => {
         { listProductionLicenses: async () => JSON.stringify(base) },
       ),
     ).rejects.toThrow(/node_modules|path/i);
-
     const duplicated = structuredClone(fixture.inventory);
     duplicated[firstLicense].push(structuredClone(duplicated[firstLicense][0]));
     await expect(
@@ -504,7 +450,6 @@ describe("application supply-chain gate", () => {
         { listProductionLicenses: async () => JSON.stringify(duplicated) },
       ),
     ).rejects.toThrow(/duplicate/i);
-
     const unknown = structuredClone(fixture.inventory) as Record<
       string,
       Array<Record<string, unknown>>
@@ -516,7 +461,6 @@ describe("application supply-chain gate", () => {
         { listProductionLicenses: async () => JSON.stringify(unknown) },
       ),
     ).rejects.toThrow(/field/i);
-
     const linkedRoot = join(fixture.root, "node_modules/.pnpm/linked/node_modules/linked");
     await mkdir(join(linkedRoot, ".."), { recursive: true });
     await symlink(join(fixture.root, "outside"), linkedRoot);
@@ -529,7 +473,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/symbolic|path|read/i);
   });
-
   it.each([
     "GPL-3.0-only",
     "AGPL-3.0-only",
@@ -556,7 +499,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/license|inventory/i);
   });
-
   it("rejects unused, wrong, cyclic, and changed fallback definitions", async () => {
     const fixture = await makeFixture();
     const cases = [
@@ -607,7 +549,6 @@ describe("application supply-chain gate", () => {
       ).rejects.toThrow(/fallback|license text|SHA-256|package/i);
     }
   });
-
   it("rejects oversized inventory and package manifests", async () => {
     const oversizedInventory = await makeFixture();
     await expect(
@@ -616,7 +557,6 @@ describe("application supply-chain gate", () => {
         { listProductionLicenses: async () => " ".repeat(2 * 1024 * 1024 + 1) },
       ),
     ).rejects.toThrow(/inventory|oversized/i);
-
     const oversizedManifest = await makeFixture();
     const first = Object.values(oversizedManifest.inventory)[0][0];
     const handle = await open(join(first.paths[0], "package.json"), "w");
@@ -629,7 +569,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/manifest|bounded|package/i);
   });
-
   it("rejects malformed package manifests and SBOMs", async () => {
     const malformedManifest = await makeFixture();
     const first = Object.values(malformedManifest.inventory)[0][0];
@@ -640,7 +579,6 @@ describe("application supply-chain gate", () => {
         malformedManifest.adapters,
       ),
     ).rejects.toThrow(/manifest|JSON|package/i);
-
     const malformedSbom = await makeFixture();
     await runApplicationSupplyChain(
       { mode: "notices", ...malformedSbom.options },
@@ -659,14 +597,13 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/SBOM|JSON/i);
   });
-
   it("rejects an SBOM changed while reading", async () => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
     const descriptor = fixture.sboms.engine;
     const sbom = {
       ...makeSbom("engine", descriptor.artifactSha256),
-      padding: "x".repeat(3_000_000),
+      padding: "x".repeat(3000000),
     };
     await writeCanonical(descriptor.path, sbom);
     const handle = await open(descriptor.path, "r+");
@@ -693,7 +630,6 @@ describe("application supply-chain gate", () => {
       await handle.close();
     }
   });
-
   it("rejects C1 controls in license text", async () => {
     const fixture = await makeFixture();
     const record = fixture.inventory.MIT[0];
@@ -702,7 +638,6 @@ describe("application supply-chain gate", () => {
       runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
     ).rejects.toThrow(/control|license text/i);
   });
-
   it.each([
     "1.3.2",
     "1.3.3",
@@ -727,7 +662,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/must not ship|prohibited/i);
   });
-
   it("rejects must-not-ship policy drift", async () => {
     const fixture = await makeFixture();
     await writeCanonical(fixture.options.policyPath, {
@@ -738,7 +672,6 @@ describe("application supply-chain gate", () => {
       runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters),
     ).rejects.toThrow(/mustNotShip|drift/i);
   });
-
   it("rejects Syft identity drift, source swaps, duplicate components, and oversized SBOMs", async () => {
     for (const mutate of [
       (sbom: ReturnType<typeof makeSbom>) => {
@@ -771,7 +704,6 @@ describe("application supply-chain gate", () => {
         ),
       ).rejects.toThrow(/Syft|source|duplicate|component/i);
     }
-
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
     await writeFile(fixture.sboms.engine.path, Buffer.alloc(4 * 1024 * 1024 + 1, 0x20));
@@ -781,7 +713,6 @@ describe("application supply-chain gate", () => {
         fixture.adapters,
       ),
     ).rejects.toThrow(/bounded|SBOM/i);
-
     const driftedHash = await makeFixture();
     await runApplicationSupplyChain(
       { mode: "notices", ...driftedHash.options },
@@ -800,7 +731,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/source|identity|artifact/i);
   });
-
   it("rejects notices mismatch and refuses gate overwrite", async () => {
     const fixture = await makeFixture();
     await runApplicationSupplyChain({ mode: "notices", ...fixture.options }, fixture.adapters);
@@ -821,7 +751,6 @@ describe("application supply-chain gate", () => {
       ),
     ).rejects.toThrow(/exist|overwrite/i);
   });
-
   it("prints only a path-safe generic direct-execution error", async () => {
     const script = join(process.cwd(), "scripts/application-supply-chain.mjs");
     await expect(

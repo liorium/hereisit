@@ -4,11 +4,6 @@ import {
   type ImageOptimizeCreateResponse,
   imageOptimizeCreateRequestSchema,
 } from "@hereisit/tool-contracts/image-optimize";
-import {
-  type PdfOptimizeCreateRequestV1,
-  type PdfOptimizeCreateResponse,
-  pdfOptimizeCreateRequestSchema,
-} from "@hereisit/tool-contracts/pdf-optimize";
 import type { ToolJobErrorCode } from "@hereisit/tool-contracts/tool-job";
 import {
   hashAnonymousSessionId,
@@ -18,7 +13,6 @@ import {
 } from "../auth";
 import type {
   AnyReserveAndCreateInput,
-  PdfReservationJob,
   ReservationJob,
   ReserveAndCreateResult,
 } from "../d1-job-repository";
@@ -41,16 +35,14 @@ type CreateConfig = Pick<
   | "accountPendingJobLimit"
   | "networkPendingJobLimit"
   | "maximumQueuedAgeSeconds"
-  | "pdfPublicAdmissionEnabled"
 >;
 
 export interface CreateJobLogEvent {
   readonly jobId: string;
-  readonly contractId: "image.optimize@1" | "pdf.optimize@1";
+  readonly contractId: "image.optimize@1";
   readonly byteCount: number;
   readonly pixelCount?: number;
-  readonly pageCount?: number;
-  readonly resourceClass: "image-standard-v1" | "image-large-v1" | "pdf-standard-v1";
+  readonly resourceClass: "image-standard-v1" | "image-large-v1";
   readonly reservedWeightedUnits: number;
 }
 
@@ -139,8 +131,8 @@ function utcDay(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
-type AnyReservationJob = ReservationJob | PdfReservationJob;
-type AnyCreateResponse = ImageOptimizeCreateResponse | PdfOptimizeCreateResponse;
+type AnyReservationJob = ReservationJob;
+type AnyCreateResponse = ImageOptimizeCreateResponse;
 type AnyReserveResult =
   | {
       kind: "created";
@@ -153,7 +145,7 @@ type AnyReserveResult =
       job: AnyReservationJob;
     }
   | Exclude<ReserveAndCreateResult, { kind: "created" | "replayed" }>;
-type AnyCreateRequest = ImageOptimizeCreateRequestV1 | PdfOptimizeCreateRequestV1;
+type AnyCreateRequest = ImageOptimizeCreateRequestV1;
 
 function uploadResponse(job: AnyReservationJob): AnyCreateResponse {
   const payload = {
@@ -170,9 +162,7 @@ function uploadResponse(job: AnyReservationJob): AnyCreateResponse {
     },
     reservedWeightedUnits: job.reservedWeightedUnits,
   };
-  return job.contractId === "pdf.optimize@1"
-    ? (payload as PdfOptimizeCreateResponse)
-    : (payload as ImageOptimizeCreateResponse);
+  return payload as ImageOptimizeCreateResponse;
 }
 
 function existingJobResponse(job: AnyReservationJob): AnyCreateResponse {
@@ -236,12 +226,8 @@ function serverCohortAllowed(input: {
   maintainer: boolean;
   rolloutBucket: number;
   toolContract?: AnyCreateRequest["toolContract"];
-  pdfPublicAdmissionEnabled: boolean;
 }): boolean {
-  return input.toolContract === "pdf.optimize@1"
-    ? input.maintainer ||
-        (input.pdfPublicAdmissionEnabled && input.rolloutBucket < input.rolloutPercent)
-    : input.maintainer || input.rolloutBucket < input.rolloutPercent;
+  return input.maintainer || input.rolloutBucket < input.rolloutPercent;
 }
 
 function globalProcessingEnabled(config: CreateConfig): boolean {
@@ -287,23 +273,7 @@ function createReservationInput(input: {
     networkPendingJobLimit: input.runtime.config.networkPendingJobLimit,
     maximumQueuedAgeSeconds: input.runtime.config.maximumQueuedAgeSeconds,
   };
-  return input.request.toolContract === "pdf.optimize@1"
-    ? {
-        ...common,
-        request: input.request,
-        estimate: estimateResources(input.request) as Extract<
-          ReturnType<typeof estimateResources>,
-          { resourceClass: "pdf-standard-v1" }
-        >,
-      }
-    : {
-        ...common,
-        request: input.request,
-        estimate: estimateResources(input.request) as Extract<
-          ReturnType<typeof estimateResources>,
-          { resourceClass: "image-standard-v1" }
-        >,
-      };
+  return { ...common, request: input.request, estimate: estimateResources(input.request) };
 }
 
 export async function routeCreateJobRequest(
@@ -344,13 +314,7 @@ export async function routeCreateJobRequest(
   } catch {
     return toolErrorResponse(400, "INVALID_REQUEST", "요청 본문을 확인해 주세요.", false);
   }
-  const parsed =
-    requestBody !== null &&
-    typeof requestBody === "object" &&
-    "toolContract" in requestBody &&
-    requestBody.toolContract === "pdf.optimize@1"
-      ? pdfOptimizeCreateRequestSchema.safeParse(requestBody)
-      : imageOptimizeCreateRequestSchema.safeParse(requestBody);
+  const parsed = imageOptimizeCreateRequestSchema.safeParse(requestBody);
   if (!parsed.success) {
     return toolErrorResponse(400, "INVALID_REQUEST", "요청 형식이 올바르지 않습니다.", false);
   }
@@ -378,7 +342,6 @@ export async function routeCreateJobRequest(
       maintainer,
       rolloutBucket,
       toolContract: parsed.data.toolContract,
-      pdfPublicAdmissionEnabled: runtime.config.pdfPublicAdmissionEnabled,
     })
   ) {
     return processingDisabledResponse("LOCAL_FALLBACK_REQUIRED");
@@ -422,9 +385,7 @@ export async function routeCreateJobRequest(
           jobId: result.job.jobId,
           contractId: result.job.contractId,
           byteCount: result.job.declaredBytes,
-          ...(result.job.contractId === "pdf.optimize@1"
-            ? { pageCount: result.job.declaredPageCount }
-            : { pixelCount: result.job.declaredWidth * result.job.declaredHeight }),
+          pixelCount: result.job.declaredWidth * result.job.declaredHeight,
           resourceClass: result.job.resourceClass,
           reservedWeightedUnits: result.job.reservedWeightedUnits,
         });

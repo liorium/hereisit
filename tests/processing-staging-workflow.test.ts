@@ -240,11 +240,9 @@ describe("processing staging workflow", () => {
       ".artifacts/deployment/processing-release-report.json",
       ".artifacts/deployment/evidence-public.pem",
       ".artifacts/deployment/cloudflare-image-digest.txt",
-      ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/smoke-result.json",
-      ".artifacts/deployment/pdf-smoke-result.json",
     ]);
     expect(upload).toContain("if-no-files-found: error");
     expect(upload).toContain("retention-days: 7");

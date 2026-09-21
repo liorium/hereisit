@@ -1,13 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { validatePdfVisualBrowserEvidence } from "./create-pdf-visual-browser-evidence.mjs";
 import {
   assertExactKeys,
   assertObject,
   assertSha256,
   canonicalize,
-  canonicalJson,
   parseCliArguments,
   readBoundedRegularFile,
   sha256Bytes,
@@ -17,12 +15,12 @@ import {
 const gitShaPattern = /^[a-f0-9]{40}$/;
 
 export const hostedReviewSchemas = Object.freeze({
-  fullCorpusBenchmark: "hereisit-full-corpus-benchmark-review@1",
-  competitorComparison: "hereisit-competitor-comparison-review@1",
-  blindedHumanReview: "hereisit-automated-visual-review@1",
-  commercialReview: "hereisit-commercial-license-review@1",
-  privacyReview: "hereisit-privacy-review@1",
-  deviceMatrix: "hereisit-device-matrix-review@1",
+  fullCorpusBenchmark: "hereisit-full-corpus-benchmark-review@2",
+  competitorComparison: "hereisit-competitor-comparison-review@2",
+  blindedHumanReview: "hereisit-automated-visual-review@2",
+  commercialReview: "hereisit-commercial-license-review@2",
+  privacyReview: "hereisit-privacy-review@2",
+  deviceMatrix: "hereisit-device-matrix-review@2",
 });
 
 const detailKeys = Object.freeze({
@@ -34,15 +32,10 @@ const detailKeys = Object.freeze({
     "engineImageDigest",
   ],
   competitorComparison: ["casesCompared", "baselineSha256"],
-  blindedHumanReview: ["visualProfilesMeasured", "pdfVisualEvidenceSha256"],
+  blindedHumanReview: ["visualProfilesMeasured", "evidenceSha256"],
   commercialReview: ["licenseGateSha256"],
-  privacyReview: ["testsRun", "pdfVisualEvidenceSha256"],
-  deviceMatrix: [
-    "projects",
-    "productAnalytics",
-    "pdfVisualEvidenceSha256",
-    "pdfVisualProfilesMeasured",
-  ],
+  privacyReview: ["testsRun", "evidenceSha256"],
+  deviceMatrix: ["projects", "productAnalytics", "evidenceSha256", "visualProfilesMeasured"],
 });
 
 const browserProjects = Object.freeze([
@@ -68,7 +61,7 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
   assertExactKeys(document, [...commonKeys, ...detailKeys[name]], `${name} hosted review document`);
   if (
     document.schema !== hostedReviewSchemas[name] ||
-    document.version !== 1 ||
+    document.version !== 2 ||
     document.passed !== true ||
     document.gitSha !== gitSha ||
     document.sourceSha256 !== sourceSha256 ||
@@ -95,13 +88,13 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
       document.visualProfilesMeasured < 1
     )
       throw new TypeError("automated visual review did not measure profiles");
-    assertSha256(document.pdfVisualEvidenceSha256, "automated visual review evidence hash");
+    assertSha256(document.evidenceSha256, "automated visual review evidence hash");
   } else if (name === "commercialReview") {
     assertSha256(document.licenseGateSha256, "commercial review license gate hash");
   } else if (name === "privacyReview") {
     if (!Number.isSafeInteger(document.testsRun) || document.testsRun < 1)
       throw new TypeError("privacy review did not run tests");
-    assertSha256(document.pdfVisualEvidenceSha256, "privacy review evidence hash");
+    assertSha256(document.evidenceSha256, "privacy review evidence hash");
   } else if (name === "deviceMatrix") {
     if (
       document.productAnalytics !== true ||
@@ -110,9 +103,12 @@ export function validateHostedReviewDocument(value, { name, gitSha, sourceSha256
       document.projects.some((project, index) => project !== browserProjects[index])
     )
       throw new TypeError("device matrix is incomplete");
-    assertSha256(document.pdfVisualEvidenceSha256, "device matrix PDF visual evidence hash");
-    if (document.pdfVisualProfilesMeasured !== 9)
-      throw new TypeError("device matrix PDF visual coverage is incomplete");
+    assertSha256(document.evidenceSha256, "device matrix visual evidence hash");
+    if (
+      !Number.isSafeInteger(document.visualProfilesMeasured) ||
+      document.visualProfilesMeasured < 1
+    )
+      throw new TypeError("device matrix visual coverage is incomplete");
   } else {
     throw new TypeError("hosted review name is invalid");
   }
@@ -150,32 +146,6 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
       checkRunId: parsedRunId,
     });
   }
-  let visual;
-  try {
-    const visualBytes = await readBoundedRegularFile(
-      join(resolve(input), "pdfVisualBrowserEvidence.json"),
-      1024 * 1024,
-      "PDF browser visual evidence",
-    );
-    visual = validatePdfVisualBrowserEvidence(JSON.parse(visualBytes.toString("utf8")));
-  } catch {
-    throw new TypeError("PDF browser visual evidence is missing or invalid");
-  }
-  if (
-    visual.gitSha !== gitSha ||
-    visual.sourceSha256 !== sourceSha256 ||
-    visual.checkRunId !== parsedRunId ||
-    visual.engineImageDigest !== documents.fullCorpusBenchmark.engineImageDigest ||
-    visual.corpusManifestSha256 !== documents.fullCorpusBenchmark.corpusSha256 ||
-    visual.visualProfilesMeasured !== documents.deviceMatrix.pdfVisualProfilesMeasured ||
-    visual.visualProfilesMeasured !== documents.blindedHumanReview.visualProfilesMeasured ||
-    documents.deviceMatrix.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
-    documents.blindedHumanReview.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
-    documents.privacyReview.pdfVisualEvidenceSha256 !== sha256Bytes(canonicalJson(visual)) ||
-    documents.competitorComparison.baselineSha256 !== documents.fullCorpusBenchmark.benchmarkSha256
-  ) {
-    throw new TypeError("PDF browser visual evidence does not bind the exact hosted reviews");
-  }
   const root = resolve(output);
   await mkdir(root, { recursive: true, mode: 0o700 });
   await Promise.all([
@@ -195,10 +165,6 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
         { refuseOverwrite: true, mode: 0o600 },
       ),
     ),
-    writeCanonicalJsonAtomic(join(root, "pdfVisualBrowserEvidence.json"), visual, {
-      refuseOverwrite: true,
-      mode: 0o600,
-    }),
   ]);
   return { sourceSha256, checkRunId: parsedRunId };
 }

@@ -32,17 +32,6 @@
     "containerInstanceMemoryGib": 6,
     "containerInstanceDiskGb": 12
   },
-  "pdfBenchmark": {
-    "evidenceSha256": "fdf15fa6b2f15ca47456c4c86f60110436aef0d02e8ced58c9c042604484e051",
-    "engineImageDigest": "sha256:525439cacab1bf1f3ffb2bfe11922ccada4af9291e7de5d6dd721ca9c8a1cee7",
-    "engineImageId": "sha256:525439cacab1bf1f3ffb2bfe11922ccada4af9291e7de5d6dd721ca9c8a1cee7",
-    "maximumCandidates": 2,
-    "maximumInputBytes": 52428800,
-    "maximumMeasuredPeakRssBytes": 714518528,
-    "maximumOutputBytes": 52428800,
-    "maximumPages": 100,
-    "maximumWallMs": 45000
-  },
   "routeCpuBenchmark": {
     "version": 1,
     "sourceModuleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

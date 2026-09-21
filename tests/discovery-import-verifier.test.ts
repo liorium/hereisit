@@ -46,7 +46,7 @@ it("rejects a forbidden workspace package without printing source content", asyn
     }),
   ).rejects.toMatchObject({
     code: 1,
-    stderr: expect.stringContaining(`${forbiddenFixture} -> @hereisit/pdf-tool`),
+    stderr: expect.stringContaining(`${forbiddenFixture} -> @hereisit/image-tool`),
   });
 
   try {

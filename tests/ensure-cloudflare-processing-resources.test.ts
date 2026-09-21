@@ -18,10 +18,7 @@ const config = {
   usageAnalyticsDatasetName: "hereisit_processing_usage_staging",
   queueName: "hereisit-image-jobs-staging",
   dlqName: "hereisit-image-jobs-dlq-staging",
-  pdfQueueName: "hereisit-pdf-jobs-staging",
-  pdfDlqName: "hereisit-pdf-jobs-dlq-staging",
 };
-
 function resources() {
   return {
     d1: [
@@ -69,22 +66,6 @@ function resources() {
         consumerCount: 0,
         consumerScriptNames: [],
       },
-      {
-        id: "3".repeat(32),
-        accountId,
-        name: config.pdfQueueName,
-        deliveryPaused: true,
-        consumerCount: 0,
-        consumerScriptNames: [],
-      },
-      {
-        id: "4".repeat(32),
-        accountId,
-        name: config.pdfDlqName,
-        deliveryPaused: true,
-        consumerCount: 0,
-        consumerScriptNames: [],
-      },
     ],
     logpush: [
       {
@@ -109,14 +90,12 @@ function resources() {
     ],
   };
 }
-
 describe("Cloudflare processing resource planner", () => {
   it("plans every missing private resource from an empty inventory", () => {
     const result = planProcessingResources({
       config,
       inventory: { d1: [], r2: [], queues: [], logpush: [] },
     });
-
     expect(result).toEqual({
       version: 1,
       phase: "provision",
@@ -137,16 +116,6 @@ describe("Cloudflare processing resource planner", () => {
           deliveryPaused: true,
         },
         {
-          type: "create-queue",
-          name: config.pdfDlqName,
-          deliveryPaused: true,
-        },
-        {
-          type: "create-queue",
-          name: config.pdfQueueName,
-          deliveryPaused: true,
-        },
-        {
           type: "create-logpush",
           dataset: "workers_trace_events",
           workerScriptName: config.workerScriptName,
@@ -155,14 +124,12 @@ describe("Cloudflare processing resource planner", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/token|secret|destination/i);
   });
-
   it("plans only missing resources from a partial inventory", () => {
     const complete = resources();
     const result = planProcessingResources({
       config,
       inventory: { ...complete, r2: complete.r2.slice(0, 1), logpush: [] },
     });
-
     expect(result.actions).toEqual([
       { type: "create-r2", name: config.usageLogBucketName, lifecycleDays: 3 },
       {
@@ -172,20 +139,16 @@ describe("Cloudflare processing resource planner", () => {
       },
     ]);
   });
-
   it("is idempotent for a complete matching inventory", () => {
     expect(planProcessingResources({ config, inventory: resources() }).actions).toEqual([]);
   });
-
   it("rotates only a stale Logpush destination credential", () => {
     const inventory = resources();
     inventory.logpush[0] = { ...inventory.logpush[0], destinationValid: false };
-
     expect(planProcessingResources({ config, inventory }).actions).toEqual([
       { type: "update-logpush-destination", id: 41 },
     ]);
   });
-
   it("resumes provisioning with only the exact processing Worker consumer", () => {
     const inventory = resources();
     inventory.queues = inventory.queues.map((queue) => ({
@@ -193,10 +156,8 @@ describe("Cloudflare processing resource planner", () => {
       consumerCount: 1,
       consumerScriptNames: [config.workerScriptName],
     }));
-
     expect(planProcessingResources({ config, inventory }).actions).toEqual([]);
   });
-
   it("pauses an active exact processing Queue before provisioning", () => {
     const inventory = resources();
     inventory.queues[0] = {
@@ -205,7 +166,6 @@ describe("Cloudflare processing resource planner", () => {
       consumerCount: 1,
       consumerScriptNames: [config.workerScriptName],
     };
-
     expect(planProcessingResources({ config, inventory }).actions).toEqual([
       {
         type: "pause-queue",
@@ -214,14 +174,12 @@ describe("Cloudflare processing resource planner", () => {
       },
     ]);
   });
-
   it("seals a converged, credential-free provisioning manifest", () => {
     const manifest = buildProcessingProvisionManifest({
       config,
       inventory: resources(),
       verifiedAt: "2026-07-19T11:00:00.000Z",
     });
-
     expect(manifest).toMatchObject({
       schema: "hereisit-processing-resource-provision@1",
       version: 1,
@@ -235,16 +193,11 @@ describe("Cloudflare processing resource planner", () => {
           primary: { id: "1".repeat(32), deliveryPaused: true },
           dlq: { id: "2".repeat(32), deliveryPaused: true },
         },
-        pdf: {
-          primary: { id: "3".repeat(32), deliveryPaused: true },
-          dlq: { id: "4".repeat(32), deliveryPaused: true },
-        },
       },
     });
     expect(manifest.verificationSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(manifest)).not.toMatch(/token|secret|access-key/i);
   });
-
   it.each([
     ["wrong account", "d1", { accountId: "f".repeat(32) }],
     ["wrong D1 location", "d1", { location: "wnam" }],
@@ -262,21 +215,17 @@ describe("Cloudflare processing resource planner", () => {
       Record<string, unknown>
     >;
     entries[0] = { ...entries[0], ...override };
-
     expect(() => planProcessingResources({ config, inventory })).toThrow();
   });
-
   it("rejects duplicate exact-name resources", () => {
     const inventory = resources();
     inventory.r2.push({ ...inventory.r2[0] });
     expect(() => planProcessingResources({ config, inventory })).toThrow(/duplicate/i);
   });
-
   it("converges one action at a time and re-verifies the final inventory", async () => {
     let inventory = { d1: [], r2: [], queues: [], logpush: [] } as ReturnType<typeof resources>;
     const applied: string[] = [];
     const finalInventory = resources();
-
     const result = await convergeProcessingResources({
       config,
       readInventory: async () => inventory,
@@ -296,7 +245,6 @@ describe("Cloudflare processing resource planner", () => {
         };
       },
     });
-
     expect(applied).toEqual([
       "create-d1",
       "create-r2",
@@ -313,7 +261,6 @@ describe("Cloudflare processing resource planner", () => {
       inventory: finalInventory,
     });
   });
-
   it("refuses a converged deployment when the runtime token cannot read Logpush status", async () => {
     await expect(
       convergeProcessingResources({
@@ -326,7 +273,6 @@ describe("Cloudflare processing resource planner", () => {
       }),
     ).rejects.toThrow("runtime token denied");
   });
-
   it("stops a non-converging or unexpectedly changed resource set", async () => {
     const empty = { d1: [], r2: [], queues: [], logpush: [] };
     await expect(

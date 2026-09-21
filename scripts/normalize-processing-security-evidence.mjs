@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -12,15 +11,7 @@ import {
   writeCanonicalJsonAtomic,
 } from "./image-lab-common.mjs";
 
-const scopes = new Set([
-  "engine",
-  "pdf-engine",
-  "web-staging",
-  "web-production",
-  "worker",
-  "lockfile",
-]);
-
+const scopes = new Set(["engine", "web-staging", "web-production", "worker", "lockfile"]);
 async function readJson(path, label) {
   const bytes = await readBoundedRegularFile(resolve(path), 8 * 1024 * 1024, label);
   try {
@@ -29,7 +20,6 @@ async function readJson(path, label) {
     throw new TypeError(`${label} is not valid JSON`);
   }
 }
-
 export async function normalizeProcessingSecurityEvidence({
   scope,
   artifactSha256,
@@ -44,7 +34,6 @@ export async function normalizeProcessingSecurityEvidence({
   if (typeof expectedScannerArtifact !== "string" || expectedScannerArtifact.length < 1)
     throw new TypeError("expected scanner artifact identity is required");
   const identity = `hereisit-${scope}:sha256-${artifactSha256}`;
-
   const sbom = assertObject(await readJson(sbomInput, "raw SBOM"), "raw SBOM");
   if (sbom.bomFormat !== "CycloneDX" || sbom.specVersion !== "1.6" || sbom.version !== 1) {
     throw new TypeError("raw SBOM identity is invalid");
@@ -62,7 +51,6 @@ export async function normalizeProcessingSecurityEvidence({
     ...properties,
     { name: "hereisit:artifact:sha256", value: artifactSha256 },
   ];
-
   const trivy = assertObject(
     await readJson(trivyInput, "raw vulnerability report"),
     "raw vulnerability report",
@@ -71,7 +59,7 @@ export async function normalizeProcessingSecurityEvidence({
     throw new TypeError("raw vulnerability report identity is invalid");
   }
   trivy.Results ??= [];
-  const container = scope === "engine" || scope === "pdf-engine";
+  const container = scope === "engine";
   if (
     trivy.ArtifactName !== expectedScannerArtifact ||
     trivy.ArtifactType !== (container ? "container_image" : "filesystem")
@@ -83,7 +71,6 @@ export async function normalizeProcessingSecurityEvidence({
       throw new TypeError("raw Trivy image digest is miswired");
   }
   trivy.HereIsItArtifactSha256 = artifactSha256;
-
   await writeCanonicalJsonAtomic(resolve(sbomOutput), sbom, { refuseOverwrite: true, mode: 0o600 });
   await writeCanonicalJsonAtomic(resolve(trivyOutput), trivy, {
     refuseOverwrite: true,
@@ -91,7 +78,6 @@ export async function normalizeProcessingSecurityEvidence({
   });
   return { artifactSha256, identity, scope };
 }
-
 export async function runNormalizeProcessingSecurityEvidenceCli(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   assertExactKeys(
@@ -119,7 +105,6 @@ export async function runNormalizeProcessingSecurityEvidenceCli(argv, stdout = p
   stdout.write(canonicalJson(result));
   return result;
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

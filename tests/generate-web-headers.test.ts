@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 import { generateHeaders, writeGeneratedHeaders } from "../scripts/generate-web-headers.mjs";
 
 describe("Cloudflare Pages header generation", () => {
+  it("does not publish a cache policy for removed PDF assets", () => {
+    expect(generateHeaders({ processingApiOrigin: null })).not.toContain("/pdfjs/");
+  });
   it("allows only the exact Cloudflare Web Analytics beacon", () => {
     const headers = generateHeaders({ processingApiOrigin: null });
     expect(headers).toContain(

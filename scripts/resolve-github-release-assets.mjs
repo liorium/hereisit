@@ -31,7 +31,6 @@ const releaseTagPattern = /^processing-release-([0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9
 const gitShaPattern = /^[0-9a-f]{40}$/;
 const securityScopes = Object.freeze([
   ["engine", "engine"],
-  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -39,18 +38,15 @@ const securityScopes = Object.freeze([
 ]);
 const securityGates = Object.freeze([
   ["imageEngine", "security-image-engine-license-gate.json"],
-  ["pdfEngine", "security-pdf-engine-license-gate.json"],
   ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
   ["vulnerability", "security-vulnerability-gate.json"],
 ]);
-
 function assertPositiveSafeInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError(`${label} must be a positive safe integer`);
   }
   return value;
 }
-
 function assertApiOrigin(value) {
   let url;
   try {
@@ -70,7 +66,6 @@ function assertApiOrigin(value) {
   }
   return url.origin;
 }
-
 function apiHeaders(token, accept = "application/vnd.github+json") {
   if (typeof token !== "string" || token.length < 1 || token.length > 512 || /[\r\n]/.test(token)) {
     throw new TypeError("GitHub token is invalid");
@@ -82,7 +77,6 @@ function apiHeaders(token, accept = "application/vnd.github+json") {
     "x-github-api-version": GITHUB_API_VERSION,
   };
 }
-
 async function readBoundedResponse(response, maximumBytes, label) {
   const declared = response.headers.get("content-length");
   if (
@@ -98,12 +92,11 @@ async function readBoundedResponse(response, maximumBytes, label) {
   }
   return bytes;
 }
-
 async function requestJson(origin, path, headers) {
   const response = await fetch(`${origin}${path}`, {
     headers,
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error(`GitHub API returned HTTP ${response.status}`);
   const bytes = await readBoundedResponse(response, MAXIMUM_JSON_BYTES, "GitHub API response");
@@ -113,7 +106,6 @@ async function requestJson(origin, path, headers) {
     throw new TypeError("GitHub API response is not valid JSON");
   }
 }
-
 function validateRelease(document, origin, repository, releaseTag) {
   const release = assertObject(document, "GitHub release");
   const id = assertPositiveSafeInteger(release.id, "GitHub release ID");
@@ -129,7 +121,6 @@ function validateRelease(document, origin, repository, releaseTag) {
   }
   return id;
 }
-
 async function resolveAnnotatedTag(origin, repository, releaseTag, headers, expectedTargetSha) {
   const reference = assertObject(
     await requestJson(origin, `/repos/${repository}/git/ref/tags/${releaseTag}`, headers),
@@ -158,7 +149,6 @@ async function resolveAnnotatedTag(origin, repository, releaseTag, headers, expe
     throw new TypeError("release tag target SHA does not match the candidate source");
   }
 }
-
 async function listReleaseAssets(origin, repository, releaseId, headers) {
   const assets = [];
   for (let page = 1; page <= 10; page += 1) {
@@ -181,7 +171,6 @@ async function listReleaseAssets(origin, repository, releaseId, headers) {
   }
   return assets;
 }
-
 async function loadCandidate(candidateRoot, expectedReleaseId) {
   const root = resolve(candidateRoot);
   if ((await realpath(root)) !== root)
@@ -221,8 +210,8 @@ async function loadCandidate(candidateRoot, expectedReleaseId) {
     throw error;
   }
   if (
-    candidate.schema !== "hereisit-processing-candidate@2" ||
-    candidate.version !== 2 ||
+    candidate.schema !== "hereisit-processing-candidate@3" ||
+    candidate.version !== 3 ||
     candidate.state !== "finalized" ||
     candidate.releaseId !== expectedReleaseId ||
     typeof candidate.gitSha !== "string" ||
@@ -233,12 +222,9 @@ async function loadCandidate(candidateRoot, expectedReleaseId) {
   assertObject(candidate.releaseAssets, "candidate release assets");
   return { candidate, bytes, root };
 }
-
 function expectedAssets(candidate, candidateBytes, releaseId) {
   const assets = assertObject(candidate.releaseAssets, "candidate release assets");
   const engine = assertObject(assets.engine, "candidate engine assets");
-  const pdfEngine = assertObject(assets.pdfEngine, "candidate PDF engine assets");
-  const pdfQuality = assertObject(assets.pdfQuality, "candidate PDF quality assets");
   const web = assertObject(assets.web, "candidate web assets");
   const evidence = assertObject(assets.evidence, "candidate evidence assets");
   const security = assertObject(assets.security, "candidate security assets");
@@ -322,32 +308,6 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
     generic("report", "processing-release-report.json", assets.report),
     generic("engine.oci", "image-engine-linux-amd64.oci.tar", engine.oci),
     generic("engine.docker", "image-engine-linux-amd64.docker.tar", engine.docker),
-    generic("pdfEngine.oci", "pdf-engine-linux-amd64.oci.tar", pdfEngine.oci),
-    generic("pdfEngine.docker", "pdf-engine-linux-amd64.docker.tar", pdfEngine.docker),
-    generic(
-      "pdfQuality.benchmark",
-      "pdf-engine-benchmark.json",
-      pdfQuality.benchmark,
-      MAXIMUM_SECURITY_EVIDENCE_BYTES,
-    ),
-    generic(
-      "pdfQuality.benchmarkSchema",
-      "pdf-engine-benchmark.schema.json",
-      pdfQuality.benchmarkSchema,
-      MAXIMUM_SECURITY_GATE_BYTES,
-    ),
-    generic(
-      "pdfQuality.releaseGate",
-      "pdf-engine-release-gate.json",
-      pdfQuality.releaseGate,
-      MAXIMUM_SECURITY_GATE_BYTES,
-    ),
-    generic(
-      "pdfQuality.releaseGateSchema",
-      "pdf-engine-release-gate.schema.json",
-      pdfQuality.releaseGateSchema,
-      MAXIMUM_SECURITY_GATE_BYTES,
-    ),
     generic("worker", "api-worker.mjs", assets.worker),
     generic("releaseInputs", "processing-release-inputs.json", assets.releaseInputs),
     generic("costModel", "live-cost-model.json", assets.costModel),
@@ -366,7 +326,6 @@ function expectedAssets(candidate, candidateBytes, releaseId) {
     ...securityAssets,
   ];
 }
-
 function validateAssetMetadata(asset, expected, origin, repository, releaseTag) {
   const value = assertObject(asset, "GitHub release asset");
   const assetId = assertPositiveSafeInteger(value.id, "GitHub release asset ID");
@@ -383,7 +342,6 @@ function validateAssetMetadata(asset, expected, origin, repository, releaseTag) 
   }
   return assetId;
 }
-
 function assertDownloadUrl(value, apiOrigin) {
   let url;
   try {
@@ -405,7 +363,6 @@ function assertDownloadUrl(value, apiOrigin) {
   }
   return url.href;
 }
-
 async function writeChunk(handle, chunk) {
   let offset = 0;
   while (offset < chunk.byteLength) {
@@ -414,13 +371,12 @@ async function writeChunk(handle, chunk) {
     offset += bytesWritten;
   }
 }
-
 async function downloadAsset({ origin, repository, assetId, headers, expected, output }) {
   const maximumBytes = expected.maximumBytes ?? MAXIMUM_ASSET_BYTES;
   const response = await fetch(`${origin}/repos/${repository}/releases/assets/${assetId}`, {
     headers: { ...headers, accept: "application/octet-stream" },
     redirect: "manual",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(15000),
   });
   if (response.status !== 302) {
     throw new Error(`GitHub release asset download returned HTTP ${response.status}`);
@@ -430,7 +386,7 @@ async function downloadAsset({ origin, repository, assetId, headers, expected, o
   const download = await fetch(assertDownloadUrl(location, origin), {
     headers: { "user-agent": "hereisit-release-asset-resolver/1" },
     redirect: "error",
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(60000),
   });
   if (!download.ok || download.body === null) {
     throw new Error(`release asset byte download returned HTTP ${download.status}`);
@@ -465,25 +421,17 @@ async function downloadAsset({ origin, repository, assetId, headers, expected, o
   if (sha256 !== expected.sha256) throw new TypeError("downloaded release asset SHA-256 mismatch");
   return { sizeBytes, sha256 };
 }
-
 function buildManifest({ releaseTag, targetSha, releaseIdNumber, resolved }) {
   const get = (key) => resolved.get(key);
   const payload = {
-    schema: "hereisit-processing-release-assets@2",
-    version: 2,
+    schema: "hereisit-processing-release-assets@3",
+    version: 3,
     apiOrigin: GITHUB_API_ORIGIN,
     repository: REPOSITORY,
     release: { id: releaseIdNumber, tag: releaseTag, targetSha },
     candidate: get("candidate"),
     report: get("report"),
     engine: { oci: get("engine.oci"), docker: get("engine.docker") },
-    pdfEngine: { oci: get("pdfEngine.oci"), docker: get("pdfEngine.docker") },
-    pdfQuality: {
-      benchmark: get("pdfQuality.benchmark"),
-      benchmarkSchema: get("pdfQuality.benchmarkSchema"),
-      releaseGate: get("pdfQuality.releaseGate"),
-      releaseGateSchema: get("pdfQuality.releaseGateSchema"),
-    },
     worker: get("worker"),
     releaseInputs: get("releaseInputs"),
     costModel: get("costModel"),
@@ -499,7 +447,6 @@ function buildManifest({ releaseTag, targetSha, releaseIdNumber, resolved }) {
   };
   return { ...payload, verificationSha256: sha256Canonical(payload) };
 }
-
 export async function resolveGitHubReleaseAssets({
   repository,
   releaseTag,
@@ -527,7 +474,6 @@ export async function resolveGitHubReleaseAssets({
   if (join(parent, basename(outputPath)) !== outputPath) {
     throw new TypeError("output path parent is not canonical");
   }
-
   const loaded = await loadCandidate(candidateRoot, releaseId);
   const expected = expectedAssets(loaded.candidate, loaded.bytes, releaseId);
   const release = await requestJson(
@@ -545,7 +491,6 @@ export async function resolveGitHubReleaseAssets({
   if (expected.some(({ name }) => !byName.has(name))) {
     throw new TypeError("GitHub release contains an unexpected or missing asset");
   }
-
   const temporary = await mkdtemp(join(parent, ".hereisit-release-assets-"));
   const resolvedAssets = new Map();
   try {
@@ -606,7 +551,6 @@ export async function resolveGitHubReleaseAssets({
     await rm(temporary, { recursive: true, force: true });
   }
 }
-
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
   assertExactKeys(
@@ -630,7 +574,6 @@ async function main() {
     })}`,
   );
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

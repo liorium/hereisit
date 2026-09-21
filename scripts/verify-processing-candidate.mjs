@@ -15,16 +15,12 @@ import {
 } from "./image-lab-common.mjs";
 import { grypeImage } from "./native-vulnerability-evidence.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
-import { validatePdfBenchmarkEvidence } from "./validate-pdf-benchmark-evidence.mjs";
 import { verifyAndExtractTreeArchive } from "./verify-and-extract-tree-archive.mjs";
 import {
   verifyDockerImageArchive,
   verifyOciImageArchive,
 } from "./verify-image-archive-identities.mjs";
-import {
-  assertReviewedPdfCostBinding,
-  verifyProcessingReleaseInputBindings,
-} from "./verify-processing-release-input-bindings.mjs";
+import { verifyProcessingReleaseInputBindings } from "./verify-processing-release-input-bindings.mjs";
 
 const maximumManifestBytes = 1024 * 1024;
 const maximumAssetBytes = 2 * 1024 * 1024 * 1024;
@@ -32,7 +28,6 @@ const gitShaPattern = /^[a-f0-9]{40}$/;
 const maximumSecurityGateBytes = 1024 * 1024;
 const securityScopes = Object.freeze([
   ["engine", "engine"],
-  ["pdf-engine", "pdfEngine"],
   ["web-staging", "webStaging"],
   ["web-production", "webProduction"],
   ["worker", "worker"],
@@ -42,7 +37,6 @@ const syftImage =
   "ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d";
 const trivyImage =
   "ghcr.io/aquasecurity/trivy@sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689";
-
 async function readBoundedRegularFile(path, maximumBytes, label) {
   let handle;
   try {
@@ -64,7 +58,6 @@ async function readBoundedRegularFile(path, maximumBytes, label) {
     await handle.close();
   }
 }
-
 async function verifyAsset(root, asset, label, hashField = "sha256") {
   const path = join(root, ...asset.path.split("/"));
   let handle;
@@ -95,21 +88,12 @@ async function verifyAsset(root, asset, label, hashField = "sha256") {
     await handle.close();
   }
 }
-
 function releaseAssetEntries(candidate) {
   const assets = candidate.releaseAssets;
   const entries = [
     [assets.worker, "Worker asset"],
     [assets.releaseInputs, "processing release inputs asset"],
     [assets.costModel, "live cost model asset"],
-    ...(candidate.pdfQuality === undefined
-      ? []
-      : [
-          [assets.pdfQuality.benchmark, "PDF benchmark asset"],
-          [assets.pdfQuality.benchmarkSchema, "PDF benchmark schema asset"],
-          [assets.pdfQuality.releaseGate, "PDF release gate asset"],
-          [assets.pdfQuality.releaseGateSchema, "PDF release gate schema asset"],
-        ]),
   ];
   if (candidate.state === "finalized") {
     entries.unshift([assets.report, "release report asset"]);
@@ -125,15 +109,12 @@ function releaseAssetEntries(candidate) {
   }
   return entries;
 }
-
 function assertTrue(value, label) {
   if (value !== true) throw new TypeError(`${label} must have passed`);
 }
-
 function assertValue(value, expected, label) {
   if (value !== expected) throw new TypeError(`${label} identity does not match`);
 }
-
 function assertHashList(value, label) {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
   const unique = new Set();
@@ -143,7 +124,6 @@ function assertHashList(value, label) {
     unique.add(hash);
   }
 }
-
 async function readCanonicalGate(root, asset, label) {
   const bytes = await readBoundedRegularFile(
     join(root, asset.path),
@@ -164,7 +144,6 @@ async function readCanonicalGate(root, asset, label) {
   }
   return assertObject(value, label);
 }
-
 function validateImageEngineGate(gate, engineSha256) {
   const commonKeys = [
     "schema",
@@ -198,35 +177,6 @@ function validateImageEngineGate(gate, engineSha256) {
   }
   assertValue(gate.artifactSha256, engineSha256, "image-engine license gate artifact");
 }
-
-function validatePdfEngineGate(gate) {
-  assertExactKeys(
-    gate,
-    [
-      "schema",
-      "passed",
-      "qpdfVersion",
-      "sourceSha256",
-      "sourceLockSha256",
-      "policySha256",
-      "licenseSha256",
-      "noticeSha256",
-    ],
-    "PDF-engine license gate",
-  );
-  assertValue(gate.schema, "hereisit-pdf-engine-license-gate@1", "PDF-engine license gate");
-  assertTrue(gate.passed, "PDF-engine license gate");
-  assertValue(gate.qpdfVersion, "12.4.0", "PDF-engine qpdf version");
-  assertValue(
-    gate.sourceSha256,
-    "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
-    "PDF-engine qpdf source",
-  );
-  for (const field of ["sourceLockSha256", "policySha256", "licenseSha256", "noticeSha256"]) {
-    assertSha256(gate[field], `PDF-engine license gate ${field}`);
-  }
-}
-
 function validateApplicationGate(gate, artifactHashes, sboms, scopesToValidate) {
   assertExactKeys(
     gate,
@@ -283,9 +233,8 @@ function validateApplicationGate(gate, artifactHashes, sboms, scopesToValidate) 
   }
   assertValue(scopes.lockfile.artifactSha256, gate.lockfileSha256, "application lockfile artifact");
 }
-
 function validateVulnerabilityGate(gate, candidate, artifactHashes, scopesToValidate) {
-  const nativeRequired = candidate.pdfEngine !== undefined;
+  const nativeRequired = candidate.schema === "hereisit-processing-candidate@3";
   assertExactKeys(
     gate,
     [
@@ -309,18 +258,13 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes, scopesToVali
     assertExactKeys(nativeScanner, ["version", "image"], "native vulnerability scanner");
     assertValue(nativeScanner.version, "0.119.0", "native vulnerability scanner version");
     assertValue(nativeScanner.image, grypeImage, "native vulnerability scanner image");
-    if (!Array.isArray(gate.nativeScans) || gate.nativeScans.length !== 2)
-      throw new TypeError("native vulnerability scans must contain both engines");
-    for (const [index, [scope, key]] of securityScopes.slice(0, 2).entries()) {
+    if (!Array.isArray(gate.nativeScans) || gate.nativeScans.length !== 1)
+      throw new TypeError("native vulnerability scans must contain the image engine");
+    for (const [index, [scope, key]] of securityScopes.slice(0, 1).entries()) {
       const scan = assertObject(gate.nativeScans[index], "native vulnerability scan");
       assertExactKeys(scan, ["scope", "sbomSha256", "databaseSha256"], "native vulnerability scan");
       assertValue(scan.scope, scope, "native vulnerability scope");
       assertSha256(scan.databaseSha256, "native vulnerability database hash");
-      assertValue(
-        scan.databaseSha256,
-        gate.nativeScans[0].databaseSha256,
-        "native vulnerability database",
-      );
       assertValue(
         scan.sbomSha256,
         candidate.releaseAssets.security.sboms[key].sha256,
@@ -384,12 +328,9 @@ function validateVulnerabilityGate(gate, candidate, artifactHashes, scopesToVali
     );
   }
 }
-
 async function verifySecurityGates(root, candidate) {
   const assets = candidate.releaseAssets.security;
-  const scopesToValidate = securityScopes.filter(
-    ([scope]) => scope !== "pdf-engine" || candidate.pdfEngine !== undefined,
-  );
+  const scopesToValidate = securityScopes;
   const application = await readCanonicalGate(
     root,
     assets.gates.applicationSupplyChain,
@@ -397,9 +338,7 @@ async function verifySecurityGates(root, candidate) {
   );
   const artifactHashes = {
     engine: candidate.engine.docker.configDigest.slice("sha256:".length),
-    ...(candidate.pdfEngine === undefined
-      ? {}
-      : { "pdf-engine": candidate.pdfEngine.docker.configDigest.slice("sha256:".length) }),
+
     "web-staging": candidate.web.staging.archiveSha256,
     "web-production": candidate.web.production.archiveSha256,
     worker: candidate.releaseAssets.worker.sha256,
@@ -410,11 +349,6 @@ async function verifySecurityGates(root, candidate) {
     await readCanonicalGate(root, assets.gates.imageEngine, "image-engine license gate"),
     artifactHashes.engine,
   );
-  if (candidate.pdfEngine !== undefined) {
-    validatePdfEngineGate(
-      await readCanonicalGate(root, assets.gates.pdfEngine, "PDF-engine license gate"),
-    );
-  }
   validateVulnerabilityGate(
     await readCanonicalGate(root, assets.gates.vulnerability, "vulnerability gate"),
     candidate,
@@ -422,7 +356,6 @@ async function verifySecurityGates(root, candidate) {
     scopesToValidate,
   );
 }
-
 async function verifyWebAsset(root, asset, environment) {
   const archivePath = await verifyAsset(root, asset, `${environment} web asset`, "archiveSha256");
   const temporaryRoot = await mkdtemp(join(tmpdir(), "hereisit-candidate-web-verification-"));
@@ -437,7 +370,6 @@ async function verifyWebAsset(root, asset, environment) {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 }
-
 export function assertVerifiedProcessingCandidateManifest({
   verification,
   manifestBytes,
@@ -460,7 +392,6 @@ export function assertVerifiedProcessingCandidateManifest({
     throw new TypeError("reread processing candidate does not match the verified manifest");
   }
 }
-
 export async function verifyProcessingCandidate({
   manifestPath,
   root,
@@ -505,7 +436,6 @@ export async function verifyProcessingCandidate({
   if (expectedGitSha !== undefined && candidate.gitSha !== expectedGitSha) {
     throw new TypeError("processing candidate source SHA does not match");
   }
-
   await verifyOciImageArchive({
     archivePath: join(canonicalRoot, candidate.releaseAssets.engine.oci.path),
     asset: candidate.releaseAssets.engine.oci,
@@ -517,63 +447,14 @@ export async function verifyProcessingCandidate({
     expectedIdentity: candidate.engine.docker,
     expectedRepoTag: candidate.engine.loadedImage,
   });
-  if (candidate.pdfEngine !== undefined) {
-    await verifyOciImageArchive({
-      archivePath: join(canonicalRoot, candidate.releaseAssets.pdfEngine.oci.path),
-      asset: candidate.releaseAssets.pdfEngine.oci,
-      expectedIdentity: candidate.pdfEngine.oci,
-    });
-    await verifyDockerImageArchive({
-      archivePath: join(canonicalRoot, candidate.releaseAssets.pdfEngine.docker.path),
-      asset: candidate.releaseAssets.pdfEngine.docker,
-      expectedIdentity: candidate.pdfEngine.docker,
-      expectedRepoTag: candidate.pdfEngine.loadedImage,
-    });
-  }
-
   const entries = releaseAssetEntries(candidate);
   for (const [asset, label] of entries) await verifyAsset(canonicalRoot, asset, label);
   await verifySecurityGates(canonicalRoot, candidate);
-  let verifiedPdfBenchmark;
-  if (candidate.pdfQuality !== undefined) {
-    const readQuality = async (asset, label) =>
-      JSON.parse(
-        await readBoundedRegularFile(join(canonicalRoot, asset.path), 8 * 1024 * 1024, label),
-      );
-    verifiedPdfBenchmark = await readQuality(
-      candidate.releaseAssets.pdfQuality.benchmark,
-      "PDF benchmark",
-    );
-    const quality = await validatePdfBenchmarkEvidence({
-      report: verifiedPdfBenchmark,
-      gate: await readQuality(candidate.releaseAssets.pdfQuality.releaseGate, "PDF release gate"),
-      benchmarkSchema: await readQuality(
-        candidate.releaseAssets.pdfQuality.benchmarkSchema,
-        "PDF benchmark schema",
-      ),
-      gateSchema: await readQuality(
-        candidate.releaseAssets.pdfQuality.releaseGateSchema,
-        "PDF release gate schema",
-      ),
-      expectedEngineImageDigest: candidate.pdfEngine.docker.configDigest,
-    });
-    if (canonicalJson(quality) !== canonicalJson(candidate.pdfQuality)) {
-      throw new TypeError("candidate PDF quality identity does not match verified evidence");
-    }
-  }
   const financialInputs = await verifyProcessingReleaseInputBindings({
     releaseInputsPath: join(canonicalRoot, candidate.releaseAssets.releaseInputs.path),
     liveCostModelPath: join(canonicalRoot, candidate.releaseAssets.costModel.path),
     expectedReleaseId: candidate.releaseId,
   });
-  if (candidate.pdfQuality !== undefined) {
-    assertReviewedPdfCostBinding(
-      financialInputs.reviewedPdfBenchmark,
-      verifiedPdfBenchmark,
-      candidate.pdfQuality.benchmarkSha256,
-      candidate.pdfEngine.docker.configDigest,
-    );
-  }
   if (
     financialInputs.releaseInputs.sha256 !== candidate.releaseInputs.sha256 ||
     financialInputs.costModel.sha256 !== candidate.costModel.sha256
@@ -598,7 +479,7 @@ export async function verifyProcessingCandidate({
     gitSha: candidate.gitSha,
     manifestSha256: sha256Bytes(manifestBytes),
     candidateVerificationSha256: candidate.verificationSha256,
-    assetCount: entries.length + (candidate.pdfEngine === undefined ? 4 : 6),
+    assetCount: entries.length + 4,
     web: {
       staging: {
         archiveSha256: staging.archiveSha256,
@@ -615,7 +496,6 @@ export async function verifyProcessingCandidate({
     },
   };
 }
-
 export async function runProcessingCandidateVerifier(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   const expectedKeys = ["manifest", "root", "required-state", "expected-git-sha"];
@@ -633,7 +513,6 @@ export async function runProcessingCandidateVerifier(argv, stdout = process.stdo
   });
   stdout.write(canonicalJson(summary));
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

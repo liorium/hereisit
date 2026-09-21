@@ -15,7 +15,6 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const workerNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const engineNames = Object.freeze({
   ImageEngineContainer: "hereisit-image-engine",
-  PdfEngineContainer: "hereisit-pdf-engine",
 });
 const utcTimestampPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/;
 const acceptedStates = new Set(["provisioning", "ready", "active"]);

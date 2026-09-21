@@ -200,7 +200,6 @@ describe("image engine native supply-chain policy", () => {
   it.each([
     ".dockerignore",
     "apps/image-engine/Dockerfile.dockerignore",
-    "apps/pdf-engine/Dockerfile.dockerignore",
   ])("excludes local evidence and deployment state from %s", async (filename) => {
     const patterns = (await readFile(join(repositoryRoot, filename), "utf8")).split(/\r?\n/u);
     for (const excluded of [
@@ -620,7 +619,7 @@ describe("image engine native supply-chain policy", () => {
     };
     expect(() =>
       validateVulnerabilityExceptions(exceptions, new Date(), {
-        allowedScopes: ["engine", "pdf-engine"],
+        allowedScopes: ["engine"],
       }),
     ).not.toThrow();
   });

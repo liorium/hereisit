@@ -13,8 +13,6 @@
     "candidate",
     "report",
     "engine",
-    "pdfEngine",
-    "pdfQuality",
     "worker",
     "releaseInputs",
     "costModel",
@@ -24,64 +22,74 @@
     "verificationSha256"
   ],
   "properties": {
-    "schema": { "const": "hereisit-processing-release-assets@2" },
-    "version": { "const": 2 },
-    "apiOrigin": { "const": "https://api.github.com" },
-    "repository": { "const": "liorium/hereisit" },
+    "schema": {
+      "const": "hereisit-processing-release-assets@3"
+    },
+    "version": {
+      "const": 3
+    },
+    "apiOrigin": {
+      "const": "https://api.github.com"
+    },
+    "repository": {
+      "const": "liorium/hereisit"
+    },
     "release": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "tag", "targetSha"],
       "properties": {
-        "id": { "$ref": "#/$defs/positiveInteger" },
+        "id": {
+          "$ref": "#/$defs/positiveInteger"
+        },
         "tag": {
           "type": "string",
           "pattern": "^processing-release-[0-9]{4}-[0-9]{2}-[0-9]{2}\\.[1-9][0-9]*$"
         },
-        "targetSha": { "$ref": "#/$defs/gitSha" }
+        "targetSha": {
+          "$ref": "#/$defs/gitSha"
+        }
       }
     },
-    "candidate": { "$ref": "#/$defs/asset" },
-    "report": { "$ref": "#/$defs/asset" },
+    "candidate": {
+      "$ref": "#/$defs/asset"
+    },
+    "report": {
+      "$ref": "#/$defs/asset"
+    },
     "engine": {
       "type": "object",
       "additionalProperties": false,
       "required": ["oci", "docker"],
       "properties": {
-        "oci": { "$ref": "#/$defs/asset" },
-        "docker": { "$ref": "#/$defs/asset" }
+        "oci": {
+          "$ref": "#/$defs/asset"
+        },
+        "docker": {
+          "$ref": "#/$defs/asset"
+        }
       }
     },
-    "pdfEngine": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["oci", "docker"],
-      "properties": {
-        "oci": { "$ref": "#/$defs/asset" },
-        "docker": { "$ref": "#/$defs/asset" }
-      }
+    "worker": {
+      "$ref": "#/$defs/asset"
     },
-    "pdfQuality": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
-      "properties": {
-        "benchmark": { "$ref": "#/$defs/asset" },
-        "benchmarkSchema": { "$ref": "#/$defs/asset" },
-        "releaseGate": { "$ref": "#/$defs/asset" },
-        "releaseGateSchema": { "$ref": "#/$defs/asset" }
-      }
+    "releaseInputs": {
+      "$ref": "#/$defs/asset"
     },
-    "worker": { "$ref": "#/$defs/asset" },
-    "releaseInputs": { "$ref": "#/$defs/asset" },
-    "costModel": { "$ref": "#/$defs/asset" },
+    "costModel": {
+      "$ref": "#/$defs/asset"
+    },
     "web": {
       "type": "object",
       "additionalProperties": false,
       "required": ["staging", "production"],
       "properties": {
-        "staging": { "$ref": "#/$defs/webAsset" },
-        "production": { "$ref": "#/$defs/webAsset" }
+        "staging": {
+          "$ref": "#/$defs/webAsset"
+        },
+        "production": {
+          "$ref": "#/$defs/webAsset"
+        }
       }
     },
     "evidence": {
@@ -89,27 +97,56 @@
       "additionalProperties": false,
       "required": ["bundle", "signature"],
       "properties": {
-        "bundle": { "$ref": "#/$defs/asset" },
-        "signature": { "$ref": "#/$defs/asset" }
+        "bundle": {
+          "$ref": "#/$defs/asset"
+        },
+        "signature": {
+          "$ref": "#/$defs/asset"
+        }
       }
     },
-    "security": { "$ref": "#/$defs/securityAssets" },
-    "verificationSha256": { "$ref": "#/$defs/sha256" }
+    "security": {
+      "$ref": "#/$defs/securityAssets"
+    },
+    "verificationSha256": {
+      "$ref": "#/$defs/sha256"
+    }
   },
   "$defs": {
-    "positiveInteger": { "type": "integer", "minimum": 1 },
-    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
     "asset": {
       "type": "object",
       "additionalProperties": false,
       "required": ["assetId", "name", "sizeBytes", "sha256", "apiUrl"],
       "properties": {
-        "assetId": { "$ref": "#/$defs/positiveInteger" },
-        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$" },
-        "sizeBytes": { "$ref": "#/$defs/positiveInteger" },
-        "sha256": { "$ref": "#/$defs/sha256" },
-        "apiUrl": { "type": "string", "format": "uri" }
+        "assetId": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$"
+        },
+        "sizeBytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "apiUrl": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "webAsset": {
@@ -126,39 +163,83 @@
         "processingApiOrigin"
       ],
       "properties": {
-        "assetId": { "$ref": "#/$defs/positiveInteger" },
-        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$" },
-        "sizeBytes": { "$ref": "#/$defs/positiveInteger" },
-        "sha256": { "$ref": "#/$defs/sha256" },
-        "apiUrl": { "type": "string", "format": "uri" },
-        "archiveSha256": { "$ref": "#/$defs/sha256" },
-        "treeSha256": { "$ref": "#/$defs/sha256" },
-        "processingApiOrigin": { "type": "string", "format": "uri" }
+        "assetId": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$"
+        },
+        "sizeBytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "apiUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "archiveSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "processingApiOrigin": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "securityGateAsset": {
       "allOf": [
-        { "$ref": "#/$defs/asset" },
-        { "properties": { "sizeBytes": { "maximum": 1048576 } } }
+        {
+          "$ref": "#/$defs/asset"
+        },
+        {
+          "properties": {
+            "sizeBytes": {
+              "maximum": 1048576
+            }
+          }
+        }
       ]
     },
     "securityEvidenceAsset": {
       "allOf": [
-        { "$ref": "#/$defs/asset" },
-        { "properties": { "sizeBytes": { "maximum": 8388608 } } }
+        {
+          "$ref": "#/$defs/asset"
+        },
+        {
+          "properties": {
+            "sizeBytes": {
+              "maximum": 8388608
+            }
+          }
+        }
       ]
     },
     "securityScopedAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "pdfEngine", "webStaging", "webProduction", "worker", "lockfile"],
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
       "properties": {
-        "engine": { "$ref": "#/$defs/securityEvidenceAsset" },
-        "pdfEngine": { "$ref": "#/$defs/securityEvidenceAsset" },
-        "webStaging": { "$ref": "#/$defs/securityEvidenceAsset" },
-        "webProduction": { "$ref": "#/$defs/securityEvidenceAsset" },
-        "worker": { "$ref": "#/$defs/securityEvidenceAsset" },
-        "lockfile": { "$ref": "#/$defs/securityEvidenceAsset" }
+        "engine": {
+          "$ref": "#/$defs/securityEvidenceAsset"
+        },
+        "webStaging": {
+          "$ref": "#/$defs/securityEvidenceAsset"
+        },
+        "webProduction": {
+          "$ref": "#/$defs/securityEvidenceAsset"
+        },
+        "worker": {
+          "$ref": "#/$defs/securityEvidenceAsset"
+        },
+        "lockfile": {
+          "$ref": "#/$defs/securityEvidenceAsset"
+        }
       }
     },
     "securityAssets": {
@@ -169,16 +250,25 @@
         "gates": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["imageEngine", "pdfEngine", "applicationSupplyChain", "vulnerability"],
+          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
           "properties": {
-            "imageEngine": { "$ref": "#/$defs/securityGateAsset" },
-            "pdfEngine": { "$ref": "#/$defs/securityGateAsset" },
-            "applicationSupplyChain": { "$ref": "#/$defs/securityGateAsset" },
-            "vulnerability": { "$ref": "#/$defs/securityGateAsset" }
+            "imageEngine": {
+              "$ref": "#/$defs/securityGateAsset"
+            },
+            "applicationSupplyChain": {
+              "$ref": "#/$defs/securityGateAsset"
+            },
+            "vulnerability": {
+              "$ref": "#/$defs/securityGateAsset"
+            }
           }
         },
-        "sboms": { "$ref": "#/$defs/securityScopedAssets" },
-        "vulnerabilityReports": { "$ref": "#/$defs/securityScopedAssets" }
+        "sboms": {
+          "$ref": "#/$defs/securityScopedAssets"
+        },
+        "vulnerabilityReports": {
+          "$ref": "#/$defs/securityScopedAssets"
+        }
       }
     }
   }

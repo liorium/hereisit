@@ -15,34 +15,18 @@ import {
 } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 import { validateProcessingProvisionManifest } from "./read-processing-provision-manifest.mjs";
-import { validatePdfSmokeTrace } from "./smoke-pdf-compress-server.mjs";
 import { validateWorkerVersionAttestation } from "./verify-worker-version-chain.mjs";
 
 const gitShaPattern = /^[a-f0-9]{40}$/;
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const digestPattern =
-  /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-(?:image|pdf)-engine@sha256:[0-9a-f]{64}$/;
-const receiptNames = Object.freeze([
-  "imageCanary",
-  "pdfCanary",
-  "deletion",
-  "cost",
-  "rollback",
-  "admission",
-  "gate",
-  "policy",
-]);
+  /^registry\.cloudflare\.com\/[0-9a-f]{32}\/hereisit-image-engine@sha256:[0-9a-f]{64}$/;
+const receiptNames = Object.freeze(["imageCanary", "gate", "policy"]);
 const receiptSchemas = Object.freeze({
   imageCanary: "hereisit-processing-production-canary-smoke@1",
-  pdfCanary: "hereisit-processing-pdf-smoke@1",
-  deletion: "hereisit-pdf-deletion-receipt@1",
-  cost: "hereisit-pdf-cost-receipt@1",
-  rollback: "hereisit-pdf-rollback-receipt@1",
-  admission: "hereisit-pdf-public-admission@1",
   gate: "hereisit-processing-deployment-gate@1",
   policy: "hereisit-processing-production-canary-policy-smoke@1",
 });
-
 export function validateProcessingDeploymentReport(value) {
   const report = assertObject(value, "processing deployment report");
   assertExactKeys(
@@ -64,8 +48,8 @@ export function validateProcessingDeploymentReport(value) {
     "processing deployment report",
   );
   if (
-    report.schema !== "hereisit-processing-deployment-report@1" ||
-    report.version !== 1 ||
+    report.schema !== "hereisit-processing-deployment-report@2" ||
+    report.version !== 2 ||
     report.passed !== true ||
     typeof report.publicAdmissionReady !== "boolean" ||
     !gitShaPattern.test(report.gitSha ?? "")
@@ -83,8 +67,8 @@ export function validateProcessingDeploymentReport(value) {
   assertSha256(worker.moduleSha256, "deployment Worker module hash");
   assertSha256(worker.generatedConfigSha256, "deployment generated config hash");
   const engines = assertObject(report.engines, "deployment engines");
-  assertExactKeys(engines, ["imageDigest", "pdfDigest"], "deployment engines");
-  if (!digestPattern.test(engines.imageDigest) || !digestPattern.test(engines.pdfDigest))
+  assertExactKeys(engines, ["imageDigest"], "deployment engines");
+  if (!digestPattern.test(engines.imageDigest))
     throw new TypeError("deployment engine digest is invalid");
   const deployment = assertObject(report.deployment, "deployment coordinates");
   assertExactKeys(
@@ -105,16 +89,12 @@ export function validateProcessingDeploymentReport(value) {
       throw new TypeError(`${name} deployment receipt identity is invalid`);
     assertSha256(receipt.sha256, `${name} deployment receipt hash`);
   }
-  for (const name of ["imageCanary", "pdfCanary", "deletion", "gate", "policy"]) {
+  for (const name of ["imageCanary", "gate", "policy"]) {
     if (receipts[name].passed !== true)
       throw new TypeError(`${name} deployment receipt did not pass`);
   }
-  if (
-    report.publicAdmissionReady !== receipts.admission.passed ||
-    (report.publicAdmissionReady &&
-      ["cost", "rollback", "deletion"].some((name) => receipts[name].passed !== true))
-  )
-    throw new TypeError("public admission receipts are incomplete");
+  if (report.publicAdmissionReady !== false)
+    throw new TypeError("canary deployment report cannot authorize public admission");
   const created = new Date(report.createdAt);
   if (!Number.isFinite(created.valueOf()) || created.toISOString() !== report.createdAt)
     throw new TypeError("deployment report timestamp is invalid");
@@ -124,13 +104,12 @@ export function validateProcessingDeploymentReport(value) {
     throw new TypeError("deployment report verification hash does not match");
   return report;
 }
-
 export function createProcessingDeploymentReport(input) {
   const payload = canonicalize({
-    schema: "hereisit-processing-deployment-report@1",
-    version: 1,
+    schema: "hereisit-processing-deployment-report@2",
+    version: 2,
     passed: true,
-    publicAdmissionReady: input.receipts?.admission?.passed === true,
+    publicAdmissionReady: false,
     ...input,
   });
   return canonicalize(
@@ -140,37 +119,16 @@ export function createProcessingDeploymentReport(input) {
     }),
   );
 }
-
 async function readJson(path) {
   const bytes = await readFile(resolve(path));
   if (bytes.byteLength < 1 || bytes.byteLength > 8 * 1024 * 1024)
     throw new RangeError("deployment receipt is not bounded");
   return { bytes, value: JSON.parse(bytes.toString("utf8")) };
 }
-
 function passedFor(name, value) {
-  if (name === "admission") return value.enabled === true;
   if (name === "gate") return value.verified === true;
   return value.passed === true;
 }
-
-function commonReleaseReceipt(value, name, schema, releaseReportSha256, keys) {
-  const receipt = assertObject(value, `${name} deployment receipt`);
-  assertExactKeys(
-    receipt,
-    ["schema", "version", "passed", "releaseReportSha256", ...keys],
-    `${name} deployment receipt`,
-  );
-  if (
-    receipt.schema !== schema ||
-    receipt.version !== 1 ||
-    typeof receipt.passed !== "boolean" ||
-    receipt.releaseReportSha256 !== releaseReportSha256
-  )
-    throw new TypeError(`${name} deployment receipt does not bind the exact release report`);
-  return receipt;
-}
-
 export function validateProcessingDeploymentReceipt(name, value, releaseReportSha256) {
   assertSha256(releaseReportSha256, "deployment receipt release report hash");
   if (name === "imageCanary") {
@@ -206,83 +164,6 @@ export function validateProcessingDeploymentReceipt(name, value, releaseReportSh
       receipt.sourceFilenameLeak !== false
     )
       throw new TypeError("image canary deployment receipt did not pass");
-    return receipt;
-  }
-  if (name === "pdfCanary") return validatePdfSmokeTrace(value);
-  if (name === "deletion") {
-    const receipt = commonReleaseReceipt(
-      value,
-      name,
-      receiptSchemas.deletion,
-      releaseReportSha256,
-      ["deleted", "sweepPassed"],
-    );
-    if (receipt.passed !== true || receipt.deleted !== true || receipt.sweepPassed !== true)
-      throw new TypeError("deletion deployment receipt did not pass");
-    return receipt;
-  }
-  if (name === "cost") {
-    const receipt = commonReleaseReceipt(value, name, receiptSchemas.cost, releaseReportSha256, [
-      "projectedMonthlyCostMicrousd",
-      "costPer1000JobsMicrousd",
-    ]);
-    for (const key of ["projectedMonthlyCostMicrousd", "costPer1000JobsMicrousd"]) {
-      if (!Number.isSafeInteger(receipt[key]) || receipt[key] < 0)
-        throw new TypeError("cost deployment receipt is invalid");
-    }
-    return receipt;
-  }
-  if (name === "rollback") {
-    const keys = [
-      "workerRestored",
-      "imageEngineRestored",
-      "pdfEngineRestored",
-      "configRestored",
-      "policyRestored",
-      "queuesRestored",
-    ];
-    const receipt = commonReleaseReceipt(
-      value,
-      name,
-      receiptSchemas.rollback,
-      releaseReportSha256,
-      keys,
-    );
-    if (keys.some((key) => typeof receipt[key] !== "boolean"))
-      throw new TypeError("rollback deployment receipt is invalid");
-    return receipt;
-  }
-  if (name === "admission") {
-    const receipt = assertObject(value, "admission deployment receipt");
-    assertExactKeys(
-      receipt,
-      [
-        "schema",
-        "enabled",
-        "releaseReportSha256",
-        "visualProfilesMeasured",
-        "deletionPassed",
-        "costPassed",
-        "rollbackPassed",
-      ],
-      "admission deployment receipt",
-    );
-    if (
-      receipt.schema !== receiptSchemas.admission ||
-      receipt.releaseReportSha256 !== releaseReportSha256 ||
-      typeof receipt.enabled !== "boolean" ||
-      !Number.isSafeInteger(receipt.visualProfilesMeasured) ||
-      receipt.visualProfilesMeasured < 0 ||
-      ["deletionPassed", "costPassed", "rollbackPassed"].some(
-        (key) => typeof receipt[key] !== "boolean",
-      ) ||
-      receipt.enabled !==
-        (receipt.visualProfilesMeasured > 0 &&
-          receipt.deletionPassed &&
-          receipt.costPassed &&
-          receipt.rollbackPassed)
-    )
-      throw new TypeError("admission deployment receipt is inconsistent");
     return receipt;
   }
   if (name === "gate") {
@@ -321,22 +202,20 @@ export function validateProcessingDeploymentReceipt(name, value, releaseReportSh
   }
   throw new TypeError("deployment receipt name is invalid");
 }
-
 export async function loadProcessingDeploymentReportInput(args, createdAt) {
   const release = await readJson(args["release-report"]);
   const releaseValue = validateProcessingReleaseReport(release.value);
-  if (releaseValue.schema !== "hereisit-processing-release-report@2")
-    throw new TypeError("deployment projection requires release report @2");
+  if (releaseValue.schema !== "hereisit-processing-release-report@3")
+    throw new TypeError("deployment projection requires release report @3");
   const attestation = validateWorkerVersionAttestation(
     (await readJson(args["worker-attestation"])).value,
   );
   const candidate = validateProcessingCandidate((await readJson(args.candidate)).value);
-  if (candidate.schema !== "hereisit-processing-candidate@2")
-    throw new TypeError("deployment projection requires candidate @2");
+  if (candidate.schema !== "hereisit-processing-candidate@3")
+    throw new TypeError("deployment projection requires candidate @3");
   const resources = await readJson(args.resources);
   validateProcessingProvisionManifest(resources.value);
   const imageDigest = (await readFile(resolve(args["image-digest"]), "utf8")).trim();
-  const pdfDigest = (await readFile(resolve(args["pdf-digest"]), "utf8")).trim();
   const pagesDeploymentId = (await readFile(resolve(args["pages-deployment-id"]), "utf8")).trim();
   const releaseReportSha256 = sha256Bytes(release.bytes);
   if (
@@ -348,11 +227,6 @@ export async function loadProcessingDeploymentReportInput(args, createdAt) {
     throw new TypeError("deployment artifacts do not bind the exact release authority");
   const paths = {
     imageCanary: args["image-canary"],
-    pdfCanary: args["pdf-canary"],
-    deletion: args["deletion-receipt"],
-    cost: args["cost-receipt"],
-    rollback: args["rollback-receipt"],
-    admission: args.admission,
     gate: args.gate,
     policy: args.policy,
   };
@@ -374,7 +248,7 @@ export async function loadProcessingDeploymentReportInput(args, createdAt) {
       moduleSha256: attestation.workerModuleSha256,
       generatedConfigSha256: attestation.generatedConfigSha256,
     },
-    engines: { imageDigest, pdfDigest },
+    engines: { imageDigest },
     deployment: {
       resourcesSha256: sha256Bytes(resources.bytes),
       pagesTreeSha256: candidate.web.production.treeSha256,
@@ -384,7 +258,6 @@ export async function loadProcessingDeploymentReportInput(args, createdAt) {
     createdAt,
   };
 }
-
 export async function runProcessingDeploymentReportCli(argv) {
   const args = parseCliArguments(argv);
   const report = createProcessingDeploymentReport(
@@ -396,7 +269,6 @@ export async function runProcessingDeploymentReportCli(argv) {
   });
   return report;
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

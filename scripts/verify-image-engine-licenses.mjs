@@ -675,7 +675,7 @@ export async function verifyImageEngineLicenseGate(
     }
   }
   validateVulnerabilityExceptions(exceptions.value, new Date(), {
-    allowedScopes: ["engine", "pdf-engine"],
+    allowedScopes: ["engine"],
   });
   if (commercialReview !== undefined)
     validateCommercialReview(commercialReview.value, sourceLock.bytes);

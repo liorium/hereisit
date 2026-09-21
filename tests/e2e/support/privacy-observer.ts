@@ -38,15 +38,11 @@ export interface PrivacyObserverOptions {
   sentinels?: readonly string[];
 }
 
-export function observesNestedWorkerRequests(page: Page): boolean {
-  return page.context().browser()?.browserType().name() !== "chromium";
-}
-
 export async function installPrivacyObserver(
   page: Page,
   options: PrivacyObserverOptions = {},
 ): Promise<{
-  assertClean(expectedDownloads?: number, requireParserWorker?: boolean): Promise<void>;
+  assertClean(expectedDownloads?: number): Promise<void>;
   clear(): Promise<void>;
   read(): Promise<PrivacyObservation>;
 }> {
@@ -61,7 +57,6 @@ export async function installPrivacyObserver(
   const context = page.context();
   const productAnalyticsOrigin = options.productAnalyticsOrigin;
   let requestCount = 0;
-  let parserWorkerRequests = 0;
   let downloads = 0;
   let failedRequests = 0;
   let pageErrors = 0;
@@ -476,13 +471,9 @@ export async function installPrivacyObserver(
         `${request.method()} ${url.origin === origin ? "same-origin" : "cross-origin"}`,
       );
     }
-    if (url.pathname.startsWith("/pdfjs/") && !url.pathname.startsWith("/pdfjs/6.2.108/")) {
-      violations.push("unpinned-pdfjs");
-    }
     if (sentinels.some((sentinel) => decodeURIComponent(request.url()).includes(sentinel))) {
       leaks.push("request-url");
     }
-    if (url.pathname === "/pdfjs/6.2.108/pdf.worker.min.mjs") parserWorkerRequests += 1;
     if (
       options.fulfillProbePathPrefix !== undefined &&
       url.pathname.startsWith(options.fulfillProbePathPrefix)
@@ -560,7 +551,6 @@ export async function installPrivacyObserver(
       consoleMessages.length = 0;
       productEvents.length = 0;
       requestCount = 0;
-      parserWorkerRequests = 0;
       downloads = 0;
       failedRequests = 0;
       pageErrors = 0;
@@ -595,7 +585,7 @@ export async function installPrivacyObserver(
         productEvents: [...productEvents],
       };
     },
-    async assertClean(expectedDownloads = 0, requireParserWorker = true) {
+    async assertClean(expectedDownloads = 0) {
       await this.read();
       await stopObserving();
       expect(violations).toEqual([]);
@@ -603,9 +593,6 @@ export async function installPrivacyObserver(
       expect(downloads).toBe(expectedDownloads);
       expect(failedRequests).toBe(0);
       expect(pageErrors).toBe(0);
-      if (requireParserWorker && observesNestedWorkerRequests(page)) {
-        expect(parserWorkerRequests).toBeGreaterThan(0);
-      }
     },
   };
 }

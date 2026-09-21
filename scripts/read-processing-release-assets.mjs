@@ -22,7 +22,6 @@ const releaseIdPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[1-9][0-9]*$/;
 const gitShaPattern = /^[0-9a-f]{40}$/;
 const assetNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/;
 const workersSubdomainLabel = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
-
 const genericAssetFields = ["assetId", "name", "sizeBytes", "sha256", "apiUrl"];
 const webAssetFields = [
   ...genericAssetFields,
@@ -32,7 +31,6 @@ const webAssetFields = [
 ];
 const securityScopes = Object.freeze([
   ["engine", "engine"],
-  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -40,18 +38,15 @@ const securityScopes = Object.freeze([
 ]);
 const securityGates = Object.freeze([
   ["imageEngine", "security-image-engine-license-gate.json"],
-  ["pdfEngine", "security-pdf-engine-license-gate.json"],
   ["applicationSupplyChain", "security-application-supply-chain-gate.json"],
   ["vulnerability", "security-vulnerability-gate.json"],
 ]);
-
 function assertPositiveSafeInteger(value, label) {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError(`${label} must be a positive safe integer`);
   }
   return value;
 }
-
 function assertExactHttpsOrigin(value, label) {
   let url;
   try {
@@ -73,7 +68,6 @@ function assertExactHttpsOrigin(value, label) {
   }
   return url;
 }
-
 function validateAsset(
   value,
   label,
@@ -97,28 +91,25 @@ function validateAsset(
   if (asset.apiUrl !== expectedApiUrl) throw new TypeError(`${label} API URL is not canonical`);
   return { asset, assetId, sizeBytes };
 }
-
-function validateSecurityAssets(value, context, dual) {
+function validateSecurityAssets(value, context) {
   const security = assertObject(value, "security release assets");
   assertExactKeys(security, ["gates", "sboms", "vulnerabilityReports"], "security release assets");
   const gates = assertObject(security.gates, "security gate release assets");
   assertExactKeys(
     gates,
-    securityGates.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
+    securityGates.map(([key]) => key),
     "security gate release assets",
   );
-  const identities = securityGates
-    .filter(([key]) => dual || key !== "pdfEngine")
-    .map(([key, path]) =>
-      validateAsset(
-        gates[key],
-        `${key} security gate asset`,
-        context,
-        `candidate-v1--${context.releaseId}--${path}`,
-        genericAssetFields,
-        MAXIMUM_SECURITY_GATE_BYTES,
-      ),
-    );
+  const identities = securityGates.map(([key, path]) =>
+    validateAsset(
+      gates[key],
+      `${key} security gate asset`,
+      context,
+      `candidate-v1--${context.releaseId}--${path}`,
+      genericAssetFields,
+      MAXIMUM_SECURITY_GATE_BYTES,
+    ),
+  );
   for (const [groupName, prefix, suffix] of [
     ["sboms", "security-sbom-", ".cdx.json"],
     ["vulnerabilityReports", "security-trivy-", ".json"],
@@ -126,10 +117,10 @@ function validateSecurityAssets(value, context, dual) {
     const group = assertObject(security[groupName], `security ${groupName} release assets`);
     assertExactKeys(
       group,
-      securityScopes.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
+      securityScopes.map(([key]) => key),
       `security ${groupName} release assets`,
     );
-    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
+    for (const [key, scope] of securityScopes) {
       identities.push(
         validateAsset(
           group[key],
@@ -144,7 +135,6 @@ function validateSecurityAssets(value, context, dual) {
   }
   return identities;
 }
-
 function validateProcessingApiOrigin(value, environment) {
   const url = assertExactHttpsOrigin(value, `${environment} processing API origin`);
   const hostnameMatches =
@@ -158,7 +148,6 @@ function validateProcessingApiOrigin(value, environment) {
   }
   return value;
 }
-
 function validateWebAsset(value, environment, context) {
   const expectedName = `candidate-v1--${context.releaseId}--web-${environment}.tar`;
   const result = validateAsset(
@@ -176,10 +165,10 @@ function validateWebAsset(value, environment, context) {
   validateProcessingApiOrigin(result.asset.processingApiOrigin, environment);
   return result;
 }
-
 export function validateProcessingReleaseAssets(value) {
   const manifest = assertObject(value, "processing release asset manifest");
-  const dual = manifest.schema === "hereisit-processing-release-assets@2" && manifest.version === 2;
+  const current =
+    manifest.schema === "hereisit-processing-release-assets@3" && manifest.version === 3;
   const legacy =
     manifest.schema === "hereisit-processing-release-assets@1" && manifest.version === 1;
   assertExactKeys(
@@ -193,7 +182,7 @@ export function validateProcessingReleaseAssets(value) {
       "candidate",
       "report",
       "engine",
-      ...(dual ? ["pdfEngine", "pdfQuality"] : []),
+
       "worker",
       "releaseInputs",
       "costModel",
@@ -204,7 +193,7 @@ export function validateProcessingReleaseAssets(value) {
     ],
     "processing release asset manifest",
   );
-  if (!dual && !legacy) {
+  if (!current && !legacy) {
     throw new TypeError("processing release asset schema is invalid");
   }
   const apiOrigin = assertExactHttpsOrigin(manifest.apiOrigin, "GitHub API origin").origin;
@@ -212,7 +201,6 @@ export function validateProcessingReleaseAssets(value) {
   if (manifest.repository !== REPOSITORY) {
     throw new TypeError("processing release repository does not match");
   }
-
   const release = assertObject(manifest.release, "processing release");
   assertExactKeys(release, ["id", "tag", "targetSha"], "processing release");
   assertPositiveSafeInteger(release.id, "processing release ID");
@@ -225,7 +213,6 @@ export function validateProcessingReleaseAssets(value) {
     throw new TypeError("processing release target SHA is invalid");
   }
   const context = { apiOrigin, repository: manifest.repository, releaseId };
-
   const prefix = `candidate-v1--${releaseId}--`;
   const candidate = validateAsset(
     manifest.candidate,
@@ -253,48 +240,6 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `${prefix}image-engine-linux-amd64.docker.tar`,
   );
-  const pdfQualityIdentities = [];
-  let pdfEngineOci;
-  let pdfEngineDocker;
-  if (dual) {
-    const pdfEngine = assertObject(manifest.pdfEngine, "PDF engine release assets");
-    assertExactKeys(pdfEngine, ["oci", "docker"], "PDF engine release assets");
-    pdfEngineOci = validateAsset(
-      pdfEngine.oci,
-      "PDF engine OCI asset",
-      context,
-      `${prefix}pdf-engine-linux-amd64.oci.tar`,
-    );
-    pdfEngineDocker = validateAsset(
-      pdfEngine.docker,
-      "PDF engine Docker asset",
-      context,
-      `${prefix}pdf-engine-linux-amd64.docker.tar`,
-    );
-    const pdfQuality = assertObject(manifest.pdfQuality, "PDF quality release assets");
-    assertExactKeys(
-      pdfQuality,
-      ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
-      "PDF quality release assets",
-    );
-    for (const [key, path, maximumBytes] of [
-      ["benchmark", "pdf-engine-benchmark.json", MAXIMUM_SECURITY_EVIDENCE_BYTES],
-      ["benchmarkSchema", "pdf-engine-benchmark.schema.json", MAXIMUM_SECURITY_GATE_BYTES],
-      ["releaseGate", "pdf-engine-release-gate.json", MAXIMUM_SECURITY_GATE_BYTES],
-      ["releaseGateSchema", "pdf-engine-release-gate.schema.json", MAXIMUM_SECURITY_GATE_BYTES],
-    ]) {
-      pdfQualityIdentities.push(
-        validateAsset(
-          pdfQuality[key],
-          `PDF ${key} asset`,
-          context,
-          `${prefix}${path}`,
-          genericAssetFields,
-          maximumBytes,
-        ),
-      );
-    }
-  }
   const worker = validateAsset(
     manifest.worker,
     "Worker module asset",
@@ -320,7 +265,6 @@ export function validateProcessingReleaseAssets(value) {
   if (web.staging.processingApiOrigin === web.production.processingApiOrigin) {
     throw new TypeError("staging and production processing API origins must be distinct");
   }
-
   const evidence = assertObject(manifest.evidence, "release evidence assets");
   assertExactKeys(evidence, ["bundle", "signature"], "release evidence assets");
   const evidenceBundle = validateAsset(
@@ -335,15 +279,13 @@ export function validateProcessingReleaseAssets(value) {
     context,
     `evidence-v1--${releaseId}--processing-evidence.sig`,
   );
-  const security = validateSecurityAssets(manifest.security, context, dual);
-
+  const security = validateSecurityAssets(manifest.security, context);
   const identities = [
     candidate,
     report,
     engineOci,
     engineDocker,
-    ...(dual ? [pdfEngineOci, pdfEngineDocker] : []),
-    ...pdfQualityIdentities,
+
     worker,
     releaseInputs,
     costModel,
@@ -359,7 +301,6 @@ export function validateProcessingReleaseAssets(value) {
   if (new Set(identities.map(({ asset }) => asset.name)).size !== identities.length) {
     throw new TypeError("processing release asset names are duplicated");
   }
-
   assertSha256(manifest.verificationSha256, "release asset verification SHA-256");
   const { verificationSha256: _verificationSha256, ...payload } = manifest;
   if (sha256Canonical(payload) !== manifest.verificationSha256) {
@@ -367,7 +308,6 @@ export function validateProcessingReleaseAssets(value) {
   }
   return { manifest, releaseId };
 }
-
 async function readBoundedRegularFile(path, maximumBytes, label) {
   let handle;
   try {
@@ -389,9 +329,7 @@ async function readBoundedRegularFile(path, maximumBytes, label) {
     await handle.close();
   }
 }
-
 async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
-  const dual = manifest.schema === "hereisit-processing-release-assets@2";
   if (typeof candidateRoot !== "string" || candidateRoot.length === 0) {
     throw new TypeError("candidate root is required");
   }
@@ -438,7 +376,6 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
       throw new TypeError(`candidate ${label} asset does not match the release asset manifest`);
     }
   };
-
   const report = releaseAssets.report;
   const engineOci = releaseAssets.engine.oci;
   const engineDocker = releaseAssets.engine.docker;
@@ -450,21 +387,9 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   const evidenceBundle = releaseAssets.evidence.bundle;
   const evidenceSignature = releaseAssets.evidence.signature;
   const candidateSecurity = releaseAssets.security;
-
   assertAssetMatch(report, manifest.report, "release report");
   assertAssetMatch(engineOci, manifest.engine.oci, "engine OCI");
   assertAssetMatch(engineDocker, manifest.engine.docker, "engine Docker");
-  if (dual) {
-    assertAssetMatch(releaseAssets.pdfEngine.oci, manifest.pdfEngine.oci, "PDF engine OCI");
-    assertAssetMatch(
-      releaseAssets.pdfEngine.docker,
-      manifest.pdfEngine.docker,
-      "PDF engine Docker",
-    );
-    for (const key of ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"]) {
-      assertAssetMatch(releaseAssets.pdfQuality[key], manifest.pdfQuality[key], `PDF ${key}`);
-    }
-  }
   assertAssetMatch(worker, manifest.worker, "Worker");
   assertAssetMatch(releaseInputs, manifest.releaseInputs, "processing release inputs");
   assertAssetMatch(costModel, manifest.costModel, "live cost model");
@@ -480,11 +405,11 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
   }
   assertAssetMatch(evidenceBundle, manifest.evidence.bundle, "release evidence bundle");
   assertAssetMatch(evidenceSignature, manifest.evidence.signature, "release evidence signature");
-  for (const [key] of securityGates.filter(([key]) => dual || key !== "pdfEngine")) {
+  for (const [key] of securityGates) {
     assertAssetMatch(candidateSecurity.gates[key], manifest.security.gates[key], `${key} gate`);
   }
   for (const groupName of ["sboms", "vulnerabilityReports"]) {
-    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
+    for (const [key, scope] of securityScopes) {
       assertAssetMatch(
         candidateSecurity[groupName][key],
         manifest.security[groupName][key],
@@ -493,7 +418,6 @@ async function verifyCandidateBinding(manifest, releaseId, candidateRoot) {
     }
   }
 }
-
 const allowedFields = new Map([
   ["release.id", (manifest) => manifest.release.id],
   ["release.tag", (manifest) => manifest.release.tag],
@@ -508,18 +432,6 @@ const allowedFields = new Map([
     genericAssetFields.map((field) => [
       `engine.${format}.${field}`,
       (manifest) => manifest.engine[format][field],
-    ]),
-  ),
-  ...["oci", "docker"].flatMap((format) =>
-    genericAssetFields.map((field) => [
-      `pdfEngine.${format}.${field}`,
-      (manifest) => manifest.pdfEngine[format][field],
-    ]),
-  ),
-  ...["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"].flatMap((key) =>
-    genericAssetFields.map((field) => [
-      `pdfQuality.${key}.${field}`,
-      (manifest) => manifest.pdfQuality[key][field],
     ]),
   ),
   ...["staging", "production"].flatMap((environment) =>
@@ -549,7 +461,6 @@ const allowedFields = new Map([
     ),
   ),
 ]);
-
 export async function readProcessingReleaseAssetField(value, candidateRoot, field) {
   if (typeof field !== "string" || !allowedFields.has(field)) {
     throw new TypeError("processing release asset field is not allowlisted");
@@ -562,7 +473,6 @@ export async function readProcessingReleaseAssetField(value, candidateRoot, fiel
   }
   return output;
 }
-
 export async function readProcessingReleaseAssetsFile({ manifestPath, candidateRoot, field }) {
   const bytes = await readBoundedRegularFile(
     resolve(manifestPath),
@@ -577,7 +487,6 @@ export async function readProcessingReleaseAssetsFile({ manifestPath, candidateR
   }
   return readProcessingReleaseAssetField(value, candidateRoot, field);
 }
-
 export async function runProcessingReleaseAssetsReader(argv, output = process.stdout) {
   const args = parseCliArguments(argv);
   assertExactKeys(args, ["manifest", "candidate-root", "field"], "release asset reader arguments");
@@ -588,7 +497,6 @@ export async function runProcessingReleaseAssetsReader(argv, output = process.st
   });
   output.write(`${String(value)}\n`);
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

@@ -4,7 +4,6 @@ import type {
   BeginUploadResult,
   CommitStoredInputResult,
   JobRepository,
-  PdfBeginUploadResult,
   PreEngineFailureInput,
   SettlePreEngineFailureResult,
 } from "../d1-job-repository";
@@ -24,7 +23,7 @@ const CANONICAL_INPUT_KEY_PATTERN = new RegExp(
 );
 const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 
-type UploadJob = Extract<BeginUploadResult | PdfBeginUploadResult, { kind: "ready" }>;
+type UploadJob = Extract<BeginUploadResult, { kind: "ready" }>;
 type UploadDiagnosticStage = ArtifactUploadStage | "begin" | "commit" | "store";
 
 export interface UploadRouteRepository
@@ -35,10 +34,7 @@ export interface UploadRouteRepository
     | "settlePreEngineFailure"
     | "openInvariantCircuit"
   > {
-  beginUpload(input: {
-    jobId: string;
-    now: number;
-  }): Promise<BeginUploadResult | PdfBeginUploadResult>;
+  beginUpload(input: { jobId: string; now: number }): Promise<BeginUploadResult>;
 }
 
 export interface UploadRouteRuntime {
@@ -57,7 +53,6 @@ export interface UploadRouteRuntime {
     readonly mime: ArtifactMime;
     readonly uploadVersion: number;
     readonly deadlineAt: number;
-    readonly expectedSha256?: string;
   }) => Promise<StoreExactInputArtifactResult>;
   readonly deleteInput: (authorization: ArtifactDeletionAuthorization) => Promise<void>;
   readonly dispatchOutbox: (jobId: string, now: number) => Promise<boolean>;
@@ -160,9 +155,7 @@ function exactUploadHeadersMatch(
   return (
     request.headers.get("content-type") === job.declaredMime &&
     parseContentLength(request.headers.get("content-length")) === job.declaredBytes &&
-    (job.declaredMime === "application/pdf"
-      ? digest !== null && /^sha-256=[A-Za-z0-9+/]{43}=$/.test(digest)
-      : digest === null)
+    digest === null
   );
 }
 
@@ -249,10 +242,7 @@ function artifactFailureStage(error: unknown): ArtifactUploadStage | undefined {
     error !== null &&
     typeof error === "object" &&
     "stage" in error &&
-    (error.stage === "digest" ||
-      error.stage === "pending-put" ||
-      error.stage === "pending-read" ||
-      error.stage === "canonical-head")
+    error.stage === "canonical-head"
   ) {
     return error.stage;
   }
@@ -424,7 +414,7 @@ export async function routeUploadRequest(
     return errorResponse(401, "INVALID_REQUEST", "작업 인증 정보가 올바르지 않습니다.", false);
   }
 
-  let begin: BeginUploadResult | PdfBeginUploadResult;
+  let begin: BeginUploadResult;
   try {
     begin = await runtime.repository.beginUpload({ jobId, now: startedAt });
   } catch {
@@ -466,7 +456,6 @@ export async function routeUploadRequest(
 
   let stored: StoreExactInputArtifactResult;
   try {
-    const expectedSha256 = request.headers.get("digest");
     stored = await runtime.storeInput({
       source: request.body,
       key: job.inputKey,
@@ -474,7 +463,6 @@ export async function routeUploadRequest(
       mime: job.declaredMime,
       uploadVersion: job.uploadVersion,
       deadlineAt: job.uploadExpiresAt,
-      ...(expectedSha256 === null ? {} : { expectedSha256 }),
     });
   } catch (error) {
     const code = classifyArtifactFailure(error);

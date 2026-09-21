@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, opendir, realpath, writeFile } from "node:fs/promises";
@@ -17,7 +16,6 @@ import {
 } from "./image-lab-common.mjs";
 import { nativeCpe } from "./native-advisory-identities.mjs";
 import { validateSourceLock } from "./verify-image-engine-licenses.mjs";
-import { validatePdfSourceLock } from "./verify-pdf-engine-licenses.mjs";
 
 const INVENTORY_MAXIMUM_BYTES = 2 * 1024 * 1024;
 const PACKAGE_JSON_MAXIMUM_BYTES = 128 * 1024;
@@ -26,7 +24,7 @@ const PACKAGE_DIRECTORY_MAXIMUM_ENTRIES = 4096;
 const PACKAGE_LICENSE_MAXIMUM_FILES = 64;
 const NOTICES_MAXIMUM_BYTES = 4 * 1024 * 1024;
 const SBOM_MAXIMUM_BYTES = 4 * 1024 * 1024;
-const SCOPES = ["engine", "pdf-engine", "web-staging", "web-production", "worker", "lockfile"];
+const SCOPES = ["engine", "web-staging", "web-production", "worker", "lockfile"];
 const APPLICATION_SCOPES = new Set(["web-staging", "web-production", "worker"]);
 const MUST_NOT_SHIP = ["@img/sharp-libvips-linux-x64@1.3.2", "@img/sharp-libvips-linux-x64@1.3.3"];
 const PNPM_VERSION = "11.11.0";
@@ -50,10 +48,6 @@ const EXPECTED_FALLBACKS = {
     sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
   },
   "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
-  "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
-    kind: "package",
-    package: "@napi-rs/canvas@1.0.2",
-  },
   "@next/env@16.3.5": { kind: "package", package: "next@16.3.5" },
   "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "next@16.3.5" },
   "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
@@ -70,11 +64,9 @@ const PNPM_REQUEST = Object.freeze({
     "--filter",
     "@hereisit/api-worker...",
     "--filter",
-    "@hereisit/pdf-engine...",
   ],
   maxBuffer: INVENTORY_MAXIMUM_BYTES,
 });
-
 function defaultListProductionLicenses({ command, args, cwd, maxBuffer }) {
   return new Promise((fulfill, reject) => {
     execFile(command, args, { cwd, maxBuffer, encoding: "utf8", shell: false }, (error, stdout) => {
@@ -83,14 +75,12 @@ function defaultListProductionLicenses({ command, args, cwd, maxBuffer }) {
     });
   });
 }
-
 function ensureInside(path, root, label) {
   const rest = relative(root, path);
   if (rest === "" || rest === ".." || rest.startsWith(`..${sep}`) || isAbsolute(rest)) {
     throw new TypeError(`${label} escapes its allowed root`);
   }
 }
-
 function decodeUtf8(bytes, label) {
   let text;
   try {
@@ -106,7 +96,6 @@ function decodeUtf8(bytes, label) {
   }
   return text.replace(/[ \t]+$/gmu, "");
 }
-
 function parseJson(bytes, label) {
   try {
     return JSON.parse(decodeUtf8(bytes, label));
@@ -115,25 +104,21 @@ function parseJson(bytes, label) {
     throw new TypeError(`${label} must be valid JSON`);
   }
 }
-
 function nonEmptyString(value, label) {
   if (typeof value !== "string" || value === "" || value !== value.trim()) {
     throw new TypeError(`${label} must be a non-empty canonical string`);
   }
   return value;
 }
-
 function stringArray(value, label) {
   if (!Array.isArray(value) || value.length === 0) throw new TypeError(`${label} must be an array`);
   return value.map((entry, index) => nonEmptyString(entry, `${label}[${index}]`));
 }
-
 function sameArray(actual, expected) {
   return (
     actual.length === expected.length && actual.every((entry, index) => entry === expected[index])
   );
 }
-
 async function loadPolicy(path) {
   const bytes = await readBoundedRegularFile(path, 256 * 1024, "application license policy");
   const policy = assertObject(
@@ -188,7 +173,6 @@ async function loadPolicy(path) {
   }
   return { policy, bytes, mustNotShip: new Set(mustNotShip), fallbacks };
 }
-
 async function withPinnedPackageRoot(root, task) {
   let handle;
   try {
@@ -221,7 +205,6 @@ async function withPinnedPackageRoot(root, task) {
     await handle.close();
   }
 }
-
 async function assertPinnedPackageIdentity(pinnedRoot, expected) {
   const packageBytes = await readBoundedRegularFile(
     join(pinnedRoot, "package.json"),
@@ -240,7 +223,6 @@ async function assertPinnedPackageIdentity(pinnedRoot, expected) {
     throw new TypeError("inventory package manifest identity does not agree with pnpm");
   }
 }
-
 async function assertRepository(root) {
   const resolved = resolve(root);
   const canonical = await realpath(resolved).catch(() => {
@@ -262,7 +244,6 @@ async function assertRepository(root) {
   }
   return { root: canonical, nodeModules };
 }
-
 function validateInventoryRecord(recordValue, groupLicense, label) {
   const record = assertObject(recordValue, label);
   const allowedFields = new Set([
@@ -293,7 +274,6 @@ function validateInventoryRecord(recordValue, groupLicense, label) {
   }
   return { name, license, versions, paths };
 }
-
 async function collectInventory(repository, rawInventory) {
   if (
     typeof rawInventory !== "string" ||
@@ -360,7 +340,6 @@ async function collectInventory(repository, rawInventory) {
   );
   return packages;
 }
-
 async function directLicenseTexts(packageValue, budget) {
   return withPinnedPackageRoot(packageValue.root, async (pinnedRoot) => {
     await assertPinnedPackageIdentity(pinnedRoot, packageValue);
@@ -397,7 +376,6 @@ async function directLicenseTexts(packageValue, budget) {
     return texts;
   });
 }
-
 async function buildNotices(repository, policyState, packages) {
   const budget = { remainingBytes: NOTICES_MAXIMUM_BYTES };
   const packageMap = new Map(packages.map((entry) => [entry.identity, entry]));
@@ -406,7 +384,6 @@ async function buildNotices(repository, policyState, packages) {
     direct.set(packageValue.identity, await directLicenseTexts(packageValue, budget));
   const usedFallbacks = new Set();
   const checkedInHashes = new Set();
-
   async function resolveTexts(identity, stack = new Set()) {
     if (stack.has(identity)) throw new TypeError("license fallback cycle detected");
     const packageValue = packageMap.get(identity);
@@ -460,7 +437,6 @@ async function buildNotices(repository, policyState, packages) {
     budget.remainingBytes -= bytes.byteLength;
     return [{ label: fallback.path, text: decodeUtf8(bytes, "fallback README") }];
   }
-
   const thirdParty = packages.filter((entry) => !entry.name.startsWith("@hereisit/"));
   const sections = [];
   const header =
@@ -499,7 +475,6 @@ async function buildNotices(repository, policyState, packages) {
     checkedInHashes: [...checkedInHashes].sort(),
   };
 }
-
 async function writeTextIfAbsentOrEqual(path, text) {
   await mkdir(resolve(path, ".."), { recursive: true });
   let metadata;
@@ -523,7 +498,6 @@ async function writeTextIfAbsentOrEqual(path, text) {
       throw new TypeError("refusing to overwrite different notices");
   }
 }
-
 function verifySyftTool(metadata) {
   const tools = assertObject(metadata.tools, "SBOM tools");
   assertExactKeys(tools, ["components"], "SBOM tools");
@@ -541,14 +515,11 @@ function verifySyftTool(metadata) {
     throw new TypeError("SBOM Syft tool identity drifted");
   }
 }
-
 export function verifyNativeSbomCoverage(scope, sbom, lock) {
   let sources;
   if (scope === "engine") {
     validateSourceLock(lock);
     sources = lock.sources.filter((entry) => entry.production);
-  } else if (scope === "pdf-engine") {
-    sources = [validatePdfSourceLock(lock)];
   } else throw new TypeError("native SBOM scope is invalid");
   for (const source of sources) {
     const cpe = nativeCpe(source.name, source.version);
@@ -578,7 +549,6 @@ export function verifyNativeSbomCoverage(scope, sbom, lock) {
       throw new TypeError(`native SBOM coverage is missing or miswired: ${source.name}`);
   }
 }
-
 async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   assertExactKeys(descriptor, ["artifactSha256", "path"], `${scope} SBOM descriptor`);
   const artifactSha256 = assertSha256(descriptor.artifactSha256, `${scope} artifact SHA-256`);
@@ -600,7 +570,7 @@ async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   if (source.name !== sourceName && !bound)
     throw new TypeError(`${scope} SBOM source identity is invalid`);
   const components = sbom.components === undefined ? [] : sbom.components;
-  if (!Array.isArray(components) || components.length > 100_000) {
+  if (!Array.isArray(components) || components.length > 100000) {
     throw new TypeError(`${scope} SBOM components are invalid`);
   }
   const identities = new Set();
@@ -622,8 +592,8 @@ async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
         throw new TypeError(`${scope} SBOM contains a must not ship component`);
     }
   }
-  if (scope === "engine" || scope === "pdf-engine") {
-    const app = scope === "engine" ? "image-engine" : "pdf-engine";
+  if (scope === "engine") {
+    const app = "image-engine";
     const lock = parseJson(
       await readBoundedRegularFile(
         join(repositoryRoot, "apps", app, "native/sources.lock.json"),
@@ -636,7 +606,6 @@ async function verifySbom(scope, descriptor, policyState, repositoryRoot) {
   }
   return { artifactSha256, sbomSha256: sha256Bytes(bytes), componentCount: components.length };
 }
-
 function validateOptions(options) {
   const value = assertObject(options, "application supply-chain options");
   const common = ["lockfilePath", "mode", "noticesPath", "policyPath", "repositoryRoot"];
@@ -651,7 +620,6 @@ function validateOptions(options) {
   if (value.mode === "verify") nonEmptyString(value.gatePath, "application supply-chain gatePath");
   return value;
 }
-
 export async function runApplicationSupplyChain(options, adapters = {}) {
   const value = validateOptions(options);
   const repository = await assertRepository(value.repositoryRoot);
@@ -673,7 +641,6 @@ export async function runApplicationSupplyChain(options, adapters = {}) {
     await writeTextIfAbsentOrEqual(value.noticesPath, notices.text);
     return { noticeSha256: notices.noticeSha256, packageCount: notices.packageCount };
   }
-
   const noticesBytes = await readBoundedRegularFile(
     value.noticesPath,
     NOTICES_MAXIMUM_BYTES,
@@ -707,7 +674,6 @@ export async function runApplicationSupplyChain(options, adapters = {}) {
   await writeCanonicalJsonAtomic(value.gatePath, gate, { refuseOverwrite: true });
   return gate;
 }
-
 function cliOptions(argv) {
   const values = parseCliArguments(argv);
   const mode = values.mode;
@@ -742,7 +708,6 @@ function cliOptions(argv) {
   }
   return options;
 }
-
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = await runApplicationSupplyChain(cliOptions(process.argv.slice(2)));

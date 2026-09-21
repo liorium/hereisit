@@ -1,5 +1,4 @@
 import type { ImageOptimizeResultDescriptor } from "@hereisit/tool-contracts/image-optimize";
-import type { PdfOptimizeResultDescriptor } from "@hereisit/tool-contracts/pdf-optimize";
 import { describe, expect, it, vi } from "vitest";
 import { createClientJobCredentials } from "./api-client";
 import { createRemoteDownloadHandle } from "./download";
@@ -18,7 +17,7 @@ const descriptor: Extract<ImageOptimizeResultDescriptor, { kind: "download" }> =
   expiresAt: "2026-07-17T00:00:00.000Z",
 };
 
-const pdfDescriptor: Extract<PdfOptimizeResultDescriptor, { kind: "download" }> = {
+const pdfDescriptor = {
   kind: "download",
   mime: "application/pdf",
   sourceByteLength: 50 * 1024 * 1024,
@@ -40,7 +39,7 @@ function response() {
 }
 
 describe("remote result download", () => {
-  it("accepts a bounded PDF descriptor without weakening the image result ceiling", () => {
+  it("rejects PDF descriptors and oversized image results", () => {
     expect(() =>
       createRemoteDownloadHandle({
         apiOrigin: "https://processing.example",
@@ -48,7 +47,7 @@ describe("remote result download", () => {
         jobToken: createClientJobCredentials().jobToken,
         descriptor: pdfDescriptor,
       } as never),
-    ).not.toThrow();
+    ).toThrow();
     expect(() =>
       createRemoteDownloadHandle({
         apiOrigin: "https://processing.example",

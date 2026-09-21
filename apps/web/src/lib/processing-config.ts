@@ -4,14 +4,12 @@ export interface ProcessingClientConfig {
 
 const SESSION_STORAGE_KEY = "hereisit.processing-session.v1";
 const IMAGE_COMPRESSION_LOCATION_STORAGE_KEY = "hereisit.image-compression-location.v1";
-const PDF_COMPRESSION_LOCATION_STORAGE_KEY = "hereisit.pdf-compression-location.v1";
 const OFFICIAL_PROCESSING_API_ORIGIN = "https://api.hereisit.app";
 const OFFICIAL_PAGE_ORIGINS = new Set(["https://hereisit.app", "https://hereisit.pages.dev"]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 let memorySessionId: string | null = null;
 
 export type ImageCompressionLocation = "server" | "local";
-export type PdfCompressionLocation = ImageCompressionLocation;
 
 function normalizePublicOrigin(value: string | undefined): string | null {
   if (value === undefined || value.trim() === "") return null;
@@ -118,15 +116,4 @@ export function writeImageCompressionLocation(
   storage?: Storage,
 ): void {
   writeCompressionLocation(IMAGE_COMPRESSION_LOCATION_STORAGE_KEY, value, storage);
-}
-
-export function readPdfCompressionLocation(storage?: Storage): PdfCompressionLocation {
-  return readCompressionLocation(PDF_COMPRESSION_LOCATION_STORAGE_KEY, storage);
-}
-
-export function writePdfCompressionLocation(
-  value: PdfCompressionLocation,
-  storage?: Storage,
-): void {
-  writeCompressionLocation(PDF_COMPRESSION_LOCATION_STORAGE_KEY, value, storage);
 }

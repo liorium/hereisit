@@ -3,11 +3,6 @@ import {
   type ImageOptimizeResultDescriptor,
   imageOptimizeResultDescriptorSchema,
 } from "@hereisit/tool-contracts/image-optimize";
-import {
-  PDF_OPTIMIZE_MAX_FILE_BYTES,
-  type PdfOptimizeResultDescriptor,
-  pdfOptimizeResultDescriptorSchema,
-} from "@hereisit/tool-contracts/pdf-optimize";
 import { toolJobErrorResponseSchema } from "@hereisit/tool-contracts/tool-job";
 import {
   acknowledgeRemoteDownload,
@@ -19,9 +14,7 @@ import {
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export type RemoteDownloadDescriptor =
-  | Extract<ImageOptimizeResultDescriptor, { kind: "download" }>
-  | Extract<PdfOptimizeResultDescriptor, { kind: "download" }>;
+export type RemoteDownloadDescriptor = Extract<ImageOptimizeResultDescriptor, { kind: "download" }>;
 
 export interface RemoteArchivePart {
   readonly byteLength: number;
@@ -68,30 +61,16 @@ interface ClaimedResponse {
   readonly lease: string;
 }
 
-export interface RemotePdfResult {
-  readonly blob: Blob;
-  readonly digest: string;
-  acknowledge(): Promise<void>;
-}
-
 function validateHandleInput(input: CreateRemoteDownloadHandleInput): void {
   canonicalApiOrigin(input.apiOrigin);
   if (!JOB_ID_PATTERN.test(input.jobId) || !TOKEN_PATTERN.test(input.jobToken)) {
     throw new RemoteJobError("INVALID_REQUEST", "다운로드 작업 정보가 올바르지 않습니다.", false);
   }
-  const descriptorSchema =
-    input.descriptor.mime === "application/pdf"
-      ? pdfOptimizeResultDescriptorSchema
-      : imageOptimizeResultDescriptorSchema;
-  const maximumResultBytes =
-    input.descriptor.mime === "application/pdf"
-      ? PDF_OPTIMIZE_MAX_FILE_BYTES
-      : IMAGE_OPTIMIZE_MAX_FILE_BYTES;
   if (
-    !descriptorSchema.safeParse(input.descriptor).success ||
+    !imageOptimizeResultDescriptorSchema.safeParse(input.descriptor).success ||
     !Number.isSafeInteger(input.descriptor.byteLength) ||
     input.descriptor.byteLength <= 0 ||
-    input.descriptor.byteLength > maximumResultBytes
+    input.descriptor.byteLength > IMAGE_OPTIMIZE_MAX_FILE_BYTES
   ) {
     throw new RemoteJobError(
       "INPUT_LIMIT_EXCEEDED",
@@ -183,60 +162,6 @@ async function acknowledge(
     ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
     ...(signal === undefined ? {} : { signal }),
   });
-}
-
-function encodeBase64(bytes: ArrayBuffer): string {
-  let binary = "";
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-export async function fetchPdfOptimizeResult(
-  input: CreateRemoteDownloadHandleInput & { readonly signal?: AbortSignal },
-): Promise<RemotePdfResult> {
-  if (input.descriptor.mime !== "application/pdf") {
-    throw new RemoteJobError("INVALID_REQUEST", "PDF 결과 정보가 올바르지 않습니다.", false);
-  }
-  validateHandleInput(input);
-  const claimed = await claimResult(input, input.signal);
-  let digest: string;
-  let blob: Blob;
-  try {
-    const header = claimed.response.headers.get("digest");
-    if (header === null || !/^sha-256=[A-Za-z0-9+/]{43}=$/.test(header)) {
-      await claimed.response.body?.cancel().catch(() => undefined);
-      throw new RemoteJobError("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true);
-    }
-    digest = header;
-    blob = await readExactBlob(
-      claimed.response,
-      input.descriptor.byteLength,
-      "application/pdf",
-      undefined,
-    );
-    const actual = `sha-256=${encodeBase64(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))}`;
-    if (actual !== digest) {
-      throw new RemoteJobError("VERIFICATION_FAILED", "PDF 처리 결과를 확인할 수 없습니다.", true);
-    }
-  } catch (error) {
-    await bestEffortDelete(input);
-    throw error;
-  }
-  let acknowledgement: Promise<void> | undefined;
-  return {
-    blob,
-    digest,
-    acknowledge() {
-      if (acknowledgement === undefined) {
-        const current = acknowledge(input, claimed.lease, input.signal);
-        acknowledgement = current;
-        void current.catch(() => {
-          if (acknowledgement === current) acknowledgement = undefined;
-        });
-      }
-      return acknowledgement;
-    },
-  };
 }
 
 function defaultClickAnchor(input: { readonly href: string; readonly download: string }): void {

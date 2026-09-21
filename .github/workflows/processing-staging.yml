@@ -42,8 +42,6 @@ jobs:
       PRODUCT_ANALYTICS_DATASET_NAME: hereisit_product_usage_staging
       QUEUE_NAME: hereisit-image-jobs-staging
       DLQ_NAME: hereisit-image-jobs-dlq-staging
-      PDF_QUEUE_NAME: hereisit-pdf-jobs-staging
-      PDF_DLQ_NAME: hereisit-pdf-jobs-dlq-staging
       WRANGLER_CONFIG: .wrangler/generated/wrangler.staging.jsonc
       WORKER_MODULE: .artifacts/build/api-worker.mjs
       STAGING_API_ORIGIN: https://hereisit-processing-staging.liorium.workers.dev
@@ -133,8 +131,8 @@ jobs:
             --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
             --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
             --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
-            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
-            --pdf-dlq-name "$PDF_DLQ_NAME" --output .artifacts/runtime/pre-mutation-state.json
+            --dlq-name "$DLQ_NAME" \
+            --output .artifacts/runtime/pre-mutation-state.json
           node -e 'const s=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));if(!Array.isArray(s.absentResources))process.exit(1)' .artifacts/runtime/pre-mutation-state.json
           echo "armed=true" >> "$GITHUB_OUTPUT"
       - name: Bind CI-built engine, Worker, web, benchmark, cost, SBOM, Trivy, and license assets
@@ -144,11 +142,8 @@ jobs:
           cp .artifacts/authority/api-worker.mjs "$WORKER_MODULE"
           cp .artifacts/authority/live-cost-model.json .artifacts/runtime/live-cost-model.json
           cp .artifacts/authority/image-engine-linux-amd64.docker.tar .artifacts/build/image-engine-linux-amd64.docker.tar
-          cp .artifacts/authority/pdf-engine-linux-amd64.docker.tar .artifacts/build/pdf-engine-linux-amd64.docker.tar
           docker load --input .artifacts/build/image-engine-linux-amd64.docker.tar
-          docker load --input .artifacts/build/pdf-engine-linux-amd64.docker.tar
           LOCAL_IMAGE_CONFIG_DIGEST="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field engine.oci.configDigest)"
-          LOCAL_PDF_CONFIG_DIGEST="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field pdfEngine.oci.configDigest)"
           LIVE_COST_MODEL_SHA256="$(sha256sum .artifacts/runtime/live-cost-model.json | cut -d' ' -f1)"
           PROVIDER_USAGE_SCHEMA_SHA256="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/authority/processing-candidate.json --field providerUsage.schemaSha256)"
           rm -rf apps/web/out
@@ -159,7 +154,6 @@ jobs:
             --output apps/web/out
           {
             echo "LOCAL_IMAGE_CONFIG_DIGEST=$LOCAL_IMAGE_CONFIG_DIGEST"
-            echo "LOCAL_PDF_CONFIG_DIGEST=$LOCAL_PDF_CONFIG_DIGEST"
             echo "LIVE_COST_MODEL_SHA256=$LIVE_COST_MODEL_SHA256"
             echo "PROVIDER_USAGE_SCHEMA_SHA256=$PROVIDER_USAGE_SCHEMA_SHA256"
           } >> "$GITHUB_ENV"
@@ -196,25 +190,6 @@ jobs:
           rm -f .artifacts/runtime/cloudflare-container-manifest.stderr
           echo "ENGINE_IMAGE=$(cat .artifacts/deployment/cloudflare-image-digest.txt)" >> "$GITHUB_ENV"
 
-          PDF_CONFIG_HEX="${LOCAL_PDF_CONFIG_DIGEST#sha256:}"
-          [[ "$PDF_CONFIG_HEX" =~ ^[0-9a-f]{64}$ ]]
-          PDF_REGISTRY_IMAGE_TAG="registry.cloudflare.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-pdf-engine:$EXPECTED_HEAD_SHA-$PDF_CONFIG_HEX"
-          docker tag "hereisit-pdf-engine:$EXPECTED_HEAD_SHA" "$PDF_REGISTRY_IMAGE_TAG"
-          pnpm exec wrangler containers push "$PDF_REGISTRY_IMAGE_TAG"
-          for attempt in {1..30}; do
-            if docker manifest inspect -v "$PDF_REGISTRY_IMAGE_TAG" \
-                > .artifacts/runtime/cloudflare-pdf-container-manifest.json 2>/dev/null &&
-              node scripts/resolve-cloudflare-image-digest.mjs \
-                --manifest .artifacts/runtime/cloudflare-pdf-container-manifest.json \
-                --expected-config-digest "$LOCAL_PDF_CONFIG_DIGEST" \
-                --image-ref "$PDF_REGISTRY_IMAGE_TAG" --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-                --output .artifacts/deployment/cloudflare-pdf-image-digest.txt; then
-              break
-            fi
-            (( attempt < 30 )) || exit 1
-            sleep 5
-          done
-          echo "PDF_ENGINE_IMAGE=$(cat .artifacts/deployment/cloudflare-pdf-image-digest.txt)" >> "$GITHUB_ENV"
       - name: Provision resources and deploy the bootstrap Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -239,8 +214,6 @@ jobs:
             --database-name "$D1_NAME" \
             --queue-name "$QUEUE_NAME" \
             --dlq-name "$DLQ_NAME" \
-            --pdf-queue-name "$PDF_QUEUE_NAME" \
-            --pdf-dlq-name "$PDF_DLQ_NAME" \
             --output .artifacts/runtime/resources-staging.json
           STAGING_D1_DATABASE_ID="$(node scripts/read-processing-provision-manifest.mjs \
             --file .artifacts/runtime/resources-staging.json --field d1.databaseId)"
@@ -262,13 +235,9 @@ jobs:
               --cost-accounting-mode "$1" \
               --logpush-job-id "$STAGING_LOGPUSH_JOB_ID" \
               --container-application-id "$2" \
-              --pdf-container-application-id "$3" \
               --queue-name "$QUEUE_NAME" \
               --dlq-name "$DLQ_NAME" \
               --engine-image "$ENGINE_IMAGE" \
-              --pdf-queue-name "$PDF_QUEUE_NAME" \
-              --pdf-dlq-name "$PDF_DLQ_NAME" \
-              --pdf-engine-image "$PDF_ENGINE_IMAGE" \
               --account-daily-weighted-unit-limit 80000000000 \
               --anonymous-daily-weighted-unit-limit 8000000000 \
               --network-daily-weighted-unit-limit 24000000000 \
@@ -284,7 +253,6 @@ jobs:
               --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
               --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
               --release-report-sha256 "$REPORT_SHA256" \
-              --pdf-public-admission-json "$(node -e 'process.stdout.write(JSON.stringify({costPassed:false,deletionPassed:false,enabled:false,releaseReportSha256:process.argv[1],rollbackPassed:false,schema:"hereisit-pdf-public-admission@1",visualProfilesMeasured:0}))' "$REPORT_SHA256")" \
               --session-rate-limit-namespace-id 21001 \
               --network-rate-limit-namespace-id 21002 \
               --job-read-rate-limit-namespace-id 21003 \
@@ -297,7 +265,7 @@ jobs:
               --rollout-percent 0
           }
 
-          generate_config bootstrap 00000000-0000-4000-8000-000000000000 00000000-0000-4000-8000-000000000000
+          generate_config bootstrap 00000000-0000-4000-8000-000000000000
           pnpm exec wrangler deploy "$WORKER_MODULE" \
             --config "$WRANGLER_CONFIG" --no-bundle --containers-rollout none --dry-run
           pnpm exec wrangler d1 migrations apply "$D1_NAME" \
@@ -397,32 +365,7 @@ jobs:
             sleep 10
           done
           rm -f .artifacts/runtime/container-application-verify.stderr
-          STAGING_PDF_CONTAINER_APPLICATION_ID="$(node scripts/resolve-cloudflare-container-application.mjs \
-            --mode discover --input .artifacts/runtime/container-inventory.json --environment staging \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-            --container-class-name PdfEngineContainer)"
-          for attempt in {1..90}; do
-            if pnpm exec wrangler containers info "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
-                > .artifacts/runtime/pdf-container-application.json \
-                2> .artifacts/runtime/pdf-container-application-verify.stderr &&
-              node scripts/resolve-cloudflare-container-application.mjs \
-                --mode verify --input .artifacts/runtime/pdf-container-application.json \
-                --output .artifacts/runtime/pdf-container-provider-scope.json --environment staging \
-                --account-id "$CLOUDFLARE_ACCOUNT_ID" --worker-script-name "$WORKER_SCRIPT_NAME" \
-                --container-class-name PdfEngineContainer \
-                --application-id "$STAGING_PDF_CONTAINER_APPLICATION_ID" \
-                --engine-image "$PDF_ENGINE_IMAGE" --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
-                2>> .artifacts/runtime/pdf-container-application-verify.stderr; then
-              break
-            fi
-            if (( attempt == 90 )); then
-              cat .artifacts/runtime/pdf-container-application-verify.stderr >&2
-              exit 1
-            fi
-            sleep 10
-          done
-          rm -f .artifacts/runtime/pdf-container-application-verify.stderr
-          generate_config active "$STAGING_CONTAINER_APPLICATION_ID" "$STAGING_PDF_CONTAINER_APPLICATION_ID"
+          generate_config active "$STAGING_CONTAINER_APPLICATION_ID"
           node scripts/verify-worker-version-chain.mjs \
             --mode capture-bootstrap \
             --worker-module "$WORKER_MODULE" \
@@ -546,8 +489,8 @@ jobs:
         run: |
           node scripts/capture-processing-queue-states.mjs \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --image-primary "$QUEUE_NAME" \
-            --image-dlq "$DLQ_NAME" --pdf-primary "$PDF_QUEUE_NAME" \
-            --pdf-dlq "$PDF_DLQ_NAME" --output .artifacts/runtime/prior-queue-states.json
+            --image-dlq "$DLQ_NAME" \
+            --output .artifacts/runtime/prior-queue-states.json
           echo "attempted=true" >> "$GITHUB_OUTPUT"
       - name: Resume image delivery for the image canary
         env:
@@ -563,10 +506,6 @@ jobs:
             --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs \
             --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - name: Run authenticated image browser smoke
         env:
           STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
@@ -574,37 +513,6 @@ jobs:
           node scripts/smoke-image-compress-server.mjs \
             --page-origin "$STAGING_PAGES_ORIGIN" \
             --output .artifacts/deployment/smoke-result.json
-      - name: Isolate and resume PDF delivery for the PDF canary
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          pnpm exec wrangler queues pause-delivery "$QUEUE_NAME"
-          pnpm exec wrangler queues resume-delivery "$PDF_QUEUE_NAME"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
-      - name: Run authenticated PDF HTTP smoke
-        env:
-          STAGING_MAINTAINER_SESSION_ID: ${{ secrets.STAGING_MAINTAINER_SESSION_ID }}
-        run: |
-          node scripts/smoke-pdf-compress-server.mjs \
-            --page-origin "$STAGING_PAGES_ORIGIN" \
-            --output .artifacts/deployment/pdf-smoke-result.json
-      - name: Restore image delivery and pause PDF delivery
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          pnpm exec wrangler queues pause-delivery "$PDF_QUEUE_NAME"
-          pnpm exec wrangler queues resume-delivery "$QUEUE_NAME"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
-          node scripts/verify-queue-delivery-state.mjs \
-            --queue "$PDF_QUEUE_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: processing-staging-deployment-${{ github.event.workflow_run.head_sha }}
@@ -616,11 +524,9 @@ jobs:
             .artifacts/deployment/evidence-public.pem
             .artifacts/authority/**
             .artifacts/deployment/cloudflare-image-digest.txt
-            .artifacts/deployment/cloudflare-pdf-image-digest.txt
             .artifacts/deployment/worker-version.json
             .artifacts/deployment/gate-results.json
             .artifacts/deployment/smoke-result.json
-            .artifacts/deployment/pdf-smoke-result.json
           compression-level: 0
           if-no-files-found: error
           include-hidden-files: true
@@ -641,8 +547,8 @@ jobs:
             --database-name "$D1_NAME" --bucket-name "$BUCKET_NAME" \
             --usage-log-bucket-name "$USAGE_LOG_BUCKET_NAME" \
             --worker-script-name "$WORKER_SCRIPT_NAME" --queue-name "$QUEUE_NAME" \
-            --dlq-name "$DLQ_NAME" --pdf-queue-name "$PDF_QUEUE_NAME" \
-            --pdf-dlq-name "$PDF_DLQ_NAME" --input .artifacts/runtime/pre-mutation-state.json
+            --dlq-name "$DLQ_NAME" \
+            --input .artifacts/runtime/pre-mutation-state.json
       - name: Re-pause and verify both queues after any failed delivery attempt
         if: always() && steps.resume-attempt.outputs.attempted == 'true' && (failure() || cancelled())
         timeout-minutes: 5
@@ -660,6 +566,4 @@ jobs:
           }
           restore_queue image-primary "$QUEUE_NAME"
           restore_queue image-dlq "$DLQ_NAME"
-          restore_queue pdf-primary "$PDF_QUEUE_NAME"
-          restore_queue pdf-dlq "$PDF_DLQ_NAME"
           exit "$status"

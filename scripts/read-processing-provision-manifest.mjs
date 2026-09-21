@@ -13,20 +13,17 @@ const maximumBytes = 256 * 1024;
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const queueIdPattern = /^[0-9a-f]{32}$/;
-
 function exact(value, keys, label) {
   const object = assertObject(value, label);
   assertExactKeys(object, keys, label);
   return object;
 }
-
 function validateBucket(value, name, days, label) {
   const bucket = exact(value, ["name", "lifecycleDays", "private"], label);
   if (bucket.name !== name || bucket.lifecycleDays !== days || bucket.private !== true) {
     throw new TypeError(`${label} does not match its private retention contract`);
   }
 }
-
 function validateQueue(value, name, label) {
   const queue = exact(value, ["id", "name", "deliveryPaused"], label);
   if (
@@ -38,7 +35,6 @@ function validateQueue(value, name, label) {
     throw new TypeError(`${label} does not match its paused provisioning contract`);
   }
 }
-
 export function validateProcessingProvisionManifest(value) {
   const manifest = exact(
     value,
@@ -96,23 +92,15 @@ export function validateProcessingProvisionManifest(value) {
   const r2 = exact(manifest.r2, ["jobs", "usage"], "R2 provision");
   validateBucket(r2.jobs, `hereisit-processing-${suffix}`, 1, "job bucket provision");
   validateBucket(r2.usage, `hereisit-processing-usage-${suffix}`, 3, "usage bucket provision");
-  const queues = exact(manifest.queues, ["image", "pdf"], "Queue provision");
+  const queues = exact(manifest.queues, ["image"], "Queue provision");
   const imageQueues = exact(queues.image, ["primary", "dlq"], "image Queue provision");
-  const pdfQueues = exact(queues.pdf, ["primary", "dlq"], "PDF Queue provision");
   validateQueue(
     imageQueues.primary,
     `hereisit-image-jobs-${suffix}`,
     "image primary Queue provision",
   );
   validateQueue(imageQueues.dlq, `hereisit-image-jobs-dlq-${suffix}`, "image DLQ provision");
-  validateQueue(pdfQueues.primary, `hereisit-pdf-jobs-${suffix}`, "PDF primary Queue provision");
-  validateQueue(pdfQueues.dlq, `hereisit-pdf-jobs-dlq-${suffix}`, "PDF DLQ provision");
-  const queueIds = [
-    imageQueues.primary.id,
-    imageQueues.dlq.id,
-    pdfQueues.primary.id,
-    pdfQueues.dlq.id,
-  ];
+  const queueIds = [imageQueues.primary.id, imageQueues.dlq.id];
   if (new Set(queueIds).size !== queueIds.length) {
     throw new TypeError("provisioned Queue IDs collide");
   }
@@ -130,7 +118,6 @@ export function validateProcessingProvisionManifest(value) {
   assertSha256(logpush.configSha256, "Logpush provision configuration hash");
   return manifest;
 }
-
 const fieldReaders = Object.freeze({
   environment: (manifest) => manifest.environment,
   accountId: (manifest) => manifest.accountId,
@@ -139,19 +126,15 @@ const fieldReaders = Object.freeze({
   "r2.usage.name": (manifest) => manifest.r2.usage.name,
   "queues.image.primary.id": (manifest) => manifest.queues.image.primary.id,
   "queues.image.dlq.id": (manifest) => manifest.queues.image.dlq.id,
-  "queues.pdf.primary.id": (manifest) => manifest.queues.pdf.primary.id,
-  "queues.pdf.dlq.id": (manifest) => manifest.queues.pdf.dlq.id,
   "analytics.datasetName": (manifest) => manifest.analytics.datasetName,
   "logpush.jobId": (manifest) => manifest.logpush.jobId,
 });
-
 export function readProcessingProvisionField(value, field) {
   if (typeof field !== "string" || !Object.hasOwn(fieldReaders, field)) {
     throw new TypeError("processing provision field is not allowlisted");
   }
   return fieldReaders[field](validateProcessingProvisionManifest(value));
 }
-
 async function readBoundedJson(file) {
   let handle;
   try {
@@ -168,7 +151,6 @@ async function readBoundedJson(file) {
     await handle?.close().catch(() => undefined);
   }
 }
-
 export async function runProcessingProvisionReader(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   if (Object.keys(args).some((key) => key !== "file" && key !== "field")) {
@@ -180,7 +162,6 @@ export async function runProcessingProvisionReader(argv, stdout = process.stdout
   const value = readProcessingProvisionField(await readBoundedJson(resolve(args.file)), args.field);
   stdout.write(`${String(value)}\n`);
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url
