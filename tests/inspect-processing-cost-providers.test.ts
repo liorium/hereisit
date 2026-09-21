@@ -35,6 +35,55 @@ function workerVersion(providerUsageSchemaSha256: string) {
 }
 
 describe("processing cost provider inspection", () => {
+  it.each([
+    ["precision", "0.0000001", "application/json", "numeric-precision"],
+    ["overflow", "9223372036854775808", "application/json", "numeric-overflow"],
+    ["content type", "0", "text/plain", "content-type"],
+  ])("identifies rejected container %s without exposing response values", async (_label, cpuTimeSec, contentType, failure) => {
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion(await providerUsageContractSha256()),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "logpush-token",
+      fetchImpl: async (input) => {
+        if (!String(input).endsWith("/graphql")) throw new Error("private provider response");
+        return new Response(
+          JSON.stringify({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    containersUsageAdaptiveGroups: [
+                      {
+                        dimensions: {
+                          datetimeHour: new Date(targetHourKey * 3_600_000).toISOString(),
+                          applicationId: "11111111-2222-4333-8444-555555555555",
+                          instanceId: "private-instance",
+                          region: "enam",
+                        },
+                        sum: {
+                          cpuTimeSec: "numeric-placeholder",
+                          allocatedMemory: 0,
+                          allocatedDisk: 0,
+                          txBytes: 0,
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+            errors: null,
+          }).replace('"numeric-placeholder"', cpuTimeSec),
+          { headers: { "content-type": contentType } },
+        );
+      },
+    });
+    expect(result.container).toEqual({ reachable: false, httpStatus: 200, failure });
+    expect(JSON.stringify(result)).not.toMatch(/private|analytics-token|logpush-token/);
+  });
+
   it("projects only bounded provider completion evidence", async () => {
     const schemaSha256 = CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256;
     const hourEnd = new Date((targetHourKey + 1) * 3_600_000).toISOString();
