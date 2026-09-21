@@ -681,8 +681,9 @@ test("detects mixed files incrementally without network or private-data side eff
   await launcher.getByRole("status").scrollIntoViewIfNeeded();
   await expect(launcher.getByRole("status")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "JPG 이미지" })).toBeVisible();
+  await expect(launcher.getByRole("heading", { level: 3 })).toHaveCount(1);
+  await expect(launcher.getByRole("heading", { name: "함께 처리할 수 있는 파일" })).toBeVisible();
+  await expect(launcher.getByText("2개", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
   expect(await page.getByRole("button", { name: /도구 선택/ }).count()).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "다른 파일 선택" })).toBeVisible();
