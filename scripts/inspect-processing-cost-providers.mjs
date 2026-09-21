@@ -52,12 +52,6 @@ function failureKind(error, status) {
   if (!(error instanceof Error)) return "unknown";
   // Classify only our fixed messages; never include provider values or raw errors.
   if (
-    /^Container (?:CPU time|allocated memory|allocated disk|transmitted bytes) precision exceeds its target integer unit\.$/.test(
-      error.message,
-    )
-  )
-    return "numeric-precision";
-  if (
     /^Container (?:CPU time|allocated memory|allocated disk|(?:regional )?transmitted bytes) exceeds signed 64-bit storage\.$/.test(
       error.message,
     )
