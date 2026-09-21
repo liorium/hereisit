@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { captureProcessingQueueStates } from "../scripts/capture-processing-queue-states.mjs";
 
 describe("processing Queue rollback snapshot", () => {
-  it("captures all four independently verified prior states without assuming image is paused", async () => {
+  it("captures both independently verified prior states without assuming image is paused", async () => {
     const root = await mkdtemp(join(tmpdir(), "queue-state-"));
     try {
       const output = join(root, "states.json");
@@ -22,18 +22,15 @@ describe("processing Queue rollback snapshot", () => {
         queues: {
           "image-primary": "image",
           "image-dlq": "image-dlq",
-          "pdf-primary": "pdf",
-          "pdf-dlq": "pdf-dlq",
         },
       });
       expect(value.queues["image-primary"].state).toBe("resumed");
-      expect(inspect).toHaveBeenCalledTimes(4);
+      expect(inspect).toHaveBeenCalledTimes(2);
       expect(JSON.parse(await readFile(output, "utf8"))).toEqual(value);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
-
   it("rejects an incomplete or unverified snapshot", async () => {
     await expect(
       captureProcessingQueueStates({
@@ -42,6 +39,6 @@ describe("processing Queue rollback snapshot", () => {
         apiToken: "token",
         inspect: vi.fn(),
       }),
-    ).rejects.toThrow(/four/);
+    ).rejects.toThrow(/both/);
   });
 });

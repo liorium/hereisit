@@ -32,11 +32,11 @@ describe("downloadUrl", () => {
   it("activates one named download and removes its temporary anchor", () => {
     const { anchor, append } = installDownloadDocument();
 
-    downloadUrl("blob:result", "result.pdf");
+    downloadUrl("blob:result", "result.png");
 
     expect(anchor).toMatchObject({
       href: "blob:result",
-      download: "result.pdf",
+      download: "result.png",
       rel: "noopener",
     });
     expect(append).toHaveBeenCalledOnce();
@@ -50,7 +50,7 @@ describe("downloadUrl", () => {
       throw failure;
     });
 
-    expect(() => downloadUrl("blob:result", "result.pdf")).toThrow(failure);
+    expect(() => downloadUrl("blob:result", "result.png")).toThrow(failure);
     expect(anchor.remove).toHaveBeenCalledOnce();
   });
 });

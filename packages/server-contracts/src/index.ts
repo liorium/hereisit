@@ -1,28 +1,15 @@
-import type {
-  ImageOptimizeSpecV1,
-  ImageOptimizeWarningCode,
-  PdfOptimizeResultDescriptor,
-  PdfOptimizeSpecV1,
-} from "@hereisit/tool-contracts";
+import type { ImageOptimizeSpecV1, ImageOptimizeWarningCode } from "@hereisit/tool-contracts";
 import {
   IMAGE_OPTIMIZE_MAX_FILE_BYTES,
   IMAGE_OPTIMIZE_MAX_PIXELS,
   imageOptimizeMimeSchema,
   imageOptimizeSpecV1Schema,
   imageOptimizeWarningCodeSchema,
-  PDF_OPTIMIZE_MAX_FILE_BYTES,
-  PDF_OPTIMIZE_MAX_PAGES,
-  pdfOptimizeMimeSchema,
-  pdfOptimizeResultDescriptorSchema,
-  pdfOptimizeSpecV1Schema,
 } from "@hereisit/tool-contracts";
 import { z } from "zod";
-
 export type ImageResourceClass = "image-standard-v1" | "image-large-v1";
 export type ImageJobAttempt = 1 | 2 | 3;
 export const IMAGE_ENGINE_MAX_TESTED_CANDIDATES = 3 as const;
-export const PDF_ENGINE_MAX_TESTED_CANDIDATES = 2 as const;
-
 export type ImageContentClass =
   | "photo"
   | "screenshot-text"
@@ -30,7 +17,6 @@ export type ImageContentClass =
   | "transparent-graphic"
   | "noisy"
   | "already-optimized";
-
 export interface ImageJobMessage {
   jobId: string;
   contractId: "image.optimize@1";
@@ -43,7 +29,6 @@ export interface ImageJobMessage {
   queueEpoch: string;
   queueGeneration: number;
 }
-
 export interface ImageEngineCreateJobRequest {
   protocol: 1;
   jobId: string;
@@ -59,7 +44,6 @@ export interface ImageEngineCreateJobRequest {
   };
   resourceClass: ImageResourceClass;
 }
-
 export type EngineState =
   | "created"
   | "uploading"
@@ -68,7 +52,6 @@ export type EngineState =
   | "succeeded"
   | "failed"
   | "cancelled";
-
 export type EnginePhase =
   | "validating"
   | "inspecting"
@@ -76,7 +59,6 @@ export type EnginePhase =
   | "optimizing"
   | "verifying"
   | "preparing-output";
-
 export interface EngineMeasurements {
   processedInputBytes: number;
   processedPixels: number;
@@ -86,13 +68,11 @@ export interface EngineMeasurements {
   testedCandidates: number;
   processingMs: number;
 }
-
 export interface EngineInspectionSummary {
   verifiedInputMime: "image/jpeg" | "image/png" | "image/webp";
   inputHasAlpha: boolean;
   contentClass: ImageContentClass;
 }
-
 export type EngineResult =
   | {
       kind: "download";
@@ -112,7 +92,6 @@ export type EngineResult =
       codecBuildId: string;
       warnings: readonly ["ORIGINAL_RETAINED_UNMODIFIED", ...ImageOptimizeWarningCode[]];
     };
-
 export type ImageEngineJobStatus =
   | {
       protocol: 1;
@@ -179,7 +158,6 @@ export type ImageEngineJobStatus =
         retryable: false;
       };
     };
-
 const nonEmptyStringSchema = z.string().min(1);
 const uuidSchema = z.uuid();
 const specHashSchema = z
@@ -200,7 +178,6 @@ const outputObjectKeySchema = z
 const nonNegativeSafeIntegerSchema = z.number().finite().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const positiveSafeIntegerSchema = nonNegativeSafeIntegerSchema.min(1);
 const fractionSchema = z.number().finite().min(0).max(1);
-
 export const imageResourceClassSchema = z.enum(["image-standard-v1", "image-large-v1"]);
 export const imageJobAttemptSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 export const imageContentClassSchema = z.enum([
@@ -228,7 +205,6 @@ export const enginePhaseSchema = z.enum([
   "verifying",
   "preparing-output",
 ]);
-
 export const imageJobMessageSchema = z
   .object({
     jobId: uuidSchema,
@@ -243,32 +219,8 @@ export const imageJobMessageSchema = z
     queueGeneration: nonNegativeSafeIntegerSchema,
   })
   .strict();
-
-export const pdfResourceClassSchema = z.literal("pdf-standard-v1");
-
-export const pdfJobMessageSchema = z
-  .object({
-    jobId: uuidSchema,
-    contractId: z.literal("pdf.optimize@1"),
-    specHash: specHashSchema,
-    inputKey: inputObjectKeySchema,
-    inputEtag: safeEtagSchema,
-    outputKey: outputObjectKeySchema,
-    resourceClass: pdfResourceClassSchema,
-    attempt: imageJobAttemptSchema,
-    queueEpoch: uuidSchema,
-    queueGeneration: nonNegativeSafeIntegerSchema,
-  })
-  .strict();
-
-export type PdfJobMessage = z.infer<typeof pdfJobMessageSchema>;
-export type ServerJobMessage = ImageJobMessage | PdfJobMessage;
-
-export const serverJobMessageSchema = z.discriminatedUnion("contractId", [
-  imageJobMessageSchema,
-  pdfJobMessageSchema,
-]);
-
+export type ServerJobMessage = ImageJobMessage;
+export const serverJobMessageSchema = z.discriminatedUnion("contractId", [imageJobMessageSchema]);
 export const imageEngineCreateJobRequestSchema = z
   .object({
     protocol: z.literal(1),
@@ -288,57 +240,14 @@ export const imageEngineCreateJobRequestSchema = z
     resourceClass: imageResourceClassSchema,
   })
   .strict();
-
-export const engineCreatePdfJobRequestSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    attempt: imageJobAttemptSchema,
-    tool: z.literal("pdf.optimize"),
-    toolVersion: z.literal(1),
-    spec: pdfOptimizeSpecV1Schema,
-    specHash: specHashSchema,
-    input: z
-      .object({
-        byteLength: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_FILE_BYTES),
-        etag: safeEtagSchema,
-        mimeHint: pdfOptimizeMimeSchema,
-        pageCount: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES),
-      })
-      .strict(),
-    resourceClass: pdfResourceClassSchema,
-  })
-  .strict();
-
-export interface EngineCreatePdfJobRequest {
-  protocol: 1;
-  jobId: string;
-  attempt: ImageJobAttempt;
-  tool: "pdf.optimize";
-  toolVersion: 1;
-  spec: PdfOptimizeSpecV1;
-  specHash: string;
-  input: {
-    byteLength: number;
-    etag: string;
-    mimeHint: "application/pdf";
-    pageCount: number;
-  };
-  resourceClass: "pdf-standard-v1";
-}
-
 export const serverEngineCreateJobRequestSchema = z.discriminatedUnion("tool", [
   imageEngineCreateJobRequestSchema,
-  engineCreatePdfJobRequestSchema,
 ]);
-
 export const anyEngineCreateJobRequestSchema = serverEngineCreateJobRequestSchema;
 export const engineCreateJobRequestSchema = imageEngineCreateJobRequestSchema;
-
-export type ServerEngineCreateJobRequest = ImageEngineCreateJobRequest | EngineCreatePdfJobRequest;
+export type ServerEngineCreateJobRequest = ImageEngineCreateJobRequest;
 export type AnyEngineCreateJobRequest = ServerEngineCreateJobRequest;
 export type EngineCreateJobRequest = ImageEngineCreateJobRequest;
-
 export const engineMeasurementsSchema = z
   .object({
     processedInputBytes: nonNegativeSafeIntegerSchema.max(IMAGE_OPTIMIZE_MAX_FILE_BYTES),
@@ -350,7 +259,6 @@ export const engineMeasurementsSchema = z
     processingMs: nonNegativeSafeIntegerSchema,
   })
   .strict();
-
 export const engineInspectionSummarySchema = z
   .object({
     verifiedInputMime: imageOptimizeMimeSchema,
@@ -358,7 +266,6 @@ export const engineInspectionSummarySchema = z
     contentClass: imageContentClassSchema,
   })
   .strict();
-
 const engineDownloadResultSchema = z
   .object({
     kind: z.literal("download"),
@@ -372,11 +279,9 @@ const engineDownloadResultSchema = z
     warnings: z.array(imageOptimizeWarningCodeSchema).readonly(),
   })
   .strict();
-
 const originalRetainedWarningsSchema = z
   .tuple([z.literal("ORIGINAL_RETAINED_UNMODIFIED")], imageOptimizeWarningCodeSchema)
   .readonly();
-
 const engineOriginalRetainedResultSchema = z
   .object({
     kind: z.literal("original-retained"),
@@ -386,7 +291,6 @@ const engineOriginalRetainedResultSchema = z
     warnings: originalRetainedWarningsSchema,
   })
   .strict();
-
 export const engineResultSchema = z
   .discriminatedUnion("kind", [engineDownloadResultSchema, engineOriginalRetainedResultSchema])
   .superRefine((result, context) => {
@@ -401,7 +305,6 @@ export const engineResultSchema = z
       });
     }
   });
-
 const inactiveEngineJobStatusSchema = z
   .object({
     protocol: z.literal(1),
@@ -412,7 +315,6 @@ const inactiveEngineJobStatusSchema = z
     sequence: nonNegativeSafeIntegerSchema,
   })
   .strict();
-
 const runningEngineJobStatusSchema = z
   .object({
     protocol: z.literal(1),
@@ -423,7 +325,6 @@ const runningEngineJobStatusSchema = z
     sequence: nonNegativeSafeIntegerSchema,
   })
   .strict();
-
 const succeededEngineJobStatusSchema = z
   .object({
     protocol: z.literal(1),
@@ -437,7 +338,6 @@ const succeededEngineJobStatusSchema = z
     measurements: engineMeasurementsSchema,
   })
   .strict();
-
 const engineFailureCodeSchema = z.enum([
   "UNSUPPORTED_INPUT",
   "UNSUPPORTED_FEATURE",
@@ -449,7 +349,6 @@ const engineFailureCodeSchema = z.enum([
   "ENGINE_CRASH",
   "VERIFICATION_FAILED",
 ]);
-
 const failedEngineJobStatusSchema = z
   .object({
     protocol: z.literal(1),
@@ -469,7 +368,6 @@ const failedEngineJobStatusSchema = z
       .strict(),
   })
   .strict();
-
 const cancelledEngineJobStatusSchema = z
   .object({
     protocol: z.literal(1),
@@ -488,7 +386,6 @@ const cancelledEngineJobStatusSchema = z
       .strict(),
   })
   .strict();
-
 export const imageEngineJobStatusSchema = z
   .discriminatedUnion("state", [
     inactiveEngineJobStatusSchema,
@@ -501,7 +398,6 @@ export const imageEngineJobStatusSchema = z
     if (status.state !== "succeeded") {
       return;
     }
-
     if (status.result.testedCandidates !== status.measurements.testedCandidates) {
       context.addIssue({
         code: "custom",
@@ -509,7 +405,6 @@ export const imageEngineJobStatusSchema = z
         path: ["result", "testedCandidates"],
       });
     }
-
     if (
       status.result.kind === "download" &&
       status.result.mime !== status.inspection.verifiedInputMime
@@ -521,240 +416,15 @@ export const imageEngineJobStatusSchema = z
       });
     }
   });
-
-export type PdfEnginePhase = "validating" | "optimizing" | "verifying" | "preparing-output";
-
-export interface PdfEngineMeasurements {
-  processedInputBytes: number;
-  cpuMs: number;
-  memoryByteMilliseconds: number;
-  peakMemoryBytes: number;
-  testedCandidates: number;
-  processingMs: number;
-}
-
-export interface PdfEngineInspectionSummary {
-  verifiedInputMime: "application/pdf";
-  verifiedPageCount: number;
-  encrypted: false;
-}
-
-export type PdfEngineResult = PdfOptimizeResultDescriptor;
-
-export type PdfEngineJobStatus =
-  | {
-      protocol: 1;
-      jobId: string;
-      state: "created" | "uploading" | "ready";
-      phase: null;
-      fraction: null;
-      sequence: number;
-    }
-  | {
-      protocol: 1;
-      jobId: string;
-      state: "running";
-      phase: PdfEnginePhase;
-      fraction: number | null;
-      sequence: number;
-    }
-  | {
-      protocol: 1;
-      jobId: string;
-      state: "succeeded";
-      phase: "preparing-output";
-      fraction: 1;
-      sequence: number;
-      result: PdfEngineResult;
-      inspection: PdfEngineInspectionSummary;
-      measurements: PdfEngineMeasurements;
-    }
-  | {
-      protocol: 1;
-      jobId: string;
-      state: "failed";
-      phase: PdfEnginePhase | null;
-      fraction: number | null;
-      sequence: number;
-      measurements: PdfEngineMeasurements;
-      inspection: PdfEngineInspectionSummary | null;
-      error: {
-        code:
-          | "UNSUPPORTED_INPUT"
-          | "UNSUPPORTED_FEATURE"
-          | "INPUT_LIMIT_EXCEEDED"
-          | "RESOURCE_CLASS_UPGRADE"
-          | "ENGINE_TIMEOUT"
-          | "ENGINE_OOM"
-          | "ENGINE_CRASH"
-          | "VERIFICATION_FAILED";
-        retryable: boolean;
-        guidance?: "TRY_BALANCED_PRESET";
-      };
-    }
-  | {
-      protocol: 1;
-      jobId: string;
-      state: "cancelled";
-      phase: PdfEnginePhase | null;
-      fraction: number | null;
-      sequence: number;
-      measurements: PdfEngineMeasurements;
-      inspection: PdfEngineInspectionSummary | null;
-      error: {
-        code: "CANCELLED";
-        retryable: false;
-      };
-    };
-
-export const pdfEnginePhaseSchema = z.enum([
-  "validating",
-  "optimizing",
-  "verifying",
-  "preparing-output",
-]);
-
-export const pdfEngineMeasurementsSchema = z
-  .object({
-    processedInputBytes: nonNegativeSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_FILE_BYTES),
-    cpuMs: nonNegativeSafeIntegerSchema,
-    memoryByteMilliseconds: nonNegativeSafeIntegerSchema,
-    peakMemoryBytes: nonNegativeSafeIntegerSchema,
-    testedCandidates: nonNegativeSafeIntegerSchema.max(PDF_ENGINE_MAX_TESTED_CANDIDATES),
-    processingMs: nonNegativeSafeIntegerSchema,
-  })
-  .strict();
-
-export const pdfEngineInspectionSummarySchema = z
-  .object({
-    verifiedInputMime: pdfOptimizeMimeSchema,
-    verifiedPageCount: positiveSafeIntegerSchema.max(PDF_OPTIMIZE_MAX_PAGES),
-    encrypted: z.literal(false),
-  })
-  .strict();
-
-const inactivePdfEngineJobStatusSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    state: z.enum(["created", "uploading", "ready"]),
-    phase: z.null(),
-    fraction: z.null(),
-    sequence: nonNegativeSafeIntegerSchema,
-  })
-  .strict();
-
-const runningPdfEngineJobStatusSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    state: z.literal("running"),
-    phase: pdfEnginePhaseSchema,
-    fraction: fractionSchema.nullable(),
-    sequence: nonNegativeSafeIntegerSchema,
-  })
-  .strict();
-
-const succeededPdfEngineJobStatusSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    state: z.literal("succeeded"),
-    phase: z.literal("preparing-output"),
-    fraction: z.literal(1),
-    sequence: nonNegativeSafeIntegerSchema,
-    result: pdfOptimizeResultDescriptorSchema,
-    inspection: pdfEngineInspectionSummarySchema,
-    measurements: pdfEngineMeasurementsSchema,
-  })
-  .strict()
-  .superRefine((status, context) => {
-    if (status.result.pageCount !== status.inspection.verifiedPageCount) {
-      context.addIssue({
-        code: "custom",
-        message: "Result and inspection page counts must match.",
-        path: ["result", "pageCount"],
-      });
-    }
-  });
-
-const pdfEngineFailureCodeSchema = z.enum([
-  "UNSUPPORTED_INPUT",
-  "UNSUPPORTED_FEATURE",
-  "INPUT_LIMIT_EXCEEDED",
-  "RESOURCE_CLASS_UPGRADE",
-  "ENGINE_TIMEOUT",
-  "ENGINE_OOM",
-  "ENGINE_CRASH",
-  "VERIFICATION_FAILED",
-]);
-
-const failedPdfEngineJobStatusSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    state: z.literal("failed"),
-    phase: pdfEnginePhaseSchema.nullable(),
-    fraction: fractionSchema.nullable(),
-    sequence: nonNegativeSafeIntegerSchema,
-    measurements: pdfEngineMeasurementsSchema,
-    inspection: pdfEngineInspectionSummarySchema.nullable(),
-    error: z
-      .object({
-        code: pdfEngineFailureCodeSchema,
-        retryable: z.boolean(),
-        guidance: z.literal("TRY_BALANCED_PRESET").optional(),
-      })
-      .strict(),
-  })
-  .strict();
-
-const cancelledPdfEngineJobStatusSchema = z
-  .object({
-    protocol: z.literal(1),
-    jobId: uuidSchema,
-    state: z.literal("cancelled"),
-    phase: pdfEnginePhaseSchema.nullable(),
-    fraction: fractionSchema.nullable(),
-    sequence: nonNegativeSafeIntegerSchema,
-    measurements: pdfEngineMeasurementsSchema,
-    inspection: pdfEngineInspectionSummarySchema.nullable(),
-    error: z
-      .object({
-        code: z.literal("CANCELLED"),
-        retryable: z.literal(false),
-      })
-      .strict(),
-  })
-  .strict();
-
-export const pdfEngineJobStatusSchema = z.discriminatedUnion("state", [
-  inactivePdfEngineJobStatusSchema,
-  runningPdfEngineJobStatusSchema,
-  succeededPdfEngineJobStatusSchema,
-  failedPdfEngineJobStatusSchema,
-  cancelledPdfEngineJobStatusSchema,
-]);
-
 const imageServerEngineJobStatusSchema = z
   .object({
     tool: z.literal("image.optimize"),
     status: imageEngineJobStatusSchema,
   })
   .strict();
-
-const pdfServerEngineJobStatusSchema = z
-  .object({
-    tool: z.literal("pdf.optimize"),
-    status: pdfEngineJobStatusSchema,
-  })
-  .strict();
-
 export const serverEngineJobStatusSchema = z.discriminatedUnion("tool", [
   imageServerEngineJobStatusSchema,
-  pdfServerEngineJobStatusSchema,
 ]);
-
 export type ServerEngineJobStatus = z.infer<typeof serverEngineJobStatusSchema>;
 export type EngineJobStatus = ImageEngineJobStatus;
 export const engineJobStatusSchema = imageEngineJobStatusSchema;

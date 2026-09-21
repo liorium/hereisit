@@ -5,9 +5,6 @@ const workbenches = [
   "apps/web/src/components/image-compress-workbench.tsx",
   "apps/web/src/components/image-workbench.tsx",
   "apps/web/src/components/image-watermark-workbench.tsx",
-  "apps/web/src/components/pdf-workbench.tsx",
-  "apps/web/src/components/pdf-compress-workbench.tsx",
-  "apps/web/src/components/pdf-to-image-workbench.tsx",
 ] as const;
 
 const forbiddenResultDeliveryText = [

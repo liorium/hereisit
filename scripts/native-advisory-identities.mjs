@@ -6,7 +6,6 @@ const identities = new Map([
   ["expat", "libexpat_project:libexpat"],
   ["util-linux", "kernel:util-linux"],
   ["libvips", "libvips:libvips"],
-  ["qpdf", "qpdf_project:qpdf"],
 ]);
 
 export function nativeCpe(name, version) {

@@ -13,17 +13,18 @@ describe("processing staging smoke workflow", () => {
     expect(workflow).toContain("environment: processing-staging");
   });
 
-  it("resumes only primary delivery and fails closed", () => {
+  it("resumes only primary delivery and restores verified prior states after failure", () => {
     const resume = workflow.indexOf('wrangler queues resume-delivery "$QUEUE_NAME"');
     const smoke = workflow.indexOf("node scripts/smoke-image-compress-server.mjs");
-    const cleanup = workflow.indexOf('wrangler queues pause-delivery "$QUEUE_NAME"');
+    const cleanup = workflow.indexOf("restore_queue() {");
 
     expect(resume).toBeGreaterThan(0);
     expect(smoke).toBeGreaterThan(resume);
     expect(cleanup).toBeGreaterThan(smoke);
     expect(workflow).not.toContain('queues resume-delivery "$DLQ_NAME"');
-    expect(workflow.slice(cleanup)).toContain('--queue "$QUEUE_NAME" --expected paused');
-    expect(workflow.slice(cleanup)).toContain('--queue "$DLQ_NAME" --expected paused');
+    expect(workflow.slice(cleanup)).toContain('restore_queue image-primary "$QUEUE_NAME"');
+    expect(workflow.slice(cleanup)).toContain('restore_queue image-dlq "$DLQ_NAME"');
+    expect(workflow.slice(cleanup)).toContain('--queue "$name" --expected "$expected"');
     expect(workflow).toContain(
       `STAGING_MAINTAINER_SESSION_ID: \${{ secrets.STAGING_MAINTAINER_SESSION_ID }}`,
     );

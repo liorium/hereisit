@@ -1,5 +1,4 @@
 import { sha256Canonical } from "../../scripts/image-lab-common.mjs";
-
 export function createReportFixture(
   options: {
     visualProfilesMeasured?: number;
@@ -8,10 +7,9 @@ export function createReportFixture(
     version?: number;
   } = {},
 ) {
-  const version = options.version ?? 2,
-    dual = version === 2;
+  const version = options.version ?? 3;
   const payload = {
-    schema: options.schema ?? "hereisit-processing-release-report@2",
+    schema: options.schema ?? "hereisit-processing-release-report@3",
     version,
     passed: true,
     releaseId: "2026-08-12.1",
@@ -41,15 +39,7 @@ export function createReportFixture(
           sizeBytes: 1,
           sha256: "2".repeat(64),
         },
-        ...(dual
-          ? {
-              pdfEngine: {
-                path: "security-pdf-engine-license-gate.json",
-                sizeBytes: 1,
-                sha256: "3".repeat(64),
-              },
-            }
-          : {}),
+
         applicationSupplyChain: {
           path: "security-application-supply-chain-gate.json",
           sizeBytes: 1,
@@ -66,15 +56,7 @@ export function createReportFixture(
     },
     artifacts: {
       engineDockerConfigDigest: `sha256:${"6".repeat(64)}`,
-      ...(dual
-        ? {
-            pdfEngineDockerConfigDigest: `sha256:${"7".repeat(64)}`,
-            pdfBenchmarkSha256: "8".repeat(64),
-            pdfReleaseGateSha256: "9".repeat(64),
-            pdfVisualProfilesMeasured: options.visualProfilesMeasured ?? 0,
-            pdfPublicAdmissionReady: options.publicAdmissionReady ?? false,
-          }
-        : {}),
+
       webStagingArchiveSha256: "a".repeat(64),
       webProductionArchiveSha256: "b".repeat(64),
       workerSha256: "c".repeat(64),
@@ -88,7 +70,7 @@ export function createReportFixture(
   for (const group of ["sboms", "vulnerabilityReports"] as const)
     for (const [key, scope] of [
       ["engine", "engine"],
-      ...(dual ? [["pdfEngine", "pdf-engine"]] : []),
+
       ["webStaging", "web-staging"],
       ["webProduction", "web-production"],
       ["worker", "worker"],

@@ -12,19 +12,10 @@ const names = [
   "privacyReview",
   "deviceMatrix",
 ] as const;
-const scopes = [
-  "engine",
-  "pdfEngine",
-  "webStaging",
-  "webProduction",
-  "worker",
-  "lockfile",
-] as const;
-
+const scopes = ["engine", "webStaging", "webProduction", "worker", "lockfile"] as const;
 function descriptor(path: string, digit: string) {
   return { path, sizeBytes: 10, sha256: digit.repeat(64) };
 }
-
 function inputs() {
   return {
     releaseId: "2026-07-20.1",
@@ -46,7 +37,6 @@ function inputs() {
       trivyDbDigest: `sha256:${"e".repeat(64)}`,
       gates: {
         imageEngine: descriptor("security-image-engine-license-gate.json", "1"),
-        pdfEngine: descriptor("security-pdf-engine-license-gate.json", "5"),
         applicationSupplyChain: descriptor("security-application-supply-chain-gate.json", "2"),
         vulnerability: descriptor("security-vulnerability-gate.json", "3"),
       },
@@ -71,11 +61,6 @@ function inputs() {
     },
     artifacts: {
       engineDockerConfigDigest: `sha256:${"f".repeat(64)}`,
-      pdfEngineDockerConfigDigest: `sha256:${"e".repeat(64)}`,
-      pdfBenchmarkSha256: "5".repeat(64),
-      pdfReleaseGateSha256: "6".repeat(64),
-      pdfVisualProfilesMeasured: 0,
-      pdfPublicAdmissionReady: false,
       webStagingArchiveSha256: "1".repeat(64),
       webProductionArchiveSha256: "2".repeat(64),
       workerSha256: "3".repeat(64),
@@ -83,17 +68,15 @@ function inputs() {
     },
   };
 }
-
 function report() {
   const payload = canonicalize({
-    schema: "hereisit-processing-release-report@2",
-    version: 2,
+    schema: "hereisit-processing-release-report@3",
+    version: 3,
     passed: true,
     ...inputs(),
   });
   return canonicalize({ ...payload, verificationSha256: sha256Canonical(payload) });
 }
-
 describe("processing release report creation", () => {
   it("does not export unverified report creation or writing", () => {
     expect(Object.keys(releaseReportModule).sort()).toEqual(
@@ -105,7 +88,6 @@ describe("processing release report creation", () => {
       ].sort(),
     );
   });
-
   it("publishes a strict schema for the exact report contract", async () => {
     const schema = JSON.parse(
       await readFile("docs/deployment/processing-release-report.schema.json", "utf8"),
@@ -115,8 +97,8 @@ describe("processing release report creation", () => {
       type: "object",
       additionalProperties: false,
       properties: {
-        schema: { const: "hereisit-processing-release-report@2" },
-        version: { const: 2 },
+        schema: { const: "hereisit-processing-release-report@3" },
+        version: { const: 3 },
         passed: { const: true },
       },
     });
@@ -137,15 +119,13 @@ describe("processing release report creation", () => {
       ].sort(),
     );
   });
-
   it("validates a deterministic canonical report with an exact verification hash", () => {
     const first = report();
     const second = report();
-
     expect(first).toEqual(second);
     expect(first).toMatchObject({
-      schema: "hereisit-processing-release-report@2",
-      version: 2,
+      schema: "hereisit-processing-release-report@3",
+      version: 3,
       passed: true,
       releaseId: inputs().releaseId,
       gitSha: inputs().gitSha,
@@ -158,7 +138,6 @@ describe("processing release report creation", () => {
     expect(verificationSha256).toBe(sha256Canonical(payload));
     expect(canonicalJson(first)).toBe(canonicalJson(validateProcessingReleaseReport(first)));
   });
-
   it("rejects unknown fields and mutation in every major binding group", () => {
     const base = report();
     const changes = [
@@ -201,12 +180,10 @@ describe("processing release report creation", () => {
       { ...base, verifiedAt: "2026-07-20T12:00:00Z" },
       { ...base, unexpected: true },
     ];
-
     for (const changed of changes) {
       expect(() => validateProcessingReleaseReport(changed)).toThrow();
     }
   });
-
   it("enforces candidate security descriptor size ceilings", () => {
     const value = report();
     for (const changed of [
@@ -253,7 +230,6 @@ describe("processing release report creation", () => {
       ).toThrow(/size|limit/i);
     }
   });
-
   it("rejects a report larger than one MiB", () => {
     const value = { ...report(), padding: "x".repeat(1024 * 1024) };
     expect(() => validateProcessingReleaseReport(value)).toThrow(/field|size|exact/i);

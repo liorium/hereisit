@@ -42,7 +42,8 @@ describe("Worker Vitest Wrangler configuration", () => {
         { tag: "v1", new_sqlite_classes: ["ImageEngineContainer"] },
         { tag: "v2", new_classes: ["ImageEngineContainer", "Counter"] },
         { tag: "v3", renamed_classes: [{ from: "OldCounter", to: "Counter" }] },
-        { tag: "v4", deleted_classes: ["LegacyCounter"] },
+        { tag: "pdf-engine-v1", new_sqlite_classes: ["PdfEngineContainer"] },
+        { tag: "v4", deleted_classes: ["LegacyCounter", "PdfEngineContainer"] },
       ],
     });
 

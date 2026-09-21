@@ -65,13 +65,9 @@ const inputKeys = new Set([
   "costAccountingMode",
   "logpushJobId",
   "containerApplicationId",
-  "pdfContainerApplicationId",
   "queueName",
   "dlqName",
-  "pdfQueueName",
-  "pdfDlqName",
   "engineImage",
-  "pdfEngineImage",
   "accountDailyWeightedUnitLimit",
   "anonymousDailyWeightedUnitLimit",
   "networkDailyWeightedUnitLimit",
@@ -87,7 +83,6 @@ const inputKeys = new Set([
   "liveCostModelSha256",
   "providerUsageSchemaSha256",
   "releaseReportSha256",
-  "pdfPublicAdmission",
   "rolloutPercent",
   "maintainerSessionHashes",
   "sessionRateLimitNamespaceId",
@@ -120,45 +115,6 @@ function assertSafeInteger(value, label, { maximum = Number.MAX_SAFE_INTEGER } =
     throw new RangeError(`${label} must be a non-negative safe integer at most ${maximum}`);
   }
   return value;
-}
-
-function validatePdfPublicAdmission(value, releaseReportSha256) {
-  const state = assertPlainObject(value, "pdfPublicAdmission");
-  assertExactKeys(
-    state,
-    [
-      "schema",
-      "enabled",
-      "releaseReportSha256",
-      "visualProfilesMeasured",
-      "deletionPassed",
-      "costPassed",
-      "rollbackPassed",
-    ],
-    "pdfPublicAdmission",
-  );
-  if (state.schema !== "hereisit-pdf-public-admission@1" || typeof state.enabled !== "boolean") {
-    throw new TypeError("pdfPublicAdmission schema or enabled value is invalid");
-  }
-  assertSha256(state.releaseReportSha256, "pdfPublicAdmission.releaseReportSha256");
-  if (state.releaseReportSha256 !== releaseReportSha256) {
-    throw new TypeError("pdfPublicAdmission must bind the exact release report SHA-256");
-  }
-  assertSafeInteger(state.visualProfilesMeasured, "pdfPublicAdmission.visualProfilesMeasured");
-  for (const key of ["deletionPassed", "costPassed", "rollbackPassed"]) {
-    if (typeof state[key] !== "boolean")
-      throw new TypeError(`pdfPublicAdmission.${key} is invalid`);
-  }
-  if (
-    state.enabled &&
-    (state.visualProfilesMeasured <= 0 ||
-      !state.deletionPassed ||
-      !state.costPassed ||
-      !state.rollbackPassed)
-  ) {
-    throw new TypeError("enabled pdfPublicAdmission requires complete release evidence");
-  }
-  return state;
 }
 
 function assertPositiveNumber(value, label) {
@@ -292,28 +248,12 @@ function validateInput(input) {
   if (!UUID_PATTERN.test(value.containerApplicationId ?? "")) {
     throw new TypeError("containerApplicationId is invalid");
   }
-  if (!UUID_PATTERN.test(value.pdfContainerApplicationId ?? "")) {
-    throw new TypeError("pdfContainerApplicationId is invalid");
-  }
   if (value.costAccountingMode !== "bootstrap" && value.costAccountingMode !== "active") {
     throw new TypeError("costAccountingMode is invalid");
   }
-  const hasBootstrapContainer =
-    value.containerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID ||
-    value.pdfContainerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID;
-  if (
-    (value.costAccountingMode === "bootstrap" && !hasBootstrapContainer) ||
-    (value.costAccountingMode === "active" && hasBootstrapContainer) ||
-    (value.costAccountingMode === "bootstrap" &&
-      value.containerApplicationId !== value.pdfContainerApplicationId)
-  ) {
+  const hasBootstrapContainer = value.containerApplicationId === BOOTSTRAP_CONTAINER_APPLICATION_ID;
+  if ((value.costAccountingMode === "bootstrap") !== hasBootstrapContainer) {
     throw new TypeError("Container application ID must match the cost accounting mode");
-  }
-  if (
-    value.costAccountingMode === "active" &&
-    value.containerApplicationId === value.pdfContainerApplicationId
-  ) {
-    throw new TypeError("image and PDF Container application IDs must be distinct");
   }
   if (value.costAccountingMode === "bootstrap" && value.rolloutPercent !== 0) {
     throw new TypeError("cost accounting bootstrap requires rollout zero");
@@ -325,8 +265,6 @@ function validateInput(input) {
     productAnalyticsDatasetName: `hereisit_product_usage_${environment}`,
     queueName: `hereisit-image-jobs-${environment}`,
     dlqName: `hereisit-image-jobs-dlq-${environment}`,
-    pdfQueueName: `hereisit-pdf-jobs-${environment}`,
-    pdfDlqName: `hereisit-pdf-jobs-dlq-${environment}`,
   };
   for (const [key, expectedName] of Object.entries(expected)) {
     if (value[key] !== expectedName) throw new TypeError(`${key} does not match ${environment}`);
@@ -336,17 +274,6 @@ function validateInput(input) {
   );
   if (typeof value.engineImage !== "string" || !imagePattern.test(value.engineImage)) {
     throw new TypeError("engineImage must be an immutable same-account Cloudflare registry digest");
-  }
-  const pdfImagePattern = new RegExp(
-    `^registry\\.cloudflare\\.com/(${value.accountId})/hereisit-pdf-engine@sha256:([0-9a-f]{64})$`,
-  );
-  if (typeof value.pdfEngineImage !== "string" || !pdfImagePattern.test(value.pdfEngineImage)) {
-    throw new TypeError(
-      "pdfEngineImage must be an immutable same-account Cloudflare registry digest",
-    );
-  }
-  if (new Set([value.queueName, value.dlqName, value.pdfQueueName, value.pdfDlqName]).size !== 4) {
-    throw new TypeError("processing queue identities must be distinct");
   }
   const appOrigins = normalizeOrigins(value.appOrigins, environment);
   for (const key of [
@@ -376,7 +303,6 @@ function validateInput(input) {
   for (const key of ["liveCostModelSha256", "providerUsageSchemaSha256", "releaseReportSha256"]) {
     assertSha256(value[key], key);
   }
-  validatePdfPublicAdmission(value.pdfPublicAdmission, value.releaseReportSha256);
   if (value.providerUsageSchemaSha256 !== CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256) {
     throw new TypeError("provider usage schema hash does not match the checked-in contract");
   }
@@ -481,10 +407,7 @@ export function generateProcessingWrangler(input) {
     ],
     version_metadata: { binding: "WORKER_VERSION" },
     queues: {
-      producers: [
-        { binding: "IMAGE_JOBS", queue: value.queueName },
-        { binding: "PDF_JOBS", queue: value.pdfQueueName },
-      ],
+      producers: [{ binding: "IMAGE_JOBS", queue: value.queueName }],
       consumers: [
         {
           queue: value.queueName,
@@ -501,21 +424,6 @@ export function generateProcessingWrangler(input) {
           max_retries: 0,
           max_concurrency: 1,
         },
-        {
-          queue: value.pdfQueueName,
-          max_batch_size: 1,
-          max_batch_timeout: 1,
-          max_retries: 2,
-          dead_letter_queue: value.pdfDlqName,
-          max_concurrency: 1,
-        },
-        {
-          queue: value.pdfDlqName,
-          max_batch_size: 1,
-          max_batch_timeout: 1,
-          max_retries: 0,
-          max_concurrency: 1,
-        },
       ],
     },
     containers: [
@@ -527,24 +435,14 @@ export function generateProcessingWrangler(input) {
         rollout_active_grace_period: 180,
         rollout_step_percentage: [100],
       },
-      {
-        class_name: "PdfEngineContainer",
-        image: value.pdfEngineImage,
-        instance_type: "standard-2",
-        max_instances: 1,
-        rollout_active_grace_period: 180,
-        rollout_step_percentage: [100],
-      },
     ],
     durable_objects: {
-      bindings: [
-        { name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" },
-        { name: "PDF_ENGINE", class_name: "PdfEngineContainer" },
-      ],
+      bindings: [{ name: "IMAGE_ENGINE", class_name: "ImageEngineContainer" }],
     },
     migrations: [
       { tag: "image-engine-v1", new_sqlite_classes: ["ImageEngineContainer"] },
       { tag: "pdf-engine-v1", new_sqlite_classes: ["PdfEngineContainer"] },
+      { tag: "retire-pdf-engine-v1", deleted_classes: ["PdfEngineContainer"] },
     ],
     ratelimits: rateLimits.map(([name, namespace_id, limit]) => ({
       name,
@@ -562,7 +460,6 @@ export function generateProcessingWrangler(input) {
       COST_ACCOUNTING_MODE: value.costAccountingMode,
       LOGPUSH_JOB_ID: String(value.logpushJobId),
       CONTAINER_APPLICATION_ID: value.containerApplicationId,
-      PDF_CONTAINER_APPLICATION_ID: value.pdfContainerApplicationId,
       WORKER_SCRIPT_NAME: `hereisit-processing-${environment}`,
       USAGE_LOG_PREFIX: `workers-trace-events/${environment}/`,
       ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT: String(value.accountDailyWeightedUnitLimit),
@@ -580,17 +477,12 @@ export function generateProcessingWrangler(input) {
       LIVE_COST_MODEL_SHA256: value.liveCostModelSha256,
       PROVIDER_USAGE_SCHEMA_SHA256: value.providerUsageSchemaSha256,
       RELEASE_REPORT_SHA256: value.releaseReportSha256,
-      PDF_PUBLIC_ADMISSION_JSON: canonicalJson(value.pdfPublicAdmission),
       IMAGE_COMPRESS_SERVER_ROLLOUT_PERCENT: String(value.rolloutPercent),
       MAINTAINER_SESSION_HASHES: JSON.stringify(value.maintainerSessionHashes),
       ENGINE_INSTANCE_NAME: "image-slot-0",
       ENGINE_IMAGE_DIGEST: value.engineImage,
       IMAGE_JOBS_QUEUE_NAME: value.queueName,
       IMAGE_JOBS_DLQ_NAME: value.dlqName,
-      PDF_ENGINE_INSTANCE_NAME: "pdf-slot-0",
-      PDF_ENGINE_IMAGE_DIGEST: value.pdfEngineImage,
-      PDF_JOBS_QUEUE_NAME: value.pdfQueueName,
-      PDF_JOBS_DLQ_NAME: value.pdfDlqName,
     },
   };
 }
@@ -605,13 +497,9 @@ const cliScalarFields = {
   "product-analytics-dataset-name": "productAnalyticsDatasetName",
   "cost-accounting-mode": "costAccountingMode",
   "container-application-id": "containerApplicationId",
-  "pdf-container-application-id": "pdfContainerApplicationId",
   "queue-name": "queueName",
   "dlq-name": "dlqName",
-  "pdf-queue-name": "pdfQueueName",
-  "pdf-dlq-name": "pdfDlqName",
   "engine-image": "engineImage",
-  "pdf-engine-image": "pdfEngineImage",
   "live-cost-model-sha256": "liveCostModelSha256",
   "provider-usage-schema-sha256": "providerUsageSchemaSha256",
   "release-report-sha256": "releaseReportSha256",
@@ -675,12 +563,6 @@ export function parseProcessingWranglerArguments(argv, liveCostModel) {
         parsed.maintainerSessionHashes = JSON.parse(value);
       } catch {
         throw new TypeError("--maintainer-session-hashes-json must be valid JSON");
-      }
-    } else if (name === "pdf-public-admission-json") {
-      try {
-        parsed.pdfPublicAdmission = JSON.parse(value);
-      } catch {
-        throw new TypeError("--pdf-public-admission-json must be valid JSON");
       }
     } else if (Object.hasOwn(cliScalarFields, name)) {
       parsed[cliScalarFields[name]] = value;

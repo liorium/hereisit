@@ -1,6 +1,5 @@
 import {
   type EngineCreateJobRequest,
-  type EngineCreatePdfJobRequest,
   type EngineInspectionSummary,
   type EngineJobStatus,
   type EngineMeasurements,
@@ -8,12 +7,6 @@ import {
   type ImageJobMessage,
   type ImageResourceClass,
   imageJobMessageSchema,
-  type PdfEngineInspectionSummary,
-  type PdfEngineJobStatus,
-  type PdfEngineMeasurements,
-  type PdfJobMessage,
-  pdfEngineJobStatusSchema,
-  pdfJobMessageSchema,
   type ServerJobMessage,
 } from "@hereisit/server-contracts";
 import {
@@ -28,19 +21,13 @@ import {
   imageOptimizeSpecV1Schema,
   type ToolJobErrorCode,
 } from "@hereisit/tool-contracts";
-import {
-  type PdfOptimizeSpecV1,
-  pdfOptimizeSpecV1Schema,
-} from "@hereisit/tool-contracts/pdf-optimize";
 import { recordContainerActivity } from "./container-activity";
 import {
   createContainerEngineClient,
-  createContainerPdfEngineClient,
   type EngineClient,
   EngineCrashError,
   EngineHttpError,
   EngineProtocolError,
-  type PdfEngineClient,
 } from "./container-client";
 import { claimQueuedJobRecord } from "./d1-job-repository";
 import type { Env } from "./env";
@@ -139,7 +126,7 @@ export type QueueFailureClassification =
   | {
       retry: true;
       delaySeconds: 0 | 10 | 30 | 120;
-      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
+      nextResourceClass: ImageResourceClass;
     }
   | {
       retry: false;
@@ -157,7 +144,7 @@ export function classifyQueueFailure(
   error: unknown,
   input: {
     attempt: 1 | 2 | 3;
-    resourceClass?: ImageResourceClass | "pdf-standard-v1";
+    resourceClass?: ImageResourceClass;
   } = { attempt: 1 },
 ): QueueFailureClassification {
   const currentClass = input.resourceClass ?? "image-standard-v1";
@@ -194,8 +181,7 @@ export function classifyQueueFailure(
       return {
         retry: true,
         delaySeconds: retryDelay(input.attempt),
-        nextResourceClass:
-          currentClass === "pdf-standard-v1" ? "pdf-standard-v1" : "image-large-v1",
+        nextResourceClass: "image-large-v1",
       };
     }
     return { retry: false, publicCode: "ENGINE_OOM" };
@@ -228,21 +214,21 @@ export function classifyQueueFailure(
 
 export interface QueueJobContext {
   jobId: string;
-  contractId: "image.optimize@1" | "pdf.optimize@1";
+  contractId: "image.optimize@1";
   specHash: string;
   inputKey: string;
   inputEtag: string;
   outputKey: string;
-  resourceClass: ImageResourceClass | "pdf-standard-v1";
+  resourceClass: ImageResourceClass;
   attempt: 1 | 2 | 3;
   queueEpoch: string;
   queueGeneration: number;
   leaseToken: string;
   leaseExpiresAt: number;
   declaredBytes: number;
-  declaredMime: ImageOptimizeMime | "application/pdf";
+  declaredMime: ImageOptimizeMime;
   declaredPageCount?: number;
-  spec: ImageOptimizeSpecV1 | PdfOptimizeSpecV1;
+  spec: ImageOptimizeSpecV1;
   sessionHash: string;
   networkHash?: string;
   dayKey?: string;
@@ -259,26 +245,9 @@ export interface QueueJobContext {
   cancelRequestedAt?: number | null;
 }
 
-type AnyEngineStatus = EngineJobStatus | PdfEngineJobStatus;
-type AnyEngineMeasurements = EngineMeasurements | PdfEngineMeasurements;
-type AnyEngineInspection = EngineInspectionSummary | PdfEngineInspectionSummary;
-interface ServerEngineClient {
-  create(request: EngineCreateJobRequest | EngineCreatePdfJobRequest): Promise<{
-    coldStart: boolean;
-    containerReadyMs: number;
-  }>;
-  upload(
-    jobId: string,
-    body: ReadableStream<Uint8Array>,
-    byteLength: number,
-    contentType: string,
-  ): Promise<void>;
-  run(jobId: string): Promise<void>;
-  status(jobId: string): Promise<AnyEngineStatus>;
-  output(jobId: string): Promise<Response>;
-  cancel(jobId: string): Promise<void>;
-  remove(jobId: string): Promise<void>;
-}
+type AnyEngineStatus = EngineJobStatus;
+type AnyEngineMeasurements = EngineMeasurements;
+type AnyEngineInspection = EngineInspectionSummary;
 
 export interface QueueJobStore {
   claim(message: ServerJobMessage, now: number): Promise<QueueJobContext | null>;
@@ -313,10 +282,10 @@ export interface QueueJobStore {
   scheduleRetry(
     context: QueueJobContext,
     input: {
-      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
+      nextResourceClass: ImageResourceClass;
       delaySeconds: 0 | 10 | 30 | 120;
       measurements?: AnyEngineMeasurements | undefined;
-      verifiedMime?: ImageOptimizeMime | "application/pdf" | undefined;
+      verifiedMime?: ImageOptimizeMime | undefined;
     },
     now: number,
   ): Promise<boolean | null>;
@@ -349,7 +318,7 @@ export interface QueueArtifactStore {
     key: string;
     body: ReadableStream<Uint8Array>;
     byteLength: number;
-    mime: ImageOptimizeMime | "application/pdf";
+    mime: ImageOptimizeMime;
     digestHeader: string;
     jobId: string;
     engineBuildId: string;
@@ -361,7 +330,6 @@ export interface QueueArtifactStore {
 
 export interface QueueConsumerDependencies {
   engine?: EngineClient;
-  pdfEngine?: PdfEngineClient;
   store?: QueueJobStore;
   artifacts?: QueueArtifactStore;
   now?: () => number;
@@ -387,7 +355,7 @@ function sampleFromMeasurements(
   context: QueueJobContext,
   measurements: AnyEngineMeasurements,
   outputBytes: number | null,
-  mime: ImageOptimizeMime | "application/pdf" = context.declaredMime,
+  mime: ImageOptimizeMime = context.declaredMime,
 ) {
   return {
     inputBytes: measurements.processedInputBytes,
@@ -409,10 +377,7 @@ class D1QueueJobStore implements QueueJobStore {
     if (row.contractId !== message.contractId) {
       throw new VerificationFailureError();
     }
-    const spec =
-      row.contractId === "pdf.optimize@1"
-        ? pdfOptimizeSpecV1Schema.parse(JSON.parse(row.specJson))
-        : imageOptimizeSpecV1Schema.parse(JSON.parse(row.specJson));
+    const spec = imageOptimizeSpecV1Schema.parse(JSON.parse(row.specJson));
     return {
       jobId: row.jobId,
       contractId: row.contractId,
@@ -428,7 +393,6 @@ class D1QueueJobStore implements QueueJobStore {
       leaseExpiresAt: row.leaseExpiresAt,
       declaredBytes: row.declaredBytes,
       declaredMime: row.declaredMime,
-      ...(row.contractId === "pdf.optimize@1" ? { declaredPageCount: row.declaredPageCount } : {}),
       spec,
       sessionHash: row.sessionHash,
       networkHash: row.networkHash,
@@ -549,14 +513,6 @@ class D1QueueJobStore implements QueueJobStore {
           status.inspection.verifiedInputMime,
         ),
       ]);
-    if (
-      (context.contractId === "pdf.optimize@1") !==
-      (status.inspection.verifiedInputMime === "application/pdf")
-    ) {
-      throw new VerificationFailureError();
-    }
-    const isPdf = context.contractId === "pdf.optimize@1";
-    const pdfResult = isPdf && "pageCount" in status.result ? status.result : null;
     return this.settleTerminal(context, {
       now,
       state: "succeeded",
@@ -574,8 +530,8 @@ class D1QueueJobStore implements QueueJobStore {
         status.result.kind === "download" && "height" in status.result
           ? status.result.height
           : null,
-      outputPageCount: pdfResult?.pageCount ?? null,
-      pdfProfile: pdfResult?.kind === "download" ? pdfResult.profile : null,
+      outputPageCount: null,
+      pdfProfile: null,
       engineBuildId: status.result.engineBuildId,
       codecBuildId: "codecBuildId" in status.result ? status.result.codecBuildId : null,
       warningsJson: JSON.stringify(status.result.warnings),
@@ -841,10 +797,10 @@ class D1QueueJobStore implements QueueJobStore {
   async scheduleRetry(
     context: QueueJobContext,
     input: {
-      nextResourceClass: ImageResourceClass | "pdf-standard-v1";
+      nextResourceClass: ImageResourceClass;
       delaySeconds: 0 | 10 | 30 | 120;
       measurements?: AnyEngineMeasurements | undefined;
-      verifiedMime?: ImageOptimizeMime | "application/pdf" | undefined;
+      verifiedMime?: ImageOptimizeMime | undefined;
     },
     now: number,
   ): Promise<boolean | null> {
@@ -853,10 +809,7 @@ class D1QueueJobStore implements QueueJobStore {
     const nextGeneration = context.queueGeneration + 1;
     const extraReservation = estimateAttemptReservation({
       inputBytes: context.declaredBytes,
-      resourceClass:
-        input.nextResourceClass === "pdf-standard-v1"
-          ? "image-standard-v1"
-          : input.nextResourceClass,
+      resourceClass: input.nextResourceClass,
     });
     const chargedAttempt = input.measurements
       ? calculateAttemptChargedUnits(
@@ -881,19 +834,11 @@ class D1QueueJobStore implements QueueJobStore {
       queueEpoch: context.queueEpoch,
       queueGeneration: nextGeneration,
     };
-    const nextMessage: ServerJobMessage =
-      context.contractId === "pdf.optimize@1"
-        ? { ...messageCommon, contractId: context.contractId, resourceClass: "pdf-standard-v1" }
-        : {
-            ...messageCommon,
-            contractId: context.contractId,
-            resourceClass:
-              input.nextResourceClass === "pdf-standard-v1"
-                ? context.resourceClass === "pdf-standard-v1"
-                  ? "image-standard-v1"
-                  : context.resourceClass
-                : input.nextResourceClass,
-          };
+    const nextMessage: ServerJobMessage = {
+      ...messageCommon,
+      contractId: context.contractId,
+      resourceClass: input.nextResourceClass,
+    };
     const accountLimit = strictLimit(
       this.env.ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT,
       "ACCOUNT_DAILY_WEIGHTED_UNIT_LIMIT",
@@ -1016,10 +961,7 @@ class D1QueueJobStore implements QueueJobStore {
       throw new StorageFailureError();
     }
     try {
-      await (context.contractId === "pdf.optimize@1"
-        ? this.env.PDF_JOBS
-        : this.env.IMAGE_JOBS
-      ).send(nextMessage, {
+      await this.env.IMAGE_JOBS.send(nextMessage, {
         contentType: "json",
         delaySeconds: input.delaySeconds,
       });
@@ -1078,15 +1020,7 @@ class D1QueueJobStore implements QueueJobStore {
          error_code = excluded.error_code,
          quarantined_at = excluded.quarantined_at`,
     )
-      .bind(
-        message.jobId,
-        message.contractId === "pdf.optimize@1"
-          ? this.env.PDF_JOBS_DLQ_NAME
-          : this.env.IMAGE_JOBS_DLQ_NAME,
-        Math.max(1, attempts),
-        now,
-        message.jobId,
-      )
+      .bind(message.jobId, this.env.IMAGE_JOBS_DLQ_NAME, Math.max(1, attempts), now, message.jobId)
       .run();
   }
 }
@@ -1136,13 +1070,7 @@ class R2QueueArtifactStore implements QueueArtifactStore {
       try {
         const value: unknown = JSON.parse(encodedRecovery);
         const image = engineJobStatusSchema.safeParse(value);
-        const pdf = pdfEngineJobStatusSchema.safeParse(value);
-        recoveryStatus =
-          image.success && image.data.state === "succeeded"
-            ? image.data
-            : pdf.success && pdf.data.state === "succeeded"
-              ? pdf.data
-              : null;
+        recoveryStatus = image.success && image.data.state === "succeeded" ? image.data : null;
       } catch {
         recoveryStatus = null;
       }
@@ -1162,7 +1090,7 @@ class R2QueueArtifactStore implements QueueArtifactStore {
     key: string;
     body: ReadableStream<Uint8Array>;
     byteLength: number;
-    mime: ImageOptimizeMime | "application/pdf";
+    mime: ImageOptimizeMime;
     digestHeader: string;
     jobId: string;
     engineBuildId: string;
@@ -1377,36 +1305,10 @@ async function ensureLease(
   throw new StaleLeaseError();
 }
 
-function validPdfAttempt(
-  context: QueueJobContext,
-  status: Extract<PdfEngineJobStatus, { state: "succeeded" }>,
-): boolean {
-  const measurements = status.measurements;
-  return (
-    context.contractId === "pdf.optimize@1" &&
-    context.declaredPageCount === status.inspection.verifiedPageCount &&
-    measurements.processedInputBytes <= context.declaredBytes &&
-    measurements.cpuMs <= 45_000 &&
-    measurements.processingMs <= 45_000 &&
-    measurements.peakMemoryBytes <= 768 * 1024 * 1024 &&
-    measurements.memoryByteMilliseconds <= 768 * 1024 * 1024 * 45_000 &&
-    measurements.testedCandidates <= 2 &&
-    status.result.sourceByteLength === context.declaredBytes &&
-    status.result.pageCount === context.declaredPageCount
-  );
-}
-
 function validTerminalAttempt(
   context: QueueJobContext,
   status: Extract<AnyEngineStatus, { state: "succeeded" }>,
 ): boolean {
-  if (context.contractId === "pdf.optimize@1") {
-    return status.inspection.verifiedInputMime === "application/pdf" && "pageCount" in status.result
-      ? validPdfAttempt(context, status as Extract<PdfEngineJobStatus, { state: "succeeded" }>)
-      : false;
-  }
-  if (status.inspection.verifiedInputMime === "application/pdf") return false;
-  if (context.resourceClass === "pdf-standard-v1") return false;
   return validateEngineAttempt({
     inputBytes: context.declaredBytes,
     resourceClass: context.resourceClass,
@@ -1415,33 +1317,7 @@ function validTerminalAttempt(
   }).valid;
 }
 
-function engineCreateRequest(
-  context: QueueJobContext,
-): EngineCreateJobRequest | EngineCreatePdfJobRequest {
-  if (context.contractId === "pdf.optimize@1") {
-    if (context.declaredMime !== "application/pdf" || context.declaredPageCount === undefined) {
-      throw new VerificationFailureError();
-    }
-    return {
-      protocol: 1,
-      jobId: context.jobId,
-      attempt: context.attempt,
-      tool: "pdf.optimize",
-      toolVersion: 1,
-      spec: pdfOptimizeSpecV1Schema.parse(context.spec),
-      specHash: context.specHash,
-      input: {
-        byteLength: context.declaredBytes,
-        etag: context.inputEtag,
-        mimeHint: context.declaredMime,
-        pageCount: context.declaredPageCount,
-      },
-      resourceClass: "pdf-standard-v1",
-    };
-  }
-  if (context.declaredMime === "application/pdf" || context.resourceClass === "pdf-standard-v1") {
-    throw new VerificationFailureError();
-  }
+function engineCreateRequest(context: QueueJobContext): EngineCreateJobRequest {
   return {
     protocol: 1,
     jobId: context.jobId,
@@ -1467,14 +1343,6 @@ export async function consumeImageJob(
   return consumeServerJob(imageJobMessageSchema.parse(rawMessage), env, dependencies);
 }
 
-export async function consumePdfJob(
-  rawMessage: PdfJobMessage,
-  env: Env,
-  dependencies: QueueConsumerDependencies = {},
-): Promise<"completed" | "retry-scheduled" | "duplicate"> {
-  return consumeServerJob(pdfJobMessageSchema.parse(rawMessage), env, dependencies);
-}
-
 async function consumeServerJob(
   message: ServerJobMessage,
   env: Env,
@@ -1482,11 +1350,7 @@ async function consumeServerJob(
 ): Promise<"completed" | "retry-scheduled" | "duplicate"> {
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? defaultSleep;
-  const engine = (
-    message.contractId === "pdf.optimize@1"
-      ? (dependencies.pdfEngine ?? createContainerPdfEngineClient(env))
-      : (dependencies.engine ?? createContainerEngineClient(env))
-  ) as ServerEngineClient;
+  const engine = dependencies.engine ?? createContainerEngineClient(env);
   const store = dependencies.store ?? new D1QueueJobStore(env);
   const artifacts = dependencies.artifacts ?? new R2QueueArtifactStore(env.JOB_OBJECTS);
   const recordEngineActivity =
@@ -1495,7 +1359,7 @@ async function consumeServerJob(
       recordContainerActivity(env.DB, {
         segmentId: crypto.randomUUID(),
         contactedAt,
-        engineIdentity: message.contractId === "pdf.optimize@1" ? "pdf:slot-0" : "image:slot-0",
+        engineIdentity: "image:slot-0",
       }));
   const contactEngine = async <Result>(operation: () => Promise<Result>): Promise<Result> => {
     await recordEngineActivity(now());
@@ -1742,10 +1606,7 @@ async function consumeDlqMessage(
     await Promise.allSettled([
       env.JOB_OBJECTS.delete(message.inputKey),
       env.JOB_OBJECTS.delete(message.outputKey),
-      (message.contractId === "pdf.optimize@1"
-        ? createContainerPdfEngineClient(env)
-        : createContainerEngineClient(env)
-      ).remove(message.jobId),
+      createContainerEngineClient(env).remove(message.jobId),
     ]);
   }
 }
@@ -1800,16 +1661,14 @@ export async function consumeProcessingQueue(
   env: Env,
   dependencies: {
     consumeImage?: typeof consumeImageJob;
-    consumePdf?: typeof consumePdfJob;
     quarantine?: typeof consumeDlqMessage;
     recordQueueOperations?: (operations: number) => Promise<void>;
   } = {},
 ): Promise<void> {
   const isImage =
     batch.queue === env.IMAGE_JOBS_QUEUE_NAME || batch.queue === env.IMAGE_JOBS_DLQ_NAME;
-  const isPdf = batch.queue === env.PDF_JOBS_QUEUE_NAME || batch.queue === env.PDF_JOBS_DLQ_NAME;
-  const isDlq = batch.queue === env.IMAGE_JOBS_DLQ_NAME || batch.queue === env.PDF_JOBS_DLQ_NAME;
-  const schema = isPdf ? pdfJobMessageSchema : isImage ? imageJobMessageSchema : null;
+  const isDlq = batch.queue === env.IMAGE_JOBS_DLQ_NAME;
+  const schema = isImage ? imageJobMessageSchema : null;
   const recordQueueOperations =
     dependencies.recordQueueOperations ??
     (async (operations: number) => {
@@ -1834,8 +1693,6 @@ export async function consumeProcessingQueue(
     try {
       if (isDlq) {
         await (dependencies.quarantine ?? consumeDlqMessage)(message, env, queueMessage.attempts);
-      } else if (message.contractId === "pdf.optimize@1") {
-        await (dependencies.consumePdf ?? consumePdfJob)(message, env);
       } else {
         await (dependencies.consumeImage ?? consumeImageJob)(message, env);
       }

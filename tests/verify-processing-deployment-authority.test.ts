@@ -5,8 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { canonicalJson, sha256Canonical } from "../scripts/image-lab-common.mjs";
 import { verifyProcessingDeploymentAuthority } from "../scripts/verify-processing-deployment-authority.mjs";
 
-function report(schema = "hereisit-processing-release-report@2", version = 2) {
-  const dual = version === 2;
+function report(schema = "hereisit-processing-release-report@3", version = 3) {
   const payload = {
     schema,
     version,
@@ -38,15 +37,7 @@ function report(schema = "hereisit-processing-release-report@2", version = 2) {
           sizeBytes: 1,
           sha256: "2".repeat(64),
         },
-        ...(dual
-          ? {
-              pdfEngine: {
-                path: "security-pdf-engine-license-gate.json",
-                sizeBytes: 1,
-                sha256: "3".repeat(64),
-              },
-            }
-          : {}),
+
         applicationSupplyChain: {
           path: "security-application-supply-chain-gate.json",
           sizeBytes: 1,
@@ -63,15 +54,7 @@ function report(schema = "hereisit-processing-release-report@2", version = 2) {
     },
     artifacts: {
       engineDockerConfigDigest: `sha256:${"6".repeat(64)}`,
-      ...(dual
-        ? {
-            pdfEngineDockerConfigDigest: `sha256:${"7".repeat(64)}`,
-            pdfBenchmarkSha256: "8".repeat(64),
-            pdfReleaseGateSha256: "9".repeat(64),
-            pdfVisualProfilesMeasured: 0,
-            pdfPublicAdmissionReady: false,
-          }
-        : {}),
+
       webStagingArchiveSha256: "a".repeat(64),
       webProductionArchiveSha256: "b".repeat(64),
       workerSha256: "c".repeat(64),
@@ -85,7 +68,7 @@ function report(schema = "hereisit-processing-release-report@2", version = 2) {
   for (const group of ["sboms", "vulnerabilityReports"] as const)
     for (const [key, scope] of [
       ["engine", "engine"],
-      ...(dual ? [["pdfEngine", "pdf-engine"]] : []),
+
       ["webStaging", "web-staging"],
       ["webProduction", "web-production"],
       ["worker", "worker"],
@@ -98,9 +81,8 @@ function report(schema = "hereisit-processing-release-report@2", version = 2) {
       };
   return { ...payload, verificationSha256: sha256Canonical(payload) };
 }
-
 describe("deployment release authority", () => {
-  it("accepts only exact verified @2 authority and returns the report file SHA", async () => {
+  it("accepts only exact verified @3 authority and returns the report file SHA", async () => {
     const root = await mkdtemp(join(tmpdir(), "authority-"));
     try {
       const path = join(root, "report.json");
@@ -133,7 +115,7 @@ describe("deployment release authority", () => {
           },
           vi.fn(),
         ),
-      ).rejects.toThrow(/@2/);
+      ).rejects.toThrow(/@3/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

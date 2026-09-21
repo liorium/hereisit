@@ -138,7 +138,7 @@ async function settleAbandonedRunningJob(
        SET lease_token = ?, lease_expires_at = ?, updated_at = ?
        WHERE id = ? AND status = 'running' AND settlement_state = 'reserved'
          AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
-         AND (cancel_requested_at IS NOT NULL OR processing_deadline_at <= ?)`,
+         AND (cancel_requested_at IS NOT NULL OR processing_deadline_at <= ? OR contract_id = 'pdf.optimize@1')`,
       )
       .bind(recoveryLease, leaseExpiry, now, row.id, now, now),
     session
@@ -287,34 +287,16 @@ async function requeueForRecovery(env: Env, jobId: string, now: number): Promise
   return changed === 1;
 }
 
-interface CleanupEngine {
-  cancel(jobId: string): Promise<void>;
-  remove(jobId: string): Promise<void>;
-}
-
-export function selectCleanupEngine(
-  contractId: "image.optimize@1" | "pdf.optimize@1",
-  factories: {
-    readonly image: () => CleanupEngine;
-    readonly pdf: () => CleanupEngine;
-  },
-): CleanupEngine {
-  return contractId === "pdf.optimize@1" ? factories.pdf() : factories.image();
-}
-
 async function bestEffortWorkspaceCleanup(
   env: Env,
   jobId: string,
   contractId: "image.optimize@1" | "pdf.optimize@1",
 ): Promise<void> {
+  // Retired container namespaces are removed by the deployment migration; never restart them.
+  if (contractId !== "image.optimize@1") return;
   try {
-    const { createContainerEngineClient, createContainerPdfEngineClient } = await import(
-      "./container-client"
-    );
-    const engine = selectCleanupEngine(contractId, {
-      image: () => createContainerEngineClient(env),
-      pdf: () => createContainerPdfEngineClient(env),
-    });
+    const { createContainerEngineClient } = await import("./container-client");
+    const engine = createContainerEngineClient(env);
     await engine.cancel(jobId).catch(() => undefined);
     await engine.remove(jobId).catch(() => undefined);
   } catch {
@@ -355,8 +337,9 @@ export async function recoverStaleLeasesAndLostQueueMessages(
        AND (
          (jobs.status = 'running' AND jobs.lease_expires_at IS NOT NULL
            AND jobs.lease_expires_at <= ?)
-         OR (jobs.status = 'queued' AND job_outbox.sent_at IS NOT NULL
+         OR (jobs.status = 'queued' AND ((job_outbox.sent_at IS NOT NULL
            AND job_outbox.sent_at <= ? AND job_outbox.reconciled_at IS NULL)
+           OR jobs.contract_id = 'pdf.optimize@1'))
        )
      ORDER BY jobs.updated_at ASC, jobs.id ASC
      LIMIT ?`,
@@ -371,7 +354,11 @@ export async function recoverStaleLeasesAndLostQueueMessages(
     if (!parsed.success) throw new Error("Recovery row validation failed.");
     const row = parsed.data;
     const deadlinePassed = row.processing_deadline_at !== null && row.processing_deadline_at <= now;
-    if (row.cancel_requested_at !== null || deadlinePassed) {
+    if (
+      row.contract_id === "pdf.optimize@1" ||
+      row.cancel_requested_at !== null ||
+      deadlinePassed
+    ) {
       if (row.status === "running") {
         if (
           await settleAbandonedRunningJob(env, row, now, deadlinePassed ? "expired" : "cancelled")

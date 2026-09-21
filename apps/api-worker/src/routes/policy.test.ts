@@ -1,5 +1,4 @@
 import { imageOptimizePolicyResponseSchema } from "@hereisit/tool-contracts/image-optimize";
-import { pdfOptimizePolicyResponseSchema } from "@hereisit/tool-contracts/pdf-optimize";
 import { describe, expect, it, vi } from "vitest";
 import { readBoundedJson } from "../bounded-json";
 import { routeRequestWithDependencies } from "../router";
@@ -24,14 +23,6 @@ function policyBody(sessionId = anonymousSessionId) {
   return {
     contract: "tool-job@1",
     toolContract: "image.optimize@1",
-    anonymousSessionId: sessionId,
-  };
-}
-
-function pdfPolicyBody(sessionId = "123e4567-e89b-42d3-a456-426614174000") {
-  return {
-    contract: "tool-job@1",
-    toolContract: "pdf.optimize@1",
     anonymousSessionId: sessionId,
   };
 }
@@ -338,89 +329,6 @@ describe("deterministic image optimization policy", () => {
       reason: "LOCAL_FALLBACK_REQUIRED",
     });
     expect(JSON.stringify(payload)).not.toMatch(/10000000|3000000|601/);
-  });
-});
-
-describe("deterministic PDF optimization policy", () => {
-  it("fails local before state lookup for a job-token-shaped PDF browser session", async () => {
-    const runtime = makeRuntime({
-      readJson: vi.fn(async () => pdfPolicyBody("a".repeat(43))),
-    });
-    const response = await routePolicyRequest(policyRequest(), runtime);
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      toolContract: "image.optimize@1",
-      execution: "local",
-    });
-    expect(runtime.readState).not.toHaveBeenCalled();
-  });
-
-  it("advertises the exact PDF limits only to maintainers", async () => {
-    const sessionId = "123e4567-e89b-42d3-a456-426614174000";
-    const hash = Array.from(
-      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sessionId))),
-      (byte) => byte.toString(16).padStart(2, "0"),
-    ).join("");
-    const response = await getPolicy(policyRequest(pdfPolicyBody()), {
-      rolloutPercent: 100,
-      accountDailyWeightedUnitLimit: 10_000_000,
-      anonymousDailyWeightedUnitLimit: 1_000_000,
-      networkDailyWeightedUnitLimit: 3_000_000,
-      maintainerSessionHashes: new Set([hash]),
-    });
-
-    expect(pdfOptimizePolicyResponseSchema.parse(await response.json())).toEqual({
-      contract: "tool-job@1",
-      toolContract: "pdf.optimize@1",
-      maintainer: true,
-      execution: "server",
-      reason: null,
-      disclosure: {
-        upload: true,
-        inputDeletion: "terminal",
-        resultDeletion: {
-          mode: "server-temporary",
-          acknowledged: "immediate-delete-attempt",
-          unacknowledgedDueSeconds: 1800,
-          applicationSloSeconds: 2100,
-          lifecycleExpirationDays: 1,
-          exceptionalDelayPossible: true,
-        },
-      },
-      limits: { maxFiles: 1, maxBytesPerFile: 50 * 1024 * 1024, maxPagesPerFile: 100 },
-    });
-  });
-
-  it("keeps non-maintainer PDF requests local even at full image rollout", async () => {
-    const response = await getPolicy(policyRequest(pdfPolicyBody()), {
-      rolloutPercent: 100,
-      accountDailyWeightedUnitLimit: 10_000_000,
-      anonymousDailyWeightedUnitLimit: 1_000_000,
-      networkDailyWeightedUnitLimit: 3_000_000,
-    });
-    expect(pdfOptimizePolicyResponseSchema.parse(await response.json())).toMatchObject({
-      toolContract: "pdf.optimize@1",
-      maintainer: false,
-      execution: "local",
-      reason: "LOCAL_FALLBACK_REQUIRED",
-    });
-  });
-
-  it("admits a non-maintainer PDF request only when the release-bound public gate is enabled", async () => {
-    const response = await getPolicy(policyRequest(pdfPolicyBody()), {
-      rolloutPercent: 100,
-      accountDailyWeightedUnitLimit: 10_000_000,
-      anonymousDailyWeightedUnitLimit: 1_000_000,
-      networkDailyWeightedUnitLimit: 3_000_000,
-      pdfPublicAdmissionEnabled: true,
-    });
-
-    expect(pdfOptimizePolicyResponseSchema.parse(await response.json())).toMatchObject({
-      toolContract: "pdf.optimize@1",
-      maintainer: false,
-      execution: "server",
-      reason: null,
-    });
   });
 });
 

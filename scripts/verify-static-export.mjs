@@ -8,28 +8,17 @@ import {
   plannedToolEntries,
 } from "../packages/tool-registry/src/tool-catalog.ts";
 
-const PDFJS_VERSION = "6.2.108";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = path.join(repositoryRoot, "apps/web/out");
-const pdfjsPackageRoot = path.join(
-  repositoryRoot,
-  "packages/browser-runtime/node_modules/pdfjs-dist",
-);
-const pdfjsOutputRoot = path.join(outputRoot, "pdfjs", PDFJS_VERSION);
-
 const IMAGE_WORKER_MARKER = "hereisit-image-worker";
 const IMAGE_SERVER_RUNTIME_MARKER = "hereisit-server-runtime";
 const IMAGE_WATERMARK_WORKER_MARKER = "hereisit-image-watermark-worker";
-const PDF_WORKER_MARKER = "hereisit-pdf-worker";
-const PDF_INSPECTION_WORKER_MARKER = "hereisit-pdf-inspection-worker";
-const PDF_TO_IMAGES_WORKER_MARKER = "hereisit-pdf-to-images-worker";
-const PDF_COMPRESS_SCANNED_WORKER_MARKER = "hereisit-pdf-compress-scanned-worker";
-const PDF_OPTIMIZE_VERIFY_WORKER_MARKER = "hereisit-pdf-optimize-verifier";
-const PDFJS_MARKER = "pdf.worker.min.mjs";
-const DEPLOYED_ORIGIN = "https://hereisit.app";
-const REMOTE_URL_PATTERN = /https?:\/\/[^"'`\s<>()\\]+/gi;
-const PDFJS_REMOTE_ASSET_PATTERN =
-  /(?:pdfjs(?:-dist)?|pdf\.js|pdf\.worker(?:\.min)?\.mjs|\/cmaps\/|\/standard_fonts\/)/i;
+const REMOVED_PDF_MARKERS = [
+  "hereisit-pdf-",
+  "pdf.worker.min.mjs",
+  "pdfjs-dist",
+  "@cantoo/pdf-lib",
+];
 
 function routeHtmlFile(route) {
   return `${route.replace(/^\/+|\/+$/g, "")}.html`;
@@ -56,26 +45,14 @@ const ALL_PROCESSING_MARKERS = [
   IMAGE_WORKER_MARKER,
   IMAGE_SERVER_RUNTIME_MARKER,
   IMAGE_WATERMARK_WORKER_MARKER,
-  PDF_WORKER_MARKER,
-  PDF_INSPECTION_WORKER_MARKER,
-  PDF_TO_IMAGES_WORKER_MARKER,
-  PDF_COMPRESS_SCANNED_WORKER_MARKER,
-  PDF_OPTIMIZE_VERIFY_WORKER_MARKER,
-  PDFJS_MARKER,
 ];
 const DISCOVERY_PROCESSING_MARKERS = [
   ...ALL_PROCESSING_MARKERS,
   "ImageWorkbench",
   "ImageWatermarkWorkbench",
-  "PdfWorkbench",
-  "PdfCompressWorkbench",
-  "PdfToImageWorkbench",
-  "pdfjs-dist",
   "@hereisit/browser-runtime",
   "@hereisit/image-tool",
-  "@hereisit/pdf-tool",
   "@hereisit/tool-contracts",
-  "@cantoo/pdf-lib",
   "fflate",
   "/codec/",
   ".codec.",
@@ -93,16 +70,6 @@ const bundleProfileMarkers = {
   "image-compression-server": [IMAGE_SERVER_RUNTIME_MARKER, IMAGE_WORKER_MARKER],
   "image-extra": [],
   "image-watermark": [IMAGE_WATERMARK_WORKER_MARKER],
-  "pdf-editing": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER],
-  "pdf-organize": [PDF_WORKER_MARKER, PDF_INSPECTION_WORKER_MARKER, PDFJS_MARKER],
-  "pdf-to-images": [PDF_INSPECTION_WORKER_MARKER, PDF_TO_IMAGES_WORKER_MARKER, PDFJS_MARKER],
-  "pdf-compress-scanned": [
-    IMAGE_SERVER_RUNTIME_MARKER,
-    PDF_INSPECTION_WORKER_MARKER,
-    PDF_COMPRESS_SCANNED_WORKER_MARKER,
-    PDF_OPTIMIZE_VERIFY_WORKER_MARKER,
-    PDFJS_MARKER,
-  ],
 };
 
 async function collectJavaScript(directory) {
@@ -199,13 +166,11 @@ function assertClosureLacks(sources, marker, message) {
   );
 }
 
-function assertSameRelativeFiles(sourceFiles, exportedFiles, label) {
-  assert.equal(exportedFiles.length, sourceFiles.length, `${label} file counts must match.`);
-  assert.ok(
-    sourceFiles.every((relativePath, index) => relativePath === exportedFiles[index]),
-    `${label} relative file sets must match exactly.`,
-  );
-}
+const exportedFiles = await collectRelativeFiles(outputRoot);
+assert.ok(
+  exportedFiles.every((file) => !/^pdf(?:js)?(?:\/|\.|$)/i.test(file) && !file.endsWith(".pdf")),
+  "The static export must not publish removed PDF routes or assets.",
+);
 
 await Promise.all([
   access(path.join(outputRoot, "index.html")),
@@ -213,7 +178,6 @@ await Promise.all([
   access(path.join(outputRoot, "_headers")),
   access(path.join(outputRoot, "sitemap.xml")),
   access(path.join(outputRoot, "robots.txt")),
-  access(path.join(pdfjsOutputRoot, "pdf.worker.min.mjs")),
   ...discoveryPages.map((page) => access(path.join(outputRoot, page.file))),
   ...toolPages.map((tool) => access(path.join(outputRoot, tool.file))),
 ]);
@@ -232,7 +196,7 @@ const toolHtmlPages = await Promise.all(
 );
 assert.match(html, /파일 작업/);
 assert.match(html, /href="\/image\/compress"/);
-assert.match(html, /href="\/pdf\/merge"/);
+assert.doesNotMatch(sitemap, /<loc>[^<]*\/pdf(?:\/|<)/);
 assert.match(headers, /Content-Security-Policy:/);
 assert.match(headers, /connect-src \x27self\x27/);
 
@@ -305,39 +269,13 @@ assert.ok(
   scriptSources.some((source) => source.includes(IMAGE_WATERMARK_WORKER_MARKER)),
   "The static export must include the image watermark Worker bundle.",
 );
-assert.ok(
-  scriptSources.some((source) => source.includes(PDF_WORKER_MARKER)),
-  "The static export must include the PDF Worker bundle.",
-);
-assert.ok(
-  scriptSources.some((source) => source.includes(PDF_INSPECTION_WORKER_MARKER)),
-  "The static export must include the PDF inspection Worker bundle.",
-);
-assert.ok(
-  scriptSources.some((source) => source.includes(PDF_TO_IMAGES_WORKER_MARKER)),
-  "The static export must include the PDF-to-images Worker bundle.",
-);
-assert.ok(
-  scriptSources.some((source) => source.includes(PDF_COMPRESS_SCANNED_WORKER_MARKER)),
-  "The static export must include the scanned PDF compression Worker bundle.",
-);
-assert.ok(
-  scriptSources.some((source) => source.includes(PDF_OPTIMIZE_VERIFY_WORKER_MARKER)),
-  "The static export must include the server PDF verification Worker bundle.",
-);
-assert.ok(
-  scriptSources.some((source) => source.includes(PDFJS_MARKER)),
-  "The static export must include the PDF.js parser Worker marker.",
-);
-
-const [sourceCMaps, exportedCMaps, sourceStandardFonts, exportedStandardFonts] = await Promise.all([
-  collectRelativeFiles(path.join(pdfjsPackageRoot, "cmaps")),
-  collectRelativeFiles(path.join(pdfjsOutputRoot, "cmaps")),
-  collectRelativeFiles(path.join(pdfjsPackageRoot, "standard_fonts")),
-  collectRelativeFiles(path.join(pdfjsOutputRoot, "standard_fonts")),
-]);
-assertSameRelativeFiles(sourceCMaps, exportedCMaps, "PDF.js CMap");
-assertSameRelativeFiles(sourceStandardFonts, exportedStandardFonts, "PDF.js standard-font");
+for (const marker of REMOVED_PDF_MARKERS) {
+  assertClosureLacks(
+    scriptSources,
+    marker,
+    `The static export contains removed PDF code: ${marker}`,
+  );
+}
 
 const javaScriptInventory = await createJavaScriptInventory();
 const homeClosure = collectRouteClosure(html, javaScriptInventory);
@@ -373,25 +311,6 @@ for (const { tool, closure } of routeClosures) {
   )) {
     assertClosureLacks(closure, marker, `${tool.path} unexpectedly loaded ${marker}.`);
   }
-}
-
-const exportedCodeFiles = (await collectRelativeFiles(outputRoot)).filter(
-  (relativePath) =>
-    relativePath.endsWith(".html") || relativePath.endsWith(".js") || relativePath.endsWith(".mjs"),
-);
-const exportedHtmlAndJavaScript = (
-  await Promise.all(
-    exportedCodeFiles.map((relativePath) => readFile(path.join(outputRoot, relativePath), "utf8")),
-  )
-).join("\n");
-const remoteUrls = exportedHtmlAndJavaScript.match(REMOTE_URL_PATTERN) ?? [];
-for (const remoteUrl of remoteUrls.filter((value) => PDFJS_REMOTE_ASSET_PATTERN.test(value))) {
-  const parsed = new URL(remoteUrl);
-  assert.equal(parsed.origin, DEPLOYED_ORIGIN, "The static export referenced a PDF.js CDN URL.");
-  assert.ok(
-    parsed.pathname.startsWith(`/pdfjs/${PDFJS_VERSION}/`),
-    "An absolute PDF.js URL must use the pinned same-origin asset path.",
-  );
 }
 
 console.log("Static export verified.");

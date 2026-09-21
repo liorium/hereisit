@@ -9,7 +9,6 @@ const onePixelPng = Buffer.from(
 
 const domains = [
   ["이미지", "/tools?domain=image"],
-  ["PDF·문서", "/tools?domain=document"],
   ["영상·오디오", "/tools?domain=media"],
   ["데이터·변환", "/tools?domain=data"],
   ["텍스트·AI", "/tools?domain=text-ai"],
@@ -20,7 +19,6 @@ const domains = [
 const homeTabs = [
   "전체·추천",
   "이미지",
-  "PDF·문서",
   "영상·오디오",
   "데이터·변환",
   "텍스트·AI",
@@ -49,11 +47,11 @@ test.beforeEach(async ({ page }) => {
     window.localStorage.setItem(
       "hereisit.recent-tools.v1",
       JSON.stringify([
-        "pdf.watermark",
-        "pdf.organize",
+        "image.rotate",
+        "image.crop",
         "image.watermark",
-        "pdf.split",
-        "pdf.merge",
+        "image.resize",
+        "image.convert",
       ]),
     );
   });
@@ -304,24 +302,24 @@ test("shows newest-first personal tools and updates favorites with ID-only stora
   await expect(page.getByRole("heading", { level: 1, name: "내 도구" })).toBeVisible();
   const recentRegion = page.getByRole("region", { name: "최근 사용한 도구" });
   await expect(recentRegion.locator("article")).toHaveCount(5);
-  await expect(recentRegion.locator("article").first()).toContainText("PDF 워터마크 넣기");
+  await expect(recentRegion.locator("article").first()).toContainText("이미지 회전");
 
   await recentRegion
     .locator("article")
     .first()
-    .getByRole("button", { name: "PDF 워터마크 넣기 즐겨찾기 추가", exact: true })
+    .getByRole("button", { name: "이미지 회전 즐겨찾기 추가", exact: true })
     .click();
   const favoriteRegion = page.getByRole("region", { name: "즐겨찾는 도구" });
   await expect(favoriteRegion.locator("article")).toHaveCount(1);
-  await expect(favoriteRegion.locator("article").first()).toContainText("PDF 워터마크 넣기");
+  await expect(favoriteRegion.locator("article").first()).toContainText("이미지 회전");
 
   const stored = await page.evaluate(() => ({
     favorites: JSON.parse(window.localStorage.getItem("hereisit.favorite-tools.v1") ?? "null"),
     recent: JSON.parse(window.localStorage.getItem("hereisit.recent-tools.v1") ?? "null"),
   }));
   expect(stored).toEqual({
-    favorites: ["pdf.watermark"],
-    recent: ["pdf.watermark", "pdf.organize", "image.watermark", "pdf.split", "pdf.merge"],
+    favorites: ["image.rotate"],
+    recent: ["image.rotate", "image.crop", "image.watermark", "image.resize", "image.convert"],
   });
   expect([...stored.favorites, ...stored.recent]).toHaveLength(6);
   expect([...stored.favorites, ...stored.recent].every((value) => typeof value === "string")).toBe(
@@ -371,7 +369,7 @@ test("presents workflows as honest preparation-only examples", async ({ page }) 
   await expect(content.getByText(/명시적인 로컬 연결.*앞으로 제공/)).toBeVisible();
 
   const examples = content.locator('[data-testid="workflow-example"]');
-  expect(await examples.count()).toBeGreaterThan(1);
+  expect(await examples.count()).toBeGreaterThan(0);
   const availableRoutes = new Set(availableToolEntries.map((tool) => tool.route));
   for (const example of await examples.all()) {
     await expect(example.getByText("준비 중", { exact: true })).toBeVisible();
@@ -638,9 +636,9 @@ test("detects mixed files incrementally without network or private-data side eff
       buffer: Buffer.concat([onePixelPng, Buffer.from(sentinelBytes)]),
     },
     {
-      name: "local-document.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-1.7\n%%EOF"),
+      name: "local-image.jpg",
+      mimeType: "image/jpeg",
+      buffer: Buffer.from([0xff, 0xd8, 0xff]),
     },
   ]);
 
@@ -683,8 +681,9 @@ test("detects mixed files incrementally without network or private-data side eff
   await launcher.getByRole("status").scrollIntoViewIfNeeded();
   await expect(launcher.getByRole("status")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "PDF 문서" })).toBeVisible();
+  await expect(launcher.getByRole("heading", { level: 3 })).toHaveCount(1);
+  await expect(launcher.getByRole("heading", { name: "함께 처리할 수 있는 파일" })).toBeVisible();
+  await expect(launcher.getByText("2개", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
   expect(await page.getByRole("button", { name: /도구 선택/ }).count()).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "다른 파일 선택" })).toBeVisible();
@@ -708,13 +707,13 @@ test("detects mixed files incrementally without network or private-data side eff
   }
   expect(afterSelection.objectUrls).toEqual([]);
   await expect(launcher.locator("img, canvas")).toHaveCount(0);
-  await privacy.assertClean(0, false);
+  await privacy.assertClean(0);
 });
 
 test("keeps sentinel data private through explicit handoff", async ({ page }) => {
-  const sentinelFilename = "PRIVATE_HANDOFF_FILENAME_SENTINEL.pdf";
+  const sentinelFilename = "PRIVATE_HANDOFF_FILENAME_SENTINEL.png";
   const sentinelBytes = "PRIVATE_HANDOFF_BYTES_SENTINEL";
-  const detectedKind = "application/pdf";
+  const detectedKind = "image/png";
   const privacy = await installPrivacyObserver(page, {
     sentinels: [sentinelFilename, sentinelBytes, detectedKind],
   });
@@ -725,11 +724,11 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
   await page.locator("#home-file-input").setInputFiles({
     name: sentinelFilename,
     mimeType: detectedKind,
-    buffer: Buffer.from(`%PDF-1.7\n% ${sentinelBytes}\n%%EOF`),
+    buffer: Buffer.concat([onePixelPng, Buffer.from(sentinelBytes)]),
   });
 
   await expect(launcher.getByRole("status")).toHaveText("1개 파일 형식 확인 완료");
-  await expect(page.getByRole("heading", { name: "PDF 문서" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
   expect(await privacy.read()).toEqual({
     requestCount: 0,
     externalRequests: [],
@@ -742,18 +741,14 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
   await expect(launcher.locator("img, canvas, [data-thumbnail]")).toHaveCount(0);
 
   await expect(page.getByText("가장 잘 맞는 도구", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF 합치기 도구 선택" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 형식 변환 도구 선택" })).not.toBeVisible();
   await revealAlternateFileTools(page);
-  await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
-  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
+  await page.getByRole("button", { name: "이미지 형식 변환 도구 선택" }).click();
+  await expect(page).toHaveURL(/\/image\/convert\/?$/);
   await expect(page.getByText(sentinelFilename, { exact: true })).toBeVisible();
   const afterHandoff = await privacy.read();
   expect(afterHandoff.externalRequests).toEqual([]);
   expect(afterHandoff.writeRequests).toEqual([]);
-  expect(afterHandoff.objectUrls).toEqual([]);
-  await expect(
-    page.getByRole("region", { name: "선택한 파일" }).locator("img, canvas, [data-thumbnail]"),
-  ).toHaveCount(0);
   expect(page.url()).not.toContain(sentinelFilename);
   expect(page.url()).not.toContain(sentinelBytes);
   expect(page.url()).not.toContain(detectedKind);
@@ -771,7 +766,7 @@ test("keeps sentinel data private through explicit handoff", async ({ page }) =>
         [sentinelFilename, sentinelBytes, detectedKind],
       ),
   ).toBe(false);
-  await privacy.assertClean(0, false);
+  await privacy.assertClean(0);
 });
 
 test("invalidates an older detection generation when the selection changes", async ({ page }) => {
@@ -813,9 +808,9 @@ test("invalidates an older detection generation when the selection changes", asy
     });
 
   await input.setInputFiles({
-    name: "stale.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.7\n%%EOF"),
+    name: "stale.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.from([0xff, 0xd8, 0xff]),
   });
   await expect.poll(pendingReadCount).toBe(1);
 
@@ -832,7 +827,7 @@ test("invalidates an older detection generation when the selection changes", asy
   await releaseRead();
 
   await expect(page.getByRole("heading", { name: "PNG 이미지" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "PDF 문서" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "JPG 이미지" })).toHaveCount(0);
 });
 
 test("keeps an unknown-format correction beside the chooser", async ({ page }) => {
@@ -887,35 +882,7 @@ test("rejects 101 launcher files before reading any bytes", async ({ page }) => 
   ).toBe(0);
   expect((await privacy.read()).requestCount).toBe(beforeSelection.requestCount);
   await expect(launcher.getByRole("button", { name: /도구 선택/ })).toHaveCount(0);
-  await privacy.assertClean(0, false);
-});
-
-test("keeps ready and needs-more recommendations actionable while disabling too-many", async ({
-  page,
-}) => {
-  await page.goto("/");
-  const input = page.locator("#home-file-input");
-  const pdfFixture = (name: string) => ({
-    name,
-    mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.7\n%%EOF"),
-  });
-
-  await input.setInputFiles(pdfFixture("one.pdf"));
-  await revealAlternateFileTools(page);
-  const merge = page.getByRole("button", { name: "PDF 합치기 도구 선택" });
-  const split = page.getByRole("button", { name: "PDF 페이지 분할 도구 선택" });
-  await expect(merge).toBeEnabled();
-  await expect(merge.locator("..")).toContainText("1개 파일을 더 선택");
-  await expect(split).toBeEnabled();
-  await expect(page).toHaveURL(/\/$/);
-
-  await input.setInputFiles([pdfFixture("first.pdf"), pdfFixture("second.pdf")]);
-  await revealAlternateFileTools(page);
-  await expect(merge).toBeEnabled();
-  await expect(split).toBeDisabled();
-  await expect(split.locator("..")).toContainText("최대 1개");
-  await expect(page).toHaveURL(/\/$/);
+  await privacy.assertClean(0);
 });
 
 test("hands a chosen file to the canonical destination without auto-processing", async ({
@@ -1050,28 +1017,13 @@ test("does not leave a consumed image handoff for a different tool", async ({ pa
   });
   await page.getByRole("button", { name: "검색", exact: true }).click();
   const search = page.getByTestId("desktop-search");
-  await search.getByRole("combobox", { name: "도구 검색" }).fill("PDF 합치기");
-  await search.getByRole("option", { name: /PDF 합치기/ }).click();
+  await search.getByRole("combobox", { name: "도구 검색" }).fill("이미지 형식 변환");
+  await search.getByRole("option", { name: /이미지 형식 변환/ }).click();
 
-  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
+  await expect(page).toHaveURL(/\/image\/convert\/?$/);
   await expect(page.getByText("파일을 다시 선택해 주세요", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/target-mismatch\.png/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "합칠 PDF 선택" })).toBeEnabled();
-});
-
-test("hands a needs-more recommendation through destination validation", async ({ page }) => {
-  await page.goto("/");
-  await page.locator("#home-file-input").setInputFiles({
-    name: "needs-another.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("%PDF-1.7\n%%EOF"),
-  });
-
-  await revealAlternateFileTools(page);
-  await page.getByRole("button", { name: "PDF 합치기 도구 선택" }).click();
-  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
-  await expect(page.getByText("needs-another.pdf", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF 합치기", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "변환할 이미지 선택" })).toBeEnabled();
 });
 
 test("exposes the desktop destinations and a bounded navigation disclosure", async ({ page }) => {
@@ -1141,11 +1093,11 @@ test("searches only local catalog metadata with bounded keyboard suggestions", a
 
   await page.clock.install();
   await page.clock.pauseAt(Date.now() + 1_000);
-  await input.fill("PDF");
+  await input.fill("이미지");
   await page.clock.runFor(150);
   await expect(search.getByRole("status")).toHaveText("검색 결과 5개");
-  await input.fill("PDF ");
-  await expect(input).toHaveValue("PDF ");
+  await input.fill("이미지 ");
+  await expect(input).toHaveValue("이미지 ");
   await expect(search.getByRole("status")).toHaveText("");
   await page.clock.runFor(149);
   await expect(search.getByRole("status")).toHaveText("");
@@ -1159,13 +1111,13 @@ test("searches only local catalog metadata with bounded keyboard suggestions", a
   await input.fill("  ");
   await expect(search.getByRole("listbox")).toHaveCount(0);
 
-  await input.fill("병합");
+  await input.fill("이미지 형식 변환");
   await page.keyboard.press("ArrowDown");
   const activeOptionId = await input.getAttribute("aria-activedescendant");
   expect(activeOptionId).toBeTruthy();
   await expect(page.locator(`#${activeOptionId}`)).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/pdf\/merge\/?$/);
+  await expect(page).toHaveURL(/\/image\/convert\/?$/);
 });
 
 test("replaces an open desktop overlay and returns search focus on Escape", async ({ page }) => {

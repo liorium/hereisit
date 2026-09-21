@@ -59,10 +59,7 @@ export function ToolDetailPage({ toolId, workbench, guide }: ToolDetailPageProps
             </section>
           ) : null}
           {implementation.notices.map((notice) => (
-            <p
-              className={notice.tone === "warning" ? styles.warning : styles.support}
-              key={notice.text}
-            >
+            <p className={styles[notice.tone]} key={notice.text}>
               {notice.text}
             </p>
           ))}

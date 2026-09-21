@@ -107,7 +107,7 @@ test("preserves shared-card text space and the 600/800 pixel boundaries", async 
 });
 
 test("keeps every shared-card surface readable without changing behavior", async ({ page }) => {
-  await seedToolPreferences(page, ["image.compress"], ["pdf.watermark"]);
+  await seedToolPreferences(page, ["image.compress"], ["image.watermark"]);
   const surfaces = [
     { path: "/", card: () => page.getByTestId("home-tool-grid").locator("article").first() },
     {

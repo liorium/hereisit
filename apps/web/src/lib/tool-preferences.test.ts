@@ -48,10 +48,10 @@ describe("normalizeStoredToolIds", () => {
   it("keeps available IDs in first-seen order and removes duplicates", () => {
     expect(
       normalizeStoredToolIds(
-        ["pdf.merge", "image.compress", "pdf.merge", "image.resize", "image.compress"],
+        ["image.rotate", "image.compress", "image.rotate", "image.resize", "image.compress"],
         (value) => findAvailableToolById(value)?.id,
       ),
-    ).toEqual(["pdf.merge", "image.compress", "image.resize"]);
+    ).toEqual(["image.rotate", "image.compress", "image.resize"]);
   });
 
   it("drops non-strings, removed IDs, and planned IDs", () => {
@@ -91,9 +91,9 @@ describe("createToolPreferencesStore", () => {
   it("resolves storage lazily and filters both stored lists to available IDs", () => {
     const storage = new FakeStorage({
       [FAVORITES_STORAGE_KEY]: JSON.stringify([
-        "pdf.merge",
+        "image.rotate",
         "media.video-compress",
-        "pdf.merge",
+        "image.rotate",
         "removed.tool",
         "image.compress",
       ]),
@@ -101,7 +101,7 @@ describe("createToolPreferencesStore", () => {
         "image.resize",
         "image.resize",
         "media.video-compress",
-        "pdf.split",
+        "image.crop",
       ]),
     });
     let resolutions = 0;
@@ -112,8 +112,8 @@ describe("createToolPreferencesStore", () => {
 
     expect(resolutions).toBe(0);
     expect(store.getSnapshot()).toEqual({
-      favorites: ["pdf.merge", "image.compress"],
-      recent: ["image.resize", "pdf.split"],
+      favorites: ["image.rotate", "image.compress"],
+      recent: ["image.resize", "image.crop"],
       persistence: "local",
     });
     expect(resolutions).toBe(1);
@@ -123,7 +123,7 @@ describe("createToolPreferencesStore", () => {
 
   it.each([
     ["malformed JSON", "{not-json", JSON.stringify([])],
-    ["a non-array payload", JSON.stringify([]), JSON.stringify({ id: "pdf.merge" })],
+    ["a non-array payload", JSON.stringify([]), JSON.stringify({ id: "image.rotate" })],
   ])("switches permanently to memory for %s", (_case, favorites, recent) => {
     const storage = new FakeStorage({
       [FAVORITES_STORAGE_KEY]: favorites,
@@ -133,12 +133,12 @@ describe("createToolPreferencesStore", () => {
 
     expect(store.getSnapshot()).toEqual({ favorites: [], recent: [], persistence: "memory" });
 
-    store.recordRecent("pdf.merge");
+    store.recordRecent("image.rotate");
     store.toggleFavorite("image.compress");
 
     expect(store.getSnapshot()).toEqual({
       favorites: ["image.compress"],
-      recent: ["pdf.merge"],
+      recent: ["image.rotate"],
       persistence: "memory",
     });
     expect(storage.writes).toEqual([]);
@@ -146,7 +146,7 @@ describe("createToolPreferencesStore", () => {
 
   it("records recents newest-first and does not republish an identical head", () => {
     const storage = new FakeStorage({
-      [RECENT_STORAGE_KEY]: JSON.stringify(["pdf.merge", "image.compress"]),
+      [RECENT_STORAGE_KEY]: JSON.stringify(["image.rotate", "image.compress"]),
     });
     const store = createToolPreferencesStore(() => storage);
     const initial = store.getSnapshot();
@@ -157,7 +157,7 @@ describe("createToolPreferencesStore", () => {
 
     store.recordRecent("image.resize");
     const changed = store.getSnapshot();
-    expect(changed.recent).toEqual(["image.resize", "pdf.merge", "image.compress"]);
+    expect(changed.recent).toEqual(["image.resize", "image.rotate", "image.compress"]);
     expect(changed).not.toBe(initial);
     expect(notifications).toBe(1);
 
@@ -167,14 +167,14 @@ describe("createToolPreferencesStore", () => {
     expect(storage.writes).toHaveLength(1);
     expect(storage.writes[0]).toEqual({
       key: RECENT_STORAGE_KEY,
-      value: JSON.stringify(["image.resize", "pdf.merge", "image.compress"]),
+      value: JSON.stringify(["image.resize", "image.rotate", "image.compress"]),
     });
     expectIdOnlyWrites(storage.writes);
   });
 
   it("moves a repeated recent ID to the front and publishes one changed snapshot", () => {
     const storage = new FakeStorage({
-      [RECENT_STORAGE_KEY]: JSON.stringify(["pdf.merge", "image.compress", "image.resize"]),
+      [RECENT_STORAGE_KEY]: JSON.stringify(["image.rotate", "image.compress", "image.resize"]),
     });
     const store = createToolPreferencesStore(() => storage);
     store.getSnapshot();
@@ -185,7 +185,7 @@ describe("createToolPreferencesStore", () => {
 
     store.recordRecent("image.resize");
 
-    expect(store.getSnapshot().recent).toEqual(["image.resize", "pdf.merge", "image.compress"]);
+    expect(store.getSnapshot().recent).toEqual(["image.resize", "image.rotate", "image.compress"]);
     expect(notifications).toBe(1);
     expectIdOnlyWrites(storage.writes);
   });
@@ -199,22 +199,22 @@ describe("createToolPreferencesStore", () => {
       notifications += 1;
     });
 
-    store.toggleFavorite("pdf.merge");
-    expect(store.getSnapshot().favorites).toEqual(["pdf.merge"]);
+    store.toggleFavorite("image.rotate");
+    expect(store.getSnapshot().favorites).toEqual(["image.rotate"]);
     expect(notifications).toBe(1);
 
     store.toggleFavorite("image.compress");
-    expect(store.getSnapshot().favorites).toEqual(["pdf.merge", "image.compress"]);
+    expect(store.getSnapshot().favorites).toEqual(["image.rotate", "image.compress"]);
     expect(notifications).toBe(2);
 
-    store.toggleFavorite("pdf.merge");
+    store.toggleFavorite("image.rotate");
     expect(store.getSnapshot().favorites).toEqual(["image.compress"]);
     expect(notifications).toBe(3);
     expect(storage.writes).toEqual([
-      { key: FAVORITES_STORAGE_KEY, value: JSON.stringify(["pdf.merge"]) },
+      { key: FAVORITES_STORAGE_KEY, value: JSON.stringify(["image.rotate"]) },
       {
         key: FAVORITES_STORAGE_KEY,
-        value: JSON.stringify(["pdf.merge", "image.compress"]),
+        value: JSON.stringify(["image.rotate", "image.compress"]),
       },
       { key: FAVORITES_STORAGE_KEY, value: JSON.stringify(["image.compress"]) },
     ]);
@@ -231,7 +231,7 @@ describe("createToolPreferencesStore", () => {
     expect(Object.isFrozen(initial.recent)).toBe(true);
     expect(store.getSnapshot()).toBe(initial);
 
-    store.recordRecent("pdf.merge");
+    store.recordRecent("image.rotate");
     const changed = store.getSnapshot();
     expect(changed).not.toBe(initial);
     expect(Object.isFrozen(changed)).toBe(true);
@@ -256,12 +256,12 @@ describe("createToolPreferencesStore", () => {
     expect(store.getSnapshot()).toEqual({ favorites: [], recent: [], persistence: "memory" });
     expect(reads).toBe(1);
 
-    store.recordRecent("pdf.merge");
+    store.recordRecent("image.rotate");
     store.toggleFavorite("image.compress");
 
     expect(store.getSnapshot()).toEqual({
       favorites: ["image.compress"],
-      recent: ["pdf.merge"],
+      recent: ["image.rotate"],
       persistence: "memory",
     });
     expect(reads).toBe(1);
@@ -285,17 +285,17 @@ describe("createToolPreferencesStore", () => {
       notifications += 1;
     });
 
-    store.recordRecent("pdf.merge");
+    store.recordRecent("image.rotate");
 
     expect(store.getSnapshot()).toEqual({
       favorites: [],
-      recent: ["pdf.merge"],
+      recent: ["image.rotate"],
       persistence: "memory",
     });
     expect(notifications).toBe(1);
     expect(writeAttempts).toBe(1);
     expect(storage.writes).toEqual([
-      { key: RECENT_STORAGE_KEY, value: JSON.stringify(["pdf.merge"]) },
+      { key: RECENT_STORAGE_KEY, value: JSON.stringify(["image.rotate"]) },
     ]);
     expectIdOnlyWrites(storage.writes);
 
@@ -304,7 +304,7 @@ describe("createToolPreferencesStore", () => {
 
     expect(store.getSnapshot()).toEqual({
       favorites: ["image.compress"],
-      recent: ["image.resize", "pdf.merge"],
+      recent: ["image.resize", "image.rotate"],
       persistence: "memory",
     });
     expect(notifications).toBe(3);

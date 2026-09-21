@@ -46,8 +46,8 @@ describe("catalog search and filters", () => {
   });
 
   it("prioritizes exact names and finds alias substrings", () => {
-    expect(searchAvailableTools("PDF 합치기")[0]?.id).toBe("pdf.merge");
-    expect(searchAvailableTools("병합")[0]?.id).toBe("pdf.merge");
+    expect(searchAvailableTools("이미지 용량 줄이기")[0]?.id).toBe("image.compress");
+    expect(searchAvailableTools("리사이즈")[0]?.id).toBe("image.resize");
   });
 
   it("orders name prefixes before lower-tier alias substrings", () => {
@@ -59,9 +59,7 @@ describe("catalog search and filters", () => {
       "image.convert",
       "image.rotate",
       "image.watermark",
-      "pdf.image-to-pdf",
       "image.editor",
-      "pdf.to-image",
       "image.html-to-image",
       "image.remove-background",
       "image.convert-to-jpg",
@@ -72,7 +70,7 @@ describe("catalog search and filters", () => {
   });
 
   it("orders exact aliases before alias substrings", () => {
-    expect(availableIds("이미지 변환")).toEqual(["image.convert", "pdf.to-image"]);
+    expect(availableIds("이미지 변환")).toEqual(["image.convert"]);
   });
 
   it("orders alias prefixes before name and alias substrings", () => {
@@ -81,18 +79,16 @@ describe("catalog search and filters", () => {
       "image.convert-from-jpg",
       "image.compress",
       "image.convert",
-      "pdf.image-to-pdf",
-      "pdf.to-image",
     ]);
   });
 
   it("orders name and alias substrings before purpose metadata", () => {
-    expect(availableIds("추출")).toEqual(["pdf.split", "pdf.to-image"]);
+    expect(availableIds("추출")).toEqual([]);
   });
 
   it("searches purpose labels and IDs, then ranks matches", () => {
-    expect(availableIds("extract")).toEqual(["pdf.split", "pdf.to-image"]);
-    expect(availableIds("추출·분석")).toEqual(["pdf.split", "pdf.to-image"]);
+    expect(availableIds("extract")).toEqual([]);
+    expect(availableIds("추출·분석")).toEqual([]);
   });
 
   it("searches domain labels and IDs, then ranks matches", () => {
@@ -101,8 +97,6 @@ describe("catalog search and filters", () => {
       "image.convert",
       "image.convert-to-jpg",
       "image.convert-from-jpg",
-      "pdf.to-image",
-      "pdf.image-to-pdf",
     ];
     expect(availableIds("data")).toEqual(expected);
     expect(availableIds("데이터")).toEqual(expected);
@@ -113,8 +107,6 @@ describe("catalog search and filters", () => {
       "image.convert",
       "image.convert-to-jpg",
       "image.convert-from-jpg",
-      "pdf.to-image",
-      "pdf.image-to-pdf",
       "data.json-format",
       "image.html-to-image",
     ]);
@@ -126,24 +118,17 @@ describe("catalog search and filters", () => {
       "image.compress",
       "image.remove-background",
       "image.upscale",
-      "pdf.merge",
       "image.resize",
       "image.crop",
-      "pdf.compress-scanned",
       "image.convert",
       "image.rotate",
-      "pdf.split",
       "image.watermark",
       "image.convert-to-jpg",
       "image.convert-from-jpg",
-      "pdf.organize",
       "image.editor",
       "image.meme",
-      "pdf.to-image",
       "image.html-to-image",
       "image.blur-face",
-      "pdf.image-to-pdf",
-      "pdf.watermark",
     ]);
     expect(new Set(availableIds("변환")).size).toBe(availableIds("변환").length);
     expect(Object.isFrozen(first)).toBe(true);
@@ -160,8 +145,6 @@ describe("catalog search and filters", () => {
       "image.convert",
       "image.convert-to-jpg",
       "image.convert-from-jpg",
-      "pdf.to-image",
-      "pdf.image-to-pdf",
       "image.html-to-image",
     ]);
     expect(selectAvailableTools({ query: "병합", domain: "image", purpose: "convert" })).toEqual(
@@ -374,11 +357,11 @@ describe("home tool selection", () => {
   it("deduplicates recent tools and places them first", () => {
     const selected = selectHomeTools({
       domain: "all",
-      recentToolIds: ["pdf.merge", "pdf.merge"],
+      recentToolIds: ["image.meme", "image.meme"],
       limit: 12,
     });
-    expect(selected[0]?.id).toBe("pdf.merge");
-    expect(selected.filter((tool) => tool.id === "pdf.merge")).toHaveLength(1);
+    expect(selected[0]?.id).toBe("image.meme");
+    expect(selected.filter((tool) => tool.id === "image.meme")).toHaveLength(1);
     expect(Object.isFrozen(selected)).toBe(true);
   });
 
@@ -386,36 +369,38 @@ describe("home tool selection", () => {
     const selected = selectHomeTools({
       domain: "all",
       recentToolIds: [
-        "pdf.watermark",
-        "pdf.image-to-pdf",
-        "pdf.to-image",
-        "pdf.organize",
-        "pdf.split",
+        "image.watermark",
+        "image.editor",
+        "image.html-to-image",
+        "image.blur-face",
+        "image.remove-background",
       ],
       limit: 12,
     });
     expect(selected.slice(0, 4).map((tool) => tool.id)).toEqual([
-      "pdf.watermark",
-      "pdf.image-to-pdf",
-      "pdf.to-image",
-      "pdf.organize",
+      "image.watermark",
+      "image.editor",
+      "image.html-to-image",
+      "image.blur-face",
     ]);
-    expect(selected.findIndex((tool) => tool.id === "pdf.split")).toBe(-1);
+    expect(selected.slice(0, 4).some((tool) => tool.id === "image.remove-background")).toBe(false);
     expect(selected).toHaveLength(12);
   });
 
   it("ignores unknown and planned recent IDs", () => {
     const selected = selectHomeTools({
       domain: "all",
-      recentToolIds: ["missing.tool", "media.video-compress", "pdf.merge"],
+      recentToolIds: ["missing.tool", "media.video-compress", "image.meme"],
     });
-    expect(selected[0]?.id).toBe("pdf.merge");
+    expect(selected[0]?.id).toBe("image.meme");
     expect(selected.some((tool) => tool.id === "media.video-compress")).toBe(false);
   });
 
   it("builds available-only domain panels in rank order", () => {
     expect(
-      selectHomeTools({ domain: "image", recentToolIds: ["pdf.merge"] }).map((tool) => tool.id),
+      selectHomeTools({ domain: "image", recentToolIds: ["data.json-format"] }).map(
+        (tool) => tool.id,
+      ),
     ).toEqual([
       "image.compress",
       "image.remove-background",
@@ -474,24 +459,6 @@ describe("home tool selection", () => {
 });
 
 describe("file capability recommendations", () => {
-  it("marks a single PDF as needing one more file for merge", () => {
-    const recommendations = recommendAvailableTools([{ index: 0, kind: "application/pdf" }]);
-    expect(recommendations.find(({ tool }) => tool.id === "pdf.merge")).toMatchObject({
-      readiness: "needs-more",
-      missingFiles: 1,
-      maximumFiles: 20,
-      matchedIndexes: [0],
-    });
-    expect(recommendations.map(({ tool }) => tool.id)).toEqual([
-      "pdf.compress-scanned",
-      "pdf.split",
-      "pdf.organize",
-      "pdf.to-image",
-      "pdf.watermark",
-      "pdf.merge",
-    ]);
-  });
-
   it("prefers the most exact detected-kind capability before rank", () => {
     const recommendations = recommendAvailableTools([
       { index: 0, kind: "image/jpeg" },
@@ -499,7 +466,6 @@ describe("file capability recommendations", () => {
     ]);
     expect(recommendations.map(({ tool }) => tool.id)).toEqual([
       "image.upscale",
-      "pdf.image-to-pdf",
       "image.compress",
       "image.remove-background",
       "image.crop",
@@ -517,27 +483,6 @@ describe("file capability recommendations", () => {
     });
   });
 
-  it("orders ready tools before too-many matches", () => {
-    const recommendations = recommendAvailableTools([
-      { index: 3, kind: "application/pdf" },
-      { index: 8, kind: "application/pdf" },
-    ]);
-    expect(recommendations.map(({ tool }) => tool.id)).toEqual([
-      "pdf.merge",
-      "pdf.compress-scanned",
-      "pdf.split",
-      "pdf.organize",
-      "pdf.to-image",
-      "pdf.watermark",
-    ]);
-    expect(recommendations.find(({ tool }) => tool.id === "pdf.compress-scanned")).toMatchObject({
-      readiness: "too-many",
-      missingFiles: 0,
-      maximumFiles: 1,
-      matchedIndexes: [3, 8],
-    });
-  });
-
   it("honors compatible kinds and mixed-kind launcher metadata", () => {
     expect(
       recommendAvailableTools([
@@ -549,8 +494,8 @@ describe("file capability recommendations", () => {
       recommendAvailableTools([
         { index: 0, kind: "application/pdf" },
         { index: 1, kind: "application/pdf" },
-      ]).find(({ tool }) => tool.id === "pdf.merge")?.readiness,
-    ).toBe("ready");
+      ]),
+    ).toEqual([]);
   });
 
   it("excludes planned and launcher-less tools", () => {
@@ -586,9 +531,7 @@ describe("file capability recommendations", () => {
     expect(groups.every((group) => Object.isFrozen(group.indexes))).toBe(true);
 
     const pdfItems = items.filter((item) => item.kind === groups[0]?.kind);
-    expect(
-      recommendAvailableTools(pdfItems).find(({ tool }) => tool.id === "pdf.merge"),
-    ).toMatchObject({ readiness: "ready", matchedIndexes: [7, 9] });
+    expect(recommendAvailableTools(pdfItems)).toEqual([]);
     const jpegItems = items.filter((item) => item.kind === groups[1]?.kind);
     expect(recommendAvailableTools(jpegItems)[0]).toMatchObject({ matchedIndexes: [3] });
   });

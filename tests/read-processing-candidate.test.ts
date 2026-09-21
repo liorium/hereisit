@@ -43,8 +43,8 @@ function securityAssets() {
 
 function candidate() {
   const payload = {
-    schema: "hereisit-processing-candidate@1",
-    version: 1,
+    schema: "hereisit-processing-candidate@3",
+    version: 3,
     state: "finalized",
     releaseId,
     gitSha,
@@ -126,6 +126,17 @@ afterEach(async () => {
 });
 
 describe("processing candidate reader", () => {
+  it("rejects retired release schemas and removed engine fields", () => {
+    const { verificationSha256: _stamp, ...base } = candidate();
+    for (const payload of [
+      { ...base, schema: "hereisit-processing-candidate@2", version: 2 },
+      { ...base, pdfEngine: base.engine },
+    ]) {
+      expect(() =>
+        validateProcessingCandidate({ ...payload, verificationSha256: sha256Canonical(payload) }),
+      ).toThrow();
+    }
+  });
   it("reads only allowlisted scalar identities from a verified finalized candidate", () => {
     const manifest = candidate();
 
@@ -144,7 +155,9 @@ describe("processing candidate reader", () => {
   });
 
   it("keeps legacy @1 parseable for history but never authorizes PDF public release", () => {
-    const legacy = candidate();
+    const { verificationSha256: _stamp, ...base } = candidate();
+    const payload = { ...base, schema: "hereisit-processing-candidate@1", version: 1 };
+    const legacy = { ...payload, verificationSha256: sha256Canonical(payload) };
     expect(validateProcessingCandidate(legacy)).toMatchObject({
       schema: "hereisit-processing-candidate@1",
       version: 1,

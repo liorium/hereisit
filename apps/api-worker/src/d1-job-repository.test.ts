@@ -2,22 +2,17 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { calculateSettledWeightedUnits, estimateImageOptimizeUnits } from "@hereisit/server-job";
 import type { ImageOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/image-optimize";
-import type { PdfOptimizeCreateRequestV1 } from "@hereisit/tool-contracts/pdf-optimize";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { hashAnonymousSessionId, hashJobToken } from "./auth";
 import {
-  type BeginUploadResult,
   claimQueuedJob,
   createD1JobRepository,
   createD1LifecycleRepository,
-  type JobRepository,
-  type PdfBeginUploadResult,
-  type PdfJobRepository,
-  type PdfReserveAndCreateInput,
-  parseStoredJob,
   RepositoryIntegrityError,
   type ReserveAndCreateInput,
 } from "./d1-job-repository";
+import type { Env } from "./env";
+import { recoverStaleLeasesAndLostQueueMessages } from "./sweeper";
 
 const baseMigration = [
   "0001_processing_jobs.sql",
@@ -244,9 +239,7 @@ function request(
   };
 }
 
-function pdfRequest(
-  overrides: Partial<PdfOptimizeCreateRequestV1> = {},
-): PdfOptimizeCreateRequestV1 {
+function pdfRequest() {
   return {
     contract: "tool-job@1",
     toolContract: "pdf.optimize@1",
@@ -259,7 +252,6 @@ function pdfRequest(
       pageCount: 3,
     },
     spec: { version: 1, preset: "balanced" },
-    ...overrides,
   };
 }
 
@@ -289,44 +281,6 @@ async function reservationInput(
     outputKey,
     queueEpoch,
     estimate: estimateImageOptimizeUnits(createRequest),
-    uploadExpiresAt: now + 10 * 60_000,
-    now,
-    accountDailyLimit: Number.MAX_SAFE_INTEGER,
-    anonymousDailyLimit: Number.MAX_SAFE_INTEGER,
-    networkDailyLimit: Number.MAX_SAFE_INTEGER,
-    accountPendingJobLimit: 10,
-    networkPendingJobLimit: 3,
-    maximumQueuedAgeSeconds: 600,
-    ...overrides,
-  };
-}
-
-async function pdfReservationInput(
-  overrides: Partial<PdfReserveAndCreateInput> = {},
-): Promise<PdfReserveAndCreateInput> {
-  const createRequest = overrides.request ?? pdfRequest();
-  const specJson = overrides.specJson ?? JSON.stringify(createRequest.spec);
-  return {
-    jobId: alternateJobId,
-    clientRequestId: createRequest.clientRequestId,
-    tokenHash: await hashJobToken(createRequest.jobToken),
-    sessionHash: await hashAnonymousSessionId(createRequest.anonymousSessionId),
-    networkHash,
-    networkDailyQuotaHashes: [networkHash, previousNetworkHash],
-    networkPendingHashes: [networkHash, previousNetworkHash, previousDayNetworkHash],
-    dayKey,
-    request: createRequest,
-    specJson,
-    specHash: overrides.specHash ?? (await sha256Hex(specJson)),
-    inputKey: "inputs/55555555-5555-4555-8555-555555555555",
-    outputKey: "outputs/66666666-6666-4666-8666-666666666666",
-    queueEpoch: "77777777-7777-4777-8777-777777777777",
-    estimate: {
-      resourceClass: "pdf-standard-v1",
-      reservedWeightedUnits: 2_439_579_999,
-      inputBytes: 1_000_000,
-      reservationPageCeiling: 100,
-    },
     uploadExpiresAt: now + 10 * 60_000,
     now,
     accountDailyLimit: Number.MAX_SAFE_INTEGER,
@@ -637,88 +591,6 @@ describe("PDF job migration", () => {
 });
 
 describe("atomic job reservation", () => {
-  it("persists a PDF reservation with pages and no image dimensions", async () => {
-    const database = new SqliteD1Database();
-    const repository = createD1JobRepository(database);
-
-    await expect(repository.reserveAndCreate(await pdfReservationInput())).resolves.toMatchObject({
-      kind: "created",
-      job: {
-        contractId: "pdf.optimize@1",
-        declaredMime: "application/pdf",
-        declaredPageCount: 3,
-        resourceClass: "pdf-standard-v1",
-      },
-    });
-
-    expect(database.sqlite.prepare("SELECT * FROM jobs").get()).toMatchObject({
-      contract_id: "pdf.optimize@1",
-      declared_mime: "application/pdf",
-      declared_width: null,
-      declared_height: null,
-      declared_page_count: 3,
-      resource_class: "pdf-standard-v1",
-    });
-
-    const pdfRepository: PdfJobRepository = repository;
-    expectTypeOf<ReturnType<JobRepository["beginUpload"]>>().toEqualTypeOf<
-      Promise<BeginUploadResult>
-    >();
-    expectTypeOf<ReturnType<PdfJobRepository["beginUpload"]>>().toEqualTypeOf<
-      Promise<PdfBeginUploadResult>
-    >();
-    await expect(
-      pdfRepository.beginUpload({ jobId: alternateJobId, now: now + 1 }),
-    ).resolves.toMatchObject({
-      kind: "ready",
-      declaredMime: "application/pdf",
-    });
-    await expect(
-      repository.commitStoredInput({
-        jobId: alternateJobId,
-        uploadVersion: 1,
-        inputEtag: "pdf-etag",
-        now: now + 2,
-      }),
-    ).resolves.toEqual({ kind: "queued" });
-    expect(
-      JSON.parse(
-        (
-          database.sqlite
-            .prepare("SELECT payload FROM job_outbox WHERE job_id = ?")
-            .get(alternateJobId) as { payload: string }
-        ).payload,
-      ),
-    ).toMatchObject({
-      contractId: "pdf.optimize@1",
-      resourceClass: "pdf-standard-v1",
-      inputEtag: "pdf-etag",
-    });
-  });
-
-  it("rejects cross-tool fields when reading persisted rows", async () => {
-    const database = new SqliteD1Database();
-    const repository = createD1JobRepository(database);
-    const input = await pdfReservationInput();
-
-    await repository.reserveAndCreate(input);
-    const row = database.sqlite.prepare("SELECT * FROM jobs WHERE id = ?").get(alternateJobId);
-    expect(() => parseStoredJob({ ...row, declared_width: 1 })).toThrow(RepositoryIntegrityError);
-    expect(() =>
-      database.sqlite.exec(`UPDATE jobs SET declared_width = 1 WHERE id = '${alternateJobId}'`),
-    ).toThrow("CHECK constraint failed");
-
-    const imageDatabase = new SqliteD1Database();
-    await createD1JobRepository(imageDatabase).reserveAndCreate(await reservationInput());
-    const imageRow = imageDatabase.sqlite.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId);
-    expect(() => parseStoredJob({ ...imageRow, declared_page_count: 1 })).toThrow(
-      RepositoryIntegrityError,
-    );
-    expect(() =>
-      imageDatabase.sqlite.exec(`UPDATE jobs SET declared_page_count = 1 WHERE id = '${jobId}'`),
-    ).toThrow("CHECK constraint failed");
-  });
-
   it("uses one first-primary batch and persists only canonical hashes and job fields", async () => {
     const database = new SqliteD1Database();
     const repository = createD1JobRepository(database);
@@ -2286,6 +2158,54 @@ describe("fenced queue leases", () => {
 });
 
 describe("authenticated lifecycle persistence", () => {
+  it("does not extend a retired PDF result's retention with a new download lease", async () => {
+    const database = await queuedDatabase();
+    database.sqlite
+      .prepare(
+        `UPDATE jobs SET contract_id = 'pdf.optimize@1', declared_mime = 'application/pdf', declared_width = NULL, declared_height = NULL, declared_page_count = 1, resource_class = 'pdf-standard-v1', status = 'succeeded', result_kind = 'download', output_mime = 'application/pdf', output_page_count = 1, output_bytes = 2, pdf_profile = 'structural', result_expires_at = ? WHERE id = ?`,
+      )
+      .run(now + 60_000, jobId);
+    await expect(
+      createD1LifecycleRepository(database).claimDownload({
+        jobId,
+        leaseHash: "d".repeat(64),
+        now: now + 10,
+        expiresAt: now + 1000,
+      }),
+    ).resolves.toEqual({ kind: "not-ready" });
+    expect(
+      database.sqlite.prepare("SELECT download_lease_hash FROM jobs WHERE id = ?").get(jobId),
+    ).toEqual({ download_lease_hash: null });
+  });
+  it.each([
+    "queued",
+    "running",
+  ] as const)("settles a retired PDF %s job without processing or orphaning its objects", async (state) => {
+    const database = await queuedDatabase();
+    database.sqlite
+      .prepare(
+        `UPDATE jobs SET contract_id = 'pdf.optimize@1', declared_mime = 'application/pdf', declared_width = NULL, declared_height = NULL, declared_page_count = 1, resource_class = 'pdf-standard-v1', spec_json = '{"version":1,"preset":"balanced"}', status = ?, lease_expires_at = ?, processing_deadline_at = ? WHERE id = ?`,
+      )
+      .run(state, state === "running" ? now : null, now + 60_000, jobId);
+    const objects = new Set([inputKey, outputKey]);
+    const environment = {
+      DB: database,
+      JOB_OBJECTS: {
+        delete: async (key: string) => {
+          objects.delete(key);
+        },
+      },
+    } as unknown as Env;
+    await expect(recoverStaleLeasesAndLostQueueMessages(environment, now + 10, 100)).resolves.toBe(
+      1,
+    );
+    expect(objects.size).toBe(0);
+    expect(
+      database.sqlite.prepare("SELECT status, settlement_state FROM jobs WHERE id = ?").get(jobId),
+    ).toEqual({ status: "cancelled", settlement_state: "settled" });
+    expect(count(database, "job_outbox")).toBe(0);
+    expect(usageRows(database).account[0]).toMatchObject({ reserved_units: 0, pending_jobs: 0 });
+  });
   async function queuedDatabase(): Promise<SqliteD1Database> {
     const database = new SqliteD1Database();
     const repository = createD1JobRepository(database);

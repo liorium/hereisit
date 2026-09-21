@@ -11,8 +11,6 @@
     "releaseId",
     "gitSha",
     "engine",
-    "pdfEngine",
-    "pdfQuality",
     "web",
     "security",
     "providerUsage",
@@ -22,96 +20,143 @@
     "verificationSha256"
   ],
   "properties": {
-    "schema": { "const": "hereisit-processing-candidate@2" },
-    "version": { "const": 2 },
-    "state": { "enum": ["built", "finalized"] },
-    "releaseId": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.[1-9]\\d*$" },
-    "gitSha": { "$ref": "#/$defs/gitSha" },
+    "schema": {
+      "const": "hereisit-processing-candidate@3"
+    },
+    "version": {
+      "const": 3
+    },
+    "state": {
+      "enum": ["built", "finalized"]
+    },
+    "releaseId": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.[1-9]\\d*$"
+    },
+    "gitSha": {
+      "$ref": "#/$defs/gitSha"
+    },
     "engine": {
       "type": "object",
       "additionalProperties": false,
       "required": ["loadedImage", "oci", "docker"],
       "properties": {
-        "loadedImage": { "type": "string", "pattern": "^hereisit-image-engine:[a-f0-9]{40}$" },
-        "oci": { "$ref": "#/$defs/ociImageIdentity" },
-        "docker": { "$ref": "#/$defs/dockerImageIdentity" }
+        "loadedImage": {
+          "type": "string",
+          "pattern": "^hereisit-image-engine:[a-f0-9]{40}$"
+        },
+        "oci": {
+          "$ref": "#/$defs/ociImageIdentity"
+        },
+        "docker": {
+          "$ref": "#/$defs/dockerImageIdentity"
+        }
       }
     },
-    "pdfEngine": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["loadedImage", "oci", "docker"],
-      "properties": {
-        "loadedImage": { "type": "string", "pattern": "^hereisit-pdf-engine:[a-f0-9]{40}$" },
-        "oci": { "$ref": "#/$defs/ociImageIdentity" },
-        "docker": { "$ref": "#/$defs/dockerImageIdentity" }
-      }
+    "web": {
+      "$ref": "#/$defs/webIdentities"
     },
-    "pdfQuality": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "benchmarkSha256",
-        "releaseGateSha256",
-        "visualProfilesMeasured",
-        "publicAdmissionReady"
-      ],
-      "properties": {
-        "benchmarkSha256": { "$ref": "#/$defs/sha256" },
-        "releaseGateSha256": { "$ref": "#/$defs/sha256" },
-        "visualProfilesMeasured": { "type": "integer", "minimum": 0 },
-        "publicAdmissionReady": { "type": "boolean" }
-      }
-    },
-    "web": { "$ref": "#/$defs/webIdentities" },
     "security": {
       "type": "object",
       "additionalProperties": false,
       "required": ["trivyDbDigest"],
-      "properties": { "trivyDbDigest": { "$ref": "#/$defs/digest" } }
+      "properties": {
+        "trivyDbDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
     },
     "providerUsage": {
       "type": "object",
       "additionalProperties": false,
       "required": ["schemaSha256"],
-      "properties": { "schemaSha256": { "$ref": "#/$defs/sha256" } }
+      "properties": {
+        "schemaSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
     },
-    "releaseInputs": { "$ref": "#/$defs/hashedIdentity" },
-    "costModel": { "$ref": "#/$defs/hashedIdentity" },
+    "releaseInputs": {
+      "$ref": "#/$defs/hashedIdentity"
+    },
+    "costModel": {
+      "$ref": "#/$defs/hashedIdentity"
+    },
     "releaseAssets": {},
-    "verificationSha256": { "$ref": "#/$defs/sha256" }
+    "verificationSha256": {
+      "$ref": "#/$defs/sha256"
+    }
   },
   "allOf": [
     {
-      "if": { "properties": { "state": { "const": "finalized" } } },
-      "then": { "properties": { "releaseAssets": { "$ref": "#/$defs/finalizedReleaseAssets" } } },
-      "else": { "properties": { "releaseAssets": { "$ref": "#/$defs/builtReleaseAssets" } } }
+      "if": {
+        "properties": {
+          "state": {
+            "const": "finalized"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "releaseAssets": {
+            "$ref": "#/$defs/finalizedReleaseAssets"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "releaseAssets": {
+            "$ref": "#/$defs/builtReleaseAssets"
+          }
+        }
+      }
     }
   ],
   "$defs": {
-    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
     "digestList": {
       "type": "array",
       "minItems": 1,
       "maxItems": 128,
-      "items": { "$ref": "#/$defs/digest" }
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
     },
     "hashedIdentity": {
       "type": "object",
       "additionalProperties": false,
       "required": ["sha256"],
-      "properties": { "sha256": { "$ref": "#/$defs/sha256" } }
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
     },
     "ociImageIdentity": {
       "type": "object",
       "additionalProperties": false,
       "required": ["configDigest", "distributionLayerDigests", "diffIds"],
       "properties": {
-        "configDigest": { "$ref": "#/$defs/digest" },
-        "distributionLayerDigests": { "$ref": "#/$defs/digestList" },
-        "diffIds": { "$ref": "#/$defs/digestList" }
+        "configDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "distributionLayerDigests": {
+          "$ref": "#/$defs/digestList"
+        },
+        "diffIds": {
+          "$ref": "#/$defs/digestList"
+        }
       }
     },
     "dockerImageIdentity": {
@@ -119,8 +164,12 @@
       "additionalProperties": false,
       "required": ["configDigest", "diffIds"],
       "properties": {
-        "configDigest": { "$ref": "#/$defs/digest" },
-        "diffIds": { "$ref": "#/$defs/digestList" }
+        "configDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "diffIds": {
+          "$ref": "#/$defs/digestList"
+        }
       }
     },
     "webIdentity": {
@@ -128,9 +177,16 @@
       "additionalProperties": false,
       "required": ["archiveSha256", "treeSha256", "processingApiOrigin"],
       "properties": {
-        "archiveSha256": { "$ref": "#/$defs/sha256" },
-        "treeSha256": { "$ref": "#/$defs/sha256" },
-        "processingApiOrigin": { "type": "string", "format": "uri" }
+        "archiveSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "processingApiOrigin": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "webIdentities": {
@@ -138,8 +194,12 @@
       "additionalProperties": false,
       "required": ["staging", "production"],
       "properties": {
-        "staging": { "$ref": "#/$defs/webIdentity" },
-        "production": { "$ref": "#/$defs/webIdentity" }
+        "staging": {
+          "$ref": "#/$defs/webIdentity"
+        },
+        "production": {
+          "$ref": "#/$defs/webIdentity"
+        }
       }
     },
     "artifact": {
@@ -151,8 +211,13 @@
           "type": "string",
           "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[a-zA-Z0-9][a-zA-Z0-9._/-]*$"
         },
-        "sizeBytes": { "type": "integer", "minimum": 1 },
-        "sha256": { "$ref": "#/$defs/sha256" }
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
     "webReleaseAsset": {
@@ -160,11 +225,24 @@
       "additionalProperties": false,
       "required": ["path", "sizeBytes", "archiveSha256", "treeSha256", "processingApiOrigin"],
       "properties": {
-        "path": { "type": "string", "enum": ["web-staging.tar", "web-production.tar"] },
-        "sizeBytes": { "type": "integer", "minimum": 1 },
-        "archiveSha256": { "$ref": "#/$defs/sha256" },
-        "treeSha256": { "$ref": "#/$defs/sha256" },
-        "processingApiOrigin": { "type": "string", "format": "uri" }
+        "path": {
+          "type": "string",
+          "enum": ["web-staging.tar", "web-production.tar"]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "archiveSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "treeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "processingApiOrigin": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "engineReleaseAssets": {
@@ -172,8 +250,12 @@
       "additionalProperties": false,
       "required": ["oci", "docker"],
       "properties": {
-        "oci": { "$ref": "#/$defs/artifact" },
-        "docker": { "$ref": "#/$defs/artifact" }
+        "oci": {
+          "$ref": "#/$defs/artifact"
+        },
+        "docker": {
+          "$ref": "#/$defs/artifact"
+        }
       }
     },
     "webReleaseAssets": {
@@ -181,33 +263,62 @@
       "additionalProperties": false,
       "required": ["staging", "production"],
       "properties": {
-        "staging": { "$ref": "#/$defs/webReleaseAsset" },
-        "production": { "$ref": "#/$defs/webReleaseAsset" }
+        "staging": {
+          "$ref": "#/$defs/webReleaseAsset"
+        },
+        "production": {
+          "$ref": "#/$defs/webReleaseAsset"
+        }
       }
     },
     "securityGateArtifact": {
       "allOf": [
-        { "$ref": "#/$defs/artifact" },
-        { "properties": { "sizeBytes": { "maximum": 1048576 } } }
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "sizeBytes": {
+              "maximum": 1048576
+            }
+          }
+        }
       ]
     },
     "securityEvidenceArtifact": {
       "allOf": [
-        { "$ref": "#/$defs/artifact" },
-        { "properties": { "sizeBytes": { "maximum": 8388608 } } }
+        {
+          "$ref": "#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "sizeBytes": {
+              "maximum": 8388608
+            }
+          }
+        }
       ]
     },
     "securityScopeArtifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine", "pdfEngine", "webStaging", "webProduction", "worker", "lockfile"],
+      "required": ["engine", "webStaging", "webProduction", "worker", "lockfile"],
       "properties": {
-        "engine": { "$ref": "#/$defs/securityEvidenceArtifact" },
-        "pdfEngine": { "$ref": "#/$defs/securityEvidenceArtifact" },
-        "webStaging": { "$ref": "#/$defs/securityEvidenceArtifact" },
-        "webProduction": { "$ref": "#/$defs/securityEvidenceArtifact" },
-        "worker": { "$ref": "#/$defs/securityEvidenceArtifact" },
-        "lockfile": { "$ref": "#/$defs/securityEvidenceArtifact" }
+        "engine": {
+          "$ref": "#/$defs/securityEvidenceArtifact"
+        },
+        "webStaging": {
+          "$ref": "#/$defs/securityEvidenceArtifact"
+        },
+        "webProduction": {
+          "$ref": "#/$defs/securityEvidenceArtifact"
+        },
+        "worker": {
+          "$ref": "#/$defs/securityEvidenceArtifact"
+        },
+        "lockfile": {
+          "$ref": "#/$defs/securityEvidenceArtifact"
+        }
       }
     },
     "securityReleaseAssets": {
@@ -218,64 +329,93 @@
         "gates": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["imageEngine", "pdfEngine", "applicationSupplyChain", "vulnerability"],
+          "required": ["imageEngine", "applicationSupplyChain", "vulnerability"],
           "properties": {
             "imageEngine": {
               "allOf": [
-                { "$ref": "#/$defs/securityGateArtifact" },
+                {
+                  "$ref": "#/$defs/securityGateArtifact"
+                },
                 {
                   "properties": {
-                    "path": { "const": "security-image-engine-license-gate.json" }
+                    "path": {
+                      "const": "security-image-engine-license-gate.json"
+                    }
                   }
                 }
               ]
             },
-            "pdfEngine": {
-              "allOf": [
-                { "$ref": "#/$defs/securityGateArtifact" },
-                { "properties": { "path": { "const": "security-pdf-engine-license-gate.json" } } }
-              ]
-            },
             "applicationSupplyChain": {
               "allOf": [
-                { "$ref": "#/$defs/securityGateArtifact" },
+                {
+                  "$ref": "#/$defs/securityGateArtifact"
+                },
                 {
                   "properties": {
-                    "path": { "const": "security-application-supply-chain-gate.json" }
+                    "path": {
+                      "const": "security-application-supply-chain-gate.json"
+                    }
                   }
                 }
               ]
             },
             "vulnerability": {
               "allOf": [
-                { "$ref": "#/$defs/securityGateArtifact" },
-                { "properties": { "path": { "const": "security-vulnerability-gate.json" } } }
+                {
+                  "$ref": "#/$defs/securityGateArtifact"
+                },
+                {
+                  "properties": {
+                    "path": {
+                      "const": "security-vulnerability-gate.json"
+                    }
+                  }
+                }
               ]
             }
           }
         },
         "sboms": {
           "allOf": [
-            { "$ref": "#/$defs/securityScopeArtifacts" },
+            {
+              "$ref": "#/$defs/securityScopeArtifacts"
+            },
             {
               "properties": {
                 "engine": {
-                  "properties": { "path": { "const": "security-sbom-engine.cdx.json" } }
-                },
-                "pdfEngine": {
-                  "properties": { "path": { "const": "security-sbom-pdf-engine.cdx.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-sbom-engine.cdx.json"
+                    }
+                  }
                 },
                 "webStaging": {
-                  "properties": { "path": { "const": "security-sbom-web-staging.cdx.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-sbom-web-staging.cdx.json"
+                    }
+                  }
                 },
                 "webProduction": {
-                  "properties": { "path": { "const": "security-sbom-web-production.cdx.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-sbom-web-production.cdx.json"
+                    }
+                  }
                 },
                 "worker": {
-                  "properties": { "path": { "const": "security-sbom-worker.cdx.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-sbom-worker.cdx.json"
+                    }
+                  }
                 },
                 "lockfile": {
-                  "properties": { "path": { "const": "security-sbom-lockfile.cdx.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-sbom-lockfile.cdx.json"
+                    }
+                  }
                 }
               }
             }
@@ -283,22 +423,45 @@
         },
         "vulnerabilityReports": {
           "allOf": [
-            { "$ref": "#/$defs/securityScopeArtifacts" },
+            {
+              "$ref": "#/$defs/securityScopeArtifacts"
+            },
             {
               "properties": {
-                "engine": { "properties": { "path": { "const": "security-trivy-engine.json" } } },
-                "pdfEngine": {
-                  "properties": { "path": { "const": "security-trivy-pdf-engine.json" } }
+                "engine": {
+                  "properties": {
+                    "path": {
+                      "const": "security-trivy-engine.json"
+                    }
+                  }
                 },
                 "webStaging": {
-                  "properties": { "path": { "const": "security-trivy-web-staging.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-trivy-web-staging.json"
+                    }
+                  }
                 },
                 "webProduction": {
-                  "properties": { "path": { "const": "security-trivy-web-production.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-trivy-web-production.json"
+                    }
+                  }
                 },
-                "worker": { "properties": { "path": { "const": "security-trivy-worker.json" } } },
+                "worker": {
+                  "properties": {
+                    "path": {
+                      "const": "security-trivy-worker.json"
+                    }
+                  }
+                },
                 "lockfile": {
-                  "properties": { "path": { "const": "security-trivy-lockfile.json" } }
+                  "properties": {
+                    "path": {
+                      "const": "security-trivy-lockfile.json"
+                    }
+                  }
                 }
               }
             }
@@ -311,42 +474,37 @@
       "additionalProperties": false,
       "required": ["bundle", "signature"],
       "properties": {
-        "bundle": { "$ref": "#/$defs/artifact" },
-        "signature": { "$ref": "#/$defs/artifact" }
+        "bundle": {
+          "$ref": "#/$defs/artifact"
+        },
+        "signature": {
+          "$ref": "#/$defs/artifact"
+        }
       }
     },
     "builtReleaseAssets": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "engine",
-        "pdfEngine",
-        "pdfQuality",
-        "worker",
-        "web",
-        "releaseInputs",
-        "costModel",
-        "security"
-      ],
+      "required": ["engine", "worker", "web", "releaseInputs", "costModel", "security"],
       "properties": {
-        "engine": { "$ref": "#/$defs/engineReleaseAssets" },
-        "pdfEngine": { "$ref": "#/$defs/engineReleaseAssets" },
-        "pdfQuality": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
-          "properties": {
-            "benchmark": { "$ref": "#/$defs/securityEvidenceArtifact" },
-            "benchmarkSchema": { "$ref": "#/$defs/securityGateArtifact" },
-            "releaseGate": { "$ref": "#/$defs/securityGateArtifact" },
-            "releaseGateSchema": { "$ref": "#/$defs/securityGateArtifact" }
-          }
+        "engine": {
+          "$ref": "#/$defs/engineReleaseAssets"
         },
-        "worker": { "$ref": "#/$defs/artifact" },
-        "web": { "$ref": "#/$defs/webReleaseAssets" },
-        "releaseInputs": { "$ref": "#/$defs/artifact" },
-        "costModel": { "$ref": "#/$defs/artifact" },
-        "security": { "$ref": "#/$defs/securityReleaseAssets" }
+        "worker": {
+          "$ref": "#/$defs/artifact"
+        },
+        "web": {
+          "$ref": "#/$defs/webReleaseAssets"
+        },
+        "releaseInputs": {
+          "$ref": "#/$defs/artifact"
+        },
+        "costModel": {
+          "$ref": "#/$defs/artifact"
+        },
+        "security": {
+          "$ref": "#/$defs/securityReleaseAssets"
+        }
       }
     },
     "finalizedReleaseAssets": {
@@ -355,8 +513,6 @@
       "required": [
         "report",
         "engine",
-        "pdfEngine",
-        "pdfQuality",
         "worker",
         "web",
         "releaseInputs",
@@ -365,26 +521,30 @@
         "evidence"
       ],
       "properties": {
-        "report": { "$ref": "#/$defs/artifact" },
-        "engine": { "$ref": "#/$defs/engineReleaseAssets" },
-        "pdfEngine": { "$ref": "#/$defs/engineReleaseAssets" },
-        "pdfQuality": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["benchmark", "benchmarkSchema", "releaseGate", "releaseGateSchema"],
-          "properties": {
-            "benchmark": { "$ref": "#/$defs/securityEvidenceArtifact" },
-            "benchmarkSchema": { "$ref": "#/$defs/securityGateArtifact" },
-            "releaseGate": { "$ref": "#/$defs/securityGateArtifact" },
-            "releaseGateSchema": { "$ref": "#/$defs/securityGateArtifact" }
-          }
+        "report": {
+          "$ref": "#/$defs/artifact"
         },
-        "worker": { "$ref": "#/$defs/artifact" },
-        "web": { "$ref": "#/$defs/webReleaseAssets" },
-        "releaseInputs": { "$ref": "#/$defs/artifact" },
-        "costModel": { "$ref": "#/$defs/artifact" },
-        "security": { "$ref": "#/$defs/securityReleaseAssets" },
-        "evidence": { "$ref": "#/$defs/evidenceReleaseAssets" }
+        "engine": {
+          "$ref": "#/$defs/engineReleaseAssets"
+        },
+        "worker": {
+          "$ref": "#/$defs/artifact"
+        },
+        "web": {
+          "$ref": "#/$defs/webReleaseAssets"
+        },
+        "releaseInputs": {
+          "$ref": "#/$defs/artifact"
+        },
+        "costModel": {
+          "$ref": "#/$defs/artifact"
+        },
+        "security": {
+          "$ref": "#/$defs/securityReleaseAssets"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceReleaseAssets"
+        }
       }
     }
   }

@@ -351,13 +351,7 @@ test("loads only the dedicated image watermark Worker marker", async ({ page }) 
   await page.waitForLoadState("networkidle");
   expect(loadedJavaScriptUrls.size).toBeGreaterThan(0);
 
-  const forbiddenMarkers = [
-    "hereisit-image-worker",
-    "hereisit-pdf-worker",
-    "hereisit-pdf-inspection-worker",
-    "hereisit-pdf-to-images-worker",
-    "hereisit-pdf-compress-scanned-worker",
-  ] as const;
+  const forbiddenMarkers = ["hereisit-image-worker"] as const;
   const markers = await scanLoadedJavaScriptMarkers(
     page,
     [...loadedJavaScriptUrls],

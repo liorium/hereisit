@@ -38,17 +38,14 @@ const reportNames = Object.freeze([
 ]);
 const securityScopes = Object.freeze([
   ["engine", "engine"],
-  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
   ["lockfile", "lockfile"],
 ]);
-
 function assertPattern(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) throw new TypeError(`${label} is invalid`);
 }
-
 function assertCanonicalTimestamp(value, label) {
   if (typeof value !== "string") throw new TypeError(`${label} must be canonical`);
   const timestamp = new Date(value);
@@ -56,7 +53,6 @@ function assertCanonicalTimestamp(value, label) {
     throw new TypeError(`${label} must be canonical`);
   }
 }
-
 function validateDescriptor(value, expectedPath, maximumBytes, label) {
   const descriptor = assertObject(value, label);
   assertExactKeys(descriptor, ["path", "sizeBytes", "sha256"], label);
@@ -66,7 +62,6 @@ function validateDescriptor(value, expectedPath, maximumBytes, label) {
   if (descriptor.sizeBytes > maximumBytes) throw new RangeError(`${label} size exceeds the limit`);
   assertSha256(descriptor.sha256, `${label} hash`);
 }
-
 function validateEvidence(value) {
   const evidence = assertObject(value, "release report evidence");
   assertExactKeys(
@@ -85,8 +80,7 @@ function validateEvidence(value) {
     assertSha256(report.summarySha256, `${name} summary hash`);
   }
 }
-
-function validateSecurity(value, dual) {
+function validateSecurity(value) {
   const security = assertObject(value, "release report security");
   assertExactKeys(
     security,
@@ -97,9 +91,7 @@ function validateSecurity(value, dual) {
   const gates = assertObject(security.gates, "release report security gates");
   assertExactKeys(
     gates,
-    dual
-      ? ["imageEngine", "pdfEngine", "applicationSupplyChain", "vulnerability"]
-      : ["imageEngine", "applicationSupplyChain", "vulnerability"],
+    ["imageEngine", "applicationSupplyChain", "vulnerability"],
     "release report security gates",
   );
   validateDescriptor(
@@ -108,14 +100,6 @@ function validateSecurity(value, dual) {
     1024 * 1024,
     "image-engine gate descriptor",
   );
-  if (dual) {
-    validateDescriptor(
-      gates.pdfEngine,
-      "security-pdf-engine-license-gate.json",
-      1024 * 1024,
-      "PDF-engine gate descriptor",
-    );
-  }
   validateDescriptor(
     gates.applicationSupplyChain,
     "security-application-supply-chain-gate.json",
@@ -135,10 +119,10 @@ function validateSecurity(value, dual) {
     const group = assertObject(security[groupName], `release report security ${groupName}`);
     assertExactKeys(
       group,
-      securityScopes.filter(([key]) => dual || key !== "pdfEngine").map(([key]) => key),
+      securityScopes.map(([key]) => key),
       `release report security ${groupName}`,
     );
-    for (const [key, scope] of securityScopes.filter(([key]) => dual || key !== "pdfEngine")) {
+    for (const [key, scope] of securityScopes) {
       validateDescriptor(
         group[key],
         `${prefix}${scope}${suffix}`,
@@ -148,22 +132,13 @@ function validateSecurity(value, dual) {
     }
   }
 }
-
-function validateArtifacts(value, dual) {
+function validateArtifacts(value) {
   const artifacts = assertObject(value, "release report artifacts");
   assertExactKeys(
     artifacts,
     [
       "engineDockerConfigDigest",
-      ...(dual
-        ? [
-            "pdfEngineDockerConfigDigest",
-            "pdfBenchmarkSha256",
-            "pdfReleaseGateSha256",
-            "pdfVisualProfilesMeasured",
-            "pdfPublicAdmissionReady",
-          ]
-        : []),
+
       "webStagingArchiveSha256",
       "webProductionArchiveSha256",
       "workerSha256",
@@ -176,25 +151,6 @@ function validateArtifacts(value, dual) {
     digestPattern,
     "release report engine Docker digest",
   );
-  if (dual) {
-    assertPattern(
-      artifacts.pdfEngineDockerConfigDigest,
-      digestPattern,
-      "release report PDF engine Docker digest",
-    );
-    assertSha256(artifacts.pdfBenchmarkSha256, "release report PDF benchmark hash");
-    assertSha256(artifacts.pdfReleaseGateSha256, "release report PDF gate hash");
-    assertNonNegativeSafeInteger(
-      artifacts.pdfVisualProfilesMeasured,
-      "release report PDF visual profile count",
-    );
-    if (typeof artifacts.pdfPublicAdmissionReady !== "boolean") {
-      throw new TypeError("release report PDF admission state is invalid");
-    }
-    if (artifacts.pdfPublicAdmissionReady && artifacts.pdfVisualProfilesMeasured < 1) {
-      throw new TypeError("release report PDF admission requires visual evidence");
-    }
-  }
   for (const field of [
     "webStagingArchiveSha256",
     "webProductionArchiveSha256",
@@ -204,10 +160,9 @@ function validateArtifacts(value, dual) {
     assertSha256(artifacts[field], `release report ${field}`);
   }
 }
-
 export function validateProcessingReleaseReport(value) {
   const report = assertObject(value, "processing release report");
-  const dual = report.schema === "hereisit-processing-release-report@2" && report.version === 2;
+  const current = report.schema === "hereisit-processing-release-report@3" && report.version === 3;
   const legacy = report.schema === "hereisit-processing-release-report@1" && report.version === 1;
   assertExactKeys(
     report,
@@ -227,7 +182,7 @@ export function validateProcessingReleaseReport(value) {
     ],
     "processing release report",
   );
-  if ((!dual && !legacy) || report.passed !== true) {
+  if ((!current && !legacy) || report.passed !== true) {
     throw new TypeError("processing release report identity is invalid");
   }
   assertPattern(report.releaseId, releaseIdPattern, "processing release report release ID");
@@ -239,8 +194,8 @@ export function validateProcessingReleaseReport(value) {
     throw new TypeError("processing release report verification time must precede expiry");
   }
   validateEvidence(report.evidence);
-  validateSecurity(report.security, dual);
-  validateArtifacts(report.artifacts, dual);
+  validateSecurity(report.security);
+  validateArtifacts(report.artifacts);
   assertSha256(report.verificationSha256, "processing release report verification hash");
   const { verificationSha256: _verificationSha256, ...payload } = report;
   if (sha256Canonical(payload) !== report.verificationSha256) {
@@ -251,11 +206,12 @@ export function validateProcessingReleaseReport(value) {
   }
   return report;
 }
-
-function createProcessingReleaseReport(inputs, { dual = true } = {}) {
+function createProcessingReleaseReport(inputs, { current = true } = {}) {
   const payload = canonicalize({
-    schema: dual ? "hereisit-processing-release-report@2" : "hereisit-processing-release-report@1",
-    version: dual ? 2 : 1,
+    schema: current
+      ? "hereisit-processing-release-report@3"
+      : "hereisit-processing-release-report@1",
+    version: current ? 3 : 1,
     passed: true,
     ...inputs,
   });
@@ -266,13 +222,11 @@ function createProcessingReleaseReport(inputs, { dual = true } = {}) {
     }),
   );
 }
-
 async function writeProcessingReleaseReport({ output, report }) {
   validateProcessingReleaseReport(report);
   await writeCanonicalJsonAtomic(output, report, { refuseOverwrite: true, mode: 0o600 });
   return report.verificationSha256;
 }
-
 async function readCanonicalJson(path, maximumBytes, label, validator) {
   const bytes = await readBoundedRegularFile(resolve(path), maximumBytes, label);
   let value;
@@ -287,11 +241,9 @@ async function readCanonicalJson(path, maximumBytes, label, validator) {
   validator(value);
   return { bytes, value };
 }
-
 function cloneSecurity(security, trivyDbDigest) {
   return canonicalize({ trivyDbDigest, ...security });
 }
-
 function reconstructBuiltCandidate(candidate) {
   const { report: _report, evidence: _evidence, ...releaseAssets } = candidate.releaseAssets;
   const { verificationSha256: _verificationSha256, ...finalizedPayload } = candidate;
@@ -301,19 +253,16 @@ function reconstructBuiltCandidate(candidate) {
     verificationSha256: sha256Canonical(payload),
   });
 }
-
 function assertFinalizedAssetPath(root, path, asset, label) {
   if (resolve(path) !== resolve(root, ...asset.path.split("/"))) {
     throw new TypeError(`${label} path does not match the finalized candidate`);
   }
 }
-
 function assertFinalizedAssetBytes(bytes, asset, label) {
   if (bytes.byteLength !== asset.sizeBytes || sha256Bytes(bytes) !== asset.sha256) {
     throw new TypeError(`${label} does not match the finalized candidate`);
   }
 }
-
 async function readFinalizedAsset(root, asset, maximumBytes, label) {
   const bytes = await readBoundedRegularFile(
     resolve(root, ...asset.path.split("/")),
@@ -323,7 +272,6 @@ async function readFinalizedAsset(root, asset, maximumBytes, label) {
   assertFinalizedAssetBytes(bytes, asset, label);
   return bytes;
 }
-
 async function deriveProcessingReleaseReport(
   {
     candidateRoot,
@@ -485,7 +433,7 @@ async function deriveProcessingReleaseReport(
       throw new TypeError("finalized release inputs changed during verification");
     }
   }
-  const dual = builtCandidate.schema === "hereisit-processing-candidate@2";
+  const current = builtCandidate.schema === "hereisit-processing-candidate@3";
   return createProcessingReleaseReport(
     {
       releaseId: builtCandidate.releaseId,
@@ -512,31 +460,21 @@ async function deriveProcessingReleaseReport(
       ),
       artifacts: {
         engineDockerConfigDigest: builtCandidate.engine.docker.configDigest,
-        ...(dual
-          ? {
-              pdfEngineDockerConfigDigest: builtCandidate.pdfEngine.docker.configDigest,
-              pdfBenchmarkSha256: builtCandidate.pdfQuality.benchmarkSha256,
-              pdfReleaseGateSha256: builtCandidate.pdfQuality.releaseGateSha256,
-              pdfVisualProfilesMeasured: builtCandidate.pdfQuality.visualProfilesMeasured,
-              pdfPublicAdmissionReady: builtCandidate.pdfQuality.publicAdmissionReady,
-            }
-          : {}),
+
         webStagingArchiveSha256: builtCandidate.web.staging.archiveSha256,
         webProductionArchiveSha256: builtCandidate.web.production.archiveSha256,
         workerSha256: builtCandidate.releaseAssets.worker.sha256,
         lockfileSha256: applicationGate.lockfileSha256,
       },
     },
-    { dual },
+    { current },
   );
 }
-
 export async function createAndWriteProcessingReleaseReport({ reportPath, ...inputs }) {
   const report = await deriveProcessingReleaseReport(inputs);
   await writeProcessingReleaseReport({ output: reportPath, report });
   return report;
 }
-
 export async function verifyProcessingReleaseReport({ reportPath, ...inputs }) {
   const bytes = await readBoundedRegularFile(
     resolve(reportPath),
@@ -577,7 +515,6 @@ export async function verifyProcessingReleaseReport({ reportPath, ...inputs }) {
     evidenceSignatureSha256: report.evidence.signatureSha256,
   };
 }
-
 const creatorCliKeys = [
   "candidate-root",
   "candidate-manifest",
@@ -587,7 +524,6 @@ const creatorCliKeys = [
   "now",
   "output",
 ];
-
 export async function runProcessingReleaseReportCreatorCli(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
   assertExactKeys(args, creatorCliKeys, "processing release report creator arguments");
@@ -611,7 +547,6 @@ export async function runProcessingReleaseReportCreatorCli(argv, stdout = proces
     }),
   );
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

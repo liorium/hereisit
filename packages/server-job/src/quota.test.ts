@@ -35,7 +35,7 @@ const otherwiseAllowedRetryReservation = {
 };
 
 describe("decideAdmission", () => {
-  it("applies the same exact quota boundary to PDF resource reservations", () => {
+  it("admits a large reservation exactly at each quota boundary", () => {
     expect(
       decideAdmission({
         ...otherwiseAllowedAdmission,

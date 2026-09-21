@@ -21,25 +21,28 @@ describe("processing security evidence normalization", () => {
         bomFormat: "CycloneDX",
         specVersion: "1.6",
         version: 1,
-        metadata: { component: { type: "container", name: "hereisit-pdf-engine:exact" } },
-        components: [{ name: "qpdf", version: "12.2.0" }],
+        metadata: { component: { type: "container", name: "hereisit-image-engine:exact" } },
+        components: [{ name: "libvips", version: "12.2.0" }],
       }),
     );
     await writeFile(
       trivyInput,
       JSON.stringify({
         SchemaVersion: 2,
-        ArtifactName: "hereisit-pdf-engine:exact",
+        ArtifactName: "hereisit-image-engine:exact",
         ArtifactType: "container_image",
-        Metadata: { ImageID: `sha256:${"a".repeat(64)}`, RepoTags: ["hereisit-pdf-engine:exact"] },
+        Metadata: {
+          ImageID: `sha256:${"a".repeat(64)}`,
+          RepoTags: ["hereisit-image-engine:exact"],
+        },
         Results: [{ Target: "debian", Vulnerabilities: [{ VulnerabilityID: "CVE-X" }] }],
       }),
     );
     const hash = "a".repeat(64);
     await normalizeProcessingSecurityEvidence({
-      scope: "pdf-engine",
+      scope: "engine",
       artifactSha256: hash,
-      expectedScannerArtifact: "hereisit-pdf-engine:exact",
+      expectedScannerArtifact: "hereisit-image-engine:exact",
       sbomInput,
       sbomOutput,
       trivyInput,
@@ -49,19 +52,19 @@ describe("processing security evidence normalization", () => {
     const trivy = JSON.parse(await readFile(trivyOutput, "utf8"));
     expect(sbom.metadata.component).toEqual({
       type: "container",
-      name: "hereisit-pdf-engine:exact",
+      name: "hereisit-image-engine:exact",
     });
     expect(sbom.metadata.properties).toContainEqual({
       name: "hereisit:artifact:sha256",
       value: hash,
     });
-    expect(sbom.components).toEqual([{ name: "qpdf", version: "12.2.0" }]);
+    expect(sbom.components).toEqual([{ name: "libvips", version: "12.2.0" }]);
     expect(trivy).toMatchObject({
-      ArtifactName: "hereisit-pdf-engine:exact",
+      ArtifactName: "hereisit-image-engine:exact",
       ArtifactType: "container_image",
       Metadata: {
         ImageID: `sha256:${hash}`,
-        RepoTags: ["hereisit-pdf-engine:exact"],
+        RepoTags: ["hereisit-image-engine:exact"],
       },
       HereIsItArtifactSha256: hash,
     });
@@ -94,9 +97,9 @@ describe("processing security evidence normalization", () => {
     );
     await expect(
       normalizeProcessingSecurityEvidence({
-        scope: "pdf-engine",
+        scope: "engine",
         artifactSha256: "a".repeat(64),
-        expectedScannerArtifact: "hereisit-pdf-engine:exact",
+        expectedScannerArtifact: "hereisit-image-engine:exact",
         sbomInput,
         sbomOutput: join(root, "sbom.json"),
         trivyInput,
@@ -123,20 +126,20 @@ describe("processing security evidence normalization", () => {
       trivyInput,
       JSON.stringify({
         SchemaVersion: 2,
-        ArtifactName: "hereisit-pdf-engine:exact",
+        ArtifactName: "hereisit-image-engine:exact",
         ArtifactType: "container_image",
         Metadata: {
           ImageID: `sha256:${"a".repeat(64)}`,
-          RepoTags: ["hereisit-pdf-engine:exact"],
+          RepoTags: ["hereisit-image-engine:exact"],
         },
         Results: [],
       }),
     );
     await expect(
       normalizeProcessingSecurityEvidence({
-        scope: "pdf-engine",
+        scope: "engine",
         artifactSha256: "a".repeat(64),
-        expectedScannerArtifact: "hereisit-pdf-engine:exact",
+        expectedScannerArtifact: "hereisit-image-engine:exact",
         sbomInput,
         sbomOutput: join(root, "sbom.json"),
         trivyInput,

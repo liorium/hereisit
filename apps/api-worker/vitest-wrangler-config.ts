@@ -71,6 +71,8 @@ function filterMigration(
 
 export function createVitestWranglerConfig(config: WranglerConfiguration): WranglerConfiguration {
   const containerClasses = new Set(config.containers?.map(({ class_name }) => class_name) ?? []);
+  // The retired PDF container remains in migration history, not current bindings.
+  containerClasses.add("PdfEngineContainer");
   const { containers: _containers, ...result } = config;
   const bindings = config.durable_objects?.bindings.filter(
     ({ class_name }) => !containerClasses.has(class_name),

@@ -3,8 +3,7 @@ import { pathToFileURL } from "node:url";
 import { canonicalJson, parseCliArguments, writeCanonicalJsonAtomic } from "./image-lab-common.mjs";
 import { inspectQueueDeliveryState } from "./verify-queue-delivery-state.mjs";
 
-const queueKeys = ["image-primary", "image-dlq", "pdf-primary", "pdf-dlq"];
-
+const queueKeys = ["image-primary", "image-dlq"];
 export async function captureProcessingQueueStates({
   accountId,
   queues,
@@ -13,7 +12,7 @@ export async function captureProcessingQueueStates({
   inspect = inspectQueueDeliveryState,
 }) {
   if (Object.keys(queues).sort().join(",") !== [...queueKeys].sort().join(",")) {
-    throw new TypeError("all four processing queues are required");
+    throw new TypeError("both image processing queues are required");
   }
   const entries = {};
   for (const key of queueKeys) {
@@ -32,10 +31,9 @@ export async function captureProcessingQueueStates({
     await writeCanonicalJsonAtomic(output, snapshot, { refuseOverwrite: true, mode: 0o600 });
   return snapshot;
 }
-
 export async function runCaptureProcessingQueueStatesCli(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
-  const expected = ["account-id", "image-primary", "image-dlq", "pdf-primary", "pdf-dlq", "output"];
+  const expected = ["account-id", "image-primary", "image-dlq", "output"];
   if (Object.keys(args).sort().join(",") !== expected.sort().join(","))
     throw new TypeError("queue snapshot arguments are invalid");
   const snapshot = await captureProcessingQueueStates({
@@ -45,13 +43,10 @@ export async function runCaptureProcessingQueueStatesCli(argv, stdout = process.
     queues: {
       "image-primary": args["image-primary"],
       "image-dlq": args["image-dlq"],
-      "pdf-primary": args["pdf-primary"],
-      "pdf-dlq": args["pdf-dlq"],
     },
   });
   stdout.write(canonicalJson(snapshot));
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

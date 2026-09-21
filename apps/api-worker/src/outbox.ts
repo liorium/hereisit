@@ -47,7 +47,6 @@ interface OutboxQueue {
 export interface OutboxEnvironment {
   readonly DB: OutboxDatabase;
   readonly IMAGE_JOBS: OutboxQueue;
-  readonly PDF_JOBS?: OutboxQueue;
 }
 
 function changedRows(result: D1RunResultLike): number {
@@ -228,9 +227,7 @@ async function dispatchSelectedRows(
     }
 
     try {
-      const queue = payload.contractId === "pdf.optimize@1" ? env.PDF_JOBS : env.IMAGE_JOBS;
-      if (queue === undefined) throw new Error("PDF queue binding is unavailable.");
-      await queue.send(payload, { contentType: "json" });
+      await env.IMAGE_JOBS.send(payload, { contentType: "json" });
     } catch {
       await markDispatchFailure(env.DB, row, now);
       continue;

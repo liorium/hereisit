@@ -48,13 +48,11 @@ const routeNames = Object.freeze([
   "maintenance",
   "queue",
 ]);
-
 function validateArrivalTrace(value, label) {
   if (!Array.isArray(value) || value.length !== 24)
     throw new TypeError(`${label} must contain 24 hourly values`);
   return value.map((entry, index) => assertNonNegativeSafeInteger(entry, `${label}[${index}]`));
 }
-
 export function validateRouteCpuBenchmark(value) {
   const benchmark = assertObject(value, "routeCpuBenchmark");
   assertExactKeys(
@@ -95,7 +93,6 @@ export function validateRouteCpuBenchmark(value) {
   }
   return { envelope, sha256: sha256Canonical(benchmark) };
 }
-
 export function createLiveCostModel(rawInput) {
   const input = assertObject(rawInput, "live cost input");
   assertExactKeys(
@@ -107,47 +104,10 @@ export function createLiveCostModel(rawInput) {
       "routeCpuBenchmark",
       "projectedMonthlyJobs",
       "arrivalTraces",
-      ...(input.pdfBenchmark === undefined ? [] : ["pdfBenchmark"]),
     ],
     "live cost input",
   );
   if (input.version !== 1) throw new TypeError("live cost input version must be 1");
-  if (input.pdfBenchmark !== undefined) {
-    const pdfBenchmark = assertObject(input.pdfBenchmark, "pdfBenchmark");
-    assertExactKeys(
-      pdfBenchmark,
-      [
-        "evidenceSha256",
-        "engineImageId",
-        "engineImageDigest",
-        "maximumCandidates",
-        "maximumInputBytes",
-        "maximumMeasuredPeakRssBytes",
-        "maximumOutputBytes",
-        "maximumPages",
-        "maximumWallMs",
-      ],
-      "pdfBenchmark",
-    );
-    assertSha256(pdfBenchmark.evidenceSha256, "pdfBenchmark.evidenceSha256");
-    for (const field of ["engineImageId", "engineImageDigest"])
-      if (
-        typeof pdfBenchmark[field] !== "string" ||
-        !/^sha256:[a-f0-9]{64}$/u.test(pdfBenchmark[field])
-      )
-        throw new TypeError(`pdfBenchmark.${field} is invalid`);
-    if (pdfBenchmark.engineImageId !== pdfBenchmark.engineImageDigest)
-      throw new TypeError("pdfBenchmark image identity is inconsistent");
-    for (const field of [
-      "maximumCandidates",
-      "maximumInputBytes",
-      "maximumMeasuredPeakRssBytes",
-      "maximumOutputBytes",
-      "maximumPages",
-      "maximumWallMs",
-    ])
-      assertPositiveNumber(pdfBenchmark[field], `pdfBenchmark.${field}`);
-  }
   const prices = assertObject(input.pricesUsd, "pricesUsd");
   assertExactKeys(prices, priceFields, "pricesUsd");
   const resources = assertObject(input.resources, "resources");
@@ -182,7 +142,6 @@ export function createLiveCostModel(rawInput) {
   );
   if (projectedMonthlyJobs === 0) throw new TypeError("projectedMonthlyJobs must be positive");
   const benchmark = validateRouteCpuBenchmark(input.routeCpuBenchmark);
-
   return canonicalize({
     version: 1,
     containerVcpuSecondMicrousd: priceMicros.containerVcpuSecond,
@@ -233,11 +192,9 @@ export function createLiveCostModel(rawInput) {
     },
   });
 }
-
 export function liveCostModelSha256(model) {
   return sha256Canonical(model);
 }
-
 export function validateLiveCostModelDocument(rawModel) {
   const model = assertObject(rawModel, "live cost model");
   const numericFields = [
@@ -320,7 +277,6 @@ export function validateLiveCostModelDocument(rawModel) {
     throw new TypeError("arrival scenario hash mismatch");
   return model;
 }
-
 const flagToPrice = Object.freeze({
   "container-vcpu-second-usd": "containerVcpuSecond",
   "container-gib-second-usd": "containerGibSecond",
@@ -343,7 +299,6 @@ const flagToPrice = Object.freeze({
   "analytics-engine-million-read-queries-usd": "analyticsEngineMillionReadQueries",
   "monthly-fixed-usd": "monthlyFixed",
 });
-
 async function jsonArgument(value, label) {
   const source = value.trim();
   try {
@@ -356,7 +311,6 @@ async function jsonArgument(value, label) {
     }
   }
 }
-
 async function inputFromFlags(args) {
   const permitted = new Set([
     ...Object.keys(flagToPrice),
@@ -401,7 +355,6 @@ async function inputFromFlags(args) {
     },
   };
 }
-
 export function liveCostInputFromReleaseDocument(document) {
   const release = assertObject(document, "processing release inputs");
   const prices = assertObject(release.pricesAndResources, "release pricesAndResources");
@@ -411,7 +364,6 @@ export function liveCostInputFromReleaseDocument(document) {
     throw new TypeError("release route benchmark hash mismatch");
   return { ...assertObject(prices.modelInput, "release modelInput"), routeCpuBenchmark };
 }
-
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
   if (!args.schema || !args.output) throw new TypeError("--schema and --output are required");
@@ -441,7 +393,6 @@ async function main() {
   const hash = await writeCanonicalJsonAtomic(args.output, model);
   process.stdout.write(`${hash}\n`);
 }
-
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

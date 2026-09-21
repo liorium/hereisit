@@ -50,6 +50,19 @@ function failureKind(error, status) {
   if (status !== undefined && status >= 400) return "http-error";
   if (error instanceof Error && error.name === "ZodError") return "schema";
   if (!(error instanceof Error)) return "unknown";
+  // Classify only our fixed messages; never include provider values or raw errors.
+  if (
+    /^Container (?:CPU time|allocated memory|allocated disk|transmitted bytes) precision exceeds its target integer unit\.$/.test(
+      error.message,
+    )
+  )
+    return "numeric-precision";
+  if (
+    /^Container (?:CPU time|allocated memory|allocated disk|(?:regional )?transmitted bytes) exceeds signed 64-bit storage\.$/.test(
+      error.message,
+    )
+  )
+    return "numeric-overflow";
   return (
     new Map([
       [
@@ -62,6 +75,7 @@ function failureKind(error, status) {
       ["Container provider pagination envelope is invalid.", "pagination"],
       ["Container provider resource envelope is invalid.", "resource"],
       ["Container provider resource ordering is invalid.", "resource"],
+      ["Container provider usage response must be JSON.", "content-type"],
     ]).get(error.message) ?? (status === undefined ? "no-response" : "invalid-response")
   );
 }

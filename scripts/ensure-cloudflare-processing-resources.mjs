@@ -19,19 +19,16 @@ const expectedLogpushFields = [
   "ScriptName",
   "ScriptVersion",
 ];
-
 function assertObject(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object`);
   }
   return value;
 }
-
 function assertArray(value, label) {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
   return value;
 }
-
 function validateConfig(value) {
   const config = assertObject(value, "resource configuration");
   if (config.phase !== "provision") throw new TypeError("resource phase must be provision");
@@ -51,15 +48,12 @@ function validateConfig(value) {
     usageAnalyticsDatasetName: `hereisit_processing_usage_${suffix}`,
     queueName: `hereisit-image-jobs-${suffix}`,
     dlqName: `hereisit-image-jobs-dlq-${suffix}`,
-    pdfQueueName: `hereisit-pdf-jobs-${suffix}`,
-    pdfDlqName: `hereisit-pdf-jobs-dlq-${suffix}`,
   };
   for (const [key, name] of Object.entries(expected)) {
     if (config[key] !== name) throw new TypeError(`${key} does not match ${suffix}`);
   }
   return config;
 }
-
 function exactNamed(entries, name, label, nameField = "name") {
   const matches = assertArray(entries, label).filter(
     (entry) => assertObject(entry, `${label} entry`)[nameField] === name,
@@ -67,11 +61,9 @@ function exactNamed(entries, name, label, nameField = "name") {
   if (matches.length > 1) throw new TypeError(`duplicate ${label} named ${name}`);
   return matches[0] ?? null;
 }
-
 function assertAccount(resource, accountId, label) {
   if (resource.accountId !== accountId) throw new TypeError(`${label} account does not match`);
 }
-
 function validateD1(resource, config) {
   assertAccount(resource, config.accountId, "D1");
   if (typeof resource.id !== "string" || !uuidPattern.test(resource.id)) {
@@ -79,7 +71,6 @@ function validateD1(resource, config) {
   }
   if (resource.location !== "apac") throw new TypeError("D1 location does not match");
 }
-
 function validateR2(resource, config, lifecycleDays) {
   assertAccount(resource, config.accountId, "R2");
   if (resource.lifecycleDays !== lifecycleDays) throw new TypeError("R2 lifecycle does not match");
@@ -92,7 +83,6 @@ function validateR2(resource, config, lifecycleDays) {
   if (resource.r2DevEnabled !== false) throw new TypeError("R2 r2.dev access must be disabled");
   if (resource.sippyEnabled !== false) throw new TypeError("R2 Sippy must be disabled");
 }
-
 function validateQueue(resource, config) {
   assertAccount(resource, config.accountId, "Queue");
   if (typeof resource.id !== "string" || !queueIdPattern.test(resource.id)) {
@@ -110,7 +100,6 @@ function validateQueue(resource, config) {
     throw new TypeError("processing Queues may only use the exact processing Worker consumer");
   }
 }
-
 function validateLogpush(resource, config) {
   assertAccount(resource, config.accountId, "Logpush");
   if (!Number.isSafeInteger(resource.id) || resource.id < 1) {
@@ -134,17 +123,14 @@ function validateLogpush(resource, config) {
   }
   if (resource.samplingRate !== null) throw new TypeError("Logpush sampling is prohibited");
 }
-
 export function planProcessingResources({ config: configValue, inventory: inventoryValue }) {
   const config = validateConfig(configValue);
   const inventory = assertObject(inventoryValue, "resource inventory");
   const actions = [];
-
   const d1 = exactNamed(inventory.d1, config.databaseName, "D1");
   if (d1 === null) {
     actions.push({ type: "create-d1", name: config.databaseName, location: "apac" });
   } else validateD1(d1, config);
-
   for (const [name, lifecycleDays] of [
     [config.bucketName, 1],
     [config.usageLogBucketName, 3],
@@ -153,8 +139,7 @@ export function planProcessingResources({ config: configValue, inventory: invent
     if (bucket === null) actions.push({ type: "create-r2", name, lifecycleDays });
     else validateR2(bucket, config, lifecycleDays);
   }
-
-  for (const name of [config.dlqName, config.queueName, config.pdfDlqName, config.pdfQueueName]) {
+  for (const name of [config.dlqName, config.queueName]) {
     const queue = exactNamed(inventory.queues, name, "Queue");
     if (queue === null) {
       actions.push({ type: "create-queue", name, deliveryPaused: true });
@@ -163,7 +148,6 @@ export function planProcessingResources({ config: configValue, inventory: invent
       if (!queue.deliveryPaused) actions.push({ type: "pause-queue", id: queue.id, name });
     }
   }
-
   const logpushMatches = assertArray(inventory.logpush, "Logpush").filter((entryValue) => {
     const entry = assertObject(entryValue, "Logpush entry");
     return (
@@ -184,7 +168,6 @@ export function planProcessingResources({ config: configValue, inventory: invent
       actions.push({ type: "update-logpush-destination", id: logpush.id });
     }
   }
-
   return {
     version: 1,
     phase: "provision",
@@ -193,7 +176,6 @@ export function planProcessingResources({ config: configValue, inventory: invent
     actions,
   };
 }
-
 export async function convergeProcessingResources({
   config,
   readInventory,
@@ -240,7 +222,6 @@ export async function convergeProcessingResources({
   }
   throw new Error("resource provisioning did not converge");
 }
-
 export function buildProcessingProvisionManifest({ config, inventory, verifiedAt }) {
   const plan = planProcessingResources({ config, inventory });
   if (plan.actions.length !== 0) throw new Error("resource inventory is not converged");
@@ -256,8 +237,6 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
   const usageBucket = exactNamed(inventory.r2, config.usageLogBucketName, "R2");
   const imagePrimaryQueue = exactNamed(inventory.queues, config.queueName, "Queue");
   const imageDeadLetterQueue = exactNamed(inventory.queues, config.dlqName, "Queue");
-  const pdfPrimaryQueue = exactNamed(inventory.queues, config.pdfQueueName, "Queue");
-  const pdfDeadLetterQueue = exactNamed(inventory.queues, config.pdfDlqName, "Queue");
   const logpush = inventory.logpush.find(
     (entry) =>
       entry.dataset === "workers_trace_events" &&
@@ -269,8 +248,6 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
     usageBucket === null ||
     imagePrimaryQueue === null ||
     imageDeadLetterQueue === null ||
-    pdfPrimaryQueue === null ||
-    pdfDeadLetterQueue === null ||
     logpush === undefined
   ) {
     throw new Error("resource inventory is incomplete after convergence");
@@ -300,14 +277,6 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
           deliveryPaused: true,
         },
       },
-      pdf: {
-        primary: { id: pdfPrimaryQueue.id, name: pdfPrimaryQueue.name, deliveryPaused: true },
-        dlq: {
-          id: pdfDeadLetterQueue.id,
-          name: pdfDeadLetterQueue.name,
-          deliveryPaused: true,
-        },
-      },
     },
     analytics: { datasetName: config.usageAnalyticsDatasetName, state: "binding-deferred" },
     logpush: {
@@ -322,7 +291,6 @@ export function buildProcessingProvisionManifest({ config, inventory, verifiedAt
   };
   return { ...unsigned, verificationSha256: sha256Canonical(unsigned) };
 }
-
 function requiredArgument(args, key) {
   const value = args[key];
   if (typeof value !== "string" || value.length === 0) {
@@ -330,7 +298,6 @@ function requiredArgument(args, key) {
   }
   return value;
 }
-
 export async function runProcessingResourceProvisioner(
   argv,
   environment = process.env,
@@ -349,8 +316,6 @@ export async function runProcessingResourceProvisioner(
     "database-name",
     "queue-name",
     "dlq-name",
-    "pdf-queue-name",
-    "pdf-dlq-name",
     "output",
   ]);
   if (Object.keys(args).some((key) => !keys.has(key))) {
@@ -368,8 +333,6 @@ export async function runProcessingResourceProvisioner(
     databaseName: requiredArgument(args, "database-name"),
     queueName: requiredArgument(args, "queue-name"),
     dlqName: requiredArgument(args, "dlq-name"),
-    pdfQueueName: requiredArgument(args, "pdf-queue-name"),
-    pdfDlqName: requiredArgument(args, "pdf-dlq-name"),
   });
   const api = createCloudflareProcessingResourceApi({
     config,
@@ -396,7 +359,6 @@ export async function runProcessingResourceProvisioner(
   });
   stdout.write(`${manifest.d1.databaseId}\n`);
 }
-
 if (
   process.argv[1] !== undefined &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url

@@ -25,8 +25,8 @@ export async function verifyProcessingDeploymentAuthority(
     throw new TypeError("release report is not valid JSON");
   }
   validateProcessingReleaseReport(report);
-  if (report.schema !== "hereisit-processing-release-report@2" || report.version !== 2) {
-    throw new TypeError("current deployment requires processing release report @2");
+  if (report.schema !== "hereisit-processing-release-report@3" || report.version !== 3) {
+    throw new TypeError("current deployment requires processing release report @3");
   }
   if (report.gitSha !== input.expectedGitSha)
     throw new TypeError("release report Git SHA does not match deployment source");

@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gzipSync, zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
-import { evaluatePdfEngineReleaseGate } from "../scripts/benchmark-pdf-engine.mjs";
 import { createDeterministicTreeArchive } from "../scripts/create-deterministic-tree-archive.mjs";
 import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import {
@@ -27,7 +26,6 @@ import {
   runProcessingCandidateFinalizer,
 } from "../scripts/finalize-processing-candidate.mjs";
 import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
-import { bindPdfBenchmarkCostInput } from "../scripts/prepare-processing-ci-release-source.mjs";
 import {
   inspectDockerImageArchive,
   inspectOciImageArchive,
@@ -40,33 +38,27 @@ import {
 const releaseId = "2026-07-20.1";
 const gitSha = "a".repeat(40);
 const temporaryRoots: string[] = [];
-const securityScopes = [
-  "engine",
-  "pdf-engine",
-  "web-staging",
-  "web-production",
-  "worker",
-  "lockfile",
-] as const;
-const securityKeys = [
-  "engine",
-  "pdfEngine",
-  "webStaging",
-  "webProduction",
-  "worker",
-  "lockfile",
-] as const;
+const securityScopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
+const securityKeys = ["engine", "webStaging", "webProduction", "worker", "lockfile"] as const;
 type MutableSecurityGate = {
   artifactSha256: string;
   pnpmVersion: string;
-  scanner: { databaseDigest: string };
-  scans: Array<{ reportSha256: string; scope: string }>;
+  scanner: {
+    databaseDigest: string;
+  };
+  scans: Array<{
+    reportSha256: string;
+    scope: string;
+  }>;
   scopes: {
-    engine: { sbomSha256: string };
-    worker: { artifactSha256: string };
+    engine: {
+      sbomSha256: string;
+    };
+    worker: {
+      artifactSha256: string;
+    };
   };
 };
-
 function rewriteTarChecksum(header: Buffer) {
   header.fill(0x20, 148, 156);
   let sum = 0;
@@ -75,7 +67,6 @@ function rewriteTarChecksum(header: Buffer) {
   header[154] = 0;
   header[155] = 0x20;
 }
-
 async function createFixture({
   ociCompression,
   dockerCompression,
@@ -89,7 +80,6 @@ async function createFixture({
   const build = join(parent, "build");
   await mkdir(root);
   await mkdir(build);
-
   const createWeb = async (environment: "staging" | "production") => {
     const tree = join(build, `web-${environment}`);
     await mkdir(tree);
@@ -100,7 +90,6 @@ async function createFixture({
   };
   const staging = await createWeb("staging");
   const production = await createWeb("production");
-
   const layerBytes = Buffer.from("canonical uncompressed layer tar bytes\n");
   const diffId = `sha256:${sha256Bytes(layerBytes)}`;
   const configBytes = Buffer.from(
@@ -118,9 +107,7 @@ async function createFixture({
         ? zstdCompressSync(layerBytes)
         : layerBytes;
   const distributionLayerDigest = `sha256:${sha256Bytes(distributionLayerBytes)}`;
-  const distributionLayerMediaType = `application/vnd.oci.image.layer.v1.tar${
-    ociCompression === undefined ? "" : `+${ociCompression}`
-  }`;
+  const distributionLayerMediaType = `application/vnd.oci.image.layer.v1.tar${ociCompression === undefined ? "" : `+${ociCompression}`}`;
   const manifestBytes = Buffer.from(
     canonicalJson({
       schemaVersion: 2,
@@ -166,7 +153,6 @@ async function createFixture({
   );
   const ociArchive = join(root, "image-engine-linux-amd64.oci.tar");
   await createDeterministicTreeArchive({ root: ociTree, output: ociArchive });
-
   const dockerTree = join(build, "engine-docker");
   const dockerLayerBytes =
     dockerCompression === "gzip"
@@ -195,93 +181,9 @@ async function createFixture({
   );
   const dockerArchive = join(root, "image-engine-linux-amd64.docker.tar");
   await createDeterministicTreeArchive({ root: dockerTree, output: dockerArchive });
-
-  const pdfConfigBytes = Buffer.from(
-    canonicalJson({
-      architecture: "amd64",
-      os: "linux",
-      config: { Labels: { "app.hereisit.engine": "pdf" } },
-      rootfs: { type: "layers", diff_ids: [diffId] },
-    }),
+  const costInput = JSON.parse(
+    await readFile("docs/deployment/processing-staging-cost-input.json", "utf8"),
   );
-  const pdfConfigDigest = `sha256:${sha256Bytes(pdfConfigBytes)}`;
-  const pdfManifestBytes = Buffer.from(
-    canonicalJson({
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.manifest.v1+json",
-      config: {
-        mediaType: "application/vnd.oci.image.config.v1+json",
-        digest: pdfConfigDigest,
-        size: pdfConfigBytes.byteLength,
-      },
-      layers: [
-        {
-          mediaType: distributionLayerMediaType,
-          digest: distributionLayerDigest,
-          size: distributionLayerBytes.byteLength,
-        },
-      ],
-    }),
-  );
-  const pdfManifestDigest = `sha256:${sha256Bytes(pdfManifestBytes)}`;
-  const pdfOciTree = join(build, "pdf-engine-oci");
-  await mkdir(join(pdfOciTree, "blobs", "sha256"), { recursive: true });
-  await writeFile(join(pdfOciTree, "oci-layout"), canonicalJson({ imageLayoutVersion: "1.0.0" }));
-  await writeFile(
-    join(pdfOciTree, "index.json"),
-    canonicalJson({
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.index.v1+json",
-      manifests: [
-        {
-          mediaType: "application/vnd.oci.image.manifest.v1+json",
-          digest: pdfManifestDigest,
-          size: pdfManifestBytes.byteLength,
-          platform: { os: "linux", architecture: "amd64" },
-        },
-      ],
-    }),
-  );
-  await writeFile(join(pdfOciTree, "blobs", "sha256", pdfConfigDigest.slice(7)), pdfConfigBytes);
-  await writeFile(
-    join(pdfOciTree, "blobs", "sha256", pdfManifestDigest.slice(7)),
-    pdfManifestBytes,
-  );
-  await writeFile(
-    join(pdfOciTree, "blobs", "sha256", distributionLayerDigest.slice(7)),
-    distributionLayerBytes,
-  );
-  const pdfOciArchive = join(root, "pdf-engine-linux-amd64.oci.tar");
-  await createDeterministicTreeArchive({ root: pdfOciTree, output: pdfOciArchive });
-
-  const pdfDockerTree = join(build, "pdf-engine-docker");
-  await mkdir(join(pdfDockerTree, "layer"), { recursive: true });
-  await writeFile(join(pdfDockerTree, "config.json"), pdfConfigBytes);
-  await writeFile(join(pdfDockerTree, "layer", "layer.tar"), layerBytes);
-  await writeFile(
-    join(pdfDockerTree, "manifest.json"),
-    canonicalJson([
-      {
-        Config: "config.json",
-        RepoTags: [`hereisit-pdf-engine:${gitSha}`],
-        Layers: ["layer/layer.tar"],
-      },
-    ]),
-  );
-  const pdfDockerArchive = join(root, "pdf-engine-linux-amd64.docker.tar");
-  await createDeterministicTreeArchive({ root: pdfDockerTree, output: pdfDockerArchive });
-
-  const pdfBenchmark = JSON.parse(
-    await readFile("docs/deployment/pdf-engine-benchmark.json", "utf8"),
-  );
-  pdfBenchmark.identity.engineImageId = pdfConfigDigest;
-  pdfBenchmark.identity.engineImageDigest = pdfConfigDigest;
-  const pdfReleaseGate = evaluatePdfEngineReleaseGate(pdfBenchmark);
-  const costInput = bindPdfBenchmarkCostInput(
-    JSON.parse(await readFile("docs/deployment/processing-staging-cost-input.json", "utf8")),
-    pdfBenchmark,
-  );
-
   const fileBytes: Record<string, Buffer> = {
     "live-cost-model.json": Buffer.from(canonicalJson(createLiveCostModel(costInput))),
     "processing-release-inputs.json": Buffer.from(
@@ -301,11 +203,11 @@ async function createFixture({
             })(),
           },
           ceilings: {
-            maxCostPer1000JobsMicrousd: 500_000,
-            maxLiveMedianOutputRatioBps: 8_000,
-            maxLiveP95WeightedUnits: 12_000,
-            maxLiveOriginalRetainedRateBps: 2_500,
-            maxProjectedMonthlyCostMicrousd: 5_000_000,
+            maxCostPer1000JobsMicrousd: 500000,
+            maxLiveMedianOutputRatioBps: 8000,
+            maxLiveP95WeightedUnits: 12000,
+            maxLiveOriginalRetainedRateBps: 2500,
+            maxProjectedMonthlyCostMicrousd: 5000000,
           },
           routeCpuBenchmark: {
             artifactSha256: "4".repeat(64),
@@ -317,23 +219,12 @@ async function createFixture({
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": await readFile(ociArchive),
     "image-engine-linux-amd64.docker.tar": await readFile(dockerArchive),
-    "pdf-engine-linux-amd64.oci.tar": await readFile(pdfOciArchive),
-    "pdf-engine-linux-amd64.docker.tar": await readFile(pdfDockerArchive),
-    "pdf-engine-benchmark.json": Buffer.from(canonicalJson(pdfBenchmark)),
-    "pdf-engine-benchmark.schema.json": await readFile(
-      "docs/deployment/pdf-engine-benchmark.schema.json",
-    ),
-    "pdf-engine-release-gate.json": Buffer.from(canonicalJson(pdfReleaseGate)),
-    "pdf-engine-release-gate.schema.json": await readFile(
-      "docs/deployment/pdf-engine-release-gate.schema.json",
-    ),
     "api-worker.mjs": Buffer.from("export default {};\n"),
     [`evidence-v1--${releaseId}--processing-evidence.json`]: Buffer.from('{"signed":true}\n'),
     [`evidence-v1--${releaseId}--processing-evidence.sig`]: Buffer.from("signature\n"),
   };
   const artifactHashes = {
     engine: configDigest.slice(7),
-    "pdf-engine": pdfConfigDigest.slice(7),
     "web-staging": staging.archiveSha256,
     "web-production": production.archiveSha256,
     worker: sha256Bytes(fileBytes["api-worker.mjs"]),
@@ -364,18 +255,6 @@ async function createFixture({
       policySha256: "2".repeat(64),
       exceptionsSha256: "3".repeat(64),
       baseImagesSha256: "4".repeat(64),
-    }),
-  );
-  fileBytes["security-pdf-engine-license-gate.json"] = Buffer.from(
-    canonicalJson({
-      schema: "hereisit-pdf-engine-license-gate@1",
-      passed: true,
-      qpdfVersion: "12.4.0",
-      sourceSha256: "2783a032f443cc886dad41aa6d5fae3dabf23dec00ee7ec2cfb27ef67ebcf529",
-      sourceLockSha256: "1".repeat(64),
-      policySha256: "2".repeat(64),
-      licenseSha256: "3".repeat(64),
-      noticeSha256: "4".repeat(64),
     }),
   );
   fileBytes["security-application-supply-chain-gate.json"] = Buffer.from(
@@ -412,7 +291,7 @@ async function createFixture({
         image:
           "ghcr.io/anchore/grype@sha256:8c2c9234a345577a6d321a4753aa3ee1276d8975c8452d2344a56b57733ecad3",
       },
-      nativeScans: ["engine", "pdf-engine"].map((scope) => ({
+      nativeScans: ["engine"].map((scope) => ({
         scope,
         sbomSha256: sbomHashes[scope],
         databaseSha256: "d".repeat(64),
@@ -454,8 +333,8 @@ async function createFixture({
   const stagingIdentity = webIdentity("staging", staging);
   const productionIdentity = webIdentity("production", production);
   const payload = {
-    schema: "hereisit-processing-candidate@2",
-    version: 2,
+    schema: "hereisit-processing-candidate@3",
+    version: 3,
     state: "finalized",
     releaseId,
     gitSha,
@@ -471,24 +350,6 @@ async function createFixture({
         diffIds: [diffId],
       },
     },
-    pdfEngine: {
-      loadedImage: `hereisit-pdf-engine:${gitSha}`,
-      oci: {
-        configDigest: pdfConfigDigest,
-        distributionLayerDigests: [distributionLayerDigest],
-        diffIds: [diffId],
-      },
-      docker: {
-        configDigest: pdfConfigDigest,
-        diffIds: [diffId],
-      },
-    },
-    pdfQuality: {
-      benchmarkSha256: pdfReleaseGate.benchmarkSha256,
-      releaseGateSha256: sha256Bytes(Buffer.from(canonicalJson(pdfReleaseGate))),
-      visualProfilesMeasured: pdfReleaseGate.visualProfilesMeasured,
-      publicAdmissionReady: pdfReleaseGate.publicAdmissionReady,
-    },
     web: { staging: stagingIdentity, production: productionIdentity },
     security: { trivyDbDigest: `sha256:${"d".repeat(64)}` },
     providerUsage: { schemaSha256: "e".repeat(64) },
@@ -499,16 +360,6 @@ async function createFixture({
       engine: {
         oci: artifact("image-engine-linux-amd64.oci.tar"),
         docker: artifact("image-engine-linux-amd64.docker.tar"),
-      },
-      pdfEngine: {
-        oci: artifact("pdf-engine-linux-amd64.oci.tar"),
-        docker: artifact("pdf-engine-linux-amd64.docker.tar"),
-      },
-      pdfQuality: {
-        benchmark: artifact("pdf-engine-benchmark.json"),
-        benchmarkSchema: artifact("pdf-engine-benchmark.schema.json"),
-        releaseGate: artifact("pdf-engine-release-gate.json"),
-        releaseGateSchema: artifact("pdf-engine-release-gate.schema.json"),
       },
       worker: artifact("api-worker.mjs"),
       releaseInputs: artifact("processing-release-inputs.json"),
@@ -528,7 +379,6 @@ async function createFixture({
       security: {
         gates: {
           imageEngine: artifact("security-image-engine-license-gate.json"),
-          pdfEngine: artifact("security-pdf-engine-license-gate.json"),
           applicationSupplyChain: artifact("security-application-supply-chain-gate.json"),
           vulnerability: artifact("security-vulnerability-gate.json"),
         },
@@ -559,7 +409,6 @@ async function createFixture({
   await writeFile(manifestPath, canonicalJson(candidate), { mode: 0o600 });
   return { parent, root, manifestPath, candidate };
 }
-
 async function bindChangedDockerArchive(
   fixture: Awaited<ReturnType<typeof createFixture>>,
   archiveBytes: Buffer,
@@ -585,7 +434,6 @@ async function bindChangedDockerArchive(
     canonicalJson({ ...payload, verificationSha256: sha256Canonical(payload) }),
   );
 }
-
 function builtOptions(fixture: Awaited<ReturnType<typeof createFixture>>, outputRoot: string) {
   return {
     sourceRoot: fixture.root,
@@ -600,8 +448,7 @@ function builtOptions(fixture: Awaited<ReturnType<typeof createFixture>>, output
     providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
   };
 }
-
-it("rejects a dual-engine candidate downgraded to Trivy-only evidence", async () => {
+it("rejects a image candidate downgraded to Trivy-only evidence", async () => {
   const fixture = await createFixture();
   const gate = JSON.parse(
     await readFile(join(fixture.root, "security-vulnerability-gate.json"), "utf8"),
@@ -612,7 +459,6 @@ it("rejects a dual-engine candidate downgraded to Trivy-only evidence", async ()
   await bindChangedSecurityGate(fixture, "vulnerability", Buffer.from(canonicalJson(gate)));
   await expect(verifyFixture(fixture)).rejects.toThrow(/vulnerability|native/);
 });
-
 it.each([
   "sbom",
   "database",
@@ -625,14 +471,13 @@ it.each([
     await readFile(join(fixture.root, "security-vulnerability-gate.json"), "utf8"),
   );
   if (kind === "sbom") gate.nativeScans[0].sbomSha256 = "0".repeat(64);
-  if (kind === "database") gate.nativeScans[1].databaseSha256 = "0".repeat(64);
+  if (kind === "database") gate.nativeScans[0].databaseSha256 = "invalid";
   if (kind === "scanner") gate.nativeScanner.image = "unreviewed:latest";
   if (kind === "missing") gate.nativeScans.pop();
-  if (kind === "order") gate.nativeScans.reverse();
+  if (kind === "order") gate.nativeScans[0].scope = "web-staging";
   await bindChangedSecurityGate(fixture, "vulnerability", Buffer.from(canonicalJson(gate)));
   await expect(verifyFixture(fixture)).rejects.toThrow(/native/);
 });
-
 async function bindChangedSecurityGate(
   fixture: Awaited<ReturnType<typeof createFixture>>,
   key: "imageEngine" | "applicationSupplyChain" | "vulnerability",
@@ -659,7 +504,6 @@ async function bindChangedSecurityGate(
     canonicalJson({ ...payload, verificationSha256: sha256Canonical(payload) }),
   );
 }
-
 async function verifyFixture(fixture: Awaited<ReturnType<typeof createFixture>>) {
   return verifyProcessingCandidate({
     manifestPath: fixture.manifestPath,
@@ -668,13 +512,11 @@ async function verifyFixture(fixture: Awaited<ReturnType<typeof createFixture>>)
     expectedGitSha: gitSha,
   });
 }
-
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-
 describe("processing candidate verifier", () => {
   it("atomically finalizes a verified built candidate with report and evidence bytes", async () => {
     const fixture = await createFixture();
@@ -692,7 +534,6 @@ describe("processing candidate verifier", () => {
       trivyDbDigest: fixture.candidate.security.trivyDbDigest,
       providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
     });
-
     const finalized = await finalizeProcessingCandidate({
       builtRoot,
       outputRoot: finalizedRoot,
@@ -703,7 +544,6 @@ describe("processing candidate verifier", () => {
         `evidence-v1--${releaseId}--processing-evidence.sig`,
       ),
     });
-
     expect(finalized).toMatchObject({ state: "finalized", releaseId, gitSha });
     await expect(
       verifyProcessingCandidate({
@@ -712,9 +552,8 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 32 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 23 });
   });
-
   it("finalizes through an exact content-free CLI boundary", async () => {
     const fixture = await createFixture();
     const builtRoot = join(fixture.parent, "cli-built-for-finalization");
@@ -732,7 +571,6 @@ describe("processing candidate verifier", () => {
       providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
     });
     const writes: string[] = [];
-
     await runProcessingCandidateFinalizer(
       [
         "--built-root",
@@ -752,7 +590,6 @@ describe("processing candidate verifier", () => {
         },
       },
     );
-
     expect(writes).toHaveLength(1);
     expect(JSON.parse(writes[0])).toEqual({
       schema: "hereisit-processing-candidate-finalization@1",
@@ -764,7 +601,6 @@ describe("processing candidate verifier", () => {
     expect(writes[0]).not.toContain(fixture.root);
     expect(writes[0]).not.toContain("evidence-v1");
   });
-
   it("rejects candidate outputs nested inside their immutable source roots", async () => {
     const fixture = await createFixture();
     await expect(
@@ -782,11 +618,9 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/outside|source root/i);
   });
-
   it("atomically creates a minimal built candidate from verified source archives", async () => {
     const fixture = await createFixture({ ociCompression: "zstd" });
     const outputRoot = join(fixture.parent, "built-candidate");
-
     const created = await createBuiltProcessingCandidate({
       sourceRoot: fixture.root,
       outputRoot,
@@ -799,7 +633,6 @@ describe("processing candidate verifier", () => {
       trivyDbDigest: fixture.candidate.security.trivyDbDigest,
       providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
     });
-
     expect(created).toMatchObject({
       state: "built",
       releaseId,
@@ -822,7 +655,7 @@ describe("processing candidate verifier", () => {
         requiredState: "built",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "built", assetCount: 29 });
+    ).resolves.toMatchObject({ state: "built", assetCount: 20 });
     await expect(lstat(join(outputRoot, "processing-release-report.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -830,12 +663,10 @@ describe("processing candidate verifier", () => {
       lstat(join(outputRoot, `evidence-v1--${releaseId}--processing-evidence.json`)),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("creates a built candidate through an exact content-free CLI boundary", async () => {
     const fixture = await createFixture();
     const outputRoot = join(fixture.parent, "cli-built-candidate");
     const writes: string[] = [];
-
     await runProcessingCandidateCreator(
       [
         "--source-root",
@@ -865,7 +696,6 @@ describe("processing candidate verifier", () => {
         },
       },
     );
-
     expect(writes).toHaveLength(1);
     expect(JSON.parse(writes[0])).toEqual({
       schema: "hereisit-processing-candidate-creation@1",
@@ -877,11 +707,9 @@ describe("processing candidate verifier", () => {
     expect(writes[0]).not.toContain(fixture.root);
     expect(writes[0]).not.toContain("image-engine-linux-amd64");
   });
-
   it("removes partial output when a source identity fails verification", async () => {
     const fixture = await createFixture();
     const outputRoot = join(fixture.parent, "invalid-built-candidate");
-
     await expect(
       createBuiltProcessingCandidate({
         sourceRoot: fixture.root,
@@ -901,7 +729,6 @@ describe("processing candidate verifier", () => {
       (await readdir(fixture.parent)).some((name) => name.startsWith(".hereisit-built-")),
     ).toBe(false);
   });
-
   it("rejects a symbolic-link source asset without publishing output", async () => {
     const fixture = await createFixture();
     const outputRoot = join(fixture.parent, "linked-built-candidate");
@@ -911,7 +738,6 @@ describe("processing candidate verifier", () => {
     const outsideWorker = join(fixture.parent, "outside-worker.mjs");
     await writeFile(outsideWorker, workerBytes);
     await symlink(outsideWorker, workerPath);
-
     await expect(
       createBuiltProcessingCandidate({
         sourceRoot: fixture.root,
@@ -928,14 +754,12 @@ describe("processing candidate verifier", () => {
     ).rejects.toThrow(/api-worker|symbolic|source/i);
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("rejects an oversized sparse source before copying its bytes", async () => {
     const fixture = await createFixture();
     const outputRoot = join(fixture.parent, "oversized-built-candidate");
     const worker = await open(join(fixture.root, "api-worker.mjs"), "w");
     await worker.truncate(2 * 1024 * 1024 * 1024 + 1);
     await worker.close();
-
     await expect(
       createBuiltProcessingCandidate({
         sourceRoot: fixture.root,
@@ -952,7 +776,6 @@ describe("processing candidate verifier", () => {
     ).rejects.toThrow(/api-worker|regular|size/i);
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it.each([
     [
       "missing",
@@ -984,7 +807,6 @@ describe("processing candidate verifier", () => {
     );
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("rejects a live cost model that does not reproduce the reviewed release inputs", async () => {
     const fixture = await createFixture();
     const outputRoot = join(fixture.parent, "drifted-cost-built-candidate");
@@ -994,7 +816,6 @@ describe("processing candidate verifier", () => {
       costPath,
       canonicalJson({ ...costModel, projectedMonthlyJobs: costModel.projectedMonthlyJobs + 1 }),
     );
-
     await expect(
       createBuiltProcessingCandidate({
         sourceRoot: fixture.root,
@@ -1011,7 +832,6 @@ describe("processing candidate verifier", () => {
     ).rejects.toThrow(/cost model.*release inputs|reviewed/i);
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("rejects non-canonical or oversized financial input documents", async () => {
     const nonCanonical = await createFixture();
     await writeFile(
@@ -1032,7 +852,6 @@ describe("processing candidate verifier", () => {
         providerUsageSchemaPath: resolve("docs/deployment/provider-usage-schema.v1.json"),
       }),
     ).rejects.toThrow(/canonical/i);
-
     const oversized = await createFixture();
     const releaseInputs = await open(join(oversized.root, "processing-release-inputs.json"), "w");
     await releaseInputs.truncate(1024 * 1024 + 1);
@@ -1052,10 +871,8 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/processing-release-inputs|regular|size/i);
   });
-
   it("derives OCI and Docker identities from the unsigned archive bytes", async () => {
     const fixture = await createFixture({ ociCompression: "zstd" });
-
     await expect(
       inspectOciImageArchive({
         archivePath: join(fixture.root, fixture.candidate.releaseAssets.engine.oci.path),
@@ -1070,13 +887,11 @@ describe("processing candidate verifier", () => {
       }),
     ).resolves.toEqual(fixture.candidate.engine.docker);
   });
-
   it.each([
     "gzip",
     "zstd",
   ] as const)("derives Docker DiffIDs from %s-compressed OCI blob layers", async (dockerCompression) => {
     const fixture = await createFixture({ dockerCompression });
-
     await expect(
       inspectDockerImageArchive({
         archivePath: join(fixture.root, fixture.candidate.releaseAssets.engine.docker.path),
@@ -1085,10 +900,8 @@ describe("processing candidate verifier", () => {
       }),
     ).resolves.toEqual(fixture.candidate.engine.docker);
   });
-
   it("verifies every release asset and both deterministic Pages trees", async () => {
     const fixture = await createFixture();
-
     await expect(
       verifyProcessingCandidate({
         manifestPath: fixture.manifestPath,
@@ -1104,7 +917,7 @@ describe("processing candidate verifier", () => {
       gitSha,
       manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
       candidateVerificationSha256: fixture.candidate.verificationSha256,
-      assetCount: 32,
+      assetCount: 23,
       web: {
         staging: expect.objectContaining({ treeSha256: fixture.candidate.web.staging.treeSha256 }),
         production: expect.objectContaining({
@@ -1113,13 +926,11 @@ describe("processing candidate verifier", () => {
       },
     });
   });
-
   it.each([
     "gzip",
     "zstd",
   ] as const)("derives the OCI DiffID through %s layer decompression", async (ociCompression) => {
     const fixture = await createFixture({ ociCompression });
-
     await expect(
       verifyProcessingCandidate({
         manifestPath: fixture.manifestPath,
@@ -1127,9 +938,8 @@ describe("processing candidate verifier", () => {
         requiredState: "finalized",
         expectedGitSha: gitSha,
       }),
-    ).resolves.toMatchObject({ state: "finalized", assetCount: 32 });
+    ).resolves.toMatchObject({ state: "finalized", assetCount: 23 });
   });
-
   it.each([
     ["wrong required state", { requiredState: "built" }],
     ["wrong source SHA", { expectedGitSha: "f".repeat(40) }],
@@ -1145,7 +955,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/state|SHA/i);
   });
-
   it("rejects changed asset bytes before claiming the candidate is verified", async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.root, "api-worker.mjs"), "tampered\n");
@@ -1158,13 +967,11 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/Worker|size|hash/i);
   });
-
   it("rejects tampered raw security evidence before gate interpretation", async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.root, "security-sbom-worker.cdx.json"), "tampered\n");
     await expect(verifyFixture(fixture)).rejects.toThrow(/worker.*security.*(?:size|hash)/i);
   });
-
   it("rejects noncanonical, malformed, or extra-field security gates", async () => {
     for (const change of [
       (gate: Record<string, unknown>) => Buffer.from(`${canonicalJson(gate)} `),
@@ -1178,7 +985,6 @@ describe("processing candidate verifier", () => {
       await expect(verifyFixture(fixture)).rejects.toThrow(/canonical|JSON|fields/i);
     }
   });
-
   it("cross-checks gate configuration, scope, artifact, SBOM, report, and database identities", async () => {
     const cases = [
       ["imageEngine", (gate: MutableSecurityGate) => (gate.artifactSha256 = "f".repeat(64))],
@@ -1212,7 +1018,6 @@ describe("processing candidate verifier", () => {
       );
     }
   });
-
   it("rejects security evidence drift before finalization", async () => {
     const fixture = await createFixture();
     const builtRoot = join(fixture.parent, "security-drift-built");
@@ -1234,7 +1039,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/lockfile.*security.*(?:size|hash)/i);
   });
-
   it("rejects same-size security evidence writes that race candidate creation", async () => {
     const fixture = await createFixture();
     const sbomPath = join(fixture.root, "security-sbom-engine.cdx.json");
@@ -1244,7 +1048,6 @@ describe("processing candidate verifier", () => {
     const gate = JSON.parse(await readFile(gatePath, "utf8"));
     gate.scopes.engine.sbomSha256 = sha256Bytes(sbomBytes);
     await writeFile(gatePath, canonicalJson(gate));
-
     let settled = false;
     let creationError: unknown;
     const outputRoot = join(fixture.parent, "same-size-race-built");
@@ -1266,13 +1069,11 @@ describe("processing candidate verifier", () => {
     } finally {
       await writer.close();
     }
-
     await creation;
     expect(creationError).toBeInstanceOf(TypeError);
     expect((creationError as Error).message).toMatch(/changed while reading/i);
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("keeps security evidence bounded when finalization reopens verified files", async () => {
     const fixture = await createFixture();
     const builtRoot = join(fixture.parent, "bounded-security-built");
@@ -1306,7 +1107,6 @@ describe("processing candidate verifier", () => {
     }
     await expect(lstat(outputRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
-
   it("recomputes the OCI distribution-layer identity from the archive", async () => {
     const fixture = await createFixture();
     const { verificationSha256: _verificationSha256, ...unsigned } = fixture.candidate;
@@ -1324,7 +1124,6 @@ describe("processing candidate verifier", () => {
       fixture.manifestPath,
       canonicalJson({ ...payload, verificationSha256: sha256Canonical(payload) }),
     );
-
     await expect(
       verifyProcessingCandidate({
         manifestPath: fixture.manifestPath,
@@ -1334,7 +1133,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/OCI|distribution|archive|identity/i);
   });
-
   it("recomputes Docker layer DiffIDs instead of trusting the signed manifest", async () => {
     const fixture = await createFixture();
     const archivePath = join(fixture.root, "image-engine-linux-amd64.docker.tar");
@@ -1344,7 +1142,6 @@ describe("processing candidate verifier", () => {
     expect(markerOffset).toBeGreaterThanOrEqual(0);
     archiveBytes[markerOffset] ^= 1;
     await bindChangedDockerArchive(fixture, archiveBytes);
-
     await expect(
       verifyProcessingCandidate({
         manifestPath: fixture.manifestPath,
@@ -1354,7 +1151,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/Docker.*(?:layer|DiffID|rootfs)/i);
   });
-
   it.each([
     [
       "symbolic-link member",
@@ -1376,7 +1172,6 @@ describe("processing candidate verifier", () => {
     const archiveBytes = await readFile(join(fixture.root, "image-engine-linux-amd64.docker.tar"));
     mutate(archiveBytes);
     await bindChangedDockerArchive(fixture, archiveBytes);
-
     await expect(
       verifyProcessingCandidate({
         manifestPath: fixture.manifestPath,
@@ -1386,7 +1181,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/Docker|tar|member|canonical/i);
   });
-
   it("rejects symbolic-link manifests, roots, and release assets", async () => {
     const manifestFixture = await createFixture();
     const manifestLink = join(manifestFixture.parent, "manifest-link.json");
@@ -1399,7 +1193,6 @@ describe("processing candidate verifier", () => {
         expectedGitSha: gitSha,
       }),
     ).rejects.toThrow(/manifest|root|symbolic|canonical/i);
-
     const rootFixture = await createFixture();
     const rootLink = join(rootFixture.parent, "root-link");
     await symlink(rootFixture.root, rootLink);
@@ -1411,7 +1204,6 @@ describe("processing candidate verifier", () => {
         expectedGitSha: gitSha,
       }),
     ).rejects.toThrow(/root|symbolic|canonical/i);
-
     const assetFixture = await createFixture();
     const workerPath = join(assetFixture.root, "api-worker.mjs");
     const workerBytes = await readFile(workerPath);
@@ -1427,7 +1219,6 @@ describe("processing candidate verifier", () => {
         expectedGitSha: gitSha,
       }),
     ).rejects.toThrow(/Worker|symbolic|regular/i);
-
     const engineFixture = await createFixture();
     const enginePath = join(engineFixture.root, "image-engine-linux-amd64.oci.tar");
     const engineBytes = await readFile(enginePath);
@@ -1444,7 +1235,6 @@ describe("processing candidate verifier", () => {
       }),
     ).rejects.toThrow(/OCI|symbolic|regular/i);
   });
-
   it("prints only a content-free verification summary at the CLI boundary", async () => {
     const fixture = await createFixture();
     const writes: string[] = [];
@@ -1469,7 +1259,7 @@ describe("processing candidate verifier", () => {
     const summary = JSON.parse(writes[0]);
     expect(summary).toMatchObject({
       state: "finalized",
-      assetCount: 32,
+      assetCount: 23,
       manifestSha256: sha256Bytes(await readFile(fixture.manifestPath)),
       candidateVerificationSha256: fixture.candidate.verificationSha256,
     });

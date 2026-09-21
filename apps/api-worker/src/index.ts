@@ -11,7 +11,7 @@ import {
   type UsageEnvironment,
 } from "./usage-analytics";
 
-export { ImageEngineContainer, PdfEngineContainer } from "./container-client";
+export { ImageEngineContainer } from "./container-client";
 
 function usageEnvironment(value: string): UsageEnvironment {
   if (value === "local" || value === "staging" || value === "production") return value;

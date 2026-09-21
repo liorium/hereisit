@@ -94,8 +94,16 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("prior-admission-state.json");
     expect(workflow).toContain("prior-queue-states.json");
     expect(workflow).toContain('--engine-image "$PRIOR_IMAGE"');
-    expect(workflow).toContain('--engine-image "$PRIOR_PDF_IMAGE"');
-    for (const key of ["image-primary", "image-dlq", "pdf-primary", "pdf-dlq"]) {
+    const queueRecovery = workflow.slice(
+      cleanup,
+      workflow.indexOf("RESTORE_WRANGLER_CONFIG=", cleanup),
+    );
+    for (const queue of ["QUEUE_NAME", "DLQ_NAME"]) {
+      expect(queueRecovery).toContain(
+        `verify-queue-delivery-state.mjs --queue "$${queue}" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID" || status=1`,
+      );
+    }
+    for (const key of ["image-primary", "image-dlq"]) {
       expect(workflow).toContain(`restore_queue ${key}`);
     }
   });
@@ -214,17 +222,11 @@ describe("processing production workflow", () => {
       ".artifacts/deployment/source-sha.txt",
       ".artifacts/deployment/staging-run-id.txt",
       ".artifacts/deployment/cloudflare-image-digest.txt",
-      ".artifacts/deployment/cloudflare-pdf-image-digest.txt",
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/policy-smoke.json",
       ".artifacts/deployment/pages-deployment-id.txt",
       ".artifacts/deployment/canary-smoke.json",
-      ".artifacts/deployment/pdf-canary-smoke.json",
-      ".artifacts/deployment/pdf-deletion-receipt.json",
-      ".artifacts/deployment/pdf-cost-receipt.json",
-      ".artifacts/deployment/pdf-rollback-receipt.json",
-      ".artifacts/deployment/pdf-public-admission.json",
       ".artifacts/deployment/processing-deployment-report.json",
       ".artifacts/deployment/processing-deployment-report.sig",
       ".artifacts/deployment/processing-deployment-report-verification.json",

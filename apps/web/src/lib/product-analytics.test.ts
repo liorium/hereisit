@@ -71,7 +71,7 @@ describe("privacy-safe product analytics", () => {
   it("returns immediately when the analytics request rejects", () => {
     vi.stubEnv("NEXT_PUBLIC_PROCESSING_API_ORIGIN", "https://processing.example");
     const fetcher = vi.fn(() => Promise.reject(new Error("offline")));
-    expect(reportDownloadRequested("pdf.merge", { fetcher })).toBeUndefined();
+    expect(reportDownloadRequested("image.rotate", { fetcher })).toBeUndefined();
   });
 
   it("does not send analytics from the privacy browser fixture", () => {
@@ -79,7 +79,7 @@ describe("privacy-safe product analytics", () => {
     vi.stubEnv("NEXT_PUBLIC_PRODUCT_ANALYTICS_DISABLED", "1");
     const fetcher = vi.fn<typeof fetch>();
 
-    reportDownloadRequested("pdf.merge", { fetcher });
+    reportDownloadRequested("image.rotate", { fetcher });
 
     expect(fetcher).not.toHaveBeenCalled();
   });

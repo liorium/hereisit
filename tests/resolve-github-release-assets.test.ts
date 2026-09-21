@@ -17,7 +17,6 @@ const tagObjectSha = "b".repeat(40);
 const temporaryRoots: string[] = [];
 const securityScopes = [
   ["engine", "engine"],
-  ["pdfEngine", "pdf-engine"],
   ["webStaging", "web-staging"],
   ["webProduction", "web-production"],
   ["worker", "worker"],
@@ -25,17 +24,14 @@ const securityScopes = [
 ] as const;
 const securityPaths = [
   "security-image-engine-license-gate.json",
-  "security-pdf-engine-license-gate.json",
   "security-application-supply-chain-gate.json",
   "security-vulnerability-gate.json",
   ...securityScopes.map(([, scope]) => `security-sbom-${scope}.cdx.json`),
   ...securityScopes.map(([, scope]) => `security-trivy-${scope}.json`),
 ];
-
 function sha256(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("hex");
 }
-
 function securityAssets(files: Record<string, Uint8Array>) {
   const descriptor = (path: string) => ({
     path,
@@ -49,7 +45,6 @@ function securityAssets(files: Record<string, Uint8Array>) {
   return {
     gates: {
       imageEngine: descriptor("security-image-engine-license-gate.json"),
-      pdfEngine: descriptor("security-pdf-engine-license-gate.json"),
       applicationSupplyChain: descriptor("security-application-supply-chain-gate.json"),
       vulnerability: descriptor("security-vulnerability-gate.json"),
     },
@@ -57,20 +52,17 @@ function securityAssets(files: Record<string, Uint8Array>) {
     vulnerabilityReports: scoped("security-trivy-", ".json"),
   };
 }
-
 async function temporaryDirectory() {
   const root = await mkdtemp(join(tmpdir(), "hereisit-release-resolver-"));
   temporaryRoots.push(root);
   return root;
 }
-
 async function createFixture({ wrongStagingTree = false } = {}) {
   const root = await temporaryDirectory();
   const candidateRoot = join(root, "candidate");
   const build = join(root, "build");
   await mkdir(candidateRoot);
   await mkdir(build);
-
   const createWeb = async (environment: "staging" | "production", body: string) => {
     const tree = join(build, `web-${environment}`);
     await mkdir(tree);
@@ -86,12 +78,6 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     "processing-release-report.json": Buffer.from('{"passed":true}\n'),
     "image-engine-linux-amd64.oci.tar": Buffer.from("canonical-oci\n"),
     "image-engine-linux-amd64.docker.tar": Buffer.from("loadable-docker\n"),
-    "pdf-engine-linux-amd64.oci.tar": Buffer.from("canonical-pdf-oci\n"),
-    "pdf-engine-linux-amd64.docker.tar": Buffer.from("loadable-pdf-docker\n"),
-    "pdf-engine-benchmark.json": Buffer.from('{"benchmark":true}\n'),
-    "pdf-engine-benchmark.schema.json": Buffer.from('{"schema":true}\n'),
-    "pdf-engine-release-gate.json": Buffer.from('{"passed":true}\n'),
-    "pdf-engine-release-gate.schema.json": Buffer.from('{"schema":true}\n'),
     "api-worker.mjs": Buffer.from('export default {fetch(){return new Response("ok")}};\n'),
     "processing-release-inputs.json": Buffer.from('{"release":true}\n'),
     "live-cost-model.json": Buffer.from('{"cost":true}\n'),
@@ -107,8 +93,8 @@ async function createFixture({ wrongStagingTree = false } = {}) {
     sha256: sha256(files[path]),
   });
   const candidatePayload = {
-    schema: "hereisit-processing-candidate@2",
-    version: 2,
+    schema: "hereisit-processing-candidate@3",
+    version: 3,
     state: "finalized",
     releaseId,
     gitSha: targetSha,
@@ -123,24 +109,6 @@ async function createFixture({ wrongStagingTree = false } = {}) {
         configDigest: `sha256:${"7".repeat(64)}`,
         diffIds: [`sha256:${"9".repeat(64)}`],
       },
-    },
-    pdfEngine: {
-      loadedImage: `hereisit-pdf-engine:${targetSha}`,
-      oci: {
-        configDigest: `sha256:${"6".repeat(64)}`,
-        distributionLayerDigests: [`sha256:${"5".repeat(64)}`],
-        diffIds: [`sha256:${"4".repeat(64)}`],
-      },
-      docker: {
-        configDigest: `sha256:${"6".repeat(64)}`,
-        diffIds: [`sha256:${"4".repeat(64)}`],
-      },
-    },
-    pdfQuality: {
-      benchmarkSha256: "1".repeat(64),
-      releaseGateSha256: "2".repeat(64),
-      visualProfilesMeasured: 0,
-      publicAdmissionReady: false,
     },
     web: {
       staging: {
@@ -163,16 +131,6 @@ async function createFixture({ wrongStagingTree = false } = {}) {
       engine: {
         oci: identity("image-engine-linux-amd64.oci.tar"),
         docker: identity("image-engine-linux-amd64.docker.tar"),
-      },
-      pdfEngine: {
-        oci: identity("pdf-engine-linux-amd64.oci.tar"),
-        docker: identity("pdf-engine-linux-amd64.docker.tar"),
-      },
-      pdfQuality: {
-        benchmark: identity("pdf-engine-benchmark.json"),
-        benchmarkSchema: identity("pdf-engine-benchmark.schema.json"),
-        releaseGate: identity("pdf-engine-release-gate.json"),
-        releaseGateSchema: identity("pdf-engine-release-gate.schema.json"),
       },
       worker: identity("api-worker.mjs"),
       releaseInputs: identity("processing-release-inputs.json"),
@@ -209,7 +167,6 @@ async function createFixture({ wrongStagingTree = false } = {}) {
   const allFiles = { ...files, "processing-candidate.json": candidateBytes };
   return { root, candidateRoot, candidate, files: allFiles };
 }
-
 async function startGitHubServer(
   fixture: Awaited<ReturnType<typeof createFixture>>,
   {
@@ -233,19 +190,17 @@ async function startGitHubServer(
     onFirstDownload?: () => void;
   } = {},
 ) {
-  const requests: Array<{ authorization?: string; path: string; version?: string }> = [];
+  const requests: Array<{
+    authorization?: string;
+    path: string;
+    version?: string;
+  }> = [];
   let origin = "";
   const suffixes = [
     "processing-candidate.json",
     "processing-release-report.json",
     "image-engine-linux-amd64.oci.tar",
     "image-engine-linux-amd64.docker.tar",
-    "pdf-engine-linux-amd64.oci.tar",
-    "pdf-engine-linux-amd64.docker.tar",
-    "pdf-engine-benchmark.json",
-    "pdf-engine-benchmark.schema.json",
-    "pdf-engine-release-gate.json",
-    "pdf-engine-release-gate.schema.json",
     "api-worker.mjs",
     "processing-release-inputs.json",
     "live-cost-model.json",
@@ -291,9 +246,7 @@ async function startGitHubServer(
   if (securityMutation === "duplicate-name") securityRecord.name = records[0].name;
   if (securityMutation === "wrong-size") securityRecord.size += 1;
   if (securityMutation === "wrong-hash") securityRecord.digest = `sha256:${"f".repeat(64)}`;
-
   let downloadStarted = false;
-
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
     requests.push({
@@ -374,13 +327,11 @@ async function startGitHubServer(
     close: () => new Promise<void>((resolvePromise) => server.close(() => resolvePromise())),
   };
 }
-
 afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-
 describe("GitHub release asset resolver", () => {
   it("binds an annotated source tag and every downloaded asset to the finalized candidate", async () => {
     const fixture = await createFixture();
@@ -396,10 +347,10 @@ describe("GitHub release asset resolver", () => {
         token: "test-token",
       });
       expect(result).toMatchObject({
-        schema: "hereisit-processing-release-assets@2",
+        schema: "hereisit-processing-release-assets@3",
         repository,
         release: { id: 9001, tag: releaseTag, targetSha },
-        worker: { assetId: 111, sha256: fixture.candidate.releaseAssets.worker.sha256 },
+        worker: { assetId: 105, sha256: fixture.candidate.releaseAssets.worker.sha256 },
         web: {
           staging: { treeSha256: fixture.candidate.releaseAssets.web.staging.treeSha256 },
           production: { treeSha256: fixture.candidate.releaseAssets.web.production.treeSha256 },
@@ -438,7 +389,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("rejects an unknown release asset", async () => {
     const fixture = await createFixture();
     const server = await startGitHubServer(fixture, { extraAsset: true });
@@ -457,7 +407,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it.each([
     ["missing", /exact|missing/i],
     ["renamed", /unexpected|missing/i],
@@ -484,7 +433,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it.each([
     [
       "renamed",
@@ -524,7 +472,6 @@ describe("GitHub release asset resolver", () => {
       }),
     ).rejects.toThrow(/path|size|limit/i);
   });
-
   it("rejects a release tag that targets another source commit", async () => {
     const fixture = await createFixture();
     const server = await startGitHubServer(fixture, { target: "c".repeat(40) });
@@ -543,7 +490,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("rejects changed download bytes even when metadata still matches", async () => {
     const fixture = await createFixture();
     const server = await startGitHubServer(fixture, { changedWorkerBytes: true });
@@ -562,7 +508,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("rejects a valid Pages archive with the wrong candidate tree hash", async () => {
     const fixture = await createFixture({ wrongStagingTree: true });
     const server = await startGitHubServer(fixture);
@@ -581,7 +526,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("never overwrites an existing output", async () => {
     const fixture = await createFixture();
     const server = await startGitHubServer(fixture);
@@ -603,7 +547,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("never overwrites an output created while assets are downloading", async () => {
     const fixture = await createFixture();
     const output = join(fixture.root, "manifest.json");
@@ -626,7 +569,6 @@ describe("GitHub release asset resolver", () => {
       await server.close();
     }
   });
-
   it("rejects a symbolic-link candidate manifest before any network request", async () => {
     const fixture = await createFixture();
     const manifestPath = join(fixture.candidateRoot, "processing-candidate.json");

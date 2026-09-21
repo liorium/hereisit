@@ -19,24 +19,6 @@ const workflowExamples = [
       ["이미지 형식 변환", "/image/convert"],
     ],
   },
-  {
-    title: "PDF 묶음 정리",
-    description: "PDF를 합치고 페이지를 정리한 뒤 표시를 더하는 순서를 준비하고 있어요.",
-    tools: [
-      ["PDF 합치기", "/pdf/merge"],
-      ["PDF 페이지 정리", "/pdf/organize"],
-      ["PDF 워터마크 넣기", "/pdf/watermark"],
-    ],
-  },
-  {
-    title: "문서와 이미지 오가기",
-    description: "PDF 페이지를 이미지로 꺼내 편집한 뒤 다시 PDF로 묶는 순서를 준비하고 있어요.",
-    tools: [
-      ["PDF를 JPG·PNG로 변환", "/pdf/to-image"],
-      ["이미지에 워터마크 넣기", "/image/watermark"],
-      ["이미지를 PDF로 변환", "/pdf/image-to-pdf"],
-    ],
-  },
 ] as const;
 
 export default function WorkflowsPage() {

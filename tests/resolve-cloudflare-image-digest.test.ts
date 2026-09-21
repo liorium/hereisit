@@ -167,16 +167,16 @@ describe("Cloudflare image digest resolver", () => {
     ).toThrow(/config/i);
   });
 
-  it("resolves the PDF engine repository without accepting it as an image candidate", () => {
+  it("rejects the retired PDF engine repository", () => {
     const pdfManifest = descriptor({ ref: pdfImageRef });
-    expect(
+    expect(() =>
       resolveCloudflareImageDigestFromConfig({
         manifest: pdfManifest,
         imageRef: pdfImageRef,
         accountId,
         expectedConfigDigest: configDigest,
       }),
-    ).toBe(`registry.cloudflare.com/${accountId}/hereisit-pdf-engine@${manifestDigest}`);
+    ).toThrow(/repository/i);
     expect(() =>
       resolveCloudflareImageDigest({
         manifest: pdfManifest,
