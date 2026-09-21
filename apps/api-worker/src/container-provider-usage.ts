@@ -162,10 +162,8 @@ function fixedInteger(source: string, scale: number, label: string): string {
     result = coefficient * 10n ** BigInt(decimalShift);
   } else {
     const divisor = 10n ** BigInt(-decimalShift);
-    if (coefficient % divisor !== 0n) {
-      throw new RangeError(`${label} precision exceeds its target integer unit.`);
-    }
-    result = coefficient / divisor;
+    // Provider decimals can be finer than storage units. Round each row up so cost is never understated.
+    result = (coefficient + divisor - 1n) / divisor;
   }
   if (result > INT64_MAXIMUM) throw new RangeError(`${label} exceeds signed 64-bit storage.`);
   return result.toString();

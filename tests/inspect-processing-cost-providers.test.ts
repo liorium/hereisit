@@ -36,10 +36,25 @@ function workerVersion(providerUsageSchemaSha256: string) {
 
 describe("processing cost provider inspection", () => {
   it.each([
-    ["precision", "0.0000001", "application/json", "numeric-precision"],
-    ["overflow", "9223372036854775808", "application/json", "numeric-overflow"],
-    ["content type", "0", "text/plain", "content-type"],
-  ])("identifies rejected container %s without exposing response values", async (_label, cpuTimeSec, contentType, failure) => {
+    [
+      "sub-unit usage",
+      "0.0000001",
+      "application/json",
+      { reachable: true, hasUsage: true, regionCount: 1 },
+    ],
+    [
+      "overflow",
+      "9223372036854775808",
+      "application/json",
+      { reachable: false, httpStatus: 200, failure: "numeric-overflow" },
+    ],
+    [
+      "content type",
+      "0",
+      "text/plain",
+      { reachable: false, httpStatus: 200, failure: "content-type" },
+    ],
+  ])("reports container %s without exposing response values", async (_label, cpuTimeSec, contentType, expected) => {
     const result = await inspectProcessingCostProviders({
       state: { activeVersionId, targetHourKey },
       workerVersion: workerVersion(await providerUsageContractSha256()),
@@ -80,7 +95,7 @@ describe("processing cost provider inspection", () => {
         );
       },
     });
-    expect(result.container).toEqual({ reachable: false, httpStatus: 200, failure });
+    expect(result.container).toEqual(expected);
     expect(JSON.stringify(result)).not.toMatch(/private|analytics-token|logpush-token/);
   });
 

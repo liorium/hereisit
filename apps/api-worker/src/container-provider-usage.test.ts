@@ -174,13 +174,31 @@ describe("Cloudflare Container provider usage", () => {
     );
   });
 
-  it("rejects precision that cannot be represented in the target integer unit", async () => {
+  it.each([
+    ["cpuTimeSec", "1.2345671", "cpuMicroseconds", "1234568"],
+    ["cpuTimeSec", "1e-128", "cpuMicroseconds", "1"],
+    ["cpuTimeSec", "0e-128", "cpuMicroseconds", "0"],
+    ["allocatedMemory", "1.0001", "allocatedMemoryByteMilliseconds", "1001"],
+    ["allocatedDisk", "0.0001", "allocatedDiskByteMilliseconds", "1"],
+    ["txBytes", "0.1", "transmittedBytes", "1"],
+    ["txBytes", "9.223372036854775807e18", "transmittedBytes", "9223372036854775807"],
+  ])("rounds %s=%s upward without losing usage or integer precision", async (field, source, resultField, expected) => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      response(usageBody().replace("1.234567", "1.2345671")),
+      response(usageBody().replace(new RegExp(`"${field}":[0-9.]+`), `"${field}":${source}`)),
     );
 
-    await expect(queryContainerUsageHour(fetcher, await validInput())).rejects.toThrow(
-      /precision/i,
-    );
+    const result = await queryContainerUsageHour(fetcher, await validInput());
+    expect(result).toMatchObject({ [resultField]: expected });
+    expect(result.transmittedBytesByRegion).toEqual([
+      { region: "enam", transmittedBytes: result.transmittedBytes },
+    ]);
+  });
+
+  it.each([
+    "9223372036854.7758071",
+    "-0.0000001",
+  ])("still rejects unsafe CPU usage %s", async (source) => {
+    const fetcher = vi.fn(async () => response(usageBody().replace("1.234567", source)));
+    await expect(queryContainerUsageHour(fetcher, await validInput())).rejects.toThrow();
   });
 });
