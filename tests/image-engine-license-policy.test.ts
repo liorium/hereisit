@@ -524,9 +524,9 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain("! -name node_modules ! -name package.json -exec rm -rf {} +");
     expect(dockerfile).toContain("chmod -R a=rX /runtime-root/app /runtime-root/licenses");
     expect(dockerfile).toContain(
-      "ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
+      "ARG UBUNTU_IMAGE=ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3",
     );
-    const runtimeStage = "FROM $" + "{DISTROLESS_NODE_IMAGE} AS runtime";
+    const runtimeStage = "FROM scratch AS runtime";
     expect(dockerfile).toContain(runtimeStage);
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
