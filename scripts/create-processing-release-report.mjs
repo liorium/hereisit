@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   processingEvidenceReportNames,
+  requiredProcessingEvidenceReportNames,
   validateProcessingEvidenceBundle,
 } from "./create-processing-evidence-bundle.mjs";
 import {
@@ -28,14 +29,6 @@ const maximumReportBytes = 1024 * 1024;
 const releaseIdPattern = /^\d{4}-\d{2}-\d{2}\.[1-9]\d*$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
-const reportNames = Object.freeze([
-  "fullCorpusBenchmark",
-  "competitorComparison",
-  "blindedHumanReview",
-  "commercialReview",
-  "privacyReview",
-  "deviceMatrix",
-]);
 const securityScopes = Object.freeze([
   ["engine", "engine"],
   ["webStaging", "web-staging"],
@@ -72,8 +65,14 @@ function validateEvidence(value) {
   assertSha256(evidence.bundleSha256, "release report evidence bundle hash");
   assertSha256(evidence.signatureSha256, "release report evidence signature hash");
   const reports = assertObject(evidence.reports, "release report evidence reports");
-  assertExactKeys(reports, reportNames, "release report evidence reports");
-  for (const name of reportNames) {
+  assertExactKeys(
+    reports,
+    Object.hasOwn(reports, "competitorComparison")
+      ? processingEvidenceReportNames
+      : requiredProcessingEvidenceReportNames,
+    "release report evidence reports",
+  );
+  for (const name of Object.keys(reports)) {
     const report = assertObject(reports[name], `${name} release report evidence`);
     assertExactKeys(report, ["sourceSha256", "summarySha256"], `${name} release report evidence`);
     assertSha256(report.sourceSha256, `${name} source hash`);
@@ -445,7 +444,7 @@ async function deriveProcessingReleaseReport(
         bundleSha256: evidenceIdentity.bundleSha256,
         signatureSha256: evidenceIdentity.signatureSha256,
         reports: Object.fromEntries(
-          processingEvidenceReportNames.map((name) => [
+          Object.keys(evidence.reports).map((name) => [
             name,
             {
               sourceSha256: evidence.reports[name].sourceSha256,

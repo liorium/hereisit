@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createProcessingEvidenceBundle,
   runProcessingEvidenceBundleCreatorCli,
+  validateProcessingEvidenceBundle,
   writeProcessingEvidenceBundle,
 } from "../scripts/create-processing-evidence-bundle.mjs";
 import { canonicalJson, sha256Canonical } from "../scripts/image-lab-common.mjs";
@@ -78,6 +79,18 @@ afterEach(async () => {
 });
 
 describe("processing evidence bundle creation", () => {
+  it("publishes five required reports while allowing the legacy comparison entry", async () => {
+    const schema = JSON.parse(
+      await readFile("docs/deployment/processing-evidence.schema.json", "utf8"),
+    );
+    expect(schema.properties.reports.required.sort()).toEqual(
+      reportNames.filter((name) => name !== "competitorComparison").sort(),
+    );
+    expect(Object.keys(schema.properties.reports.properties).sort()).toEqual(
+      [...reportNames].sort(),
+    );
+    expect(schema.properties.reports.additionalProperties).toBe(false);
+  });
   it("produces deterministic canonical report entries with stable hashes", () => {
     const first = createProcessingEvidenceBundle(inputs());
     const second = createProcessingEvidenceBundle({
@@ -170,10 +183,21 @@ describe("processing evidence bundle creation", () => {
     );
   });
 
-  it("requires exactly the six reports", () => {
-    const missing = inputs();
-    delete (missing.reports as Record<string, unknown>).deviceMatrix;
-    expect(() => createProcessingEvidenceBundle(missing)).toThrow(/report|field/i);
+  it("accepts the five required reports without a competitor comparison", () => {
+    const value = inputs();
+    delete value.reports.competitorComparison;
+    const bundle = createProcessingEvidenceBundle(value);
+    expect(Object.keys(bundle.reports)).toHaveLength(5);
+    expect(bundle.reports).not.toHaveProperty("competitorComparison");
+    expect(validateProcessingEvidenceBundle(bundle)).toEqual(bundle);
+  });
+
+  it("requires the five mandatory reports and rejects unknown reports", () => {
+    for (const name of reportNames.filter((name) => name !== "competitorComparison")) {
+      const missing = inputs();
+      delete missing.reports[name];
+      expect(() => createProcessingEvidenceBundle(missing)).toThrow(/report|field/i);
+    }
 
     expect(() =>
       createProcessingEvidenceBundle({
@@ -181,6 +205,49 @@ describe("processing evidence bundle creation", () => {
         reports: { ...inputs().reports, surprise: {} },
       }),
     ).toThrow(/report|field/i);
+  });
+
+  it("still validates supplied competitor hashes and exact entry fields", () => {
+    for (const change of [{ summarySha256: "0".repeat(64) }, { extra: true }]) {
+      const bundle = createProcessingEvidenceBundle(inputs());
+      Object.assign(bundle.reports.competitorComparison, change);
+      expect(() => validateProcessingEvidenceBundle(bundle)).toThrow(/hash|field/i);
+    }
+  });
+
+  it("accepts the CLI without an optional comparison but rejects unknown arguments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-evidence-optional-"));
+    temporaryRoots.push(root);
+    const value = inputs();
+    delete value.reports.competitorComparison;
+    const args = [
+      "--release-id",
+      value.releaseId,
+      "--git-sha",
+      value.gitSha,
+      "--candidate-verification-sha256",
+      value.candidateVerificationSha256,
+      "--created-at",
+      value.createdAt,
+      "--expires-at",
+      value.expiresAt,
+      "--schema",
+      resolve("docs/deployment/processing-evidence.schema.json"),
+      "--output",
+      join(root, "bundle.json"),
+    ];
+    for (const [name, document] of Object.entries(value.reports)) {
+      const path = join(root, `${name}.json`);
+      await writeFile(path, canonicalJson(document));
+      args.push(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, path);
+    }
+    await expect(
+      runProcessingEvidenceBundleCreatorCli([...args, "--surprise", "true"]),
+    ).rejects.toThrow(/field/i);
+    await runProcessingEvidenceBundleCreatorCli(args, { write: () => true });
+    expect(await readFile(join(root, "bundle.json"), "utf8")).toBe(
+      canonicalJson(createProcessingEvidenceBundle(value)),
+    );
   });
 
   it("rejects forbidden keys and values", () => {

@@ -126,16 +126,23 @@ describe("encodeJpegCandidate", () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when jpegtran cannot perform a perfect MCU transform", async () => {
+  it.each([
+    [1, "transformation is not perfect", "unsafe-lossless-transform"],
+    [1, "/usr/local/bin/jpegtran: transformation is not perfect\n", "unsafe-lossless-transform"],
+    [1, "unexpected codec failure", "codec-failed"],
+    [1, "", "codec-failed"],
+    [-1, "transformation is not perfect", "codec-failed"],
+    [3, "transformation is not perfect", "codec-failed"],
+  ] as const)("classifies jpegtran exit %i with diagnostic %s", async (exitCode, stderrTail, reason) => {
     const directory = await root();
     const sourcePath = join(directory, "source.jpg");
     const outputPath = join(directory, "result.jpg");
     await writeFile(sourcePath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     const run = vi.fn(
       async (): Promise<CommandResult> => ({
-        exitCode: 1,
+        exitCode,
         elapsedMs: 2,
-        stderrTail: "transformation is not perfect",
+        stderrTail,
       }),
     );
 
@@ -151,7 +158,7 @@ describe("encodeJpegCandidate", () => {
         signal: new AbortController().signal,
         run,
       }),
-    ).rejects.toEqual(new JpegCodecError("unsafe-lossless-transform"));
+    ).rejects.toEqual(new JpegCodecError(reason));
   });
 
   it("distinguishes a fatal jpegtran source rejection from an engine failure", async () => {

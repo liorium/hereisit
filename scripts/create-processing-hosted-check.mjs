@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -128,13 +128,18 @@ export async function createProcessingHostedCheck({ source, input, output, gitSh
   const sourceSha256 = assertSha256(sha256Bytes(bytes), "exact hosted source hash");
   const documents = {};
   for (const name of Object.keys(hostedReviewSchemas)) {
+    const path = join(resolve(input), `${name}.json`);
+    if (name === "competitorComparison") {
+      try {
+        await lstat(path);
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw new TypeError(`${name} hosted review is missing or invalid`);
+      }
+    }
     let document;
     try {
-      const reportBytes = await readBoundedRegularFile(
-        join(resolve(input), `${name}.json`),
-        1024 * 1024,
-        `${name} hosted review`,
-      );
+      const reportBytes = await readBoundedRegularFile(path, 1024 * 1024, `${name} hosted review`);
       document = JSON.parse(reportBytes.toString("utf8"));
     } catch {
       throw new TypeError(`${name} hosted review is missing or invalid`);

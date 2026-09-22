@@ -228,7 +228,10 @@ export async function encodeJpegCandidate(input: {
       throw new JpegCodecError(
         lossless && result.exitCode === 2
           ? "invalid-input"
-          : lossless && input.orientation !== 1
+          : lossless &&
+              input.orientation !== 1 &&
+              result.exitCode === 1 &&
+              /^(?:[^\r\n]+: )?transformation is not perfect$/.test(result.stderrTail.trim())
             ? "unsafe-lossless-transform"
             : "codec-failed",
       );

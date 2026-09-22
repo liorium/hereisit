@@ -17,13 +17,22 @@ import { encodeWebpCandidate } from "../codecs/webp";
 import { classifyImage, extractImageFeatures } from "../pipeline/classify";
 import { type ImageInspection, ImagePipelineError, inspectImage } from "../pipeline/inspect";
 import { type NormalizedImageWithSample, normalizeImage } from "../pipeline/normalize";
-import { OptimizationExecutionError, optimizeCandidates } from "../pipeline/optimize";
+import {
+  OptimizationExecutionError,
+  optimizeCandidates,
+  RecoverableCandidateError,
+} from "../pipeline/optimize";
 import {
   type OptimizationPlan,
   type OptimizationPlanningResult,
   planOptimization,
 } from "../pipeline/plan";
-import { liveQualityFloor, selectVerifiedResult, verifyCandidate } from "../pipeline/verify";
+import {
+  liveQualityFloor,
+  selectVerifiedResult,
+  verifyCandidate,
+  verifyCandidateLiveQuality,
+} from "../pipeline/verify";
 import { writeJsonAtomic } from "./workspace";
 
 function argument(name: string): string | undefined {
@@ -237,6 +246,9 @@ export async function runPlanningPipeline(input: {
               signal: new AbortController().signal,
             });
           } catch (error) {
+            if (error instanceof JpegCodecError && error.reason === "unsafe-lossless-transform") {
+              throw new RecoverableCandidateError("codec-rejected");
+            }
             if (error instanceof JpegCodecError && error.reason === "invalid-input") {
               throw new ImagePipelineError("UNSUPPORTED_INPUT", false, currentInspection);
             }
@@ -253,6 +265,15 @@ export async function runPlanningPipeline(input: {
             candidate,
             outputPath,
             signal: new AbortController().signal,
+            verifyPaletteQuality: async (path) =>
+              (
+                await verifyCandidateLiveQuality({
+                  candidate: { path },
+                  normalized,
+                  preset: input.request.spec.preset,
+                  contentClass,
+                })
+              ).accepted,
           });
         }
         return encodeWebpCandidate({

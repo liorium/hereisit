@@ -432,6 +432,15 @@ export async function verifyCandidate(input: {
     }
     return { accepted: true, reason: "accepted", liveQuality: null };
   }
+  return verifyCandidateLiveQuality(input);
+}
+
+export async function verifyCandidateLiveQuality(input: {
+  readonly candidate: Pick<CodecCandidate, "path">;
+  readonly normalized: NormalizedImage;
+  readonly preset: "balanced" | "smallest";
+  readonly contentClass: ImageContentClass;
+}): Promise<CandidateVerification> {
   let sourceSample: Uint8Array;
   let candidateSample: Uint8Array;
   try {

@@ -411,6 +411,7 @@ export async function encodePngCandidate(input: {
   readonly candidate: OptimizationCandidatePlan;
   readonly outputPath: string;
   readonly signal: AbortSignal;
+  readonly verifyPaletteQuality?: (path: string) => Promise<boolean>;
   readonly run?: CommandRunner;
   readonly onProcessGroup?: (event: { action: "add" | "remove"; pgid: number }) => void;
 }): Promise<CodecCandidate> {
@@ -503,6 +504,9 @@ export async function encodePngCandidate(input: {
           throw new RecoverableCandidateError("alpha-mismatch");
         }
         throw error;
+      }
+      if (input.verifyPaletteQuality && !(await input.verifyPaletteQuality(palettePath))) {
+        throw new RecoverableCandidateError("codec-rejected");
       }
     }
     const optimized = await run({

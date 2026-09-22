@@ -118,6 +118,19 @@ describe("processing release report creation", () => {
         "verificationSha256",
       ].sort(),
     );
+    const reports = schema.properties.evidence.properties.reports;
+    expect(reports.required.sort()).toEqual(
+      names.filter((name) => name !== "competitorComparison").sort(),
+    );
+    expect(Object.keys(reports.properties).sort()).toEqual([...names].sort());
+    expect(reports.additionalProperties).toBe(false);
+  });
+  it("continues to accept valid legacy six-report release evidence", () => {
+    const { verificationSha256: _hash, ...base } = report();
+    const payload = { ...base, schema: "hereisit-processing-release-report@1", version: 1 };
+    const value = { ...payload, verificationSha256: sha256Canonical(payload) };
+    expect(validateProcessingReleaseReport(value)).toEqual(value);
+    expect(Object.keys(value.evidence.reports)).toHaveLength(6);
   });
   it("validates a deterministic canonical report with an exact verification hash", () => {
     const first = report();
@@ -137,6 +150,35 @@ describe("processing release report creation", () => {
     const { verificationSha256, ...payload } = first;
     expect(verificationSha256).toBe(sha256Canonical(payload));
     expect(canonicalJson(first)).toBe(canonicalJson(validateProcessingReleaseReport(first)));
+  });
+  it("accepts five-report releases while retaining strict optional comparison hashes", () => {
+    const { verificationSha256: _hash, ...payload } = report();
+    delete payload.evidence.reports.competitorComparison;
+    const value = { ...payload, verificationSha256: sha256Canonical(payload) };
+    expect(validateProcessingReleaseReport(value)).toEqual(value);
+    for (const name of names.filter((name) => name !== "competitorComparison")) {
+      const changed = structuredClone(payload);
+      delete changed.evidence.reports[name];
+      expect(() =>
+        validateProcessingReleaseReport({
+          ...changed,
+          verificationSha256: sha256Canonical(changed),
+        }),
+      ).toThrow(/field/i);
+    }
+    for (const entry of [
+      { sourceSha256: "invalid", summarySha256: "a".repeat(64) },
+      { sourceSha256: "a".repeat(64), summarySha256: "b".repeat(64), extra: true },
+    ]) {
+      const changed = structuredClone(payload);
+      changed.evidence.reports.competitorComparison = entry;
+      expect(() =>
+        validateProcessingReleaseReport({
+          ...changed,
+          verificationSha256: sha256Canonical(changed),
+        }),
+      ).toThrow();
+    }
   });
   it("rejects unknown fields and mutation in every major binding group", () => {
     const base = report();

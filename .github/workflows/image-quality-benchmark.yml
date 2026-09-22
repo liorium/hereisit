@@ -2,6 +2,12 @@ name: Image quality benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Reduced check or full native release verification
+        type: choice
+        options: [pr, release]
+        default: pr
 
 permissions:
   contents: read
@@ -50,11 +56,16 @@ jobs:
             --tag hereisit-image-engine:benchmark \
             --load \
             .
-      - name: Run the reduced quality benchmark
+      - name: Run the selected quality benchmark
+        env:
+          BENCHMARK_SCOPE: ${{ inputs.scope || 'pr' }}
         run: |
           set -euo pipefail
           umask 077
           mkdir -p .artifacts
+          pnpm --filter @hereisit/image-engine exec esbuild src/pipeline/benchmark-verify.ts \
+            --bundle --platform=node --format=esm --target=node24 --external:sharp \
+            --outfile=dist/benchmark-verify.mjs
           node scripts/create-image-corpus.mjs \
             --verify-clean \
             --runtime-image hereisit-image-engine:quality
@@ -67,18 +78,21 @@ jobs:
             --metric-image hereisit-image-engine:benchmark \
             --manifest tests/image-corpus/manifest.json \
             --live-cost-model .artifacts/live-cost-model-pr.json \
-            --scope pr \
-            --output .artifacts/image-benchmark-pr.json
-          node scripts/verify-image-quality.mjs \
-            --report .artifacts/image-benchmark-pr.json \
-            --scope pr
+            --scope "$BENCHMARK_SCOPE" \
+            --output .artifacts/image-benchmark.json
+          if [[ "$BENCHMARK_SCOPE" == release ]]; then
+            node scripts/verify-image-quality.mjs --report .artifacts/image-benchmark.json \
+              --scope native-release --manifest tests/image-corpus/manifest.json
+          else
+            node scripts/verify-image-quality.mjs --report .artifacts/image-benchmark.json --scope pr
+          fi
       - name: Upload reports only
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-quality-benchmark-${{ github.sha }}
           path: |
-            .artifacts/image-benchmark-pr.json
+            .artifacts/image-benchmark.json
             .artifacts/live-cost-model-pr.json
           if-no-files-found: ignore
           include-hidden-files: true

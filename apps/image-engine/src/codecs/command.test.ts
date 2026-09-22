@@ -54,6 +54,17 @@ async function readEventually(path: string, timeoutMs: number): Promise<string> 
 }
 
 describe("runBoundedCommand", () => {
+  it("does not turn signal termination into a recoverable codec exit code", async () => {
+    const result = await runBoundedCommand({
+      command: process.execPath,
+      args: ["-e", "process.kill(process.pid, 'SIGKILL')"],
+      cwd: await root(),
+      timeoutMs: 1_000,
+      signal: new AbortController().signal,
+    });
+    expect(result.exitCode).toBe(-1);
+  });
+
   it("preserves literal arguments, never invokes a shell, and bounds stderr", async () => {
     const cwd = await root();
     const forbidden = join(cwd, "forbidden");
