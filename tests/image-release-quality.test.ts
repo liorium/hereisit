@@ -38,6 +38,26 @@ describe("full native image release measurements", () => {
   it("accepts all measured profiles without inventing competitor or public cost evidence", () => {
     expect(evaluate()).toMatchObject({ passed: true, failures: [], profilesMeasured: 117 });
   });
+  it("requires the planner's safe unsupported-feature rejection, never a crash", () => {
+    for (const errorCode of ["UNSUPPORTED_INPUT", "ENGINE_CRASH", null]) {
+      const report = fixture();
+      const unsupported = report.records.find((record) => record.errorCode !== null);
+      if (!unsupported) throw new Error("missing unsupported fixture");
+      unsupported.errorCode = errorCode;
+      expect(evaluate(report).failures).toContain("UNSAFE_UNSUPPORTED_INPUT");
+    }
+  });
+  it("does not hide an engine crash inside the supported success-rate tolerance", () => {
+    const report = fixture();
+    Object.assign(report.records[0], {
+      outcome: "rejected",
+      outputMime: null,
+      outputBytes: null,
+      effectiveDeliveredBytes: null,
+      errorCode: "ENGINE_CRASH",
+    });
+    expect(evaluate(report).failures).toContain("NATIVE_ENGINE_CRASH");
+  });
   it("rejects reduced, missing, duplicate and foreign corpus measurements", () => {
     for (const mutate of [
       (r: ReturnType<typeof fixture>) => {

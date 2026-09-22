@@ -42,7 +42,7 @@ export function fixture() {
             inputMime: `image/${e.expected.format}`,
             outputMime: unsupported ? null : `image/${e.expected.format}`,
             outcome: unsupported ? "rejected" : "download",
-            errorCode: unsupported ? "UNSUPPORTED_INPUT" : null,
+            errorCode: unsupported ? "UNSUPPORTED_FEATURE" : null,
             inputBytes: 1000,
             outputBytes: unsupported ? null : 500,
             effectiveDeliveredBytes: unsupported ? null : 500,

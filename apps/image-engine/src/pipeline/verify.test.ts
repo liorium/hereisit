@@ -13,6 +13,7 @@ import {
   liveQualityFloor,
   selectVerifiedResult,
   verifyCandidate,
+  verifyCandidateLiveQuality,
 } from "./verify";
 
 const roots: string[] = [];
@@ -119,6 +120,19 @@ describe("live quality v1", () => {
 });
 
 describe("verifyCandidate", () => {
+  it("prechecks live quality without rejecting a palette that still needs size optimization", async () => {
+    const value = await fixture({});
+    const input = { ...value, preset: "balanced" as const, contentClass: "photo" as const };
+    await expect(verifyCandidateLiveQuality(input)).resolves.toMatchObject({ accepted: true });
+    await expect(
+      verifyCandidate({
+        ...input,
+        sourceBytes: value.candidate.byteLength,
+        minimumSavingsPercent: 1,
+        mode: "smart",
+      }),
+    ).resolves.toMatchObject({ accepted: false, reason: "not-smaller" });
+  });
   it("accepts a smaller exact lossless WebP", async () => {
     const value = await fixture({});
     await expect(

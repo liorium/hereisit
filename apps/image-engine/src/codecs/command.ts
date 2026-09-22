@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 export interface CommandResult {
+  /** -1 means termination without a normal process exit code. */
   readonly exitCode: number;
   readonly elapsedMs: number;
   readonly stderrTail: string;
@@ -118,7 +119,7 @@ export function runBoundedCommand(input: {
         return;
       }
       resolve({
-        exitCode: typeof code === "number" ? code : 1,
+        exitCode: typeof code === "number" ? code : -1,
         elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
         stderrTail: stderrTail.toString("utf8"),
         stdoutTail: stdoutTail.toString("utf8"),

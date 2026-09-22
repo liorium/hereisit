@@ -347,8 +347,9 @@ export function evaluateNativeImageReleaseReport(rawReport, manifest, manifestSh
   const supported = records.filter((record) => !unsupported(record));
   const failures = evaluateMeasuredImageQualityReport({ ...report, records: supported }).failures;
   for (const record of records) {
+    if (record.errorCode === "ENGINE_CRASH") failures.push("NATIVE_ENGINE_CRASH");
     if (unsupported(record)) {
-      if (record.outcome !== "rejected" || record.errorCode !== "UNSUPPORTED_INPUT")
+      if (record.outcome !== "rejected" || record.errorCode !== "UNSUPPORTED_FEATURE")
         failures.push("UNSAFE_UNSUPPORTED_INPUT");
     } else if (record.outcome !== "rejected") {
       if (
