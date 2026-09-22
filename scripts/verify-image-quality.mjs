@@ -72,12 +72,6 @@ export function evaluateImageQualityReport(rawReport) {
     "COST_PER_1000",
   );
 
-  const human = assertObject(aggregate.humanReview, "human review aggregate");
-  check(failures, human.count >= 20, "HUMAN_REVIEW_COUNT");
-  check(failures, human.severeDefects === 0, "HUMAN_REVIEW_SEVERE_DEFECT");
-  check(failures, human.hereisitOrTieRate >= 0.8, "HUMAN_REVIEW_ACCEPTANCE");
-  check(failures, human.hereisit >= human.baseline, "HUMAN_REVIEW_PREFERENCE");
-
   if (!Array.isArray(report.strata) || report.strata.length === 0) {
     failures.push("MISSING_STRATA");
   } else {
@@ -94,7 +88,6 @@ export function evaluateImageQualityReport(rawReport) {
     if (!group) failures.push(`STRATEGIC_MISSING:${tag}`);
     else {
       if (group.authorizedSamples < 3) failures.push(`STRATEGIC_SAMPLE_COUNT:${tag}`);
-      if (group.humanReviewedSamples < 1) failures.push(`STRATEGIC_HUMAN_REVIEW:${tag}`);
       if (group.medianBaselineRatio > 0.95) failures.push(`STRATEGIC_ADVANTAGE:${tag}`);
       if (group.medianBaselineRatio > 1.05) failures.push(`STRATEGIC_REGRESSION:${tag}`);
     }

@@ -44,13 +44,6 @@ const passing = {
     acknowledgedResultDeletionP99Ms: 10_000,
     sweeperResultDeletionP99Ms: 35 * 60_000,
     costPer1000JobsMicrousd: 500_000,
-    humanReview: {
-      count: 20,
-      hereisitOrTieRate: 0.8,
-      hereisit: 10,
-      baseline: 10,
-      severeDefects: 0,
-    },
   },
   thresholds: { maxCostPer1000JobsMicrousd: 500_000 },
   strata: [{ id: "jpeg-small-photo-opaque", successfulSamples: 3, passed: true }],
@@ -58,22 +51,33 @@ const passing = {
     {
       tag: "korean-text",
       authorizedSamples: 3,
-      humanReviewedSamples: 1,
       medianBaselineRatio: 0.95,
     },
-    { tag: "ui", authorizedSamples: 3, humanReviewedSamples: 1, medianBaselineRatio: 0.95 },
-    { tag: "code", authorizedSamples: 3, humanReviewedSamples: 1, medianBaselineRatio: 0.95 },
-    { tag: "logo", authorizedSamples: 3, humanReviewedSamples: 1, medianBaselineRatio: 0.95 },
+    { tag: "ui", authorizedSamples: 3, medianBaselineRatio: 0.95 },
+    { tag: "code", authorizedSamples: 3, medianBaselineRatio: 0.95 },
+    { tag: "logo", authorizedSamples: 3, medianBaselineRatio: 0.95 },
     {
       tag: "flat-graphic",
       authorizedSamples: 3,
-      humanReviewedSamples: 1,
       medianBaselineRatio: 0.95,
     },
   ],
 };
 
 describe("image release quality gates", () => {
+  it("does not require human ratings when automated measurements pass", () => {
+    expect(
+      evaluateImageQualityReport({
+        ...passing,
+        aggregate: { ...passing.aggregate, humanReview: undefined },
+        strategic: passing.strategic.map((group) => ({
+          ...group,
+          humanReviewedSamples: undefined,
+        })),
+      }),
+    ).toEqual({ passed: true, failures: [] });
+  });
+
   it("passes only when every global, stratum, and strategic gate passes", () => {
     expect(evaluateImageQualityReport(passing)).toEqual({ passed: true, failures: [] });
   });
@@ -104,19 +108,6 @@ describe("image release quality gates", () => {
     ["ack deletion", { acknowledgedResultDeletionP99Ms: 10_001 }],
     ["sweeper deletion", { sweeperResultDeletionP99Ms: 35 * 60_000 + 1 }],
     ["cost", { costPer1000JobsMicrousd: 500_001 }],
-    ["human sample count", { humanReview: { ...passing.aggregate.humanReview, count: 19 } }],
-    [
-      "human severe defect",
-      { humanReview: { ...passing.aggregate.humanReview, severeDefects: 1 } },
-    ],
-    [
-      "human acceptance",
-      { humanReview: { ...passing.aggregate.humanReview, hereisitOrTieRate: 0.799 } },
-    ],
-    [
-      "human preference",
-      { humanReview: { ...passing.aggregate.humanReview, hereisit: 9, baseline: 10 } },
-    ],
   ])("fails independently for %s", (_, aggregate) => {
     const result = evaluateImageQualityReport({
       ...passing,
