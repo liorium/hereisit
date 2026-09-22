@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { crc32, deflateSync } from "node:zlib";
 import { expect, type Page, test } from "@playwright/test";
@@ -254,6 +255,20 @@ test.describe("configured processing server", () => {
     await page.addInitScript(() => {
       const send = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.send = function sendWithDeterministicProgress(body) {
+        // WebKit's request interception omits Blob bodies; hash the bytes passed to native XHR.
+        if (body instanceof Blob) {
+          Object.defineProperty(window, "__hereisitUploadSha256", {
+            configurable: true,
+            value: body
+              .arrayBuffer()
+              .then((bytes) => crypto.subtle.digest("SHA-256", bytes))
+              .then((digest) =>
+                Array.from(new Uint8Array(digest), (byte) =>
+                  byte.toString(16).padStart(2, "0"),
+                ).join(""),
+              ),
+          });
+        }
         const result = send.call(this, body);
         if (body instanceof Blob && body.size > 0) {
           setTimeout(() => {
@@ -311,8 +326,15 @@ test.describe("configured processing server", () => {
           },
         });
       } else if (path.endsWith("/input")) {
+        expect(request.method()).toBe("PUT");
         expect(request.headers()["content-type"]).toBe("image/png");
-        expect(request.postDataBuffer()).toEqual(progressPng);
+        expect(
+          await page.evaluate(
+            () =>
+              (window as Window & { __hereisitUploadSha256?: Promise<string> })
+                .__hereisitUploadSha256 ?? null,
+          ),
+        ).toBe(createHash("sha256").update(progressPng).digest("hex"));
         await new Promise((resolve) => setTimeout(resolve, 250));
         await route.fulfill({ status: 204 });
       } else if (path === `/v1/jobs/${jobId}` && request.method() === "GET") {
@@ -724,13 +746,12 @@ test.describe("configured processing server", () => {
     ]);
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await expect(page.getByRole("heading", { name: "2개 이미지 압축 완료" })).toBeVisible();
-    await expect(
-      page
-        .getByRole("region", { name: "2개 이미지 압축 완료" })
-        .locator("p")
-        .filter({ hasText: /136B.*→.*136B/ })
-        .first(),
-    ).toBeVisible();
+    const result = page.getByRole("region", { name: "2개 이미지 압축 완료" });
+    for (const label of ["원본", "결과"]) {
+      const size = result.getByText(label, { exact: true }).locator("..").locator("strong");
+      await expect(size).toBeVisible();
+      await expect(size).toHaveText("136B");
+    }
     const archiveButton = page.getByRole("button", { name: "결과 2개 ZIP 다운로드 ↓" });
     await expect(archiveButton).toBeVisible();
     await expect(page.getByRole("button", { name: /개별 다운로드/ })).toHaveCount(0);
