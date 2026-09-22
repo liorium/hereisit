@@ -38,7 +38,7 @@ async function readCanonicalBundle(path) {
   }
   if (value.schema === "hereisit-processing-evidence@1" && value.version === 1) {
     // The existing release verifier owns the complete evidence schema. This signer binds bytes.
-  } else if (value.schema === "hereisit-processing-deployment-report@1" && value.version === 1) {
+  } else if (value.schema === "hereisit-processing-deployment-report@2" && value.version === 2) {
     validateProcessingDeploymentReport(value);
   } else {
     throw new TypeError("processing evidence bundle schema or version is invalid");
