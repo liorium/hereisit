@@ -97,62 +97,54 @@ jobs:
           test "$(cat .artifacts/canary/source-sha.txt)" = "$EXPECTED_HEAD_SHA"
           ENGINE_IMAGE="$(cat .artifacts/canary/cloudflare-image-digest.txt)"
           [[ "$ENGINE_IMAGE" =~ ^registry\.cloudflare\.com/$CLOUDFLARE_ACCOUNT_ID/hereisit-image-engine@sha256:[0-9a-f]{64}$ ]]
-          node --input-type=module - <<'NODE'
-          import { readFile } from "node:fs/promises";
-          const exact = (value, keys, label) => {
-            if (value === null || typeof value !== "object" || Array.isArray(value)) {
-              throw new Error(`${label} is invalid`);
-            }
-            if (Object.keys(value).sort().join() !== [...keys].sort().join()) {
-              throw new Error(`${label} fields are invalid`);
-            }
-          };
-          const read = async (name) => JSON.parse(await readFile(`.artifacts/canary/${name}`, "utf8"));
-          const canary = await read("canary-smoke.json");
-          exact(canary, ["schema", "version", "passed", "rolloutPercent", "nonMaintainerLocal", "maintainerServer", "browserPreflight", "exactLengthUpload", "directDownload", "downloadAcknowledged", "sourceFilenameLeak"], "canary smoke");
-          if (canary.schema !== "hereisit-processing-production-canary-smoke@1" || canary.version !== 1 || canary.passed !== true || canary.rolloutPercent !== 0 || canary.nonMaintainerLocal !== true || canary.maintainerServer !== true || canary.browserPreflight !== true || canary.exactLengthUpload !== true || canary.directDownload !== true || canary.downloadAcknowledged !== true || canary.sourceFilenameLeak !== false) throw new Error("canary smoke did not pass");
-          const gate = await read("gate-results.json");
-          exact(gate, ["verified"], "canary gate");
-          if (gate.verified !== true) throw new Error("canary gate did not pass");
-          const policy = await read("policy-smoke.json");
-          exact(policy, ["schema", "passed", "execution", "reason", "upload", "queuesPaused"], "canary policy");
-          if (policy.passed !== true || policy.execution !== "local" || policy.reason !== "LOCAL_FALLBACK_REQUIRED" || policy.upload !== false || policy.queuesPaused !== true) throw new Error("canary public policy is not local");
-          const attestation = await read("worker-version.json");
-          exact(attestation, ["schema", "version", "verifiedAt", "workerModuleSha256", "generatedConfigSha256", "releaseReportSha256", "activeVersionId", "previousActive", "versions"], "canary attestation");
-          const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-          const sha = /^[0-9a-f]{64}$/;
-          if (attestation.schema !== "hereisit-worker-version-attestations@1" || attestation.version !== 1 || !uuid.test(attestation.activeVersionId) || !sha.test(attestation.workerModuleSha256) || !sha.test(attestation.generatedConfigSha256) || !sha.test(attestation.releaseReportSha256) || attestation.versions?.length !== 6 || attestation.versions.at(-1)?.versionId !== attestation.activeVersionId || attestation.versions.at(-1)?.state !== "active" || attestation.versions.at(-1)?.publicAdmissionPercent !== 0) throw new Error("canary attestation is invalid");
-          NODE
-          mkdir -p .artifacts/admission .artifacts/build/api-worker-bundle .artifacts/runtime .wrangler/generated
+          REPORT_SHA256="$(shasum -a 256 .artifacts/canary/authority/processing-release-report.json | cut -d' ' -f1)"
+          RELEASE_ID="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/canary/authority/processing-candidate.json --field releaseId)"
+          mkdir -p .artifacts/admission .artifacts/build .artifacts/runtime .wrangler/generated
+          node scripts/verify-processing-deployment-authority.mjs \
+            --candidate-root .artifacts/canary/authority \
+            --candidate-manifest .artifacts/canary/authority/processing-candidate.json \
+            --evidence-bundle ".artifacts/canary/authority/evidence-v1--$RELEASE_ID--processing-evidence.json" \
+            --evidence-signature ".artifacts/canary/authority/evidence-v1--$RELEASE_ID--processing-evidence.sig" \
+            --public-key .artifacts/canary/authority/evidence-public.pem \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --report .artifacts/canary/authority/processing-release-report.json \
+            --expected-git-sha "$EXPECTED_HEAD_SHA" --expected-report-sha256 "$REPORT_SHA256" \
+            > .artifacts/admission/release-authority.json
+          node scripts/verify-processing-deployment-report.mjs \
+            --report .artifacts/canary/processing-deployment-report.json \
+            --signature .artifacts/canary/processing-deployment-report.sig \
+            --public-key .artifacts/canary/authority/evidence-public.pem \
+            --expected-git-sha "$EXPECTED_HEAD_SHA" \
+            --expected-release-report-sha256 "$REPORT_SHA256" \
+            --release-report .artifacts/canary/authority/processing-release-report.json \
+            --candidate .artifacts/canary/authority/processing-candidate.json \
+            --worker-attestation .artifacts/canary/worker-version.json \
+            --image-digest .artifacts/canary/cloudflare-image-digest.txt \
+            --resources .artifacts/canary/resources-production.json \
+            --pages-deployment-id .artifacts/canary/pages-deployment-id.txt \
+            --image-canary .artifacts/canary/canary-smoke.json \
+            --gate .artifacts/canary/gate-results.json \
+            --policy .artifacts/canary/policy-smoke.json \
+            > .artifacts/admission/deployment-verification.json
           cp .artifacts/canary/source-sha.txt .artifacts/admission/source-sha.txt
           cp .artifacts/canary/cloudflare-image-digest.txt .artifacts/admission/cloudflare-image-digest.txt
           for name in transition-attestation gate-result policy-result public-smoke-result recovery-result; do
             printf '%s\n' '{"schema":"hereisit-processing-image-admission-pending@1","passed":false}' > ".artifacts/admission/$name.json"
           done
           chmod 0600 .artifacts/admission/*.json
-          SOURCE_SHA256="$(sha256sum .artifacts/admission/source-sha.txt | cut -d' ' -f1)"
           {
             echo "ENGINE_IMAGE=$ENGINE_IMAGE"
-            echo "SOURCE_SHA256=$SOURCE_SHA256"
+            echo "REPORT_SHA256=$REPORT_SHA256"
           } >> "$GITHUB_ENV"
-      - name: Install locked dependencies and rebuild release inputs
+      - name: Install locked dependencies and bind exact release inputs
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
           git diff --exit-code
-          pnpm --filter @hereisit/api-worker exec wrangler deploy \
-            --config wrangler.local.jsonc \
-            --containers-rollout none \
-            --dry-run \
-            --outdir "$GITHUB_WORKSPACE/.artifacts/build/api-worker-bundle"
-          cp .artifacts/build/api-worker-bundle/index.js "$WORKER_MODULE"
-          LIVE_COST_MODEL_SHA256="$(node scripts/create-live-cost-model.mjs \
-            --input docs/deployment/processing-staging-cost-input.json \
-            --schema docs/deployment/live-cost-model.schema.json \
-            --output .artifacts/runtime/live-cost-model.json)"
-          NEXT_PUBLIC_PROCESSING_API_ORIGIN="$PRODUCTION_API_ORIGIN" pnpm --filter @hereisit/web build
-          PROVIDER_USAGE_SCHEMA_SHA256="$(node --input-type=module -e \
-            'import {CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 as value} from "./scripts/generate-processing-wrangler.mjs"; process.stdout.write(value)')"
+          cp .artifacts/canary/authority/api-worker.mjs "$WORKER_MODULE"
+          cp .artifacts/canary/authority/live-cost-model.json .artifacts/runtime/live-cost-model.json
+          LIVE_COST_MODEL_SHA256="$(shasum -a 256 .artifacts/runtime/live-cost-model.json | cut -d' ' -f1)"
+          PROVIDER_USAGE_SCHEMA_SHA256="$(node scripts/read-processing-candidate.mjs --manifest .artifacts/canary/authority/processing-candidate.json --field providerUsage.schemaSha256)"
           [[ "$LIVE_COST_MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$PROVIDER_USAGE_SCHEMA_SHA256" =~ ^[0-9a-f]{64}$ ]]
           {
@@ -214,6 +206,16 @@ jobs:
             --application-id "$PRODUCTION_CONTAINER_APPLICATION_ID" --engine-image "$ENGINE_IMAGE" \
             --observed-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
 
+          PRODUCTION_CANARY_MAINTAINER_HASHES_JSON="$(node --input-type=module - <<'NODE'
+          const configuredHashes = JSON.parse(process.env.PRODUCTION_MAINTAINER_HASHES_JSON);
+          if (!Array.isArray(configuredHashes) || configuredHashes.some((value) => !/^[0-9a-f]{64}$/.test(value))) {
+            throw new TypeError("production maintainer hashes are invalid");
+          }
+          process.stdout.write(JSON.stringify([...new Set(configuredHashes)].sort()));
+          NODE
+          )"
+          echo "::add-mask::$PRODUCTION_CANARY_MAINTAINER_HASHES_JSON"
+
           generate_config() {
             local network_rate_limit_namespace_id rollout_args
             if [[ "$1" == current ]]; then
@@ -246,14 +248,14 @@ jobs:
               --live-cost-model .artifacts/runtime/live-cost-model.json \
               --live-cost-model-sha256 "$LIVE_COST_MODEL_SHA256" \
               --provider-usage-schema-sha256 "$PROVIDER_USAGE_SCHEMA_SHA256" \
-              --release-report-sha256 "$SOURCE_SHA256" \
+              --release-report-sha256 "$REPORT_SHA256" \
               --session-rate-limit-namespace-id 22001 \
               --network-rate-limit-namespace-id "$network_rate_limit_namespace_id" \
               --job-read-rate-limit-namespace-id 22003 --result-download-rate-limit-namespace-id 22004 \
               --policy-rate-limit-namespace-id 22005 --job-api-network-rate-limit-namespace-id 22006 \
               --product-analytics-rate-limit-namespace-id 22007 \
               --alert-destination-address "${{ vars.ALERT_DESTINATION_ADDRESS }}" \
-              --maintainer-session-hashes-json "$PRODUCTION_MAINTAINER_HASHES_JSON" \
+              --maintainer-session-hashes-json "$PRODUCTION_CANARY_MAINTAINER_HASHES_JSON" \
               "${rollout_args[@]}"
           }
 
@@ -266,7 +268,7 @@ jobs:
           import { readFile, writeFile } from "node:fs/promises";
           const hash = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
           const canary = JSON.parse(await readFile(".artifacts/canary/worker-version.json", "utf8"));
-          if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/admission/source-sha.txt") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
+          if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/canary/authority/processing-release-report.json") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
           const observedAt = Date.parse(canary.verifiedAt);
           if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new Error("canary verification time is invalid");
           await writeFile(".artifacts/runtime/canary-rollback.json", `${JSON.stringify({ schema: "hereisit-processing-admission-rollback@1", state: { circuitOpen: 0, circuitReason: null, openedAt: null, versionId: canary.activeVersionId, workerModuleSha256: canary.workerModuleSha256, generatedConfigSha256: canary.generatedConfigSha256, releaseReportSha256: canary.releaseReportSha256, publicAdmissionAllowed: 1, observedAt } })}\n`, { flag: "wx", mode: 0o600 });
@@ -301,7 +303,7 @@ jobs:
             --mode public-admission-rearm \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" \
-            --release-report-sha256 "$SOURCE_SHA256"
+            --release-report-sha256 "$REPORT_SHA256"
       - name: Restore and verify the exact local canary before admission
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -323,7 +325,7 @@ jobs:
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
-            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/preflight.json
+            --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/preflight.json
           node --input-type=module - <<'NODE'
           import { setTimeout as delay } from "node:timers/promises";
           for (let attempt = 1; attempt <= 30; attempt += 1) {
@@ -369,7 +371,7 @@ jobs:
             --worker-module "$WORKER_MODULE" \
             --current-config .artifacts/runtime/current-wrangler.jsonc \
             --next-config .artifacts/runtime/public-wrangler.jsonc \
-            --release-report .artifacts/admission/source-sha.txt \
+            --release-report .artifacts/canary/authority/processing-release-report.json \
             --output .artifacts/runtime/transition-attestation.json
           cp .artifacts/runtime/transition-attestation.json .artifacts/admission/transition-attestation.json
           node scripts/apply-worker-version-attestations.mjs \
@@ -379,7 +381,7 @@ jobs:
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
-            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/post-attestation.json
+            --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/post-attestation.json
           echo "PUBLIC_VERSION_ID=$PUBLIC_VERSION_ID" >> "$GITHUB_ENV"
       - name: Verify anonymous public policy before delivery
         run: |
@@ -435,7 +437,7 @@ jobs:
           node scripts/verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
-            --expected-release-report-sha256 "$SOURCE_SHA256" > .artifacts/runtime/final-state.json
+            --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/final-state.json
           node scripts/verify-queue-delivery-state.mjs --queue "$QUEUE_NAME" --expected resumed --account-id "$CLOUDFLARE_ACCOUNT_ID"
           node scripts/verify-queue-delivery-state.mjs --queue "$DLQ_NAME" --expected paused --account-id "$CLOUDFLARE_ACCOUNT_ID"
           printf '%s\n' '{"schema":"hereisit-processing-image-admission-gate@1","verified":true,"projectedMonthlyCostCeilingMicrousd":5000000,"liveCostPer1000CeilingMicrousd":500000}' > .artifacts/admission/gate-result.json
@@ -493,6 +495,8 @@ jobs:
           path: |
             .artifacts/admission/source-sha.txt
             .artifacts/admission/cloudflare-image-digest.txt
+            .artifacts/admission/release-authority.json
+            .artifacts/admission/deployment-verification.json
             .artifacts/admission/transition-attestation.json
             .artifacts/admission/gate-result.json
             .artifacts/admission/policy-result.json

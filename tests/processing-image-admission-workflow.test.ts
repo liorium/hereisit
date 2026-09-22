@@ -4,6 +4,42 @@ import { describe, expect, it } from "vitest";
 const workflow = readFileSync(".github/workflows/processing-image-admission.yml", "utf8");
 
 describe("deployed image canary admission workflow", () => {
+  it("verifies signed release and deployment authority before binding immutable admission inputs", () => {
+    const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
+    const preflight = workflow.slice(0, mutation);
+    expect(preflight).toContain("node scripts/verify-processing-deployment-authority.mjs");
+    expect(preflight).toContain("node scripts/verify-processing-deployment-report.mjs");
+    expect(preflight).toContain("--candidate-root .artifacts/canary/authority");
+    expect(preflight).toContain(
+      '--evidence-signature ".artifacts/canary/authority/evidence-v1--$RELEASE_ID--processing-evidence.sig"',
+    );
+    expect(preflight).toContain("--signature .artifacts/canary/processing-deployment-report.sig");
+    expect(preflight).toContain("--public-key .artifacts/canary/authority/evidence-public.pem");
+    expect(preflight).toContain("--gate .artifacts/canary/gate-results.json");
+    expect(preflight).toContain("--image-canary .artifacts/canary/canary-smoke.json");
+    expect(preflight).not.toContain('exact(gate, ["verified"]');
+    expect(preflight).toContain('cp .artifacts/canary/authority/api-worker.mjs "$WORKER_MODULE"');
+    expect(preflight).toContain(
+      "cp .artifacts/canary/authority/live-cost-model.json .artifacts/runtime/live-cost-model.json",
+    );
+    expect(preflight).toContain(
+      "--manifest .artifacts/canary/authority/processing-candidate.json --field providerUsage.schemaSha256",
+    );
+    expect(preflight).not.toContain("create-live-cost-model.mjs");
+    expect(preflight).not.toContain("pnpm --filter @hereisit/web build");
+    expect(preflight).not.toContain("wrangler.local.jsonc");
+    expect(preflight).toContain("JSON.stringify([...new Set(configuredHashes)].sort())");
+    expect(workflow).not.toContain("SOURCE_SHA256");
+    expect(workflow).not.toContain("--release-report .artifacts/admission/source-sha.txt");
+    expect(workflow).toContain(
+      "--release-report .artifacts/canary/authority/processing-release-report.json",
+    );
+    expect(workflow).toContain(
+      'hash(".artifacts/canary/authority/processing-release-report.json") !== canary.releaseReportSha256',
+    );
+    expect(workflow.match(/--release-report-sha256 "\$REPORT_SHA256"/g)).toHaveLength(2);
+    expect(workflow.match(/--expected-release-report-sha256 "\$REPORT_SHA256"/g)).toHaveLength(4);
+  });
   it("binds an explicit immutable production artifact before any mutation", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("source_sha:");
@@ -98,7 +134,7 @@ describe("deployed image canary admission workflow", () => {
     expect(restoreStep).toContain("--mode restore");
     expect(restoreStep).toContain(".artifacts/runtime/canary-rollback.json");
     expect(restoreStep).toContain("verify-processing-admission-state.mjs");
-    expect(restoreStep).toContain('--expected-release-report-sha256 "$SOURCE_SHA256"');
+    expect(restoreStep).toContain('--expected-release-report-sha256 "$REPORT_SHA256"');
     expect(restoreStep).toContain("verifyActiveWorkerDeployment");
     expect(restoreStep).toContain('body.execution === "local"');
     expect(restoreStep).toContain("body.disclosure?.upload === false");
