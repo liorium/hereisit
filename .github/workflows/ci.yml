@@ -125,6 +125,13 @@ jobs:
             -v "$PWD/.artifacts/runtime/grype-cache:/cache" "$GRYPE_IMAGE" db update
           GRYPE_DB_SHA256="$(sha256sum .artifacts/runtime/grype-cache/6/vulnerability.db | cut -d' ' -f1)"
           docker load --input .artifacts/release-source/image-engine-linux-amd64.docker.tar
+          cc -std=c11 -Wall -Wextra -Werror -O2 tests/fixtures/native/libvips-source-bounds.c \
+            -ldl -o .artifacts/runtime/libvips-source-bounds
+          timeout 15s docker run --rm --network none --read-only --memory 128m --memory-swap 128m \
+            --pids-limit 32 --cap-drop ALL --security-opt no-new-privileges \
+            -v "$PWD/.artifacts/runtime/libvips-source-bounds:/probe:ro" --entrypoint /probe \
+            "hereisit-image-engine:$GITHUB_SHA" \
+            > .artifacts/runtime/security-libvips-source-bounds.json
           IMAGE_ENGINE_SHA256="$(docker image inspect "hereisit-image-engine:$GITHUB_SHA" --format '{{.Id}}' | sed 's/^sha256://')"
           WEB_STAGING_SHA256="$(sha256sum .artifacts/release-source/web-staging.tar | cut -d' ' -f1)"
           WEB_PRODUCTION_SHA256="$(sha256sum .artifacts/release-source/web-production.tar | cut -d' ' -f1)"

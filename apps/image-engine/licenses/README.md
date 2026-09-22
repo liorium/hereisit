@@ -20,3 +20,20 @@ Do not mark pending source records approved without completing their review. Unk
 licenses, outstanding conditions, stale or mismatched evidence, and vulnerability checks remain
 blocking. This change removes an organizational prerequisite; it does not waive license obligations,
 approve security exceptions, or establish that a release is ready.
+
+## Runtime package source
+
+The image runtime uses Ubuntu 24.04 LTS packages from the fixed
+`https://snapshot.ubuntu.com/ubuntu/20260918T000000Z/` archive. Native libraries are built against
+that same distribution. The final shell-free image copies only their runtime dependencies, the
+official Node binary, certificate bundle, locale data, and application files; it does not combine
+Debian's libc with Ubuntu libraries or maintain a private libc patch.
+
+`/build-metadata/debian-packages.json` retains its existing filename for dpkg-format compatibility.
+It records the exact copied package versions; `/var/lib/dpkg/status.d` and `/etc/os-release` preserve
+the package and Ubuntu identities for vulnerability scanners. Copyright notices are under
+`/usr/share/doc/<package>/copyright`; the Node distribution's complete license notice is under
+`/licenses/node/LICENSE`. Retrieve corresponding Ubuntu source by enabling `deb-src` for the same
+snapshot and running `apt-get source <source-package>=<source-version>` using the `Source` and
+`Version` fields in the retained package records. Native source revisions and build instructions
+remain in `native/sources.lock.json` and `native/build-*.sh`.

@@ -2,7 +2,11 @@
 
 ARG RUST_IMAGE=rust@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0
 ARG NODE_IMAGE=node@sha256:036dfa7e82a1e867b09248440a2b6635b3f8de557f69e60bac923a10c6e696a8
-ARG DISTROLESS_NODE_IMAGE=gcr.io/distroless/nodejs24-debian13@sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1
+ARG NODE_RUNTIME_IMAGE=node@sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe
+ARG UBUNTU_IMAGE=ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+
+FROM --platform=linux/amd64 ${NODE_IMAGE} AS node-distribution
+FROM --platform=linux/amd64 ${NODE_RUNTIME_IMAGE} AS node-runtime-distribution
 
 FROM --platform=linux/amd64 ${RUST_IMAGE} AS rust-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -21,14 +25,18 @@ COPY apps/image-engine/native/png-smart /build/native/png-smart
 RUN /build/native/build-oxipng.sh \
   && /build/native/build-png-smart.sh
 
-FROM --platform=linux/amd64 ${NODE_IMAGE} AS native-build
+FROM --platform=linux/amd64 ${UBUNTU_IMAGE} AS native-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+COPY --from=node-distribution /usr/local/ /usr/local/
+COPY --from=rust-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
-      -e 's|http://deb.debian.org/debian|http://snapshot.debian.org/archive/debian/20260918T000000Z|g' \
-      /etc/apt/sources.list.d/debian.sources \
-  && printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99snapshot \
+      -e 's|^URIs:.*|URIs: https://snapshot.ubuntu.com/ubuntu/20260918T000000Z/|' \
+      -e 's/ noble-backports//' \
+      -e 's/Components: .*/Components: main universe/' \
+      /etc/apt/sources.list.d/ubuntu.sources \
+  && printf 'Acquire::Check-Valid-Until "false";\nAPT::Update::Error-Mode "any";\n' >/etc/apt/apt.conf.d/99snapshot \
   && apt-get update \
+  && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends \
       build-essential \
       ca-certificates \
@@ -44,6 +52,8 @@ RUN sed -i \
       ninja-build \
       pkg-config \
       python3 \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libc6)" ge 2.39-0ubuntu8.9 \
+  && test "$(node --version)" = v24.13.0 \
   && rm -rf /var/lib/apt/lists/*
 COPY apps/image-engine/native/build-common.sh /build/native/
 COPY apps/image-engine/native/build-mozjpeg.sh /build/native/
@@ -72,7 +82,7 @@ RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
 FROM native-build AS node-build
 WORKDIR /src
 COPY . .
-RUN corepack enable \
+RUN corepack enable pnpm \
   && corepack prepare pnpm@11.11.0 --activate \
   && pnpm install --filter @hereisit/image-engine... --frozen-lockfile --no-optional --ignore-scripts \
   && test "$(apps/image-engine/node_modules/esbuild/bin/esbuild --version)" = "0.28.1" \
@@ -107,11 +117,20 @@ RUN /build/native/build-jpegli.sh \
   && /build/native/build-libjxl-metrics.sh
 
 FROM node-build AS runtime-files
+COPY --from=node-runtime-distribution /usr/local/bin/node /runtime-root/nodejs/bin/node
+COPY --from=node-runtime-distribution /usr/local/LICENSE /runtime-root/licenses/node/LICENSE
 COPY --from=rust-build /opt/hereisit-native/oxipng/bin/ /runtime-root/usr/local/bin/
 COPY --from=rust-build /opt/hereisit-native/png-smart/bin/ /runtime-root/usr/local/bin/
 COPY --from=rust-build /licenses/ /runtime-root/licenses/
 COPY --from=rust-build /build-metadata/ /runtime-root/build-metadata/
-RUN install -d /runtime-root/usr/local/lib \
+RUN install -d /runtime-root/usr/local/lib /runtime-root/usr/lib /runtime-root/usr/lib64 /runtime-root/etc/ssl/certs \
+  && ln -s usr/lib /runtime-root/lib \
+  && ln -s usr/lib64 /runtime-root/lib64 \
+  && cp /etc/os-release /etc/nsswitch.conf /runtime-root/etc/ \
+  && cp /etc/ssl/certs/ca-certificates.crt /runtime-root/etc/ssl/certs/ \
+  && printf 'hereisit:x:10001:10001:HereIsIt:/home/hereisit:/sbin/nologin\n' >/runtime-root/etc/passwd \
+  && printf 'hereisit:x:10001:\n' >/runtime-root/etc/group \
+  && cp -a /usr/lib/locale /runtime-root/usr/lib/ \
   && cp -a /opt/app /runtime-root/app \
   && cp -a /opt/hereisit-native/mozjpeg/bin/. /runtime-root/usr/local/bin/ \
   && cp -a /opt/hereisit-native/libwebp/bin/. /runtime-root/usr/local/bin/ \
@@ -126,7 +145,7 @@ RUN install -d /runtime-root/usr/local/lib \
   && cp -a apps/image-engine/licenses /runtime-root/licenses/hereisit-policy \
   && LD_LIBRARY_PATH=/runtime-root/usr/local/lib \
     bash scripts/copy-distroless-runtime-deps.sh /runtime-root \
-      /runtime-root/app /runtime-root/usr/local/bin /runtime-root/usr/local/lib \
+      /runtime-root/app /runtime-root/nodejs /runtime-root/usr/local/bin /runtime-root/usr/local/lib \
       >/tmp/debian-packages.tsv \
   && find /runtime-root/usr/share/doc -name copyright -type f -printf '/usr/share/doc/%P\n' \
       | sort >/tmp/debian-copyright-paths.txt \
@@ -136,10 +155,13 @@ RUN install -d /runtime-root/usr/local/lib \
   && node scripts/create-image-native-sbom.mjs /runtime-root \
   && chmod -R a=rX /runtime-root/app /runtime-root/licenses \
       /runtime-root/build-metadata /runtime-root/usr \
+  && install -d -m 1777 /runtime-root/tmp \
   && install -d -m 0700 -o 10001 -g 10001 /runtime-root/work /runtime-root/home/hereisit \
-  && chown -R 10001:10001 /runtime-root/app
+  && chown -R 10001:10001 /runtime-root/app \
+  && LD_LIBRARY_PATH=/usr/local/lib chroot --userspec=10001:10001 /runtime-root \
+      /nodejs/bin/node /app/dist/server.mjs --self-test
 
-FROM ${DISTROLESS_NODE_IMAGE} AS runtime
+FROM scratch AS runtime
 COPY --from=runtime-files /runtime-root /
 ENV NODE_ENV=production LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC HOME=/home/hereisit \
   LD_LIBRARY_PATH=/usr/local/lib

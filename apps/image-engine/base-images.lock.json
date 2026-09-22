@@ -16,9 +16,15 @@
     },
     {
       "name": "node-runtime",
-      "reference": "gcr.io/distroless/nodejs24-debian13",
-      "indexDigest": "sha256:b1fc33242cc74151f50c62b4a03d48afd759dccf81279b5f8e401db4546479c1",
-      "platformDigest": "sha256:979dc379a2fb11d76d9ae0257ea4559e36b533088b062ff2f93d771b11a76f76"
+      "reference": "node:24.21.0-trixie-slim",
+      "indexDigest": "sha256:8ec5d7557396cfe32d21c3f9c13072355ceab22b584578ca4bb28af31120cffe",
+      "platformDigest": "sha256:b64fccfbcd1ae10d11b969a868b50e1c2530a7054813d5cdea04ac3bce551697"
+    },
+    {
+      "name": "native-build-runtime-packages",
+      "reference": "ubuntu:24.04",
+      "indexDigest": "sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3",
+      "platformDigest": "sha256:496754492fb28b4d3049432f2ca787449331e23fb14f0dd3fffea86bf5a93eb4"
     }
   ]
 }
