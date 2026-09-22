@@ -4,6 +4,20 @@ import { describe, expect, it } from "vitest";
 const workflow = readFileSync(".github/workflows/processing-image-admission.yml", "utf8");
 
 describe("deployed image canary admission workflow", () => {
+  it("passes the image class to both container discovery and verification", () => {
+    const commands = [
+      ...workflow
+        .replace(/\\\n\s*/g, " ")
+        .matchAll(/node scripts\/resolve-cloudflare-container-application\.mjs ([^\n]+)/g),
+    ].map((match) => match[1]);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toContain("--mode discover");
+    expect(commands[1]).toContain("--mode verify");
+    for (const command of commands) {
+      expect(command).toContain("--container-class-name ImageEngineContainer");
+    }
+  });
+
   it("verifies signed release and deployment authority before binding immutable admission inputs", () => {
     const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
     const preflight = workflow.slice(0, mutation);
