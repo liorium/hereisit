@@ -249,6 +249,10 @@ export function verifyBenchmarkRecords(records) {
 export function evaluatePrImageQualityReport(rawReport) {
   const report = assertObject(rawReport, "PR benchmark report");
   if (report.scope !== "pr") throw new TypeError("PR report scope is required");
+  return evaluateMeasuredImageQualityReport(report);
+}
+
+function evaluateMeasuredImageQualityReport(report) {
   const identity = assertObject(report.identity, "PR benchmark identity");
   if (
     typeof identity.engineImageDigest !== "string" ||
@@ -296,19 +300,153 @@ export function evaluatePrImageQualityReport(rawReport) {
   return { passed: failures.length === 0, failures };
 }
 
+// Native CI quality is distinct from the optional competitor comparison and the later
+// live admission checks. Never turn local timing/cost estimates into provider receipts.
+export function evaluateNativeImageReleaseReport(rawReport, manifest, manifestSha256) {
+  const report = assertObject(rawReport, "native release benchmark");
+  if (report.version !== 1 || report.scope !== "release")
+    throw new TypeError("full native release benchmark is required");
+  validateCorpusManifest(manifest);
+  assertSha256(manifestSha256, "manifest hash");
+  if (report.identity?.corpusManifestSha256 !== manifestSha256)
+    throw new TypeError("native benchmark does not bind the corpus");
+  const metricBuild = "libjxl-0.11.2-332feb17";
+  if (
+    report.identity.metricBuildIds?.ssimulacra2 !== metricBuild ||
+    report.identity.metricBuildIds?.butteraugli !== metricBuild
+  )
+    throw new TypeError("native benchmark metric builds differ");
+  const entries = manifest.entries.filter(
+    (entry) => !["malformed", "truncated", "bomb-regression"].includes(entry.expected.class),
+  );
+  const variants = ["smart:balanced", "smart:smallest", "lossless:balanced"];
+  const expected = new Map(
+    entries.flatMap((entry) => variants.map((variant) => [`${entry.id}:${variant}`, entry])),
+  );
+  const seen = new Set();
+  const records = verifyBenchmarkRecords(report.records);
+  for (const record of records) {
+    const key = `${record.corpusId}:${record.mode}:${record.preset}`;
+    const entry = expected.get(key);
+    if (!entry || seen.has(key) || record.inputMime !== `image/${entry.expected.format}`)
+      throw new TypeError("native benchmark has duplicate or foreign profiles");
+    seen.add(key);
+  }
+  if (seen.size !== expected.size) throw new TypeError("native benchmark profiles are missing");
+  // These committed fixtures deliberately exercise unsupported JPEG color interpretations.
+  // They must reject safely, not lower the supported-file success requirement.
+  const unsupportedLossless = new Set([
+    "photo-wide-gamut-jpeg",
+    "photo-cmyk-jpeg",
+    "photo-cmyk-profile-jpeg",
+    "photo-ycck-jpeg",
+  ]);
+  const unsupported = (record) =>
+    record.corpusId === "photo-conflicting-adobe-jpeg" ||
+    (record.mode === "lossless" && unsupportedLossless.has(record.corpusId));
+  const supported = records.filter((record) => !unsupported(record));
+  const failures = evaluateMeasuredImageQualityReport({ ...report, records: supported }).failures;
+  for (const record of records) {
+    if (unsupported(record)) {
+      if (record.outcome !== "rejected" || record.errorCode !== "UNSUPPORTED_INPUT")
+        failures.push("UNSAFE_UNSUPPORTED_INPUT");
+    } else if (record.outcome !== "rejected") {
+      if (
+        !["download", "original-retained"].includes(record.outcome) ||
+        record.qualityChecksPassed !== true ||
+        record.alphaChecksPassed !== true
+      )
+        failures.push("NATIVE_OUTPUT_VERIFICATION");
+      if (record.outcome === "download") {
+        if (
+          !Number.isFinite(record.ssimulacra2) ||
+          !Number.isFinite(record.butteraugli) ||
+          record.butteraugli < 0
+        )
+          failures.push("UNMEASURED_VISUAL_QUALITY");
+        if (
+          record.mode === "lossless" &&
+          (record.inputMime === "image/jpeg"
+            ? record.losslessVerification !== "jpeg-coefficient-exact"
+            : record.losslessVerification !== "pixel-exact" || record.normalizedPixelMatch !== true)
+        )
+          failures.push("LOSSLESS_VERIFICATION_MISMATCH");
+      }
+    }
+    if (
+      record.deletionVerified !== true ||
+      !Number.isFinite(record.inputDeletionLagMs) ||
+      record.inputDeletionLagMs < 0 ||
+      record.inputDeletionLagMs > 60_000 ||
+      !Number.isFinite(record.resultDeletionLagMs) ||
+      record.resultDeletionLagMs < 0 ||
+      record.resultDeletionLagMs > 10_000
+    )
+      failures.push("NATIVE_DELETION");
+  }
+  if (supported.filter((record) => record.outcome !== "rejected").length / supported.length < 0.99)
+    failures.push("SUPPORTED_SUCCESS_RATE");
+  // The ordinary JPEG is the reproduced false-original-retained regression fixture.
+  // Already optimized and other legitimately incompressible files are not failures.
+  const regressions = supported.filter(
+    (record) => record.corpusId === "photo-ordinary-jpeg" && record.mode === "smart",
+  );
+  if (
+    regressions.length !== 2 ||
+    regressions.filter(
+      (record) =>
+        record.outcome === "download" &&
+        record.qualityChecksPassed === true &&
+        record.effectiveDeliveredBytes <= record.inputBytes * 0.95,
+    ).length /
+      regressions.length <
+      0.9
+  )
+    failures.push("FALSE_NO_SIZE_REDUCTION");
+  for (const mime of ["image/jpeg", "image/png", "image/webp"]) {
+    if (
+      !supported.some(
+        (record) =>
+          record.inputMime === mime &&
+          record.mode === "smart" &&
+          record.preset === "balanced" &&
+          record.outcome === "download",
+      )
+    )
+      failures.push(`NO_COMPRESSED_OUTPUT:${mime}`);
+  }
+  return {
+    passed: failures.length === 0,
+    failures: [...new Set(failures)],
+    profilesMeasured: records.length,
+    visualProfilesMeasured: supported.filter((record) => record.outcome === "download").length,
+  };
+}
+
 async function main() {
   const args = parseCliArguments(process.argv.slice(2));
   if (
     !args.report ||
     !args.scope ||
-    Object.keys(args).length !== 2 ||
-    !["pr", "release"].includes(args.scope)
+    Object.keys(args).length !== (args.scope === "native-release" ? 3 : 2) ||
+    !["pr", "release", "native-release"].includes(args.scope) ||
+    (args.scope === "native-release" && !args.manifest)
   ) {
-    throw new TypeError("usage: verify-image-quality --report <json> --scope <pr|release>");
+    throw new TypeError(
+      "usage: verify-image-quality --report <json> --scope <pr|release|native-release> [--manifest <json>]",
+    );
   }
   const report = JSON.parse(await readFile(args.report, "utf8"));
-  const result =
-    args.scope === "pr" ? evaluatePrImageQualityReport(report) : evaluateImageQualityReport(report);
+  const manifestBytes = args.scope === "native-release" ? await readFile(args.manifest) : null;
+  const result = manifestBytes
+    ? evaluateNativeImageReleaseReport(
+        report,
+        JSON.parse(manifestBytes),
+        createHash("sha256").update(manifestBytes).digest("hex"),
+      )
+    : args.scope === "pr"
+      ? evaluatePrImageQualityReport(report)
+      : evaluateImageQualityReport(report);
   process.stdout.write(`${JSON.stringify({ ...result, reportSha256: sha256Canonical(report) })}\n`);
   if (!result.passed) process.exitCode = 1;
 }

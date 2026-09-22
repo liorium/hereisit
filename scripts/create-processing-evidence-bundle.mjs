@@ -30,6 +30,15 @@ export const processingEvidenceReportNames = Object.freeze([
   "privacyReview",
   "deviceMatrix",
 ]);
+export const requiredProcessingEvidenceReportNames = Object.freeze(
+  processingEvidenceReportNames.filter((name) => name !== "competitorComparison"),
+);
+
+function reportNamesFor(reports) {
+  return Object.hasOwn(reports, "competitorComparison")
+    ? processingEvidenceReportNames
+    : requiredProcessingEvidenceReportNames;
+}
 
 function assertPattern(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) throw new TypeError(`${label} is invalid`);
@@ -179,8 +188,8 @@ export function validateProcessingEvidenceBundle(value) {
   );
   validateIdentity(bundle);
   const reports = assertObject(bundle.reports, "processing evidence reports");
-  assertExactKeys(reports, processingEvidenceReportNames, "processing evidence reports");
-  for (const name of processingEvidenceReportNames) {
+  assertExactKeys(reports, reportNamesFor(reports), "processing evidence reports");
+  for (const name of Object.keys(reports)) {
     const entry = assertObject(reports[name], `${name} report`);
     assertExactKeys(entry, ["sourceSha256", "summarySha256", "document"], `${name} report`);
     assertSha256(entry.sourceSha256, `${name} source report hash`);
@@ -208,9 +217,9 @@ export function createProcessingEvidenceBundle({
   reports,
 }) {
   const documents = assertObject(reports, "processing evidence reports");
-  assertExactKeys(documents, processingEvidenceReportNames, "processing evidence reports");
+  assertExactKeys(documents, reportNamesFor(documents), "processing evidence reports");
   const entries = Object.fromEntries(
-    processingEvidenceReportNames.map((name) => {
+    Object.keys(documents).map((name) => {
       const source = documents[name];
       const document = projectDocumentValue(source, `${name} report document`);
       validateDocumentValue(document, `${name} report document`);
@@ -266,6 +275,9 @@ async function readReport(path, name) {
 
 export async function runProcessingEvidenceBundleCreatorCli(argv, stdout = process.stdout) {
   const args = parseCliArguments(argv);
+  const reportArguments = Object.keys(reportCliNames).filter(
+    (name) => name !== "competitor-comparison" || Object.hasOwn(args, name),
+  );
   assertExactKeys(
     args,
     [
@@ -274,7 +286,7 @@ export async function runProcessingEvidenceBundleCreatorCli(argv, stdout = proce
       "candidate-verification-sha256",
       "created-at",
       "expires-at",
-      ...Object.keys(reportCliNames),
+      ...reportArguments,
       "schema",
       "output",
     ],
@@ -283,9 +295,9 @@ export async function runProcessingEvidenceBundleCreatorCli(argv, stdout = proce
   await readBoundedRegularFile(args.schema, maximumDocumentBytes, "processing evidence schema");
   const reports = Object.fromEntries(
     await Promise.all(
-      Object.entries(reportCliNames).map(async ([argument, name]) => [
-        name,
-        await readReport(args[argument], name),
+      reportArguments.map(async (argument) => [
+        reportCliNames[argument],
+        await readReport(args[argument], reportCliNames[argument]),
       ]),
     ),
   );

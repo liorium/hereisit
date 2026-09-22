@@ -20,11 +20,26 @@ Repository changes and image resource provisioning do not delete existing remote
 
 ## Release reviews
 
+CI produces image receipts from the full native corpus and actual Playwright JSON results in the
+same run, bound to the source archive and production engine digest. Downloaded outputs are decoded
+and checked again using the existing live quality, alpha, dimension and lossless policies. Pinned
+SSIMULACRA2 and Butteraugli measurements are retained for performance comparisons; no competitor
+parity is claimed. A reduced PR benchmark cannot authorize a release. Native cost estimates are not
+provider usage receipts: live cost accounting and the separate public-admission checks still apply.
+
 Human ratings and manual review counts are not release requirements. Automated visual quality
 measurements remain required. The legacy `blindedHumanReview` evidence key is retained for contract
 compatibility, but its payload is `hereisit-automated-visual-review@2`: automated measurements, not a
 human approval step.
 
-The six image-applicable review checks remain fail closed. Removed PDF review outputs are not image
-evidence. Until genuine exact-source image review receipts exist, report the missing evidence and do not
-publish a release authority or fabricate passes.
+Five image-applicable review checks remain required and fail closed: full native corpus quality,
+automated visual quality, commercial licenses, privacy, and the browser/device matrix. iLoveIMG and
+other competitor comparisons are separate performance metrics, not deployment requirements. The
+`competitorComparison` evidence entry and `--competitor-comparison` bundle argument are optional;
+when supplied, their strict validation and hash bindings still apply. Existing six-report evidence
+remains accepted. No comparison receipt is fabricated when it is absent.
+
+Removed PDF review outputs are not image evidence. Until genuine exact-source image review receipts
+exist for every required check, report the missing evidence and do not publish a release authority or
+fabricate passes. Native quality, automated visual quality, licenses, privacy, device coverage,
+security, and cost accounting remain required.

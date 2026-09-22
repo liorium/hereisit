@@ -78,8 +78,11 @@ describe("Playwright CI workflow", () => {
       workflow.indexOf("  release-authority:"),
       workflow.indexOf("  browser:"),
     );
-    expect(release).toContain("Require exact image review evidence");
-    expect(release).toContain("processing-hosted-check-");
+    expect(release).toContain("node scripts/create-image-release-evidence.mjs");
+    expect(release).toContain("image-browser-evidence-$" + "{{ github.sha }}");
+    expect(release.indexOf("node scripts/create-image-release-evidence.mjs")).toBeLessThan(
+      release.indexOf("node scripts/prepare-processing-ci-evidence.mjs"),
+    );
     expect(release).not.toContain("continue-on-error:");
   });
 

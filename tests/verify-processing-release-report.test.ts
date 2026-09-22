@@ -7,6 +7,7 @@ import { createDeterministicTreeArchive } from "../scripts/create-deterministic-
 import { createLiveCostModel } from "../scripts/create-live-cost-model.mjs";
 import { createBuiltProcessingCandidate } from "../scripts/create-processing-candidate.mjs";
 import { writeProcessingEvidenceBundle } from "../scripts/create-processing-evidence-bundle.mjs";
+import { hostedReviewSchemas } from "../scripts/create-processing-hosted-check.mjs";
 import { createProcessingReleaseInputs } from "../scripts/create-processing-release-inputs.mjs";
 import {
   createAndWriteProcessingReleaseReport,
@@ -14,6 +15,7 @@ import {
 } from "../scripts/create-processing-release-report.mjs";
 import { finalizeProcessingCandidate } from "../scripts/finalize-processing-candidate.mjs";
 import { canonicalJson, sha256Bytes, sha256Canonical } from "../scripts/image-lab-common.mjs";
+import { prepareProcessingCiEvidence } from "../scripts/prepare-processing-ci-evidence.mjs";
 import { signCanonicalProcessingEvidence } from "../scripts/processing-evidence-signature.mjs";
 import {
   assertVerifiedProcessingCandidateManifest,
@@ -29,7 +31,7 @@ const gitSha = "a".repeat(40);
 const now = "2026-07-20T12:00:00.000Z";
 const temporaryRoots: string[] = [];
 const securityScopes = ["engine", "web-staging", "web-production", "worker", "lockfile"] as const;
-async function fixture() {
+async function fixture(includeComparison = true) {
   const parent = await mkdtemp(join(tmpdir(), "hereisit-release-report-verify-"));
   temporaryRoots.push(parent);
   const source = join(parent, "source");
@@ -267,7 +269,7 @@ async function fixture() {
     expiresAt: "2026-07-21T10:00:00.000Z",
     reports: {
       fullCorpusBenchmark: { passed: true },
-      competitorComparison: { passed: true },
+      ...(includeComparison ? { competitorComparison: { passed: true } } : {}),
       blindedHumanReview: { passed: true },
       commercialReview: { passed: true },
       privacyReview: { passed: true },
@@ -371,9 +373,13 @@ describe("processing release report verification", () => {
       }),
     ).toThrow(/verified|manifest|identity/i);
   });
-  it("creates and verifies an exact report derived only from verified bytes", async () => {
-    const value = await fixture();
+  it.each([
+    true,
+    false,
+  ])("creates and verifies an exact report with competitor comparison %s", async (includeComparison) => {
+    const value = await fixture(includeComparison);
     const created = await createAndWriteProcessingReleaseReport(options(value));
+    expect(Object.hasOwn(created.evidence.reports, "competitorComparison")).toBe(includeComparison);
     expect(created.artifacts).toEqual({
       engineDockerConfigDigest: value.candidate.engine.docker.configDigest,
       webStagingArchiveSha256: value.candidate.web.staging.archiveSha256,
@@ -402,6 +408,86 @@ describe("processing release report verification", () => {
       releaseId,
       gitSha,
     });
+  });
+  it("prepares exact CI evidence with five required reports, without manufacturing a comparison", async () => {
+    const value = await fixture();
+    const sourceSha256 = "b".repeat(64);
+    const hostedCheckRoot = join(value.parent, "hosted");
+    await mkdir(hostedCheckRoot);
+    const details = {
+      fullCorpusBenchmark: {
+        profilesMeasured: 3,
+        corpusSha256: "c".repeat(64),
+        benchmarkSha256: "d".repeat(64),
+        releaseGateSha256: "e".repeat(64),
+        engineImageDigest: value.candidate.engine.oci.configDigest,
+      },
+      blindedHumanReview: { visualProfilesMeasured: 9, evidenceSha256: "c".repeat(64) },
+      commercialReview: {
+        licenseGateSha256: value.candidate.releaseAssets.security.gates.imageEngine.sha256,
+      },
+      privacyReview: { testsRun: 6, evidenceSha256: "c".repeat(64) },
+      deviceMatrix: {
+        projects: [
+          "chromium",
+          "firefox",
+          "mobile-chromium",
+          "mobile-firefox",
+          "webkit",
+          "mobile-webkit",
+        ],
+        productAnalytics: true,
+        evidenceSha256: "c".repeat(64),
+        visualProfilesMeasured: 9,
+      },
+    };
+    for (const name of Object.keys(details) as Array<keyof typeof details>) {
+      await writeFile(
+        join(hostedCheckRoot, `${name}.json`),
+        canonicalJson({
+          schema: "hereisit-processing-hosted-review@1",
+          version: 1,
+          reportName: name,
+          passed: true,
+          gitSha,
+          sourceSha256,
+          checkRunId: 42,
+          document: {
+            schema: hostedReviewSchemas[name],
+            version: 2,
+            passed: true,
+            gitSha,
+            sourceSha256,
+            checkRunId: 42,
+            execution: "exact-main-hosted-check",
+            ...details[name],
+          },
+        }),
+      );
+    }
+    const output = join(value.parent, "ci-evidence.json");
+    const args = {
+      candidatePath: value.candidateManifestPath,
+      releaseId,
+      gitSha,
+      output,
+      hostedCheckRoot,
+      sourceSha256,
+      now: new Date(now),
+    };
+    await prepareProcessingCiEvidence(args);
+    const evidence = JSON.parse(await readFile(output, "utf8"));
+    expect(Object.keys(evidence.reports)).toHaveLength(5);
+    expect(evidence.reports).not.toHaveProperty("competitorComparison");
+    await writeFile(join(hostedCheckRoot, "competitorComparison.json"), "{");
+    await expect(
+      prepareProcessingCiEvidence({ ...args, output: join(value.parent, "invalid.json") }),
+    ).rejects.toThrow(/competitorComparison.*invalid/);
+    await rm(join(hostedCheckRoot, "competitorComparison.json"));
+    await rm(join(hostedCheckRoot, "blindedHumanReview.json"));
+    await expect(
+      prepareProcessingCiEvidence({ ...args, output: join(value.parent, "missing.json") }),
+    ).rejects.toThrow(/blindedHumanReview.*missing/);
   });
   it("verifies a finalized candidate by reconstructing its unique built projection", async () => {
     const value = await finalizedFixture();

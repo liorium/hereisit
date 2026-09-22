@@ -40,15 +40,30 @@ function sizeBand(bytes) {
 }
 
 async function docker(...args) {
-  const result = await execute("docker", args, { maxBuffer: 8 * 1024 * 1024 });
+  const result = await execute("docker", args, { maxBuffer: 8 * 1024 * 1024, timeout: 120_000 });
   return result.stdout.trim();
+}
+
+const request = (url, options = {}) =>
+  fetch(url, { ...options, signal: AbortSignal.timeout(30_000) });
+
+export async function deleteBenchmarkJob(origin, jobId) {
+  const started = performance.now();
+  const deleted = await request(`${origin}/v1/jobs/${jobId}`, { method: "DELETE" });
+  if (deleted.status !== 204) throw new Error(`engine delete failed with ${deleted.status}`);
+  for (const suffix of ["", "/output"]) {
+    const response = await request(`${origin}/v1/jobs/${jobId}${suffix}`);
+    await response.body?.cancel();
+    if (response.status !== 404) throw new Error("engine job or output readable after deletion");
+  }
+  return Math.round(performance.now() - started);
 }
 
 async function waitForHealth(origin, timeoutMs = 30_000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     try {
-      const response = await fetch(`${origin}/healthz`);
+      const response = await request(`${origin}/healthz`);
       if (response.status === 204) return;
     } catch {}
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
@@ -60,7 +75,7 @@ async function pollTerminal(origin, jobId) {
   const started = Date.now();
   let firstRunningAt = null;
   while (Date.now() - started < 100_000) {
-    const response = await fetch(`${origin}/v1/jobs/${jobId}`);
+    const response = await request(`${origin}/v1/jobs/${jobId}`);
     if (!response.ok) throw new Error(`engine status failed with ${response.status}`);
     const status = await response.json();
     if (status.state === "running" && firstRunningAt === null) firstRunningAt = Date.now();
@@ -162,6 +177,8 @@ async function runOne({
   build,
   model,
   metricImage,
+  engineImage,
+  verifier,
   temporaryRoot,
   coldStart,
 }) {
@@ -177,7 +194,7 @@ async function runOne({
     minimumSavingsPercent: 1,
   };
   const createdAt = performance.now();
-  const createResponse = await fetch(`${origin}/v1/jobs`, {
+  const createResponse = await request(`${origin}/v1/jobs`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -199,7 +216,7 @@ async function runOne({
   if (createResponse.status !== 201)
     throw new Error(`engine create failed with ${createResponse.status}`);
   const feedbackMs = performance.now() - createdAt;
-  const uploadResponse = await fetch(`${origin}/v1/jobs/${jobId}/input`, {
+  const uploadResponse = await request(`${origin}/v1/jobs/${jobId}/input`, {
     method: "PUT",
     headers: {
       "content-type": mimeByFormat[entry.expected.format],
@@ -210,15 +227,22 @@ async function runOne({
   if (uploadResponse.status !== 204)
     throw new Error(`engine upload failed with ${uploadResponse.status}`);
   const runStarted = performance.now();
-  const runResponse = await fetch(`${origin}/v1/jobs/${jobId}/run`, { method: "POST" });
+  const runResponse = await request(`${origin}/v1/jobs/${jobId}/run`, { method: "POST" });
   if (runResponse.status !== 202) throw new Error(`engine run failed with ${runResponse.status}`);
   const { status } = await pollTerminal(origin, jobId);
+  const terminalMs = Math.round(performance.now() - runStarted);
   let outputBytes = null;
   let outputMime = null;
   let effectiveDeliveredBytes = null;
   let metrics = { ssimulacra2: null, butteraugli: null };
-  let normalizedPixelMatch = null;
-  let losslessVerification = null;
+  let validation = {
+    qualityChecksPassed: false,
+    alphaChecksPassed: false,
+    normalizedPixelMatch: null,
+    losslessVerification: null,
+    liveQuality: null,
+    verificationReason: null,
+  };
   let outcome = "rejected";
   let errorCode = status.error?.code ?? null;
   let codecBuildId = build.codecs[entry.expected.format] ?? "unknown";
@@ -230,8 +254,10 @@ async function runOne({
       outputBytes = status.result.byteLength;
       outputMime = status.result.mime;
       effectiveDeliveredBytes = outputBytes;
-      const response = await fetch(`${origin}/v1/jobs/${jobId}/output`);
+      const response = await request(`${origin}/v1/jobs/${jobId}/output`);
       if (!response.ok) throw new Error(`engine output failed with ${response.status}`);
+      if (response.headers.get("content-type") !== outputMime)
+        throw new Error("engine output MIME header mismatch");
       const bytes = Buffer.from(await response.arrayBuffer());
       if (bytes.byteLength !== outputBytes || bytes.byteLength >= inputBytes.byteLength)
         throw new Error("engine selected an invalid output size");
@@ -241,6 +267,51 @@ async function runOne({
       );
       await writeFile(outputPath, bytes);
       await chmod(outputPath, 0o644);
+      validation = await verifier.verifyBenchmarkOutput({
+        sourcePath: inputPath,
+        outputPath,
+        mime: outputMime,
+        mode,
+        preset,
+        verifyCoefficients: async (transform) => {
+          const source = `/source/${basename(inputPath)}`;
+          const result = `/result/${basename(outputPath)}`;
+          const verification = await verifier.verifyJpegCoefficientTransform({
+            sourcePath: source,
+            candidatePath: result,
+            transform,
+            signal: AbortSignal.timeout(30_000),
+            run: async ({ command, args, signal }) => {
+              const started = performance.now();
+              const result = await execute(
+                "docker",
+                [
+                  "run",
+                  "--rm",
+                  "--network",
+                  "none",
+                  "-v",
+                  `${dirname(inputPath)}:/source:ro`,
+                  "-v",
+                  `${dirname(outputPath)}:/result:ro`,
+                  "--entrypoint",
+                  command,
+                  engineImage,
+                  ...args,
+                ],
+                { timeout: 30_000, maxBuffer: 8192, signal },
+              );
+              return {
+                exitCode: 0,
+                elapsedMs: performance.now() - started,
+                stdoutTail: result.stdout,
+                stderrTail: result.stderr,
+              };
+            },
+          });
+          return verification.exact;
+        },
+      });
       if (metricImage) {
         const metricSourcePath = join(temporaryRoot, `${jobId}-source.png`);
         const metricOutputPath = join(temporaryRoot, `${jobId}-output.png`);
@@ -249,18 +320,18 @@ async function runOne({
         await Promise.all([chmod(metricSourcePath, 0o644), chmod(metricOutputPath, 0o644)]);
         metrics = await measureMetrics(metricImage, metricSourcePath, metricOutputPath);
       }
-      if (mode === "lossless") {
-        normalizedPixelMatch = true;
-        losslessVerification =
-          entry.expected.format === "jpeg" ? "jpeg-coefficient-exact" : "pixel-exact";
-      }
-    } else {
+    } else if (status.result.kind === "original-retained") {
       outcome = "original-retained";
       effectiveDeliveredBytes = inputBytes.byteLength;
+      validation.qualityChecksPassed = true;
+      validation.alphaChecksPassed = true;
+      validation.verificationReason = "original-retained";
+    } else {
+      throw new Error("engine returned an unknown result kind");
     }
   }
   const measurements = status.measurements ?? {
-    processingMs: Math.round(performance.now() - runStarted),
+    processingMs: terminalMs,
     peakMemoryBytes: 0,
     processedPixels: 0,
     testedCandidates: 0,
@@ -294,21 +365,23 @@ async function runOne({
       measurements.processedPixels,
     ssimulacra2: metrics.ssimulacra2,
     butteraugli: metrics.butteraugli,
-    normalizedPixelMatch,
-    losslessVerification,
-    alphaChecksPassed: status.state === "succeeded",
-    reproducedFalseNoSizeReductionCase: outcome !== "rejected",
+    ...validation,
+    reproducedFalseNoSizeReductionCase:
+      entry.id === "photo-ordinary-jpeg" &&
+      mode === "smart" &&
+      outcome === "download" &&
+      validation.qualityChecksPassed &&
+      effectiveDeliveredBytes <= inputBytes.byteLength * 0.95,
     cancellationObservedMs: null,
     inputDeletionLagMs: null,
     resultDeletionLagMs: null,
+    deletionVerified: false,
     costUsd: null,
   };
   baseRecord.costUsd = calculateCostUsd(model, baseRecord);
-  const deleteStarted = performance.now();
-  const deleted = await fetch(`${origin}/v1/jobs/${jobId}`, { method: "DELETE" });
-  if (deleted.status !== 204) throw new Error(`engine delete failed with ${deleted.status}`);
-  baseRecord.resultDeletionLagMs = Math.round(performance.now() - deleteStarted);
+  baseRecord.resultDeletionLagMs = await deleteBenchmarkJob(origin, jobId);
   baseRecord.inputDeletionLagMs = baseRecord.resultDeletionLagMs;
+  baseRecord.deletionVerified = true;
   return baseRecord;
 }
 
@@ -319,6 +392,7 @@ export async function benchmarkImageEngine({
   liveCostModelPath,
   scope,
 }) {
+  const verifier = await import("../apps/image-engine/dist/benchmark-verify.mjs");
   const manifestBytes = await readFile(manifestPath);
   const manifest = JSON.parse(manifestBytes);
   const model = validateLiveCostModelDocument(
@@ -356,7 +430,7 @@ export async function benchmarkImageEngine({
     if (!port) throw new Error("docker did not publish the engine port");
     const origin = `http://127.0.0.1:${port}`;
     await waitForHealth(origin);
-    const build = await (await fetch(`${origin}/v1/build`)).json();
+    const build = await (await request(`${origin}/v1/build`)).json();
     const valid = manifest.entries.filter((entry) => validClasses.has(entry.expected.class));
     const selected =
       scope === "pr"
@@ -397,6 +471,8 @@ export async function benchmarkImageEngine({
             build,
             model,
             metricImage,
+            engineImage,
+            verifier,
             temporaryRoot,
             coldStart: first,
           }),

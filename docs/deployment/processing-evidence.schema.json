@@ -27,7 +27,6 @@
       "additionalProperties": false,
       "required": [
         "fullCorpusBenchmark",
-        "competitorComparison",
         "blindedHumanReview",
         "commercialReview",
         "privacyReview",

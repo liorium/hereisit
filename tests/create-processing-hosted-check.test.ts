@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,7 +63,10 @@ function documentFor(reportName: keyof typeof hostedReviewSchemas, sourceSha256:
 }
 
 describe("exact-main hosted processing checks", () => {
-  it("seals genuine strict reports without restamping their identity", async () => {
+  it.each([
+    true,
+    false,
+  ])("seals genuine strict reports with competitor comparison %s", async (includeComparison) => {
     const root = await mkdtemp(join(tmpdir(), "hereisit-hosted-check-"));
     roots.push(root);
     const source = join(root, "source.tar");
@@ -76,6 +79,7 @@ describe("exact-main hosted processing checks", () => {
     for (const reportName of Object.keys(hostedReviewSchemas) as Array<
       keyof typeof hostedReviewSchemas
     >) {
+      if (!includeComparison && reportName === "competitorComparison") continue;
       await writeFile(
         join(input, `${reportName}.json`),
         JSON.stringify(documentFor(reportName, sourceSha256)),
@@ -91,6 +95,12 @@ describe("exact-main hosted processing checks", () => {
     });
 
     for (const reportName of Object.keys(hostedReviewSchemas)) {
+      if (!includeComparison && reportName === "competitorComparison") {
+        await expect(readFile(join(output, `${reportName}.json`))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+        continue;
+      }
       const receipt = JSON.parse(await readFile(join(output, `${reportName}.json`), "utf8"));
       expect(receipt.document).toEqual(documentFor(reportName, sourceSha256));
       expect(receipt).toMatchObject({
@@ -136,6 +146,51 @@ describe("exact-main hosted processing checks", () => {
         checkRunId: 42,
       }),
     ).rejects.toThrow(/field|visual|missing/i);
+  });
+
+  it.each([
+    "invalid-json",
+    "invalid-review",
+    "directory",
+    "dangling-symlink",
+  ])("rejects a supplied competitor comparison that is %s", async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), "hereisit-hosted-optional-"));
+    roots.push(root);
+    const source = join(root, "source.tar");
+    const input = join(root, "reports");
+    const sourceBytes = Buffer.from("exact archived source");
+    await writeFile(source, sourceBytes);
+    await mkdir(input);
+    const sourceSha256 = sha256Bytes(sourceBytes);
+    for (const name of Object.keys(hostedReviewSchemas) as Array<
+      keyof typeof hostedReviewSchemas
+    >) {
+      if (name === "competitorComparison") continue;
+      await writeFile(join(input, `${name}.json`), JSON.stringify(documentFor(name, sourceSha256)));
+    }
+    const path = join(input, "competitorComparison.json");
+    if (kind === "directory") await mkdir(path);
+    else if (kind === "dangling-symlink") await symlink(join(root, "missing"), path);
+    else
+      await writeFile(
+        path,
+        kind === "invalid-json"
+          ? "{"
+          : JSON.stringify({
+              ...documentFor("competitorComparison", sourceSha256),
+              extra: true,
+            }),
+      );
+    await expect(
+      createProcessingHostedCheck({
+        source,
+        input,
+        output: join(root, "out"),
+        gitSha,
+        checkRunId: 42,
+      }),
+    ).rejects.toThrow(/competitorComparison/);
+    await expect(readFile(join(root, "out", "fullCorpusBenchmark.json"))).rejects.toThrow();
   });
 
   it("fails closed without manufacturing a missing hosted review", async () => {

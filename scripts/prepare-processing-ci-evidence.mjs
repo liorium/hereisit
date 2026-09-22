@@ -1,7 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { writeProcessingEvidenceBundle } from "./create-processing-evidence-bundle.mjs";
+import {
+  processingEvidenceReportNames,
+  writeProcessingEvidenceBundle,
+} from "./create-processing-evidence-bundle.mjs";
 import { validateHostedReviewDocument } from "./create-processing-hosted-check.mjs";
 import {
   assertExactKeys,
@@ -11,14 +14,6 @@ import {
 } from "./image-lab-common.mjs";
 import { validateProcessingCandidate } from "./read-processing-candidate.mjs";
 
-const reportNames = [
-  "fullCorpusBenchmark",
-  "competitorComparison",
-  "blindedHumanReview",
-  "commercialReview",
-  "privacyReview",
-  "deviceMatrix",
-];
 export function validateHostedReviewReceipt(value, { name, gitSha, sourceSha256 }) {
   const receipt = assertObject(value, `${name} hosted review receipt`);
   assertExactKeys(
@@ -86,21 +81,25 @@ export async function prepareProcessingCiEvidence({
     candidate.gitSha !== gitSha
   )
     throw new TypeError("candidate is not exact current @3 release");
-  const reports = Object.fromEntries(
-    await Promise.all(
-      reportNames.map(async (name) => {
-        let receipt;
-        try {
-          receipt = JSON.parse(
-            await readFile(join(resolve(hostedCheckRoot), `${name}.json`), "utf8"),
-          );
-        } catch {
-          throw new TypeError(`${name} exact hosted review evidence is missing or invalid`);
-        }
-        return [name, validateHostedReviewReceipt(receipt, { name, gitSha, sourceSha256 })];
-      }),
-    ),
-  );
+  const reports = {};
+  for (const name of processingEvidenceReportNames) {
+    const path = join(resolve(hostedCheckRoot), `${name}.json`);
+    if (name === "competitorComparison") {
+      try {
+        await lstat(path);
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw new TypeError(`${name} exact hosted review evidence is missing or invalid`);
+      }
+    }
+    let receipt;
+    try {
+      receipt = JSON.parse(await readFile(path, "utf8"));
+    } catch {
+      throw new TypeError(`${name} exact hosted review evidence is missing or invalid`);
+    }
+    reports[name] = validateHostedReviewReceipt(receipt, { name, gitSha, sourceSha256 });
+  }
   validateHostedImageCandidateBinding(reports, candidate);
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.valueOf() + 24 * 60 * 60 * 1000).toISOString();
