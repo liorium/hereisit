@@ -180,7 +180,42 @@ export async function inspectProcessingCostProviders({
       containerFetch.httpStatus,
     ),
   ]);
-  return { targetHourKey: state.targetHourKey, logpush, analytics, container };
+  const result = { targetHourKey: state.targetHourKey, logpush, analytics, container };
+  if (analytics.failure === "sampled") {
+    // Read-only A/B diagnosis: retain the original failure and never use these results to seal costs.
+    const hourStart = new Date(state.targetHourKey * 3_600_000)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ");
+    result.analyticsQueryComparison = {};
+    for (const [name, filter] of [
+      ["indexed", "index1 = 'production:usage-v1'"],
+      [
+        "indexedSinceHour",
+        `index1 = 'production:usage-v1' AND timestamp >= toDateTime('${hourStart}')`,
+      ],
+    ]) {
+      const diagnosticFetch = trackedFetch((url, init) =>
+        fetchImpl(url, { ...init, body: init.body.replace("WHERE ", `WHERE ${filter} AND `) }),
+      );
+      // No upper timestamp bound: delayed outbox writes still belong to their original event hour.
+      result.analyticsQueryComparison[name] = await projected(
+        queryAnalyticsHour(diagnosticFetch.fetch, {
+          accountId,
+          token: analyticsReadToken,
+          dataset,
+          environment: "production",
+          hourKey: state.targetHourKey,
+        }),
+        (value) => ({
+          handlerInvocationCount: value.handlerInvocationCount,
+          groupCount: value.groups.length,
+        }),
+        diagnosticFetch.httpStatus,
+      );
+    }
+  }
+  return result;
 }
 
 export async function runProcessingCostProviderInspectionCli(
