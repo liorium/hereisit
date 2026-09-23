@@ -24,6 +24,11 @@ Attestation observation and retirement timestamps are not invocation validity in
 Deploy through the normal release workflow, which starts a release-bound accounting epoch. Do not
 hot-patch an old epoch: its verified Analytics-based snapshots use different write/read accounting.
 
+Each import tick scans up to 64 pages while replaying at most 128 bodies. Previously parsed objects
+strictly before the target hour need only an unchanged ETag/size check; target/future and unknown
+objects still require full body validation. Partial scans never count as complete observations. This
+avoids repeatedly replaying the historical backlog, but is not an unbounded stale-epoch catch-up path.
+
 Configured cost ceilings constrain release estimates and admission configuration. They are not a
 Cloudflare invoice cap: a live budget-overrun evaluator is not currently wired into the runtime.
 

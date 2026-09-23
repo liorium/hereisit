@@ -98,6 +98,7 @@ describe("private R2 usage-log importer", () => {
       kind: "complete",
       importedObjects: 1,
       replayedObjects: 0,
+      metadataRowsRead: 0,
     });
 
     expect(deps.bucket.list).toHaveBeenCalledWith({ prefix: "logs/", limit: 64 });
@@ -172,6 +173,7 @@ describe("private R2 usage-log importer", () => {
       kind: "complete",
       importedObjects: 0,
       replayedObjects: 0,
+      metadataRowsRead: 0,
     });
     expect(deps.bucket.get).not.toHaveBeenCalled();
     expect(deps.openCircuit).not.toHaveBeenCalled();
@@ -190,6 +192,7 @@ describe("private R2 usage-log importer", () => {
       kind: "failed-closed",
       importedObjects: 0,
       replayedObjects: 0,
+      metadataRowsRead: 0,
     });
     expect(deps.bucket.get).not.toHaveBeenCalled();
     expect(deps.openCircuit).toHaveBeenCalledWith(
