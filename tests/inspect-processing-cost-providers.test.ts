@@ -35,6 +35,50 @@ function workerVersion(providerUsageSchemaSha256: string) {
 }
 
 describe("processing cost provider inspection", () => {
+  it("compares narrower queries after sampling without accepting estimates or leaking groups", async () => {
+    const queries: string[] = [];
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion(await providerUsageContractSha256()),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "logpush-token",
+      fetchImpl: async (input, init) => {
+        if (!String(input).endsWith("/analytics_engine/sql")) throw new Error("private");
+        const query = String(init?.body);
+        queries.push(query);
+        const interval = query.includes("timestamp >=") ? 1 : 10;
+        return Response.json({
+          meta: [],
+          rows: 1,
+          data: [
+            {
+              event_type: "fetch",
+              entrypoint: "default",
+              version_id: "123e4567-e89b-42d3-a456-426614174000",
+              release_report_sha256: "a".repeat(64),
+              point_count: 3,
+              minimum_sample_interval: interval,
+              maximum_sample_interval: interval,
+            },
+          ],
+        });
+      },
+    });
+    expect(result.analytics).toEqual({ reachable: false, httpStatus: 200, failure: "sampled" });
+    expect(result.analyticsQueryComparison).toEqual({
+      indexed: { reachable: false, httpStatus: 200, failure: "sampled" },
+      indexedSinceHour: { reachable: true, handlerInvocationCount: 3, groupCount: 1 },
+    });
+    expect(queries).toHaveLength(3);
+    expect(queries[1]).toContain("index1 = 'production:usage-v1'");
+    expect(queries[1]).not.toContain("timestamp >=");
+    expect(queries[2]).toContain("index1 = 'production:usage-v1'");
+    expect(queries[2]).toContain("timestamp >= toDateTime('2026-08-11 23:00:00')");
+    expect(queries[2]).not.toMatch(/timestamp\s*</);
+    expect(JSON.stringify(result)).not.toMatch(/123e4567|aaaaaa|analytics-token|private/);
+  });
+
   it.each([
     [
       "sub-unit usage",
