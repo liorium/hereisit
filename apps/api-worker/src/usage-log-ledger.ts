@@ -9,10 +9,19 @@ const hourSchema = z
     invocationCount: nonnegativeInteger,
     workerCpuMs: nonnegativeInteger,
     handlerInvocationCount: nonnegativeInteger,
+    handlerVersionIds: z
+      .array(z.string().uuid())
+      .max(128)
+      .refine(
+        (ids) => ids.every((id, index) => index === 0 || id > (ids[index - 1] ?? "")),
+        "Handler versions must be unique and sorted.",
+      ),
     payloadSha256: hashSchema,
   })
   .strict()
-  .refine((hour) => hour.handlerInvocationCount <= hour.invocationCount);
+  .refine((hour) => hour.handlerInvocationCount <= hour.invocationCount)
+  .refine((hour) => (hour.handlerInvocationCount === 0) === (hour.handlerVersionIds.length === 0))
+  .refine((hour) => hour.handlerVersionIds.length <= hour.handlerInvocationCount);
 const inputSchema = z
   .object({
     objectKey: z
@@ -77,6 +86,7 @@ const storedHourSchema = z
     worker_cpu_ms: nonnegativeInteger,
     subset_invocation_count: nonnegativeInteger,
     payload_sha256: hashSchema,
+    handler_version_ids: z.string().max(5_000).nullable(),
   })
   .strict();
 
@@ -104,6 +114,7 @@ function hourJson(parsed: ParsedTraceEvents): string {
       invocationCount: hour.invocationCount,
       workerCpuMs: hour.workerCpuMs,
       handlerInvocationCount: hour.handlerInvocationCount,
+      handlerVersionIds: hour.handlerVersionIds,
       payloadSha256: hour.payloadSha256,
     })),
   );
@@ -158,21 +169,28 @@ export async function recordParsedUsageLog(
       .prepare(
         `INSERT INTO usage_log_object_hours (
            object_key, hour_key, invocation_count, worker_cpu_ms,
-           subset_invocation_count, payload_sha256
+           subset_invocation_count, payload_sha256, handler_version_ids
          )
          SELECT ?,
                 json_extract(value, '$.hourKey'),
                 json_extract(value, '$.invocationCount'),
                 json_extract(value, '$.workerCpuMs'),
                 json_extract(value, '$.handlerInvocationCount'),
-                json_extract(value, '$.payloadSha256')
+                json_extract(value, '$.payloadSha256'),
+                json_extract(value, '$.handlerVersionIds')
          FROM json_each(?)
          WHERE EXISTS (
            SELECT 1 FROM usage_log_objects
            WHERE object_key = ? AND etag = ? AND byte_size = ?
              AND (parsed_sha256 IS NULL OR parsed_sha256 = ?)
          )
-         ON CONFLICT(object_key, hour_key) DO NOTHING`,
+         ON CONFLICT(object_key, hour_key) DO UPDATE SET
+           handler_version_ids = excluded.handler_version_ids
+         WHERE usage_log_object_hours.handler_version_ids IS NULL
+           AND usage_log_object_hours.invocation_count = excluded.invocation_count
+           AND usage_log_object_hours.worker_cpu_ms = excluded.worker_cpu_ms
+           AND usage_log_object_hours.subset_invocation_count = excluded.subset_invocation_count
+           AND usage_log_object_hours.payload_sha256 = excluded.payload_sha256`,
       )
       .bind(
         input.objectKey,
@@ -189,7 +207,8 @@ export async function recordParsedUsageLog(
                   json_extract(value, '$.invocationCount') AS invocation_count,
                   json_extract(value, '$.workerCpuMs') AS worker_cpu_ms,
                   json_extract(value, '$.handlerInvocationCount') AS subset_invocation_count,
-                  json_extract(value, '$.payloadSha256') AS payload_sha256
+                  json_extract(value, '$.payloadSha256') AS payload_sha256,
+                  json_extract(value, '$.handlerVersionIds') AS handler_version_ids
            FROM json_each(?)
          )
          UPDATE rollout_control
@@ -210,6 +229,8 @@ export async function recordParsedUsageLog(
                   OR stored.worker_cpu_ms <> incoming.worker_cpu_ms
                   OR stored.subset_invocation_count <> incoming.subset_invocation_count
                   OR stored.payload_sha256 <> incoming.payload_sha256
+                  OR stored.handler_version_ids IS NULL
+                  OR stored.handler_version_ids <> incoming.handler_version_ids
              )
              OR EXISTS (
                SELECT 1 FROM usage_log_object_hours AS stored
@@ -264,7 +285,7 @@ export async function recordParsedUsageLog(
     session
       .prepare(
         `SELECT hour_key, invocation_count, worker_cpu_ms,
-                subset_invocation_count, payload_sha256
+                subset_invocation_count, payload_sha256, handler_version_ids
          FROM usage_log_object_hours
          WHERE object_key = ?
          ORDER BY hour_key`,
@@ -287,7 +308,8 @@ export async function recordParsedUsageLog(
         stored.invocation_count === expected.invocationCount &&
         stored.worker_cpu_ms === expected.workerCpuMs &&
         stored.subset_invocation_count === expected.handlerInvocationCount &&
-        stored.payload_sha256 === expected.payloadSha256
+        stored.payload_sha256 === expected.payloadSha256 &&
+        stored.handler_version_ids === JSON.stringify(expected.handlerVersionIds)
       );
     });
   const objectMatches =

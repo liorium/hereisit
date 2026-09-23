@@ -1,21 +1,9 @@
 import { z } from "zod";
-import type { AnalyticsHourResult } from "./provider-usage";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const nonnegativeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const epochSchema = z.string().regex(/^[0-9a-f]{32}$/);
-const analyticsGroupSchema = z
-  .object({
-    event_type: z.enum(["fetch", "queue", "scheduled"]),
-    entrypoint: z.enum(["default", "queue", "scheduled"]),
-    version_id: z.string().regex(UUID_PATTERN),
-    release_report_sha256: hashSchema,
-    point_count: nonnegativeInteger,
-    minimum_sample_interval: z.literal(1),
-    maximum_sample_interval: z.literal(1),
-  })
-  .strict();
 const inputSchema = z
   .object({
     hourKey: nonnegativeInteger,
@@ -26,46 +14,13 @@ const inputSchema = z
         lastCompleteMilliseconds: nonnegativeInteger.nullable(),
       })
       .strict(),
-    analytics: z
-      .object({
-        handlerInvocationCount: nonnegativeInteger,
-        sampled: z.literal(false),
-        groups: z.array(analyticsGroupSchema).max(128),
-      })
-      .strict(),
     liveCostModelSha256: hashSchema,
     providerUsageSchemaSha256: hashSchema,
     releaseReportSha256: hashSchema,
     expectedWorkerModuleSha256: hashSchema,
     expectedGeneratedConfigSha256: hashSchema,
   })
-  .strict()
-  .superRefine((input, context) => {
-    let groupCount = 0;
-    const groups = new Set<string>();
-    for (const group of input.analytics.groups) {
-      groupCount += group.point_count;
-      const expectedEntrypoint = {
-        fetch: "default",
-        queue: "queue",
-        scheduled: "scheduled",
-      }[group.event_type];
-      if (group.entrypoint !== expectedEntrypoint) {
-        context.addIssue({ code: "custom", message: "Analytics entrypoint is invalid." });
-      }
-      const groupKey = `${group.event_type}:${group.entrypoint}:${group.version_id}:${group.release_report_sha256}`;
-      if (groups.has(groupKey)) {
-        context.addIssue({ code: "custom", message: "Analytics groups must be unique." });
-      }
-      groups.add(groupKey);
-    }
-    if (
-      !Number.isSafeInteger(groupCount) ||
-      groupCount !== input.analytics.handlerInvocationCount
-    ) {
-      context.addIssue({ code: "custom", message: "Analytics group counts must reconcile." });
-    }
-  });
+  .strict();
 
 const controlSchema = z
   .object({
@@ -79,6 +34,7 @@ const usageAggregateSchema = z
     object_bytes: nonnegativeInteger,
     matching_observation_count: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     current_object_count: nonnegativeInteger,
+    versioned_object_count: nonnegativeInteger,
     invocation_count: nonnegativeInteger,
     worker_cpu_ms: nonnegativeInteger,
     subset_invocation_count: nonnegativeInteger,
@@ -87,12 +43,12 @@ const usageAggregateSchema = z
 const attestationSchema = z
   .object({
     requested_version_id: z.string().regex(UUID_PATTERN),
+    kind: z.enum(["bootstrap", "secret-intermediate", "active", "retired"]).nullable(),
     version_id: z.string().regex(UUID_PATTERN).nullable(),
     worker_module_sha256: hashSchema.nullable(),
     generated_config_sha256: hashSchema.nullable(),
     release_report_sha256: hashSchema.nullable(),
     observed_at: nonnegativeInteger.nullable(),
-    retired_at: nonnegativeInteger.nullable(),
   })
   .strict();
 const storedCostSchema = z
@@ -119,7 +75,6 @@ export interface ReconcileWorkerProviderHourInput {
     readonly complete: boolean;
     readonly lastCompleteMilliseconds: number | null;
   };
-  readonly analytics: AnalyticsHourResult;
   readonly liveCostModelSha256: string;
   readonly providerUsageSchemaSha256: string;
   readonly releaseReportSha256: string;
@@ -170,30 +125,14 @@ async function openProviderCircuit(
   return { kind: "conflict", reason, circuitOpen: true };
 }
 
-function uniqueVersions(input: z.infer<typeof inputSchema>): string {
-  return JSON.stringify(
-    [...new Map(input.analytics.groups.map((group) => [group.version_id, group])).values()].map(
-      (group) => ({
-        versionId: group.version_id,
-        releaseReportSha256: group.release_report_sha256,
-      }),
-    ),
-  );
-}
-
 export async function reconcileWorkerProviderHour(
   database: D1Database,
   rawInput: ReconcileWorkerProviderHourInput,
 ): Promise<ReconcileWorkerProviderHourResult> {
   const input = inputSchema.parse(rawInput);
-  const hourStart = input.hourKey * 3_600_000;
   const hourEnd = (input.hourKey + 1) * 3_600_000;
   const providerReadyAt = hourEnd + 30 * 60_000;
-  if (
-    !Number.isSafeInteger(hourStart) ||
-    !Number.isSafeInteger(hourEnd) ||
-    !Number.isSafeInteger(providerReadyAt)
-  ) {
+  if (!Number.isSafeInteger(hourEnd) || !Number.isSafeInteger(providerReadyAt)) {
     throw new RangeError("Provider usage hour exceeded its timestamp bound.");
   }
   const session = database.withSession("first-primary");
@@ -224,6 +163,10 @@ export async function reconcileWorkerProviderHour(
               observation.object_bytes,
               observation.matching_observation_count,
               COUNT(hours.object_key) AS current_object_count,
+              COUNT(CASE WHEN
+                (hours.subset_invocation_count = 0 AND json_array_length(hours.handler_version_ids) = 0)
+                OR json_array_length(hours.handler_version_ids) BETWEEN 1 AND hours.subset_invocation_count
+                THEN 1 END) AS versioned_object_count,
               COALESCE(SUM(hours.invocation_count), 0) AS invocation_count,
               COALESCE(SUM(hours.worker_cpu_ms), 0) AS worker_cpu_ms,
               COALESCE(SUM(hours.subset_invocation_count), 0) AS subset_invocation_count
@@ -242,47 +185,44 @@ export async function reconcileWorkerProviderHour(
     };
   }
   const aggregate = usageAggregateSchema.parse(aggregateRaw);
-  if (aggregate.matching_observation_count < 2) {
+  if (
+    aggregate.matching_observation_count < 2 ||
+    aggregate.versioned_object_count !== aggregate.current_object_count
+  ) {
     return {
       kind: "incomplete",
       reason: "usage-log-set",
       circuitOpen: control.circuit_open === 1,
     };
   }
-  if (
-    aggregate.current_object_count !== aggregate.object_count ||
-    aggregate.subset_invocation_count !== input.analytics.handlerInvocationCount
-  ) {
+  if (aggregate.current_object_count !== aggregate.object_count) {
     return openProviderCircuit(database, input.observedAt, "PROVIDER_USAGE_MISMATCH");
   }
-  if (
-    input.analytics.groups.some(
-      (group) => group.release_report_sha256 !== input.releaseReportSha256,
-    )
-  ) {
-    return openProviderCircuit(database, input.observedAt, "PROVIDER_USAGE_UNATTESTED_VERSION");
-  }
-
-  const versionsJson = uniqueVersions(input);
+  // Each handler writes usage telemetry and may also write one product-analytics point.
+  // This is a conservative write bound from original logs, never a sampled estimate.
+  const analyticsDataPoints = aggregate.subset_invocation_count * 2;
+  if (!Number.isSafeInteger(analyticsDataPoints))
+    throw new RangeError("Analytics write bound overflow.");
   const attestationResult = await session
     .prepare(
       `WITH requested AS (
-         SELECT DISTINCT json_extract(value, '$.versionId') AS requested_version_id
-         FROM json_each(?)
+         SELECT DISTINCT version.value AS requested_version_id
+         FROM usage_log_object_hours AS hours, json_each(hours.handler_version_ids) AS version
+         WHERE hours.hour_key = ?
        )
        SELECT requested.requested_version_id,
+              attestation.kind,
               attestation.version_id,
               attestation.worker_module_sha256,
               attestation.generated_config_sha256,
               attestation.release_report_sha256,
-              attestation.observed_at,
-              attestation.retired_at
+              attestation.observed_at
        FROM requested
        LEFT JOIN worker_version_attestations AS attestation
          ON attestation.version_id = requested.requested_version_id
-       ORDER BY requested.requested_version_id`,
+       ORDER BY requested.requested_version_id LIMIT 129`,
     )
-    .bind(versionsJson)
+    .bind(input.hourKey)
     .all();
   const attestations = z.array(attestationSchema).max(128).parse(attestationResult.results);
   if (
@@ -290,15 +230,18 @@ export async function reconcileWorkerProviderHour(
       (attestation) =>
         attestation.version_id === null ||
         attestation.worker_module_sha256 !== input.expectedWorkerModuleSha256 ||
-        attestation.generated_config_sha256 !== input.expectedGeneratedConfigSha256 ||
+        (attestation.kind === "active" &&
+          attestation.generated_config_sha256 !== input.expectedGeneratedConfigSha256) ||
         attestation.release_report_sha256 !== input.releaseReportSha256 ||
         attestation.observed_at === null ||
-        attestation.observed_at > hourStart ||
-        (attestation.retired_at !== null && attestation.retired_at < hourEnd),
+        attestation.observed_at > input.observedAt,
     )
   ) {
     return openProviderCircuit(database, input.observedAt, "PROVIDER_USAGE_UNATTESTED_VERSION");
   }
+
+  // Billing includes every attested version used during promotion. verifiedAt/retiredAt are
+  // control-plane observation times, not invocation validity intervals or deployment authorization.
 
   const writes = await session.batch([
     session
@@ -327,7 +270,7 @@ export async function reconcileWorkerProviderHour(
              provider_worker_cpu_ms = ?,
              provider_worker_usage_complete = 1,
              analytics_engine_data_points = ?,
-             analytics_engine_read_queries = 1,
+             analytics_engine_read_queries = 0,
              analytics_engine_usage_complete = 1,
              provider_usage_complete = CASE
                WHEN provider_container_usage_complete = 1 THEN 1
@@ -347,7 +290,7 @@ export async function reconcileWorkerProviderHour(
                provider_worker_requests = ?
                AND provider_worker_cpu_ms = ?
                AND analytics_engine_data_points = ?
-               AND analytics_engine_read_queries = 1
+               AND analytics_engine_read_queries = 0
                AND workers_logpush_events = ?
                AND usage_log_objects = ?
                AND usage_log_bytes = ?
@@ -362,6 +305,12 @@ export async function reconcileWorkerProviderHour(
                AND (
                  SELECT COUNT(*) FROM usage_log_object_hours WHERE hour_key = ?
                ) = ?
+               AND (
+                 SELECT COUNT(*) FROM usage_log_object_hours WHERE hour_key = ? AND (
+                   (subset_invocation_count = 0 AND json_array_length(handler_version_ids) = 0)
+                   OR json_array_length(handler_version_ids) BETWEEN 1 AND subset_invocation_count
+                 )
+               ) = ?
                AND COALESCE((
                  SELECT SUM(invocation_count) FROM usage_log_object_hours WHERE hour_key = ?
                ), 0) = ?
@@ -374,22 +323,20 @@ export async function reconcileWorkerProviderHour(
            )
            AND NOT EXISTS (
              SELECT 1
-             FROM json_each(?) AS requested
+             FROM usage_log_object_hours AS hours, json_each(hours.handler_version_ids) AS requested
              LEFT JOIN worker_version_attestations AS attestation
-               ON attestation.version_id = json_extract(requested.value, '$.versionId')
-             WHERE attestation.version_id IS NULL
+               ON attestation.version_id = requested.value
+             WHERE hours.hour_key = ? AND (attestation.version_id IS NULL
                 OR attestation.worker_module_sha256 <> ?
-                OR attestation.generated_config_sha256 <> ?
-                OR attestation.release_report_sha256 <>
-                   json_extract(requested.value, '$.releaseReportSha256')
-                OR attestation.observed_at > ?
-                OR (attestation.retired_at IS NOT NULL AND attestation.retired_at < ?)
+                OR (attestation.kind = 'active' AND attestation.generated_config_sha256 <> ?)
+                OR attestation.release_report_sha256 <> ?
+                OR attestation.observed_at > ?)
            )`,
       )
       .bind(
         aggregate.invocation_count,
         aggregate.worker_cpu_ms,
-        input.analytics.handlerInvocationCount,
+        analyticsDataPoints,
         aggregate.invocation_count,
         aggregate.object_count,
         aggregate.object_bytes,
@@ -401,7 +348,7 @@ export async function reconcileWorkerProviderHour(
         input.releaseReportSha256,
         aggregate.invocation_count,
         aggregate.worker_cpu_ms,
-        input.analytics.handlerInvocationCount,
+        analyticsDataPoints,
         aggregate.invocation_count,
         aggregate.object_count,
         aggregate.object_bytes,
@@ -412,16 +359,18 @@ export async function reconcileWorkerProviderHour(
         input.hourKey,
         aggregate.object_count,
         input.hourKey,
+        aggregate.object_count,
+        input.hourKey,
         aggregate.invocation_count,
         input.hourKey,
         aggregate.worker_cpu_ms,
         input.hourKey,
-        input.analytics.handlerInvocationCount,
-        versionsJson,
+        aggregate.subset_invocation_count,
+        input.hourKey,
         input.expectedWorkerModuleSha256,
         input.expectedGeneratedConfigSha256,
-        hourStart,
-        hourEnd,
+        input.releaseReportSha256,
+        input.observedAt,
       ),
     session
       .prepare(
@@ -444,8 +393,8 @@ export async function reconcileWorkerProviderHour(
     stored.data.provider_worker_requests === aggregate.invocation_count &&
     stored.data.provider_worker_cpu_ms === aggregate.worker_cpu_ms &&
     stored.data.provider_worker_usage_complete === 1 &&
-    stored.data.analytics_engine_data_points === input.analytics.handlerInvocationCount &&
-    stored.data.analytics_engine_read_queries === 1 &&
+    stored.data.analytics_engine_data_points === analyticsDataPoints &&
+    stored.data.analytics_engine_read_queries === 0 &&
     stored.data.analytics_engine_usage_complete === 1 &&
     stored.data.workers_logpush_events === aggregate.invocation_count &&
     stored.data.usage_log_objects === aggregate.object_count &&
@@ -457,7 +406,7 @@ export async function reconcileWorkerProviderHour(
     kind: "verified",
     requestCount: aggregate.invocation_count,
     workerCpuMs: aggregate.worker_cpu_ms,
-    handlerInvocationCount: input.analytics.handlerInvocationCount,
+    handlerInvocationCount: aggregate.subset_invocation_count,
     objectCount: aggregate.object_count,
     objectBytes: aggregate.object_bytes,
     circuitOpen: control.circuit_open === 1,

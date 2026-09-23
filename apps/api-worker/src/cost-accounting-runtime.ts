@@ -5,7 +5,7 @@ import type { CostAccountingScheduleDependencies } from "./cost-accounting-sched
 import type { LiveCostModelV1 } from "./env";
 import { sealNextHourlyCost } from "./hourly-cost-sealer";
 import { prepareOperationalCounter } from "./operational-counters";
-import { checkLogpushHour, queryAnalyticsHour } from "./provider-usage";
+import { checkLogpushHour } from "./provider-usage";
 import { reconcileWorkerProviderHour } from "./provider-usage-reconciler";
 import { importUsageLogPage } from "./usage-log-importer";
 import { observeUsageLogHour } from "./usage-log-observer";
@@ -206,26 +206,16 @@ export function createCostAccountingRuntime(
       try {
         const attestation = await activeAttestation(env.DB, env.WORKER_VERSION.id);
         if (attestation === null) return "incomplete";
-        const [logpush, analytics] = await Promise.all([
-          checkLogpushHour(fetch, {
-            accountId: config.accountId,
-            token: env.LOGPUSH_STATUS_TOKEN,
-            jobId: config.logpushJobId,
-            hourKey,
-          }),
-          queryAnalyticsHour(fetch, {
-            accountId: config.accountId,
-            token: env.ANALYTICS_READ_TOKEN,
-            dataset: config.analyticsDatasetName,
-            environment: config.environment,
-            hourKey,
-          }),
-        ]);
+        const logpush = await checkLogpushHour(fetch, {
+          accountId: config.accountId,
+          token: env.LOGPUSH_STATUS_TOKEN,
+          jobId: config.logpushJobId,
+          hourKey,
+        });
         const result = await reconcileWorkerProviderHour(env.DB, {
           hourKey,
           observedAt: now,
           logpush,
-          analytics,
           liveCostModelSha256: config.liveCostModelSha256,
           providerUsageSchemaSha256: config.providerUsageSchemaSha256,
           releaseReportSha256: config.releaseReportSha256,

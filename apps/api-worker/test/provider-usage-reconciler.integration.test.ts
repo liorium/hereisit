@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AnalyticsHourResult } from "../src/provider-usage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  type CostAccountingRuntimeConfig,
+  createCostAccountingRuntime,
+} from "../src/cost-accounting-runtime";
 import { reconcileWorkerProviderHour } from "../src/provider-usage-reconciler";
 
 const accountingEpoch = "a".repeat(32);
@@ -14,27 +17,10 @@ const hourKey = 495_408;
 const hourStart = hourKey * 3_600_000;
 const observedAt = hourStart + 3_600_000 + 50 * 60_000;
 
-const analytics = (count = 3, id = versionId): AnalyticsHourResult => ({
-  handlerInvocationCount: count,
-  sampled: false,
-  groups: [
-    {
-      event_type: "fetch",
-      entrypoint: "default",
-      version_id: id,
-      release_report_sha256: releaseReportSha256,
-      point_count: count,
-      minimum_sample_interval: 1,
-      maximum_sample_interval: 1,
-    },
-  ],
-});
-
 const input = (overrides: Record<string, unknown> = {}) => ({
   hourKey,
   observedAt,
   logpush: { complete: true, lastCompleteMilliseconds: hourStart + 3_600_000 },
-  analytics: analytics(),
   liveCostModelSha256,
   providerUsageSchemaSha256,
   releaseReportSha256,
@@ -63,9 +49,9 @@ async function seedStableUsageHour(): Promise<void> {
     env.DB.prepare(
       `INSERT INTO usage_log_object_hours (
          object_key, hour_key, invocation_count, worker_cpu_ms,
-         subset_invocation_count, payload_sha256
-       ) VALUES (?, ?, 4, 17, 3, ?)`,
-    ).bind("logs/hour.ndjson.gz", hourKey, "2".repeat(64)),
+         subset_invocation_count, payload_sha256, handler_version_ids
+       ) VALUES (?, ?, 4, 17, 3, ?, ?)`,
+    ).bind("logs/hour.ndjson.gz", hourKey, "2".repeat(64), JSON.stringify([versionId])),
     env.DB.prepare(
       `INSERT INTO usage_log_hour_observations (
          accounting_epoch, hour_key, object_set_sha256, object_count, object_bytes,
@@ -99,6 +85,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM operational_cost_hourly"),
     env.DB.prepare("DELETE FROM usage_log_hour_observations"),
@@ -108,7 +95,58 @@ afterEach(async () => {
 });
 
 describe("Worker provider-hour reconciliation", () => {
-  it("records an immutable Worker provider snapshot only after all sources agree", async () => {
+  it("reconciles through the real scheduler runtime without querying sampled Analytics", async () => {
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = String(request);
+      urls.push(url);
+      if (!url.endsWith("/logpush/jobs/41")) throw new Error("Analytics is unavailable or sampled");
+      return Response.json({
+        success: true,
+        errors: [],
+        messages: [],
+        result: {
+          id: 41,
+          dataset: "workers_trace_events",
+          enabled: true,
+          last_complete: new Date(hourStart + 3_600_000).toISOString(),
+          last_error: null,
+          error_message: null,
+        },
+      });
+    });
+    const runtime = createCostAccountingRuntime(
+      {
+        ...env,
+        ANALYTICS_READ_TOKEN: "test-analytics-token",
+        LOGPUSH_STATUS_TOKEN: "test-logpush-token",
+        WORKER_VERSION: {
+          id: versionId,
+          tag: "test",
+          timestamp: new Date(hourStart - 1).toISOString(),
+        },
+      },
+      {
+        accountId: "a".repeat(32),
+        logpushJobId: 41,
+        containerApplicationId: versionId,
+        workerScriptName: "hereisit-processing-staging",
+        usageLogPrefix: "workers-trace-events/staging/",
+        analyticsDatasetName: "hereisit_processing_usage_staging",
+        environment: "staging",
+        liveCostModel: {} as CostAccountingRuntimeConfig["liveCostModel"],
+        liveCostModelSha256,
+        providerUsageSchemaSha256,
+        releaseReportSha256,
+      },
+    );
+    await expect(runtime.reconcileWorker(hourKey, observedAt)).resolves.toBe("verified");
+    expect(urls).toEqual([
+      `https://api.cloudflare.com/client/v4/accounts/${"a".repeat(32)}/logpush/jobs/41`,
+    ]);
+  });
+
+  it("uses exact original logs without Analytics availability and bounds both analytics writes", async () => {
     await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toEqual({
       kind: "verified",
       requestCount: 4,
@@ -135,8 +173,8 @@ describe("Worker provider-hour reconciliation", () => {
       provider_worker_requests: 4,
       provider_worker_cpu_ms: 17,
       provider_worker_usage_complete: 1,
-      analytics_engine_data_points: 3,
-      analytics_engine_read_queries: 1,
+      analytics_engine_data_points: 6,
+      analytics_engine_read_queries: 0,
       analytics_engine_usage_complete: 1,
       workers_logpush_events: 4,
       usage_log_objects: 1,
@@ -186,12 +224,7 @@ describe("Worker provider-hour reconciliation", () => {
       ).bind(accountingEpoch, hourKey, "4".repeat(64), observedAt - 10 * 60_000, observedAt),
     ]);
 
-    await expect(
-      reconcileWorkerProviderHour(
-        env.DB,
-        input({ analytics: { handlerInvocationCount: 0, sampled: false, groups: [] } }),
-      ),
-    ).resolves.toMatchObject({
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
       kind: "verified",
       requestCount: 0,
       workerCpuMs: 0,
@@ -238,28 +271,35 @@ describe("Worker provider-hour reconciliation", () => {
     });
   });
 
-  it("opens the circuit when Analytics and Trace handler counts disagree", async () => {
-    await expect(
-      reconcileWorkerProviderHour(env.DB, input({ analytics: analytics(2) })),
-    ).resolves.toMatchObject({ kind: "conflict", reason: "PROVIDER_USAGE_MISMATCH" });
+  it("opens the circuit when the observed and current log sets disagree", async () => {
+    await env.DB.prepare("UPDATE usage_log_hour_observations SET object_count = 2").run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "conflict",
+      reason: "PROVIDER_USAGE_MISMATCH",
+    });
     await expect(
       env.DB.prepare("SELECT circuit_open, reason FROM rollout_control WHERE id = 1").first(),
     ).resolves.toEqual({ circuit_open: 1, reason: "PROVIDER_USAGE_MISMATCH" });
   });
 
-  it("opens the circuit for an unattested Analytics Worker version", async () => {
+  it("opens the circuit for an unattested version in the original logs", async () => {
     const unknownVersion = "123e4567-e89b-42d3-a456-426614174001";
-    await expect(
-      reconcileWorkerProviderHour(env.DB, input({ analytics: analytics(3, unknownVersion) })),
-    ).resolves.toMatchObject({ kind: "conflict", reason: "PROVIDER_USAGE_UNATTESTED_VERSION" });
+    await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = ?")
+      .bind(JSON.stringify([unknownVersion]))
+      .run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "conflict",
+      reason: "PROVIDER_USAGE_UNATTESTED_VERSION",
+    });
   });
 
   it("never rewrites an already verified provider snapshot", async () => {
     await reconcileWorkerProviderHour(env.DB, input());
-
-    await expect(
-      reconcileWorkerProviderHour(env.DB, input({ analytics: analytics(2) })),
-    ).resolves.toMatchObject({ kind: "conflict", reason: "PROVIDER_USAGE_MISMATCH" });
+    await env.DB.prepare("UPDATE usage_log_object_hours SET worker_cpu_ms = 18").run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "conflict",
+      reason: "PROVIDER_USAGE_RACE",
+    });
     await expect(
       env.DB.prepare(
         `SELECT provider_worker_requests, provider_worker_cpu_ms, analytics_engine_data_points
@@ -270,7 +310,70 @@ describe("Worker provider-hour reconciliation", () => {
     ).resolves.toEqual({
       provider_worker_requests: 4,
       provider_worker_cpu_ms: 17,
-      analytics_engine_data_points: 3,
+      analytics_engine_data_points: 6,
+    });
+  });
+
+  it("waits for legacy provenance to be replayed instead of treating it as zero usage", async () => {
+    await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = NULL").run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "incomplete",
+      reason: "usage-log-set",
+      circuitOpen: false,
+    });
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM operational_cost_hourly").first("count"),
+    ).toBe(0);
+  });
+
+  it("does not accept empty provenance for a nonempty handler hour", async () => {
+    await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = '[]'").run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "incomplete",
+      reason: "usage-log-set",
+    });
+  });
+
+  it("accounts for attested canary and public versions without resetting a transition hour", async () => {
+    const publicVersion = "123e4567-e89b-42d3-a456-426614174001";
+    await env.DB.prepare(
+      "UPDATE worker_version_attestations SET kind = 'retired', public_admission_allowed = 0, generated_config_sha256 = ?, retired_at = ?",
+    )
+      .bind("1".repeat(64), hourStart + 1_800_000)
+      .run();
+    await seedAttestation(publicVersion);
+    // Verification can finish after the event hour; it is not the deployment start time.
+    await env.DB.prepare(
+      "UPDATE worker_version_attestations SET observed_at = ? WHERE version_id = ?",
+    )
+      .bind(hourStart + 3_600_002, publicVersion)
+      .run();
+    await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = ?")
+      .bind(JSON.stringify([versionId, publicVersion]))
+      .run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "verified",
+      requestCount: 4,
+      handlerInvocationCount: 3,
+    });
+    expect(
+      await env.DB.prepare("SELECT cost_accounting_epoch FROM rollout_control").first(
+        "cost_accounting_epoch",
+      ),
+    ).toBe(accountingEpoch);
+  });
+
+  it.each([
+    "worker_module_sha256",
+    "release_report_sha256",
+    "generated_config_sha256",
+  ])("rejects a mismatched active %s", async (column) => {
+    await env.DB.prepare(`UPDATE worker_version_attestations SET ${column} = ?`)
+      .bind("0".repeat(64))
+      .run();
+    await expect(reconcileWorkerProviderHour(env.DB, input())).resolves.toMatchObject({
+      kind: "conflict",
+      reason: "PROVIDER_USAGE_UNATTESTED_VERSION",
     });
   });
 });
