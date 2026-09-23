@@ -156,7 +156,7 @@ describe("Worker control-plane bindings and routes", () => {
     const migration = await env.DB.prepare(
       "SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1",
     ).first<{ name: string }>();
-    expect(migration?.name).toBe("0009_container_activity_identity.sql");
+    expect(migration?.name).toBe("0010_usage_log_versions.sql");
 
     for (const [table, column] of primaryKeyColumns) {
       const schema = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<D1TableColumn>();

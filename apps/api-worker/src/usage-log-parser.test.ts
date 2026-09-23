@@ -71,6 +71,7 @@ describe("Workers Trace Events usage-log parser", () => {
           invocationCount: 3,
           workerCpuMs: 14,
           handlerInvocationCount: 1,
+          handlerVersionIds: [versionId],
         },
       ],
       decompressedBytes: new TextEncoder().encode(input).byteLength,
@@ -84,7 +85,9 @@ describe("Workers Trace Events usage-log parser", () => {
 
     await expect(parseTraceEventNdjson(chunked(input, 7), options)).resolves.toMatchObject({
       invocationCount: 2,
-      hours: [{ invocationCount: 2, workerCpuMs: 10, handlerInvocationCount: 0 }],
+      hours: [
+        { invocationCount: 2, workerCpuMs: 10, handlerInvocationCount: 0, handlerVersionIds: [] },
+      ],
     });
     await expect(
       parseTraceEventNdjson(
@@ -113,6 +116,40 @@ describe("Workers Trace Events usage-log parser", () => {
     await expect(
       parseTraceEventNdjson(chunked(`${JSON.stringify(value)}\n`, 64), options),
     ).resolves.toMatchObject({ invocationCount: 1 });
+  });
+
+  it("retains sorted unique handler versions from original records, including rare versions", async () => {
+    const rare = "550e8400-e29b-41d4-a716-446655440001";
+    const input = [
+      record({ ScriptVersion: { ID: rare, Message: null, Tag: null } }),
+      record(),
+      record(),
+      record({ EventTimestampMs: 7_200_000, Entrypoint: "ImageEngineContainer" }),
+    ]
+      .map((value) => JSON.stringify(value))
+      .join("\n");
+    const parsed = await parseTraceEventNdjson(chunked(input, 17), options);
+    expect(parsed.hours).toMatchObject([
+      { hourKey: 1, handlerInvocationCount: 3, handlerVersionIds: [versionId, rare] },
+      { hourKey: 2, handlerInvocationCount: 0, handlerVersionIds: [] },
+    ]);
+  });
+
+  it("bounds distinct handler versions per hour", async () => {
+    const input = Array.from({ length: 129 }, (_, index) =>
+      JSON.stringify(
+        record({
+          ScriptVersion: {
+            ID: `550e8400-e29b-41d4-a716-${index.toString(16).padStart(12, "0")}`,
+            Message: null,
+            Tag: null,
+          },
+        }),
+      ),
+    ).join("\n");
+    await expect(parseTraceEventNdjson(chunked(input, 1024), options)).rejects.toThrow(
+      /too many Worker versions/,
+    );
   });
 
   it("cancels after a line crosses the 4 KiB bound", async () => {

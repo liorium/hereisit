@@ -5,7 +5,7 @@ import type { CostAccountingScheduleDependencies } from "./cost-accounting-sched
 import type { LiveCostModelV1 } from "./env";
 import { sealNextHourlyCost } from "./hourly-cost-sealer";
 import { prepareOperationalCounter } from "./operational-counters";
-import { checkLogpushHour, queryAnalyticsHour } from "./provider-usage";
+import { checkLogpushHour } from "./provider-usage";
 import { reconcileWorkerProviderHour } from "./provider-usage-reconciler";
 import { importUsageLogPage } from "./usage-log-importer";
 import { observeUsageLogHour } from "./usage-log-observer";
@@ -138,18 +138,19 @@ export function createCostAccountingRuntime(
   env: CostAccountingRuntimeEnvironment,
   config: CostAccountingRuntimeConfig,
 ): CostAccountingScheduleDependencies {
+  const targetHour = async () => {
+    const row = targetRowSchema.parse(
+      await env.DB.withSession("first-primary")
+        .prepare(
+          "SELECT cost_accounting_started_at, last_sealed_hour_key FROM rollout_control WHERE id = 1",
+        )
+        .first(),
+    );
+    const firstHour = Math.ceil(row.cost_accounting_started_at / 3_600_000);
+    return row.last_sealed_hour_key === null ? firstHour : row.last_sealed_hour_key + 1;
+  };
   return {
-    targetHour: async () => {
-      const row = targetRowSchema.parse(
-        await env.DB.withSession("first-primary")
-          .prepare(
-            "SELECT cost_accounting_started_at, last_sealed_hour_key FROM rollout_control WHERE id = 1",
-          )
-          .first(),
-      );
-      const firstHour = Math.ceil(row.cost_accounting_started_at / 3_600_000);
-      return row.last_sealed_hour_key === null ? firstHour : row.last_sealed_hour_key + 1;
-    },
+    targetHour,
     importUsageLogs: async (now) => {
       const session = env.DB.withSession("first-primary");
       const cursor = cursorRowSchema.safeParse(
@@ -157,25 +158,38 @@ export function createCostAccountingRuntime(
           .prepare("SELECT cursor FROM maintenance_cursors WHERE task = 'usage-log-import'")
           .first(),
       );
-      const result = await importUsageLogPage(
-        {
-          bucket: env.USAGE_LOGS,
-          database: env.DB,
-          parserOptions: {
-            scriptName: config.workerScriptName,
-            allowedEntrypoints: PROCESSING_USAGE_LOG_ENTRYPOINTS,
-            createDigest: createCloudflareSha256Digest,
+      let nextCursor = cursor.success ? cursor.data.cursor : null;
+      let bodyReads = 0;
+      let listCalls = 0;
+      let metadataRowsRead = 0;
+      const minimumHourKey = await targetHour();
+      // ponytail: scan at most 64 pages and replay 128 bodies per tick; queue imports if this ceiling is reached routinely.
+      for (; listCalls < 64 && bodyReads < 128; ) {
+        listCalls += 1;
+        const result = await importUsageLogPage(
+          {
+            bucket: env.USAGE_LOGS,
+            database: env.DB,
+            parserOptions: {
+              scriptName: config.workerScriptName,
+              allowedEntrypoints: PROCESSING_USAGE_LOG_ENTRYPOINTS,
+              createDigest: createCloudflareSha256Digest,
+            },
           },
-        },
-        {
-          observedAt: now,
-          prefix: config.usageLogPrefix,
-          ...(cursor.success && cursor.data.cursor !== null ? { cursor: cursor.data.cursor } : {}),
-          maximumObjects: 128,
-        },
-      );
-      if (result.kind === "failed-closed") return "conflict";
-      const nextCursor = result.kind === "partial" ? result.cursor : null;
+          {
+            observedAt: now,
+            prefix: config.usageLogPrefix,
+            ...(nextCursor !== null ? { cursor: nextCursor } : {}),
+            maximumObjects: 128 - bodyReads,
+            minimumHourKey,
+          },
+        );
+        bodyReads += result.importedObjects + result.replayedObjects;
+        metadataRowsRead += result.metadataRowsRead;
+        if (result.kind === "failed-closed") return "conflict";
+        nextCursor = result.kind === "partial" ? result.cursor : null;
+        if (result.kind === "complete") break;
+      }
       await session.batch([
         session
           .prepare(
@@ -186,13 +200,13 @@ export function createCostAccountingRuntime(
           .bind(nextCursor, now),
         prepareOperationalCounter(session, {
           recordedAt: now,
-          d1RowsRead: 4,
+          d1RowsRead: 5 + metadataRowsRead,
           d1RowsWritten: 2,
-          r2ClassAOperations: 1,
-          r2ClassBOperations: result.importedObjects + result.replayedObjects,
+          r2ClassAOperations: listCalls,
+          r2ClassBOperations: bodyReads,
         }),
       ]);
-      return result.kind === "partial" ? "partial" : "complete";
+      return nextCursor !== null ? "partial" : "complete";
     },
     observeUsageHour: async (hourKey, now) => {
       const result = await observeUsageLogHour(env.DB, {
@@ -206,26 +220,16 @@ export function createCostAccountingRuntime(
       try {
         const attestation = await activeAttestation(env.DB, env.WORKER_VERSION.id);
         if (attestation === null) return "incomplete";
-        const [logpush, analytics] = await Promise.all([
-          checkLogpushHour(fetch, {
-            accountId: config.accountId,
-            token: env.LOGPUSH_STATUS_TOKEN,
-            jobId: config.logpushJobId,
-            hourKey,
-          }),
-          queryAnalyticsHour(fetch, {
-            accountId: config.accountId,
-            token: env.ANALYTICS_READ_TOKEN,
-            dataset: config.analyticsDatasetName,
-            environment: config.environment,
-            hourKey,
-          }),
-        ]);
+        const logpush = await checkLogpushHour(fetch, {
+          accountId: config.accountId,
+          token: env.LOGPUSH_STATUS_TOKEN,
+          jobId: config.logpushJobId,
+          hourKey,
+        });
         const result = await reconcileWorkerProviderHour(env.DB, {
           hourKey,
           observedAt: now,
           logpush,
-          analytics,
           liveCostModelSha256: config.liveCostModelSha256,
           providerUsageSchemaSha256: config.providerUsageSchemaSha256,
           releaseReportSha256: config.releaseReportSha256,

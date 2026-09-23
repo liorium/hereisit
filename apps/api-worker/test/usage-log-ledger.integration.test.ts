@@ -5,6 +5,7 @@ import type { ParsedTraceEvents } from "../src/usage-log-parser";
 
 const objectKey = "trace/2026-07-19/worker.ndjson.gz";
 const now = Date.parse("2026-07-19T09:00:00.000Z");
+const versionId = "550e8400-e29b-41d4-a716-446655440000";
 
 function parsed(overrides: Partial<ParsedTraceEvents> = {}): ParsedTraceEvents {
   return {
@@ -17,6 +18,7 @@ function parsed(overrides: Partial<ParsedTraceEvents> = {}): ParsedTraceEvents {
         invocationCount: 2,
         workerCpuMs: 7,
         handlerInvocationCount: 2,
+        handlerVersionIds: [versionId],
         payloadSha256: "b".repeat(64),
       },
       {
@@ -24,6 +26,7 @@ function parsed(overrides: Partial<ParsedTraceEvents> = {}): ParsedTraceEvents {
         invocationCount: 1,
         workerCpuMs: 3,
         handlerInvocationCount: 0,
+        handlerVersionIds: [],
         payloadSha256: "c".repeat(64),
       },
     ],
@@ -41,6 +44,37 @@ afterEach(async () => {
 });
 
 describe("usage log D1 ledger", () => {
+  it("backfills missing version provenance only from an identical replay", async () => {
+    const input = { objectKey, etag: "etag-1", byteSize: 512, observedAt: now, parsed: parsed() };
+    await recordParsedUsageLog(env.DB, input);
+    await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = NULL").run();
+    await expect(recordParsedUsageLog(env.DB, input)).resolves.toMatchObject({ kind: "replayed" });
+    expect(
+      await env.DB.prepare(
+        "SELECT handler_version_ids FROM usage_log_object_hours ORDER BY hour_key",
+      ).all(),
+    ).toMatchObject({
+      results: [
+        { handler_version_ids: JSON.stringify([versionId]) },
+        { handler_version_ids: "[]" },
+      ],
+    });
+    const changed = parsed();
+    await expect(
+      recordParsedUsageLog(env.DB, {
+        ...input,
+        parsed: {
+          ...changed,
+          hours: changed.hours.map((hour, index) =>
+            index === 0
+              ? { ...hour, handlerVersionIds: ["550e8400-e29b-41d4-a716-446655440001"] }
+              : hour,
+          ),
+        },
+      }),
+    ).resolves.toEqual({ kind: "conflict", circuitOpen: true });
+  });
+
   it("records all hours atomically and replays the same object exactly once", async () => {
     const input = { objectKey, etag: "etag-1", byteSize: 512, observedAt: now, parsed: parsed() };
 
@@ -107,10 +141,16 @@ describe("usage log D1 ledger", () => {
     ).resolves.toEqual({ circuit_open: 1, reason: "USAGE_LOG_OBJECT_CHANGED" });
   });
 
-  it("opens the circuit when an hourly aggregate changes under the same object digest", async () => {
+  it.each([
+    false,
+    true,
+  ])("rejects a changed hourly aggregate, including legacy provenance (%s)", async (legacy) => {
     const initial = parsed();
     const input = { objectKey, etag: "etag-1", byteSize: 512, observedAt: now, parsed: initial };
     await recordParsedUsageLog(env.DB, input);
+
+    if (legacy)
+      await env.DB.prepare("UPDATE usage_log_object_hours SET handler_version_ids = NULL").run();
 
     const changedHours = initial.hours.map((hour, index) =>
       index === 0 ? { ...hour, workerCpuMs: hour.workerCpuMs + 1 } : hour,

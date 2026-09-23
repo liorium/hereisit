@@ -28,6 +28,7 @@ const inputSchema = z
       .refine((value) => !value.includes("\0"))
       .optional(),
     maximumObjects: z.number().int().min(1).max(MAXIMUM_PAGE_OBJECTS).optional(),
+    minimumHourKey: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict();
 
@@ -61,6 +62,7 @@ export interface ImportUsageLogPageInput {
   readonly prefix: string;
   readonly cursor?: string;
   readonly maximumObjects?: number;
+  readonly minimumHourKey?: number;
 }
 
 export type ImportUsageLogPageResult =
@@ -68,17 +70,20 @@ export type ImportUsageLogPageResult =
       readonly kind: "complete";
       readonly importedObjects: number;
       readonly replayedObjects: number;
+      readonly metadataRowsRead: number;
     }
   | {
       readonly kind: "partial";
       readonly importedObjects: number;
       readonly replayedObjects: number;
+      readonly metadataRowsRead: number;
       readonly cursor: string;
     }
   | {
       readonly kind: "failed-closed";
       readonly importedObjects: number;
       readonly replayedObjects: number;
+      readonly metadataRowsRead: number;
     };
 
 function isSafeMetadata(object: R2Object, prefix: string): boolean {
@@ -138,10 +143,11 @@ export async function importUsageLogPage(
   const objects = listed.objects.filter((object) => !isOwnershipChallenge(object, input.prefix));
   let importedObjects = 0;
   let replayedObjects = 0;
+  let metadataRowsRead = 0;
 
   const failClosed = async (reason: UsageLogCircuitReason): Promise<ImportUsageLogPageResult> => {
     await openCircuit(dependencies.database, input.observedAt, reason);
-    return { kind: "failed-closed", importedObjects, replayedObjects };
+    return { kind: "failed-closed", importedObjects, replayedObjects, metadataRowsRead };
   };
 
   if (
@@ -151,7 +157,39 @@ export async function importUsageLogPage(
     return failClosed("USAGE_LOG_IMPORT_INVALID");
   }
 
+  const historical = new Set<string>();
+  if (input.minimumHourKey !== undefined && objects.length > 0) {
+    const known = await dependencies.database
+      .withSession("first-primary")
+      .prepare(
+        `SELECT stored.object_key
+       FROM json_each(?) AS listed
+       JOIN usage_log_objects AS stored ON stored.object_key = json_extract(listed.value, '$.key')
+       WHERE stored.parsed_sha256 IS NOT NULL AND stored.last_hour_key < ?
+         AND stored.etag = json_extract(listed.value, '$.etag')
+         AND stored.byte_size = json_extract(listed.value, '$.size')`,
+      )
+      .bind(
+        JSON.stringify(objects.map(({ key, etag, size }) => ({ key, etag, size }))),
+        input.minimumHourKey,
+      )
+      .all();
+    metadataRowsRead = z
+      .number()
+      .int()
+      .min(0)
+      .max(Number.MAX_SAFE_INTEGER)
+      .parse(known.meta.rows_read);
+    const rows = z
+      .array(z.object({ object_key: z.string().min(1).max(1_024) }).strict())
+      .max(limit)
+      .parse(known.results);
+    for (const row of rows) historical.add(row.object_key);
+  }
+
   for (const metadata of objects) {
+    // Only older, already parsed immutable objects may skip body replay; target/future logs never do.
+    if (historical.has(metadata.key)) continue;
     const object = await dependencies.bucket.get(metadata.key, {
       onlyIf: { etagMatches: metadata.etag },
     });
@@ -178,15 +216,22 @@ export async function importUsageLogPage(
       parsed,
     });
     if (outcome.kind === "conflict") {
-      return { kind: "failed-closed", importedObjects, replayedObjects };
+      return { kind: "failed-closed", importedObjects, replayedObjects, metadataRowsRead };
     }
     if (outcome.kind === "recorded") importedObjects += 1;
     else replayedObjects += 1;
   }
 
-  if (!listed.truncated) return { kind: "complete", importedObjects, replayedObjects };
+  if (!listed.truncated)
+    return { kind: "complete", importedObjects, replayedObjects, metadataRowsRead };
   if (listed.cursor.length < 1 || listed.cursor === input.cursor) {
     return failClosed("USAGE_LOG_IMPORT_INVALID");
   }
-  return { kind: "partial", importedObjects, replayedObjects, cursor: listed.cursor };
+  return {
+    kind: "partial",
+    importedObjects,
+    replayedObjects,
+    metadataRowsRead,
+    cursor: listed.cursor,
+  };
 }

@@ -42,6 +42,7 @@ export interface TraceEventHourAggregate {
   readonly invocationCount: number;
   readonly workerCpuMs: number;
   readonly handlerInvocationCount: number;
+  readonly handlerVersionIds: readonly string[];
   readonly payloadSha256: string;
 }
 
@@ -123,7 +124,10 @@ export async function parseTraceEventNdjson(
   const pending: Uint8Array[] = [];
   const hours = new Map<
     number,
-    Omit<TraceEventHourAggregate, "payloadSha256"> & { readonly digest: StreamingDigest }
+    Omit<TraceEventHourAggregate, "payloadSha256" | "handlerVersionIds"> & {
+      readonly handlerVersionIds: Set<string>;
+      readonly digest: StreamingDigest;
+    }
   >();
   let pendingBytes = 0;
   let decompressedBytes = 0;
@@ -147,6 +151,11 @@ export async function parseTraceEventNdjson(
     }
     const hourKey = Math.floor(event.EventTimestampMs / 3_600_000);
     const prior = hours.get(hourKey);
+    const isHandler = HANDLER_EVENT_TYPES.has(event.EventType) && event.Entrypoint === "";
+    const handlerVersionIds = prior?.handlerVersionIds ?? new Set<string>();
+    if (isHandler) handlerVersionIds.add(event.ScriptVersion.ID);
+    if (handlerVersionIds.size > 128)
+      throw new RangeError("Trace hour has too many Worker versions.");
     const hourDigest = prior?.digest ?? options.createDigest();
     await hourDigest.update(line);
     await hourDigest.update(Uint8Array.of(0x0a));
@@ -156,9 +165,10 @@ export async function parseTraceEventNdjson(
       workerCpuMs: checkedAdd(prior?.workerCpuMs ?? 0, event.CPUTimeMs, "Hourly Worker CPU"),
       handlerInvocationCount: checkedAdd(
         prior?.handlerInvocationCount ?? 0,
-        HANDLER_EVENT_TYPES.has(event.EventType) && event.Entrypoint === "" ? 1 : 0,
+        isHandler ? 1 : 0,
         "Hourly handler invocation count",
       ),
+      handlerVersionIds,
       digest: hourDigest,
     };
     hours.set(hourKey, next);
@@ -206,12 +216,16 @@ export async function parseTraceEventNdjson(
     const finalizedHours = await Promise.all(
       [...hours.values()]
         .sort((left, right) => left.hourKey - right.hourKey)
-        .map(async ({ digest: hourDigest, ...hour }) => {
+        .map(async ({ digest: hourDigest, handlerVersionIds, ...hour }) => {
           const hourPayloadSha256 = await hourDigest.finish();
           if (!/^[0-9a-f]{64}$/.test(hourPayloadSha256)) {
             throw new TypeError("Hourly trace payload digest is not canonical SHA-256.");
           }
-          return { ...hour, payloadSha256: hourPayloadSha256 };
+          return {
+            ...hour,
+            handlerVersionIds: [...handlerVersionIds].sort(),
+            payloadSha256: hourPayloadSha256,
+          };
         }),
     );
     return {

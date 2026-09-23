@@ -9,6 +9,29 @@ PDF processing is retired. New image releases must not build a PDF engine, creat
 PDF benchmark/browser evidence. Canary deployment report version 2 cannot authorize public admission;
 image admission remains a separate verified operation.
 
+## Runtime cost accounting
+
+Worker request counts, CPU time, and handler version provenance come from immutable, complete Logpush
+objects, not sampled Analytics Engine points. No minimum customer traffic is required: a complete empty
+hour is valid. Missing logs or version provenance remain incomplete, not zero usage. Migration 0010
+allows legacy provenance to be backfilled only by replaying an identical original object.
+
+The runtime no longer queries Analytics Engine for accounting. It budgets at most two analytics writes
+per handler invocation (usage plus optional product telemetry); this is a conservative cost bound, not
+an exact analytics-write count. Historical cost snapshots are not rewritten. Attested versions with the
+same module and release can contribute to a canary/public transition hour without resetting accounting.
+Attestation observation and retirement timestamps are not invocation validity intervals.
+Deploy through the normal release workflow, which starts a release-bound accounting epoch. Do not
+hot-patch an old epoch: its verified Analytics-based snapshots use different write/read accounting.
+
+Each import tick scans up to 64 pages while replaying at most 128 bodies. Previously parsed objects
+strictly before the target hour need only an unchanged ETag/size check; target/future and unknown
+objects still require full body validation. Partial scans never count as complete observations. This
+avoids repeatedly replaying the historical backlog, but is not an unbounded stale-epoch catch-up path.
+
+Configured cost ceilings constrain release estimates and admission configuration. They are not a
+Cloudflare invoice cap: a live budget-overrun evaluator is not currently wired into the runtime.
+
 ## Existing deployment retirement
 
 Before deploying across the retirement boundary, pause the old PDF primary queue and DLQ and reject new
