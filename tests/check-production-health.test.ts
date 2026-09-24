@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   checkProductionHealth,
@@ -39,6 +41,17 @@ function healthyResponse(url: string) {
 }
 
 describe("production readiness monitor", () => {
+  it("ends a real stalled JSON body before the external watchdog", async () => {
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      ["--expose-gc", "tests/fixtures/production-readiness-stall.mjs"],
+      { timeout: 14_000 },
+    );
+    const result = JSON.parse(stdout);
+    expect(result.watchdogFired).toBe(false);
+    expect(result.check).toMatchObject({ ok: false, status: 200, code: "INVALID_RESPONSE" });
+  }, 15_000);
+
   it.each([
     true,
     false,
@@ -158,7 +171,7 @@ describe("production readiness monitor", () => {
     expect(JSON.stringify(report)).not.toContain("private-secret-value");
   });
 
-  it("treats a timeout as failure and still reports the other checks", async () => {
+  it("treats a network failure as unhealthy and still reports the other checks", async () => {
     const report = await checkProductionHealth({
       fetchImpl: async (url: string) => {
         if (url.endsWith("/image/compress")) throw new Error("private-secret-value");

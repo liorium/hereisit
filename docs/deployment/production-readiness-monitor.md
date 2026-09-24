@@ -24,7 +24,7 @@ watch and Actions notification settings of the operator; this workflow does not 
 | Result | Next action |
 | --- | --- |
 | `REQUEST_FAILED` or `HTTP_ERROR` | Check DNS/network, Cloudflare status, and the exact failed endpoint. |
-| `INVALID_RESPONSE` | Check routing/content type and contract drift; do not log the raw response. |
+| `INVALID_RESPONSE` | Check stalled/truncated bodies, routing/content type, and contract drift; do not log the raw response. |
 | `JOBS_UNAVAILABLE` | Inspect the deployed Worker configuration and release state. |
 | `SERVER_PROCESSING_DISABLED` or `LOCAL_FALLBACK_REQUIRED` | Inspect public admission, circuit-breaker/accounting evidence, and the release security check. Do not bypass them. |
 | `UNEXPECTED_MAINTAINER_POLICY` | Investigate why a fresh anonymous caller was classified as a maintainer. |

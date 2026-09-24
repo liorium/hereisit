@@ -4,16 +4,32 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { imageOptimizePolicyResponseSchema } from "../packages/tool-contracts/src/image-optimize.ts";
 
-async function readJson(response) {
+async function readJson(response, signal) {
   if (response.body === null) throw new Error("missing body");
+  const reader = response.body.getReader();
+  // Keep the deadline attached to the body even if native fetch loses its abort listener.
+  const abort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", abort, { once: true });
   const chunks = [];
   let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.byteLength;
-    if (size > 65_536) throw new Error("response too large");
-    chunks.push(chunk);
+  try {
+    signal.throwIfAborted();
+    while (true) {
+      const { value, done } = await reader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 65_536) throw new Error("response too large");
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    signal.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 export async function checkProductionHealth({ fetchImpl = fetch } = {}) {
@@ -31,11 +47,12 @@ export async function checkProductionHealth({ fetchImpl = fetch } = {}) {
     probes.map(async ({ name, url, kind }) => {
       let response;
       let code = null;
+      const signal = AbortSignal.timeout(10_000);
       try {
         response = await fetchImpl(url, {
           redirect: "error",
           cache: "no-store",
-          signal: AbortSignal.timeout(10_000),
+          signal,
           ...(kind !== "policy"
             ? {}
             : {
@@ -63,7 +80,7 @@ export async function checkProductionHealth({ fetchImpl = fetch } = {}) {
           ) {
             throw new Error("unexpected content type");
           }
-          const body = await readJson(response);
+          const body = await readJson(response, signal);
           if (kind === "health") {
             if (body?.status !== "ok" || body.serverJobsEnabled !== true) code = "JOBS_UNAVAILABLE";
           } else {
