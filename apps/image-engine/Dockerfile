@@ -9,6 +9,7 @@ FROM --platform=linux/amd64 ${NODE_IMAGE} AS node-distribution
 FROM --platform=linux/amd64 ${NODE_RUNTIME_IMAGE} AS node-runtime-distribution
 
 FROM --platform=linux/amd64 ${RUST_IMAGE} AS rust-build
+ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN sed -i \
       -e 's|http://deb.debian.org/debian-security|http://snapshot.debian.org/archive/debian-security/20260918T000000Z|g' \
@@ -26,6 +27,7 @@ RUN /build/native/build-oxipng.sh \
   && /build/native/build-png-smart.sh
 
 FROM --platform=linux/amd64 ${UBUNTU_IMAGE} AS native-build
+ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=node-distribution /usr/local/ /usr/local/
 COPY --from=rust-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

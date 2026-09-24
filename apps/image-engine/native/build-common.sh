@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Match the release archive epoch; native tools must not embed the wall-clock date.
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1786752000}"
+
 SOURCE_ROOT="${SOURCE_ROOT:-/opt/hereisit-sources}"
 BUILD_METADATA_ROOT="${BUILD_METADATA_ROOT:-/build-metadata}"
 LICENSE_ROOT="${LICENSE_ROOT:-/licenses}"
