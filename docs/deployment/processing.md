@@ -9,6 +9,12 @@ PDF processing is retired. New image releases must not build a PDF engine, creat
 PDF benchmark/browser evidence. Canary deployment report version 2 cannot authorize public admission;
 image admission remains a separate verified operation.
 
+Native build scripts export `SOURCE_DATE_EPOCH` (default `1786752000`, matching release archives),
+and both independent Docker build stages accept the release override. This prevents mozjpeg from
+embedding the day of the build into its binaries. Archive timestamp normalization alone does not
+normalize dates compiled into native code. Security exceptions remain bound to an exact image digest;
+a changed digest still requires fresh evidence and approval, never an automatic exception rebind.
+
 ## Runtime cost accounting
 
 Worker request counts, CPU time, and handler version provenance come from immutable, complete Logpush
