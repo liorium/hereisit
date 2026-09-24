@@ -977,8 +977,8 @@ test("inspects a pending image handoff without OffscreenCanvas", async ({ page }
   await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
   await expect(page.getByText(/expires-locally\.png · 68B/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 다시 선택", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "용량 줄이기", exact: true })).toBeDisabled();
 });
 
@@ -1007,7 +1007,8 @@ test("does not leave a consumed image handoff for a different tool", async ({ pa
   await revealAlternateFileTools(page);
   await page.getByRole("button", { name: "이미지 용량 줄이기 도구 선택" }).click();
   await expect(page).toHaveURL(/\/image\/compress\/?$/);
-  await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
+  await expect(page.getByText(/target-mismatch\.png · 68B/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 다시 선택", exact: true })).toBeEnabled();
   await page.getByRole("link", { name: "내 도구", exact: true }).click();
   await expect(page).toHaveURL(/\/my-tools\/?$/);
   await page.evaluate(() => {
