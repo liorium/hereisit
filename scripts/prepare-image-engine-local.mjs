@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { validateRuntimePackageInventory } from "./verify-image-engine-licenses.mjs";
 
 export const BASE_ENGINE_IMAGE = "hereisit-image-engine:test";
 export const LOCAL_ENGINE_IMAGE = "hereisit-image-engine:local-source";
@@ -9,10 +10,29 @@ const execute = promisify(execFile);
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 async function inspectBaseImage(image) {
-  await execute("docker", ["image", "inspect", image], {
-    cwd: repositoryRoot,
-    maxBuffer: 1024 * 1024,
-  });
+  const { stdout } = await execute(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--pull",
+      "never",
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--entrypoint",
+      "/nodejs/bin/node",
+      image,
+      "-e",
+      'process.stdout.write(require("node:fs").readFileSync("/build-metadata/debian-packages.json"))',
+    ],
+    { cwd: repositoryRoot, maxBuffer: 1024 * 1024, timeout: 10_000 },
+  );
+  return JSON.parse(stdout);
 }
 
 async function runCommand(command, args) {
@@ -35,7 +55,7 @@ export async function prepareLocalImageEngine({
 } = {}) {
   let hasBaseImage = true;
   try {
-    await inspect(BASE_ENGINE_IMAGE);
+    validateRuntimePackageInventory(await inspect(BASE_ENGINE_IMAGE));
   } catch {
     hasBaseImage = false;
   }

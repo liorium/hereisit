@@ -479,6 +479,24 @@ export const artifactSourceByPath = new Map([
   ["/usr/local/lib/libmount.so", "util-linux"],
 ]);
 
+export function validateRuntimePackageInventory(debian) {
+  if (
+    debian?.schemaVersion !== 1 ||
+    debian.snapshot !== "20260924T000000Z" ||
+    !Array.isArray(debian.packages) ||
+    debian.packages.length === 0 ||
+    !Array.isArray(debian.copyrightPaths) ||
+    debian.copyrightPaths.length === 0
+  ) {
+    throw new TypeError("runtime Debian package inventory is invalid");
+  }
+  const glib = debian.packages.filter((record) => record?.name === "libglib2.0-0t64");
+  // Exact Ubuntu snapshot version includes USN-8794-1; reject stale local base images too.
+  if (glib.length !== 1 || glib[0].version !== "2.80.0-6ubuntu3.9") {
+    throw new TypeError("runtime GLib package does not match the security snapshot");
+  }
+}
+
 export function validateRuntimeInventory(inventory, sourceLock, policy) {
   if (inventory?.schemaVersion !== 1 || inventory.uid !== 10001) {
     throw new TypeError("runtime inventory has a privileged or unexpected uid");
@@ -550,17 +568,7 @@ export function validateRuntimeInventory(inventory, sourceLock, policy) {
       throw new TypeError(`runtime artifact hash is not bound to ${sourceName}: ${path}`);
     }
   }
-  const debian = inventory.buildMetadata["debian-packages.json"];
-  if (
-    debian?.schemaVersion !== 1 ||
-    debian.snapshot !== "20260918T000000Z" ||
-    !Array.isArray(debian.packages) ||
-    debian.packages.length === 0 ||
-    !Array.isArray(debian.copyrightPaths) ||
-    debian.copyrightPaths.length === 0
-  ) {
-    throw new TypeError("runtime Debian package inventory is invalid");
-  }
+  validateRuntimePackageInventory(inventory.buildMetadata["debian-packages.json"]);
   validatePackageLicenses(inventory.packages, policy);
   for (const name of ["oxipng-cargo-metadata.json", "png-smart-cargo-metadata.json"]) {
     const cargoMetadata = inventory.buildMetadata[name];

@@ -32,7 +32,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=node-distribution /usr/local/ /usr/local/
 COPY --from=rust-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN sed -i \
-      -e 's|^URIs:.*|URIs: https://snapshot.ubuntu.com/ubuntu/20260918T000000Z/|' \
+      -e 's|^URIs:.*|URIs: https://snapshot.ubuntu.com/ubuntu/20260924T000000Z/|' \
       -e 's/ noble-backports//' \
       -e 's/Components: .*/Components: main universe/' \
       /etc/apt/sources.list.d/ubuntu.sources \
@@ -55,6 +55,7 @@ RUN sed -i \
       pkg-config \
       python3 \
   && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libc6)" ge 2.39-0ubuntu8.9 \
+  && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libglib2.0-0t64)" ge 2.80.0-6ubuntu3.9 \
   && test "$(node --version)" = v24.13.0 \
   && rm -rf /var/lib/apt/lists/*
 COPY apps/image-engine/native/build-common.sh /build/native/

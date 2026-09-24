@@ -126,8 +126,11 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
   Object.assign(buildMetadata, {
     "debian-packages.json": {
       schemaVersion: 1,
-      snapshot: "20260918T000000Z",
-      packages: [{ name: "base-files", version: "1" }],
+      snapshot: "20260924T000000Z",
+      packages: [
+        { name: "base-files", version: "1" },
+        { name: "libglib2.0-0t64", version: "2.80.0-6ubuntu3.9" },
+      ],
       copyrightPaths: ["/usr/share/doc/base-files/copyright"],
     },
     "oxipng-cargo-metadata.json": {
@@ -172,6 +175,43 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
+  it.each([
+    [],
+    [{ name: "libglib2.0-0t64", version: "2.80.0-6ubuntu3.8" }],
+    [
+      { name: "libglib2.0-0t64", version: "2.80.0-6ubuntu3.9" },
+      { name: "libglib2.0-0t64", version: "2.80.0-6ubuntu3.8" },
+    ],
+  ])("rejects missing, unpatched, or ambiguous GLib package records (%j)", async (...packages) => {
+    const fixture = await licenseGateFixture();
+    fixture.inventory.buildMetadata["debian-packages.json"].packages = [
+      { name: "base-files", version: "1" },
+      ...packages,
+    ];
+    expect(() =>
+      validateRuntimeInventory(
+        fixture.inventory,
+        fixture.documents.sourceLock,
+        fixture.documents.policy,
+      ),
+    ).toThrow("runtime GLib package does not match the security snapshot");
+  });
+
+  it.each([
+    "20260918T000000Z",
+    "20260925T000000Z",
+  ])("rejects an unapproved Ubuntu snapshot %s", async (snapshot) => {
+    const fixture = await licenseGateFixture();
+    fixture.inventory.buildMetadata["debian-packages.json"].snapshot = snapshot;
+    expect(() =>
+      validateRuntimeInventory(
+        fixture.inventory,
+        fixture.documents.sourceLock,
+        fixture.documents.policy,
+      ),
+    ).toThrow("runtime Debian package inventory is invalid");
+  });
+
   it.each([
     ["/usr/local/lib/libexpat.so", "expat"],
     ["/usr/local/lib/libblkid.so", "util-linux"],
@@ -530,7 +570,6 @@ describe("image engine native supply-chain policy", () => {
     expect(dockerfile).toContain(runtimeStage);
     expect(dockerfile).toContain("COPY --from=runtime-files /runtime-root /");
     expect(dockerfile).not.toContain("cp -a apps/image-engine/security /runtime-root/security");
-    expect(verifier).toContain('debian.snapshot !== "20260918T000000Z"');
     expect(verifier).toContain('"--entrypoint",\n      "/nodejs/bin/node",');
     expect(verifier).not.toContain('"--entrypoint",\n      "node",');
     const runtime = dockerfile.slice(dockerfile.indexOf(runtimeStage));

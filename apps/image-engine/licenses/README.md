@@ -24,10 +24,14 @@ approve security exceptions, or establish that a release is ready.
 ## Runtime package source
 
 The image runtime uses Ubuntu 24.04 LTS packages from the fixed
-`https://snapshot.ubuntu.com/ubuntu/20260918T000000Z/` archive. Native libraries are built against
+`https://snapshot.ubuntu.com/ubuntu/20260924T000000Z/` archive. Native libraries are built against
 that same distribution. The final shell-free image copies only their runtime dependencies, the
 official Node binary, certificate bundle, locale data, and application files; it does not combine
 Debian's libc with Ubuntu libraries or maintain a private libc patch.
+
+The build and runtime inventory gate require the snapshot's GLib `2.80.0-6ubuntu3.9`, which
+includes [USN-8794-1](https://ubuntu.com/security/notices/USN-8794-1). This does not waive other
+findings or establish that all GLib vulnerabilities are fixed; unfiltered release scans still apply.
 
 `/build-metadata/debian-packages.json` retains its existing filename for dpkg-format compatibility.
 It records the exact copied package versions; `/var/lib/dpkg/status.d` and `/etc/os-release` preserve
