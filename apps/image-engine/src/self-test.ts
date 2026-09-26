@@ -35,7 +35,7 @@ export async function runEngineSelfTest(
     dependencies.loadSharpVersions ?? (async () => (await import("sharp")).default.versions)
   )();
   if (versions.sharp !== "0.35.4") throw new Error("unexpected Sharp runtime version");
-  if (versions.vips !== "8.18.6") throw new Error("unexpected global libvips runtime version");
+  if (versions.vips !== "8.18.7") throw new Error("unexpected global libvips runtime version");
   return {
     sharp: versions.sharp,
     vips: versions.vips,
