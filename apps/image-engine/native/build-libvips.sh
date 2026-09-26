@@ -3,7 +3,7 @@ set -euo pipefail
 source "$(dirname "$0")/build-common.sh"
 
 NAME=libvips
-REVISION=426af3f44246fce9cfa8dd51a353aa4dfd48c553
+REVISION=24ad4d042940e6bf99a68871ba886ca8847c9c82
 PREFIX=/opt/hereisit-native/libvips
 SOURCE="$(checkout_source "$NAME" https://github.com/libvips/libvips.git "$REVISION")"
 copy_notices "$NAME" "$SOURCE" LICENSE

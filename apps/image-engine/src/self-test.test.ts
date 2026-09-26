@@ -7,9 +7,9 @@ describe("image engine runtime self-test", () => {
     await expect(
       runEngineSelfTest({
         access,
-        loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.18.6" }),
+        loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.18.7" }),
       }),
-    ).resolves.toEqual({ sharp: "0.35.4", vips: "8.18.6", artifacts: 13 });
+    ).resolves.toEqual({ sharp: "0.35.4", vips: "8.18.7", artifacts: 13 });
     expect(access.mock.calls.map(([path]) => path)).toEqual(
       expect.arrayContaining([
         "/usr/local/bin/cjpeg",
@@ -26,11 +26,11 @@ describe("image engine runtime self-test", () => {
     );
   });
 
-  it("rejects a prebuilt or mismatched libvips", async () => {
+  it.each(["8.17.0", "8.18.6"])("rejects a prebuilt or superseded libvips %s", async (vips) => {
     await expect(
       runEngineSelfTest({
         access: vi.fn().mockResolvedValue(undefined),
-        loadSharpVersions: async () => ({ sharp: "0.35.4", vips: "8.17.0" }),
+        loadSharpVersions: async () => ({ sharp: "0.35.4", vips }),
       }),
     ).rejects.toThrow("libvips");
   });

@@ -97,7 +97,7 @@ RUN cd apps/image-engine/node_modules/sharp \
   && PATH=/src/apps/image-engine/node_modules/.bin:$PATH SHARP_FORCE_GLOBAL_LIBVIPS=1 \
     node install/build.js \
   && cd /src \
-  && node -e 'const sharp = require("./apps/image-engine/node_modules/sharp"); if (sharp.versions.vips !== "8.18.6") throw new Error(`unexpected libvips ${sharp.versions.vips}`)' \
+  && node -e 'const sharp = require("./apps/image-engine/node_modules/sharp"); if (sharp.versions.vips !== "8.18.7") throw new Error(`unexpected libvips ${sharp.versions.vips}`)' \
   && pnpm --filter @hereisit/image-engine build \
   && test -f apps/image-engine/dist/server.mjs \
   && test -f apps/image-engine/dist/job/job-runner.mjs \
@@ -105,7 +105,7 @@ RUN cd apps/image-engine/node_modules/sharp \
   && ! find /opt/app/node_modules -path '*/@img/sharp-*' -print -quit | grep . \
   && install -Dm755 apps/image-engine/node_modules/sharp/src/build/Release/sharp-linux-x64-0.35.4.node \
       "$(readlink -f /opt/app/node_modules/sharp)/src/build/Release/sharp-linux-x64-0.35.4.node" \
-  && node -e 'const sharp = require("/opt/app/node_modules/sharp"); if (sharp.versions.vips !== "8.18.6") throw new Error(`unexpected deployed libvips ${sharp.versions.vips}`)' \
+  && node -e 'const sharp = require("/opt/app/node_modules/sharp"); if (sharp.versions.vips !== "8.18.7") throw new Error(`unexpected deployed libvips ${sharp.versions.vips}`)' \
   && test "$(readlink /opt/app/node_modules/.pnpm/node_modules/@hereisit/image-engine)" = "../../../../../../src/apps/image-engine" \
   && unlink /opt/app/node_modules/.pnpm/node_modules/@hereisit/image-engine \
   && rm /opt/app/node_modules/.modules.yaml \
