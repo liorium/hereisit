@@ -15,6 +15,15 @@ embedding the day of the build into its binaries. Archive timestamp normalizatio
 normalize dates compiled into native code. Security exceptions remain bound to an exact image digest;
 a changed digest still requires fresh evidence and approval, never an automatic exception rebind.
 
+For `Stale Trivy DB pin`, compare the official `ghcr.io/aquasecurity/trivy-db:2` manifest digest
+with `gh variable get TRIVY_DB_DIGEST --env processing-release-authority`. The protected environment
+variable [takes precedence](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#configuration-variable-precedence)
+over the repository variable: updating only the repository value does not
+update the release job. After verifying the official manifest, update the protected environment pin
+and keep any repository pin consistent, then start a new workflow run. Do not remove the digest check
+or reuse an old security report to resolve this failure. A matching DB pin only permits the scans to
+run; it does not prove that the resulting image passes the vulnerability gate.
+
 ## Runtime cost accounting
 
 Worker request counts, CPU time, and handler version provenance come from immutable, complete Logpush

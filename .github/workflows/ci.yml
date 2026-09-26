@@ -111,7 +111,7 @@ jobs:
           TRIVY_DB_DIGEST="$(docker buildx imagetools inspect ghcr.io/aquasecurity/trivy-db:2 | awk '$1 == "Digest:" { print $2; exit }')"
           [[ "$TRIVY_DB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           if [[ "$TRIVY_DB_DIGEST" != "${{ vars.TRIVY_DB_DIGEST }}" ]]; then
-            echo "::error title=Stale Trivy DB pin::Rotate TRIVY_DB_DIGEST and start a new workflow run; reruns retain their original variables."
+            echo "::error title=Stale Trivy DB pin::Update TRIVY_DB_DIGEST in the processing-release-authority environment, then start a new workflow run. A repository variable update does not override the environment variable."
             exit 1
           fi
           mkdir -p .artifacts/runtime/trivy-cache
