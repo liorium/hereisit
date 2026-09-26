@@ -324,6 +324,35 @@ describe("aggregate product analytics report", () => {
     expect(report.product).toMatchObject({ tools: [], duration_buckets: {}, failure_classes: {} });
   });
 
+  describe.each(["totals", "vitals"])("provider %s aggregate", (field) => {
+    it.each([
+      ["missing", undefined],
+      ["null", null],
+      ["object", {}],
+      ["string", "provider-private-value"],
+      ["number", 0],
+      ["boolean", false],
+    ])("rejects a %s aggregate instead of reporting no data", async (_label, value) => {
+      const web = webResponse();
+      Object.assign(web.data.viewer.accounts[0], { [field]: value });
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(json({ data: [] }))
+        .mockResolvedValueOnce(json(web));
+
+      await expect(
+        createProductAnalyticsReport({
+          accountId,
+          token,
+          environment: "production",
+          days: 7,
+          now,
+          fetcher,
+        }),
+      ).rejects.toThrow(/^Cloudflare analytics response is invalid$/);
+    });
+  });
+
   it("rejects unbounded arguments before fetching", async () => {
     expect(() => buildProductUsageQuery("preview", 7)).toThrow("environment");
     expect(() => buildProductUsageQuery("production", 0)).toThrow("days");
