@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type JsonFormatErrorCode,
   type JsonFormatMode,
@@ -28,8 +28,17 @@ export function JsonFormatWorkbench() {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
+  const revisionRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      revisionRef.current += 1;
+    },
+    [],
+  );
 
   function run(mode: JsonFormatMode): void {
+    revisionRef.current += 1;
     const result = transformJsonText(source, mode);
     if (!result.ok) {
       setOutput(null);
@@ -47,16 +56,21 @@ export function JsonFormatWorkbench() {
 
   async function copyResult(): Promise<void> {
     if (output === null) return;
+    const revision = ++revisionRef.current;
     try {
       await navigator.clipboard.writeText(output.text);
+      if (revision !== revisionRef.current) return;
       setFeedback({ tone: "success", message: "결과를 복사했어요." });
     } catch {
+      if (revision !== revisionRef.current) return;
       setFeedback({
         tone: "error",
         code: "COPY_FAILED",
         message: "복사하지 못했어요. 결과를 직접 선택해 복사해 주세요.",
       });
-      requestAnimationFrame(() => errorRef.current?.focus());
+      requestAnimationFrame(() => {
+        if (revision === revisionRef.current) errorRef.current?.focus();
+      });
     }
   }
 
@@ -74,6 +88,7 @@ export function JsonFormatWorkbench() {
   }
 
   function reset(): void {
+    revisionRef.current += 1;
     setSource("");
     setOutput(null);
     setFeedback(null);
@@ -91,6 +106,7 @@ export function JsonFormatWorkbench() {
           aria-describedby={feedback?.tone === "error" ? "json-format-feedback" : undefined}
           id="json-source"
           onChange={(event) => {
+            revisionRef.current += 1;
             setSource(event.currentTarget.value);
             setOutput(null);
             setFeedback(null);

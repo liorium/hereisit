@@ -293,6 +293,7 @@ test("formats JSON locally without changing value tokens", async ({ page }) => {
   await expect(result).toHaveValue(pretty);
 
   await page.getByRole("button", { name: "결과 복사", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "결과를 복사했어요." })).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(
@@ -327,6 +328,88 @@ test("formats JSON locally without changing value tokens", async ({ page }) => {
   await expect(result).toHaveCount(0);
   expect(violations).toEqual([]);
 });
+
+test("keeps the current JSON result available when clipboard access fails", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => Promise.reject(new Error("clipboard denied")) },
+    });
+  });
+  await page.goto(jsonFormatTool.path);
+  const input = page.getByRole("textbox", { name: "JSON 입력" });
+  await input.fill('{"value":1}');
+  await page.getByRole("button", { name: "공백 줄이기", exact: true }).click();
+  await page.getByRole("button", { name: "결과 복사", exact: true }).click();
+  const alert = page.locator("#json-format-feedback");
+  await expect(alert).toHaveText("복사하지 못했어요. 결과를 직접 선택해 복사해 주세요.");
+  await expect(alert).toBeFocused();
+  await expect(page.getByRole("textbox", { name: "결과", exact: true })).toHaveValue('{"value":1}');
+  await expect(page.getByRole("button", { name: "JSON 다운로드", exact: true })).toBeEnabled();
+});
+
+for (const action of ["edit", "reset", "reformat"] as const) {
+  for (const outcome of ["resolve", "reject"] as const) {
+    test(`ignores a stale JSON copy ${outcome} after ${action}`, async ({ page }) => {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", {
+          configurable: true,
+          value: {
+            writeText: () =>
+              new Promise<void>((resolve, reject) => {
+                Object.assign(window, {
+                  __finishJsonCopy: (outcome: string) =>
+                    outcome === "resolve" ? resolve() : reject(new Error("clipboard denied")),
+                });
+              }),
+          },
+        });
+      });
+      await page.goto(jsonFormatTool.path);
+      const input = page.getByRole("textbox", { name: "JSON 입력" });
+      const result = page.getByRole("textbox", { name: "결과", exact: true });
+      await input.fill('{"value":1}');
+      await page.getByRole("button", { name: "정리하기", exact: true }).click();
+      await expect(result).toHaveValue('{\n  "value": 1\n}');
+      await page.getByRole("button", { name: "결과 복사", exact: true }).click();
+
+      if (action === "edit") await input.fill('{"value":2}');
+      else if (action === "reset") {
+        await page.getByRole("button", { name: "지우기", exact: true }).click();
+        await expect(input).toBeFocused();
+      } else await page.getByRole("button", { name: "공백 줄이기", exact: true }).click();
+      const focusedBeforeSettlement = await page.evaluateHandle(() => document.activeElement);
+
+      await page.evaluate(async (outcome) => {
+        (window as Window & { __finishJsonCopy: (outcome: string) => void }).__finishJsonCopy(
+          outcome,
+        );
+        // Let the clipboard continuation, React render, and deferred focus all complete.
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+      }, outcome);
+
+      expect(
+        await focusedBeforeSettlement.evaluate((element) => element === document.activeElement),
+      ).toBe(true);
+      await focusedBeforeSettlement.dispose();
+      await expect(page.locator("#json-format-feedback")).toHaveCount(0);
+      await expect(page.getByRole("status").filter({ hasText: /JSON|브라우저/ })).toHaveText(
+        action === "reformat"
+          ? "JSON 공백을 줄였어요."
+          : "입력한 내용은 이 브라우저에서만 처리해요.",
+      );
+      if (action === "reformat") {
+        await expect(result).toHaveValue('{"value":1}');
+      } else {
+        await expect(result).toHaveCount(0);
+        await expect(input).toHaveValue(action === "reset" ? "" : '{"value":2}');
+        await expect(input).toBeFocused();
+      }
+    });
+  }
+}
 
 test("publishes every available catalog route from the complete tools page", async ({
   page,
