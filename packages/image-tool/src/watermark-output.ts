@@ -85,7 +85,8 @@ function splitFinalExtension(name: string): { stem: string; extension: string } 
 export function dedupeArchiveNames(names: readonly string[]): string[] {
   const reservedNames = new Set<string>();
 
-  return names.map((name) => {
+  return names.map((originalName) => {
+    const name = originalName.normalize("NFC");
     if (!reservedNames.has(name.toLowerCase())) {
       reservedNames.add(name.toLowerCase());
       return name;

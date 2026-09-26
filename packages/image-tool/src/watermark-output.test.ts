@@ -126,6 +126,14 @@ describe("suggestWatermarkedImageName", () => {
 });
 
 describe("dedupeArchiveNames", () => {
+  it("reserves canonically equivalent Korean names and their generated suffixes", () => {
+    expect(dedupeArchiveNames(["가.png", "\u1100\u1161.PNG", "가-2.png"])).toEqual([
+      "가.png",
+      "가-2.PNG",
+      "가-2-2.png",
+    ]);
+  });
+
   it("reserves names generated for earlier collisions", () => {
     expect(dedupeArchiveNames(["a.png", "a.png", "a-2.png", "a.png"])).toEqual([
       "a.png",
