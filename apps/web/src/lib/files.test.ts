@@ -56,6 +56,22 @@ describe("downloadUrl", () => {
 });
 
 describe("createZipArchive", () => {
+  it("preserves every file when archive names differ only by case or Unicode normalization", async () => {
+    const names = ["Photo.PNG", "photo.png", "../가.png", "\u1100\u1161.PNG", "가-2.png"];
+    const archive = await createZipArchive(
+      names.map((name, index) => ({ name, bytes: Uint8Array.of(index + 1).buffer })),
+    );
+    const entries = unzipSync(new Uint8Array(await archive.arrayBuffer()));
+    expect(Object.keys(entries)).toEqual([
+      "Photo.PNG",
+      "photo-2.png",
+      "가.png",
+      "가-2.PNG",
+      "가-2-2.png",
+    ]);
+    expect(Object.values(entries).map((bytes) => [...bytes])).toEqual([[1], [2], [3], [4], [5]]);
+  });
+
   it("keeps every duplicate name and strips archive paths", async () => {
     const byte = (value: number) => Uint8Array.of(value).buffer;
     const archive = await createZipArchive([

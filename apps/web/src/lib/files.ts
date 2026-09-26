@@ -1,3 +1,4 @@
+import { dedupeArchiveNames } from "@hereisit/image-tool";
 import { zip } from "fflate";
 
 export function formatBytes(bytes: number): string {
@@ -49,21 +50,6 @@ function safeArchiveName(requested: string): string {
     .join("");
 }
 
-function uniqueArchiveName(requested: string, names: Set<string>): string {
-  const safe = safeArchiveName(requested);
-  const lastDot = safe.lastIndexOf(".");
-  const stem = lastDot > 0 ? safe.slice(0, lastDot) : safe;
-  const extension = lastDot > 0 ? safe.slice(lastDot) : "";
-  let candidate = safe;
-  let suffix = 2;
-  while (names.has(candidate)) {
-    candidate = `${stem}-${suffix}${extension}`;
-    suffix += 1;
-  }
-  names.add(candidate);
-  return candidate;
-}
-
 export async function resolveIfCurrent<T>(
   pending: Promise<T>,
   generation: number,
@@ -77,10 +63,10 @@ export async function createZipArchive(
   files: readonly { name: string; bytes: ArrayBuffer }[],
 ): Promise<Blob> {
   const entries: Record<string, Uint8Array> = {};
-  const names = new Set<string>();
+  const names = dedupeArchiveNames(files.map((file) => safeArchiveName(file.name)));
 
-  for (const file of files) {
-    entries[uniqueArchiveName(file.name, names)] = new Uint8Array(file.bytes);
+  for (const [index, file] of files.entries()) {
+    entries[names[index] ?? `image-${index + 1}`] = new Uint8Array(file.bytes);
   }
 
   const bytes = await new Promise<Uint8Array>((resolve, reject) => {
