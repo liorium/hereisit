@@ -1,7 +1,8 @@
 import { execFile, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import { validateRuntimePackageInventory } from "./verify-image-engine-licenses.mjs";
 
 export const BASE_ENGINE_IMAGE = "hereisit-image-engine:test";
@@ -28,7 +29,7 @@ async function inspectBaseImage(image) {
       "/nodejs/bin/node",
       image,
       "-e",
-      'process.stdout.write(require("node:fs").readFileSync("/build-metadata/debian-packages.json"))',
+      'const fs = require("node:fs"); process.stdout.write(JSON.stringify({ ...JSON.parse(fs.readFileSync("/build-metadata/debian-packages.json", "utf8")), sourceLock: JSON.parse(fs.readFileSync("/licenses/sources.lock.json", "utf8")) }))',
     ],
     { cwd: repositoryRoot, maxBuffer: 1024 * 1024, timeout: 10_000 },
   );
@@ -53,9 +54,16 @@ export async function prepareLocalImageEngine({
   inspect = inspectBaseImage,
   run = runCommand,
 } = {}) {
+  const sourceLock = JSON.parse(
+    await readFile(resolve(repositoryRoot, "apps/image-engine/native/sources.lock.json"), "utf8"),
+  );
   let hasBaseImage = true;
   try {
-    validateRuntimePackageInventory(await inspect(BASE_ENGINE_IMAGE));
+    const inventory = await inspect(BASE_ENGINE_IMAGE);
+    validateRuntimePackageInventory(inventory);
+    if (!isDeepStrictEqual(inventory.sourceLock, sourceLock)) {
+      throw new Error("native source lock does not match the local checkout");
+    }
   } catch {
     hasBaseImage = false;
   }
