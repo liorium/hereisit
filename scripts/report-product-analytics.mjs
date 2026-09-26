@@ -282,7 +282,10 @@ function parseWebAnalytics(value) {
   const accounts = assertRecord(assertRecord(root.data).viewer).accounts;
   if (!Array.isArray(accounts) || accounts.length !== 1) throw new TypeError("invalid response");
   const account = assertRecord(accounts[0]);
-  const totalValue = Array.isArray(account.totals) ? account.totals[0] : undefined;
+  if (!Array.isArray(account.totals) || !Array.isArray(account.vitals)) {
+    throw new TypeError("invalid response");
+  }
+  const totalValue = account.totals[0];
   const total = totalValue === undefined ? null : assertRecord(totalValue);
   const sampleInterval =
     total === null ? 1 : finiteNumber(assertRecord(total.avg).sampleInterval, 1);
@@ -294,7 +297,7 @@ function parseWebAnalytics(value) {
     if (!Array.isArray(values)) throw new TypeError("invalid response");
     return values.map((entry) => estimateGroup(entry, dimension, label));
   };
-  const vitalValue = Array.isArray(account.vitals) ? account.vitals[0] : undefined;
+  const vitalValue = account.vitals[0];
   const quantiles =
     vitalValue === undefined ? null : assertRecord(assertRecord(vitalValue).quantiles);
   const metric = (metricValue, divisor = 1) =>
