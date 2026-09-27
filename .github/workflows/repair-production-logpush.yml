@@ -1,0 +1,83 @@
+name: Repair production Logpush
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_job_id:
+        description: Existing LOGPUSH_JOB_ID on the attested production Worker
+        required: true
+        type: string
+      repair_missing:
+        description: Create only a confirmed missing production Logpush job
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: processing-production
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.repository == 'liorium/hereisit' && github.ref == 'refs/heads/main'
+    environment: processing-production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.11.0
+          run_install: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Inspect attested production coordinates
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .artifacts/logpush-recovery
+          pnpm exec wrangler d1 list --json > "$RUNNER_TEMP/logpush-databases.json"
+          DATABASE_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const rows=JSON.parse(readFileSync(process.argv[1],"utf8")); const matches=Array.isArray(rows)?rows.filter(row=>row?.name==="hereisit-processing-production"):[]; if(matches.length!==1||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(matches[0].uuid))process.exit(1);process.stdout.write(matches[0].uuid)' "$RUNNER_TEMP/logpush-databases.json")"
+          node scripts/verify-processing-admission-state.mjs --mode inspect-current \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$DATABASE_ID" \
+            > .artifacts/logpush-recovery/state.json
+          ACTIVE_VERSION_ID="$(node -e 'const s=require(require("node:path").resolve(process.argv[1]));if(!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(s.activeVersionId))process.exit(1);process.stdout.write(s.activeVersionId)' .artifacts/logpush-recovery/state.json)"
+          pnpm exec wrangler versions view "$ACTIVE_VERSION_ID" \
+            --name hereisit-processing-production --json > "$RUNNER_TEMP/logpush-worker-version.json"
+      - name: Inspect or restore only the production Logpush job
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          LOGPUSH_R2_ACCESS_KEY_ID: ${{ secrets.LOGPUSH_R2_ACCESS_KEY_ID }}
+          LOGPUSH_R2_SECRET_ACCESS_KEY: ${{ secrets.LOGPUSH_R2_SECRET_ACCESS_KEY }}
+          EXPECTED_JOB_ID: ${{ inputs.expected_job_id }}
+          REPAIR_MISSING: ${{ inputs.repair_missing }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/logpush-worker-version.json" "$RUNNER_TEMP/logpush-databases.json"' EXIT
+          node scripts/repair-production-logpush.mjs \
+            --account-id "$CLOUDFLARE_ACCOUNT_ID" --expected-job-id "$EXPECTED_JOB_ID" \
+            --repair-missing "$REPAIR_MISSING" --state .artifacts/logpush-recovery/state.json \
+            --worker-version "$RUNNER_TEMP/logpush-worker-version.json" \
+            > .artifacts/logpush-recovery/result.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: production-logpush-recovery-${{ github.run_id }}
+          path: .artifacts/logpush-recovery/*.json
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
