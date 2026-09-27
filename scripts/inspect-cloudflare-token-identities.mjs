@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 const idPattern = /^[a-f0-9]{32}$/;
 const tokenPattern = /^[!-~]{20,512}$/;
 
-async function readEnvelope(response) {
+export async function readEnvelope(response) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Missing response body");
   const chunks = [];
