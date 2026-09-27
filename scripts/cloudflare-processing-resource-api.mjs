@@ -209,6 +209,7 @@ export function createCloudflareProcessingResourceApi({
     };
   };
 
+  const readLogpushJobs = () => request(`${accountPath}/logpush/jobs`, logsToken);
   const readInventory = async () => {
     const [d1Result, r2Result, queueResult, logpushResult, workerResult, containerResult] =
       await Promise.all([
@@ -218,7 +219,7 @@ export function createCloudflareProcessingResourceApi({
         ),
         request(`${accountPath}/r2/buckets`, resourceToken),
         request(`${accountPath}/queues?page=1`, resourceToken),
-        request(`${accountPath}/logpush/jobs`, logsToken),
+        readLogpushJobs(),
         request(`${accountPath}/workers/scripts`, resourceToken),
         request(`${accountPath}/containers/applications`, resourceToken),
       ]);
@@ -444,5 +445,5 @@ export function createCloudflareProcessingResourceApi({
     throw new TypeError("unknown processing resource action");
   };
 
-  return { readInventory, verifyLogpushStatus, applyAction };
+  return { readInventory, readLogpushJobs, verifyLogpushStatus, applyAction };
 }
