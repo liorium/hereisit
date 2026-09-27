@@ -9,6 +9,7 @@ import {
   canonicalJson,
   parseCliArguments,
 } from "./image-lab-common.mjs";
+import { readEnvelope } from "./inspect-cloudflare-token-identities.mjs";
 
 const accountIdPattern = /^[0-9a-f]{32}$/;
 const versionIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -34,15 +35,33 @@ function plainTextBinding(workerVersion, name) {
   return matches[0].text;
 }
 
-function trackedFetch(fetchImpl) {
+function trackedFetch(fetchImpl, captureErrorCodes = false) {
   let httpStatus;
+  let providerErrorCodes;
   return {
-    fetch: async (...args) => {
-      const response = await fetchImpl(...args);
+    fetch: async (input, init) => {
+      const response = await fetchImpl(input, { ...init, signal: AbortSignal.timeout(8000) });
       httpStatus = response.status;
+      if (captureErrorCodes && !response.ok) {
+        try {
+          // The runtime rejects non-OK responses before reading their bodies. Consume only that
+          // error body here, bounded to 64 KiB, without cloning/retaining a second stream.
+          const envelope = await readEnvelope(response);
+          const codes = Array.isArray(envelope?.errors)
+            ? envelope.errors
+                .slice(0, 8)
+                .map((error) => error?.code)
+                .filter((code) => Number.isSafeInteger(code) && code >= 1000 && code <= 999999)
+            : [];
+          if (codes.length > 0) providerErrorCodes = [...new Set(codes)];
+        } catch {
+          // Original errors can contain credentials or destination URLs. Never print them.
+        }
+      }
       return response;
     },
     httpStatus: () => httpStatus,
+    errorEvidence: () => (providerErrorCodes === undefined ? {} : { providerErrorCodes }),
   };
 }
 
@@ -103,6 +122,7 @@ export async function inspectProcessingCostProviders({
   accountId,
   analyticsReadToken,
   logpushStatusToken,
+  logpushRecoveryToken,
   fetchImpl = fetch,
 }) {
   const state = assertObject(stateValue, "processing state");
@@ -133,7 +153,7 @@ export async function inspectProcessingCostProviders({
   }
   if (typeof fetchImpl !== "function") throw new TypeError("fetch implementation is required");
 
-  const logpushFetch = trackedFetch(fetchImpl);
+  const logpushFetch = trackedFetch(fetchImpl, true);
   const analyticsFetch = trackedFetch(fetchImpl);
   const containerFetch = trackedFetch(fetchImpl);
   const [logpush, analytics, container] = await Promise.all([
@@ -181,6 +201,28 @@ export async function inspectProcessingCostProviders({
     ),
   ]);
   const result = { targetHourKey: state.targetHourKey, logpush, analytics, container };
+  Object.assign(logpush, logpushFetch.errorEvidence());
+  if (
+    [401, 403].includes(logpush.httpStatus) &&
+    typeof logpushRecoveryToken === "string" &&
+    logpushRecoveryToken.length > 0 &&
+    logpushRecoveryToken !== logpushStatusToken
+  ) {
+    // Read-only A/B diagnosis. Never substitute recovery credentials into the runtime or mark
+    // the primary credential healthy just because a different credential can read the same job.
+    const recoveryFetch = trackedFetch(fetchImpl, true);
+    result.logpushRecoveryComparison = await projected(
+      checkLogpushHour(recoveryFetch.fetch, {
+        accountId,
+        token: logpushRecoveryToken,
+        jobId,
+        hourKey: state.targetHourKey,
+      }),
+      (value) => value,
+      recoveryFetch.httpStatus,
+    );
+    Object.assign(result.logpushRecoveryComparison, recoveryFetch.errorEvidence());
+  }
   if (analytics.failure === "sampled") {
     // Read-only A/B diagnosis: retain the original failure and never use these results to seal costs.
     const hourStart = new Date(state.targetHourKey * 3_600_000)
@@ -233,6 +275,7 @@ export async function runProcessingCostProviderInspectionCli(
     accountId: args["account-id"],
     analyticsReadToken: env.PRODUCTION_ANALYTICS_READ_TOKEN,
     logpushStatusToken: env.PRODUCTION_LOGPUSH_STATUS_TOKEN,
+    logpushRecoveryToken: env.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN,
     fetchImpl,
   });
   stdout.write(canonicalJson(result));

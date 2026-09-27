@@ -35,6 +35,93 @@ function workerVersion(providerUsageSchemaSha256: string) {
 }
 
 describe("processing cost provider inspection", () => {
+  it("compares existing Logpush credentials with GET only and preserves the primary failure", async () => {
+    const logpushRequests: string[] = [];
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion(await providerUsageContractSha256()),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "primary-private-token",
+      logpushRecoveryToken: "recovery-private-token",
+      fetchImpl: async (input, init) => {
+        if (!String(input).includes("/logpush/")) throw new Error("private");
+        expect(String(input)).toBe(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/logpush/jobs/41`,
+        );
+        expect(init?.method).toBe("GET");
+        expect(init?.redirect).toBe("error");
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        const auth = new Headers(init?.headers).get("authorization") ?? "";
+        logpushRequests.push(auth);
+        if (auth === "Bearer primary-private-token")
+          return Response.json(
+            {
+              success: false,
+              errors: [{ code: 1004, message: "private destination_conf" }],
+            },
+            { status: 403 },
+          );
+        return Response.json({
+          success: true,
+          errors: [],
+          messages: [],
+          result: {
+            id: 41,
+            dataset: "workers_trace_events",
+            enabled: true,
+            last_complete: new Date((targetHourKey + 1) * 3600000).toISOString(),
+            last_error: null,
+            error_message: null,
+            destination_conf: "private destination URL",
+          },
+        });
+      },
+    });
+    expect(logpushRequests).toEqual([
+      "Bearer primary-private-token",
+      "Bearer recovery-private-token",
+    ]);
+    expect(result.logpush).toEqual({
+      reachable: false,
+      httpStatus: 403,
+      failure: "http-error",
+      providerErrorCodes: [1004],
+    });
+    expect(result.logpushRecoveryComparison).toEqual({
+      reachable: true,
+      complete: true,
+      lastCompleteMilliseconds: (targetHourKey + 1) * 3600000,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private|destination_conf/);
+  });
+
+  it.each([
+    "oversize",
+    "malformed",
+    "invalid-codes",
+  ])("does not leak %s error bodies", async (kind) => {
+    const result = await inspectProcessingCostProviders({
+      state: { activeVersionId, targetHourKey },
+      workerVersion: workerVersion(await providerUsageContractSha256()),
+      accountId,
+      analyticsReadToken: "analytics-token",
+      logpushStatusToken: "logpush-token",
+      fetchImpl: async () =>
+        new Response(
+          kind === "oversize"
+            ? JSON.stringify({ errors: [{ code: 1004 }], padding: "private".repeat(10000) })
+            : kind === "malformed"
+              ? "private"
+              : JSON.stringify({ errors: [{ code: "private" }, { code: -1 }, { code: 1.5 }] }),
+          { status: 403 },
+        ),
+    });
+    expect(result.logpush).toEqual({ reachable: false, httpStatus: 403, failure: "http-error" });
+    expect(result).not.toHaveProperty("logpushRecoveryComparison");
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
   it("compares narrower queries after sampling without accepting estimates or leaking groups", async () => {
     const queries: string[] = [];
     const result = await inspectProcessingCostProviders({
