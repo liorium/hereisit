@@ -102,6 +102,7 @@ describe("Cloudflare credential identity inspection", () => {
     "oversize",
     "malformed",
     "unsuccessful",
+    "array-id",
   ])("does not leak or accept %s provider responses", async (kind) => {
     const secret = "a".repeat(32);
     const result = await inspectCloudflareTokenIdentities({
@@ -114,7 +115,7 @@ describe("Cloudflare credential identity inspection", () => {
         return Response.json({
           success: kind !== "unsuccessful",
           result: {
-            id: kind === "echo" ? secret : tokenId,
+            id: kind === "array-id" ? [tokenId] : kind === "echo" ? secret : tokenId,
             status: "active",
           },
         });

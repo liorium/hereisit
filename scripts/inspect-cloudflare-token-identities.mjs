@@ -80,6 +80,7 @@ export async function inspectCloudflareTokenIdentities({ environment, env, fetch
           const result = envelope?.result;
           if (
             envelope?.success === true &&
+            typeof result?.id === "string" &&
             idPattern.test(result?.id ?? "") &&
             ["active", "disabled", "expired"].includes(result?.status) &&
             !values.some((value) => result.id.includes(value))
