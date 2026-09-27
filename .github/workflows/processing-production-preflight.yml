@@ -32,6 +32,18 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Inspect existing token identities and duplicate slots (read-only)
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_API_TOKEN }}
+          CLOUDFLARE_CLEANUP_API_TOKEN: ${{ secrets.CLOUDFLARE_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_D1_CLEANUP_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_CLEANUP_API_TOKEN }}
+          CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN: ${{ secrets.CLOUDFLARE_LOGPUSH_CLEANUP_API_TOKEN }}
+          PRODUCTION_ANALYTICS_READ_TOKEN: ${{ secrets.PRODUCTION_ANALYTICS_READ_TOKEN }}
+          PRODUCTION_LOGPUSH_STATUS_TOKEN: ${{ secrets.PRODUCTION_LOGPUSH_STATUS_TOKEN }}
+        run: node scripts/inspect-cloudflare-token-identities.mjs production
       - name: Validate sealed environment inputs
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
