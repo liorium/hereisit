@@ -39,6 +39,18 @@ export async function createImageNativeSbom(root) {
       metadata.artifacts.length === 0
     )
       throw new TypeError(`native build metadata is invalid: ${source.name}`);
+    if (metadata.patchSha256 !== source.patchSha256)
+      throw new TypeError(`native source patch metadata mismatch: ${source.name}`);
+    if (source.patchSha256 !== undefined) {
+      const patch = await readBoundedRegularFile(
+        join(runtimeRoot, "licenses", source.name, source.patchPath),
+        1024 * 1024,
+        "native source patch",
+      );
+      if (sha256Bytes(patch) !== source.patchSha256)
+        throw new TypeError(`native source patch hash mismatch: ${source.name}`);
+      properties.push({ name: "hereisit:source-patch:sha256", value: source.patchSha256 });
+    }
     for (const [path, name] of artifactSourceByPath) {
       if (name !== buildName) continue;
       const resolvedPath = await realpath(join(runtimeRoot, path));

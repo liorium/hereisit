@@ -18,12 +18,15 @@ The image and platform digests are in `apps/image-engine/base-images.lock.json`.
   Ubuntu's notes contradict the earlier blanket source-not-affected conclusion in the September 18
   research: they report a reproducer affecting older versions too. That earlier conclusion must not
   be reused as a release disposition.
-- The remaining HIGH result is `libvips 8.18.6 / CVE-2026-2913`. Its locked revision contains
-  upstream fix `a56feecbe9ed66521d9647ec9fbcd2546eccd7ee`. The existing harmless custom-source
-  probe passes on the newly built runtime. CI now repeats the probe against the exact production
-  image before its vulnerability gate. Any applicability exception must bind that CI image's exact
-  config digest, preserve the original scanner results, and include the actual approval permalink
-  and an expiry of at most 30 days. The migration itself does not grant that exception.
+- The historical remaining HIGH result was `libvips 8.18.6 / CVE-2026-2913`. The old
+  custom-source probe covered only map/read-to-memory. **Correction, October 5:** source ancestry
+  did not establish coverage of both branches in the original fix. The current 8.18.7 release
+  runtime failed an expanded sniff-boundary probe because upstream had replaced its runtime check
+  with an assertion that release builds disable. The [new repair and two-path evidence](2026-10-05-libvips-source-bounds-repair.md)
+  restore error-return behavior and preserve exact patch provenance. No remote exploitability is
+  claimed. Any remaining applicability exception still requires the exact CI image config digest,
+  original scanner results, actual approval permalink and an expiry of at most 30 days; local
+  verification does not grant that exception.
 
 ## Verification
 

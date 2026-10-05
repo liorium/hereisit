@@ -420,6 +420,14 @@ export function validateSourceLock(lock) {
     if (!/^\/build-metadata\/[a-z0-9-]+\.json$/.test(source.artifactRecord)) {
       throw new TypeError(`source ${source.name} artifact record is invalid`);
     }
+    if (source.patchPath !== undefined || source.patchSha256 !== undefined) {
+      if (
+        !/^[a-z0-9-]+\.patch$/.test(source.patchPath ?? "") ||
+        !source.noticePaths.includes(source.patchPath)
+      )
+        throw new TypeError(`source ${source.name} patch path is invalid`);
+      assertSha256(source.patchSha256, "source patch hash");
+    }
     if (typeof source.production !== "boolean") {
       throw new TypeError(`source ${source.name} production classification is required`);
     }
@@ -550,6 +558,16 @@ export function validateRuntimeInventory(inventory, sourceLock, policy) {
     ) {
       throw new TypeError(`runtime build metadata is invalid for ${source.name}`);
     }
+    if (
+      metadata.patchSha256 !== source.patchSha256 ||
+      (source.patchSha256 !== undefined &&
+        !inventory.entries.some(
+          (entry) =>
+            entry.path === `/licenses/${source.name}/${source.patchPath}` &&
+            entry.sha256 === source.patchSha256,
+        ))
+    )
+      throw new TypeError(`runtime source patch is invalid for ${source.name}`);
     for (const noticePath of source.noticePaths) {
       if (!entryPaths.has(`/licenses/${source.name}/${noticePath}`)) {
         throw new TypeError(`runtime notice is missing: ${source.name}/${noticePath}`);

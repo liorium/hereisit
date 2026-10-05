@@ -1,0 +1,20 @@
+Restore the runtime check from upstream CVE-2026-2913 fix
+https://github.com/libvips/libvips/commit/a56feecbe9ed66521d9647ec9fbcd2546eccd7ee
+The later 7fe60225cb62f93963b9e846bfb09eb382e5e195 assertion is disabled
+in release builds. Keep error-return behavior before allocation and reads.
+
+--- a/libvips/iofuncs/source.c
++++ b/libvips/iofuncs/source.c
+@@ -1354,7 +1354,11 @@ vips_source_sniff_at_most(VipsSource *source,
+ 
+ 	VIPS_DEBUG_MSG("vips_source_sniff_at_most: %zd bytes\n", length);
+ 
+-	g_assert(length <= UINT_MAX);
++	if (G_UNLIKELY(length > UINT_MAX)) {
++		vips_error(vips_connection_nick(VIPS_CONNECTION(source)),
++			"%s", _("length overflow"));
++		return -1;
++	}
+ 	SANITY(source);
+ 
+ 	if (vips_source_test_features(source) ||

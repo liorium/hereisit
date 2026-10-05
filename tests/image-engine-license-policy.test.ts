@@ -117,6 +117,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
           schemaVersion: 1,
           name: source.name === "quantizr" ? "png-smart" : source.name,
           revision: source.revision,
+          ...(source.patchSha256 === undefined ? {} : { patchSha256: source.patchSha256 }),
           artifacts: (sourcePaths[String(source.name)] ?? []).map((path) => ({
             sha256: required.find((record) => record.path === path)?.sha256,
           })),
@@ -149,7 +150,7 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
         (source.noticePaths as string[]).map((noticePath) => ({
           path: `/licenses/${String(source.name)}/${noticePath}`,
           type: "file",
-          sha256: "f".repeat(64),
+          sha256: noticePath === source.patchPath ? source.patchSha256 : "f".repeat(64),
         })),
       ),
     required,
@@ -175,6 +176,34 @@ async function licenseGateFixture(scope: "pr" | "release" = "pr") {
 }
 
 describe("image engine native supply-chain policy", () => {
+  it("pins the retained libvips patch bytes in both lock and build", async () => {
+    const lock = (await readJson("apps/image-engine/native/sources.lock.json")) as {
+      sources: Array<{ name: string; patchPath?: string; patchSha256?: string }>;
+    };
+    const source = lock.sources.find((entry) => entry.name === "libvips");
+    expect(source?.patchPath).toBe("libvips-source-bounds.patch");
+    const bytes = await readFile(
+      join(repositoryRoot, "apps/image-engine/native/libvips-source-bounds.patch"),
+    );
+    expect(source?.patchSha256).toBe(sha256(bytes));
+    expect(
+      await readFile(join(repositoryRoot, "apps/image-engine/native/build-libvips.sh"), "utf8"),
+    ).toContain(`PATCH_SHA256=${sha256(bytes)}`);
+  });
+
+  it("rejects native patch provenance missing from runtime build metadata", async () => {
+    const fixture = await licenseGateFixture();
+    const source = fixture.documents.sourceLock.sources.find((item) => item.name === "libvips");
+    Object.assign(source ?? {}, { patchPath: "bounds.patch", patchSha256: "a".repeat(64) });
+    expect(() =>
+      validateRuntimeInventory(
+        fixture.inventory,
+        fixture.documents.sourceLock,
+        fixture.documents.policy,
+      ),
+    ).toThrow(/patch/);
+  });
+
   it.each([
     [],
     [{ name: "libglib2.0-0t64", version: "2.80.0-6ubuntu3.8" }],

@@ -70,7 +70,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY apps/image-engine/native/build-util-linux.sh /build/native/
 RUN /build/native/build-util-linux.sh
-COPY apps/image-engine/native/build-libvips.sh /build/native/
+COPY apps/image-engine/native/build-libvips.sh apps/image-engine/native/libvips-source-bounds.patch /build/native/
 RUN /build/native/build-libvips.sh
 COPY apps/image-engine/native/jpeg-coeff-verify.c /build/native/jpeg-coeff-verify.c
 RUN cc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong \

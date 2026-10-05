@@ -3,7 +3,8 @@
  * Run inside the pinned engine with /usr/local/lib on LD_LIBRARY_PATH.
  * No libvips development package needed; signatures match connection.h.
  * The synthetic read never writes beyond the requested size, even on an
- * unpatched runtime. A small source is the positive functionality control.
+ * unpatched runtime. Both APIs have small positive functionality controls.
+ * Both oversized paths must return an error before any read or allocation.
  */
 #include <dlfcn.h>
 #include <stdint.h>
@@ -47,6 +48,9 @@ int main(void) {
     int (*init)(const char *) = symbol(library, "vips_init");
     void *(*new_source)(void) = symbol(library, "vips_source_custom_new");
     const void *(*map)(void *, size_t *) = symbol(library, "vips_source_map");
+    int64_t (*sniff)(void *, unsigned char **, size_t) =
+        symbol(library, "vips_source_sniff_at_most");
+    const char *(*version)(void) = symbol(library, "vips_version_string");
     unsigned long (*connect)(void *, const char *, void (*)(void), void *, void *, int) =
         symbol(library, "g_signal_connect_data");
     const char *(*error)(void) = symbol(library, "vips_error_buffer");
@@ -54,6 +58,7 @@ int main(void) {
     void (*unref)(void *) = symbol(library, "g_object_unref");
     void (*shutdown)(void) = symbol(library, "vips_shutdown");
     if (init("source-bounds-probe") != 0) return 1;
+    if (strcmp(version(), "8.18.7") != 0) return 1;
     for (int oversized = 0; oversized < 2; oversized++) {
         struct source_state state = {0, oversized ? INT64_C(4294968320) : 4, 0};
         void *source = new_source();
@@ -69,8 +74,25 @@ int main(void) {
         clear_error();
         if (!passed) { fputs("source boundary regression\n", stderr); return 1; }
     }
+    for (int oversized = 0; oversized < 2; oversized++) {
+        struct source_state state = {0, 4, 0};
+        void *source = new_source();
+        if (!source) return 1;
+        connect(source, "seek", (void (*)(void)) seek_source, &state, NULL, 0);
+        connect(source, "read", (void (*)(void)) read_source, &state, NULL, 0);
+        unsigned char *bytes = NULL;
+        int64_t length = sniff(source, &bytes, oversized ? (size_t) UINT64_C(4294968320) : 4);
+        int passed = oversized
+            ? length == -1 && strstr(error(), "length overflow") != NULL && state.reads == 0
+            : length == 4 && bytes != NULL && memcmp(bytes, "test", 4) == 0;
+        unref(source);
+        clear_error();
+        if (!passed) { fputs("sniff boundary regression\n", stderr); return 1; }
+    }
     shutdown();
     dlclose(library);
-    puts("{\"smallSourceMapped\":true,\"oversizedSourceRejectedBeforeRead\":true}");
+    puts("{\"runtimeVersion\":\"8.18.7\",\"smallSourceMapped\":true,"
+        "\"oversizedSourceRejectedBeforeRead\":true,\"smallSourceSniffed\":true,"
+        "\"oversizedSniffRejectedBeforeRead\":true}");
     return 0;
 }

@@ -33,7 +33,7 @@ async function fixture() {
   };
   const metadataPath = join(root, "build-metadata/expat.json");
   await writeFile(metadataPath, JSON.stringify(metadata));
-  return { root, hash, libraryPath, metadata, metadataPath };
+  return { root, hash, libraryPath, metadata, metadataPath, lock };
 }
 
 it("catalogs production native sources with evidence from the shipped binary, excluding benchmark sources", async () => {
@@ -89,4 +89,24 @@ it("writes the embedded SBOM once and refuses to overwrite build evidence", asyn
   expect(JSON.parse(bytes).components[0].name).toBe("expat");
   expect(spawnSync(process.execPath, args).status).toBe(1);
   expect(await readFile(path, "utf8")).toBe(bytes);
+});
+
+it("binds a source patch to its retained bytes, build metadata and SBOM", async () => {
+  const { root, lock, metadata, metadataPath } = await fixture();
+  const patch = Buffer.from("reviewed source patch");
+  const patchSha256 = createHash("sha256").update(patch).digest("hex");
+  Object.assign(lock.sources[0], { patchPath: "bounds.patch", patchSha256 });
+  lock.sources[0].noticePaths.push("bounds.patch");
+  await mkdir(join(root, "licenses/expat"));
+  await writeFile(join(root, "licenses/expat/bounds.patch"), patch);
+  await writeFile(join(root, "licenses/sources.lock.json"), JSON.stringify(lock));
+  await expect(createImageNativeSbom(root)).rejects.toThrow(/patch/);
+  await writeFile(metadataPath, JSON.stringify({ ...metadata, patchSha256 }));
+  const sbom = await createImageNativeSbom(root);
+  expect(sbom.components[0].properties).toContainEqual({
+    name: "hereisit:source-patch:sha256",
+    value: patchSha256,
+  });
+  await writeFile(join(root, "licenses/expat/bounds.patch"), "wrong patch");
+  await expect(createImageNativeSbom(root)).rejects.toThrow(/patch/);
 });
