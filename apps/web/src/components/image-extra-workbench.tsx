@@ -1061,6 +1061,7 @@ export function ImageExtraWorkbench({
             <label>
               확대{" "}
               <select
+                aria-label="확대"
                 value={options.scale}
                 onChange={(event) =>
                   updateOption("scale", Number(event.currentTarget.value) as 2 | 4)
