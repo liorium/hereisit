@@ -22,14 +22,14 @@ async function fixture() {
   await writeFile(join(root, "licenses/sources.lock.json"), JSON.stringify(lock));
   const library = Buffer.from("\x7fELFfixture");
   const hash = createHash("sha256").update(library).digest("hex");
-  const libraryPath = join(root, "usr/local/lib/libexpat.so.1.12.4");
+  const libraryPath = join(root, "usr/local/lib/libexpat.so.1.13.0");
   await writeFile(libraryPath, library);
-  await symlink("libexpat.so.1.12.4", join(root, "usr/local/lib/libexpat.so"));
+  await symlink("libexpat.so.1.13.0", join(root, "usr/local/lib/libexpat.so"));
   const metadata = {
     schemaVersion: 1,
     name: "expat",
     revision: lock.sources[0].revision,
-    artifacts: [{ path: "/opt/hereisit-native/expat/lib/libexpat.so.1.12.4", sha256: hash }],
+    artifacts: [{ path: "/opt/hereisit-native/expat/lib/libexpat.so.1.13.0", sha256: hash }],
   };
   const metadataPath = join(root, "build-metadata/expat.json");
   await writeFile(metadataPath, JSON.stringify(metadata));
@@ -43,13 +43,13 @@ it("catalogs production native sources with evidence from the shipped binary, ex
   expect(sbom.components).toHaveLength(1);
   expect(sbom.components[0]).toMatchObject({
     name: "expat",
-    version: "2.8.4",
-    purl: "pkg:generic/expat@2.8.4",
-    cpe: "cpe:2.3:a:libexpat_project:libexpat:2.8.4:*:*:*:*:*:*:*",
-    evidence: { occurrences: [{ location: "/usr/local/lib/libexpat.so.1.12.4" }] },
+    version: "2.9.0",
+    purl: "pkg:generic/expat@2.9.0",
+    cpe: "cpe:2.3:a:libexpat_project:libexpat:2.9.0:*:*:*:*:*:*:*",
+    evidence: { occurrences: [{ location: "/usr/local/lib/libexpat.so.1.13.0" }] },
   });
   expect(sbom.components[0].properties).toContainEqual({
-    name: "hereisit:runtime-sha256:/usr/local/lib/libexpat.so.1.12.4",
+    name: "hereisit:runtime-sha256:/usr/local/lib/libexpat.so.1.13.0",
     value: hash,
   });
 });

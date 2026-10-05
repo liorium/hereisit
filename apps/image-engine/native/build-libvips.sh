@@ -16,7 +16,7 @@ copy_notices "$NAME" "$SOURCE" LICENSE libvips-source-bounds.patch
 
 export PKG_CONFIG_PATH="/opt/hereisit-native/expat/lib/pkgconfig:/opt/hereisit-native/mozjpeg/lib/pkgconfig:/opt/hereisit-native/libwebp/lib/pkgconfig"
 export LD_LIBRARY_PATH="/opt/hereisit-native/expat/lib:/opt/hereisit-native/util-linux/lib:/opt/hereisit-native/libwebp/lib"
-test "$(pkg-config --modversion expat)" = "2.8.4"
+test "$(pkg-config --modversion expat)" = "2.9.0"
 meson setup "$SOURCE/build" "$SOURCE" \
   --buildtype=release \
   --prefix="$PREFIX" \
