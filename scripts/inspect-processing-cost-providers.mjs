@@ -89,6 +89,7 @@ function failureKind(error, status) {
       ["Container provider resource envelope is invalid.", "resource"],
       ["Container provider resource ordering is invalid.", "resource"],
       ["Container provider usage response must be JSON.", "content-type"],
+      ["Provider usage response must be JSON.", "content-type"],
     ]).get(error.message) ?? (status === undefined ? "no-response" : "invalid-response")
   );
 }

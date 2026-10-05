@@ -54,7 +54,8 @@ const HEIC_GUIDANCE =
 const SUPPORTED_IMAGE_GUIDANCE =
   "JPG, PNG, WebP 정지 이미지만 지원하며 파일당 30MB까지 처리할 수 있어요.";
 const SERVER_DISCLOSURE = "선택한 파일을 HereIsIt 서버에서 처리하고 완료 후 삭제해요.";
-const LOCAL_DISCLOSURE = "파일은 업로드하지 않고 이 기기에서 처리해요.";
+const LOCAL_DISCLOSURE =
+  "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.";
 
 type Preset = "recommended" | "smallest" | "lossless";
 type PolicyView =
@@ -221,6 +222,13 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
       active = false;
     };
   }, [config.apiOrigin, sessionId]);
+
+  useEffect(() => {
+    if (policy.state !== "local") return;
+    locationRef.current = "local";
+    setLocation("local");
+    writeImageCompressionLocation("local");
+  }, [policy.state]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -502,7 +510,7 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
     };
     try {
       let execution: "server" | "local" = effectiveExecution;
-      if (location === "server" && config.apiOrigin !== null) {
+      if (effectiveExecution === "server" && config.apiOrigin !== null) {
         setMessage("처리 정책을 다시 확인하고 있어요.");
         try {
           const refreshed = await getProcessingPolicy({
@@ -960,25 +968,32 @@ export function ImageCompressWorkbench({ toolId }: { toolId: AvailableToolId }) 
             disabled={!executionReady || busy}
             onChange={handleFileInputChange}
           />
-          <fieldset className={styles.executionModes}>
+          <fieldset className={styles.executionModes} disabled={busy}>
             <legend>처리 방식</legend>
-            <label data-selected={location === "server"}>
+            <label data-selected={effectiveExecution === "server"}>
               <input
                 type="radio"
                 name="image-processing-location"
                 value="server"
-                checked={location === "server"}
+                checked={effectiveExecution === "server"}
+                disabled={policy.state !== "server"}
                 onChange={() => changeLocation("server")}
               />
               <strong>고성능 서버 압축</strong>
-              <span>처리 후 자동 삭제</span>
+              <span>
+                {policy.state === "server"
+                  ? "처리 후 자동 삭제"
+                  : policy.state === "checking"
+                    ? "사용 가능 여부 확인 중"
+                    : "현재 사용할 수 없어요"}
+              </span>
             </label>
-            <label data-selected={location === "local"}>
+            <label data-selected={effectiveExecution === "local"}>
               <input
                 type="radio"
                 name="image-processing-location"
                 value="local"
-                checked={location === "local"}
+                checked={effectiveExecution === "local"}
                 onChange={() => changeLocation("local")}
               />
               <strong>내 기기에서 처리</strong>

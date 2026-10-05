@@ -19,6 +19,15 @@ import {
   removeBackgroundPixels,
   sanitizeHtmlMarkup,
 } from "../lib/image-extra";
+import {
+  assertExtraFileSizes,
+  assertExtraResultsFit,
+  inspectExtraInput,
+  loadExtraImage as loadImage,
+  loadRenderSource,
+  planExtraDimensions,
+  validateExtraOutput,
+} from "../lib/image-extra-browser";
 import { getToolImplementation } from "../lib/tool-implementations";
 import styles from "./image-extra-workbench.module.css";
 
@@ -48,7 +57,7 @@ type BlurRegion = {
 interface WorkItem {
   readonly id: string;
   readonly file: File;
-  readonly previewUrl: string;
+  readonly previewUrl: string | undefined;
   readonly status: ItemStatus;
   readonly resultUrl?: string;
   readonly result?: Blob;
@@ -77,11 +86,11 @@ interface ExtraOptions {
   readonly tolerance: number;
 }
 
-const MAX_PIXELS = 25_000_000;
 const MAX_HTML_BYTES = 100_000;
 const DEFAULT_HTML = `<main style="font-family:system-ui;padding:48px;background:#172033;color:white;border-radius:24px"><p style="color:#ffd84d;font-weight:700">HEREISIT</p><h1 style="font-size:56px;margin:0 0 12px">HTML을 이미지로</h1><p style="font-size:24px;margin:0;color:#d9e1ff">브라우저에서 안전하게 렌더링했어요.</p></main>`;
 const ACCEPT_BY_INTENT: Record<ImageExtraIntent, string> = {
-  "convert-to-jpg": "image/*,.jpg,.jpeg,.png,.gif,.webp,.svg,.tif,.tiff,.heic,.heif",
+  "convert-to-jpg":
+    "image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif",
   "convert-from-jpg": "image/jpeg,.jpg,.jpeg",
   editor: "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp",
   meme: "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp",
@@ -137,32 +146,14 @@ function acceptedFile(file: File, intent: ImageExtraIntent): boolean {
     return file.type === "image/jpeg" || /\.jpe?g$/i.test(file.name);
   if (intent === "convert-to-jpg")
     return (
-      file.type.startsWith("image/") ||
-      /^\.(?:jpe?g|png|gif|webp|svg|tiff?|heic|heif)$/i.test(
-        file.name.slice(file.name.lastIndexOf(".")),
-      )
+      ["image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"].includes(
+        file.type,
+      ) || /^\.(?:jpe?g|png|gif|webp|heic|heif)$/i.test(file.name.slice(file.name.lastIndexOf(".")))
     );
   return (
     ["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
     /\.(?:jpe?g|png|webp)$/i.test(file.name)
   );
-}
-
-function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("이미지를 읽지 못했습니다."));
-    };
-    image.src = url;
-  });
 }
 
 interface FaceDetectorLike {
@@ -191,65 +182,6 @@ function canvasBlob(canvas: HTMLCanvasElement, mime: string, quality: number): P
       quality / 100,
     );
   });
-}
-
-function fitDimensions(
-  width: number,
-  height: number,
-  scale: number,
-): { width: number; height: number } {
-  const safeScale = Math.max(1, scale);
-  const ratio = Math.min(
-    1,
-    Math.sqrt(MAX_PIXELS / Math.max(1, width * height)),
-    4096 / Math.max(1, width),
-    4096 / Math.max(1, height),
-  );
-  return {
-    width: Math.max(1, Math.floor(width * safeScale * ratio)),
-    height: Math.max(1, Math.floor(height * safeScale * ratio)),
-  };
-}
-
-interface RenderSource {
-  readonly source: CanvasImageSource;
-  readonly image?: HTMLImageElement;
-  readonly width: number;
-  readonly height: number;
-  readonly release: () => void;
-}
-
-async function loadRenderSource(file: File, scale: number): Promise<RenderSource> {
-  if (scale > 1 && typeof createImageBitmap === "function") {
-    let original: ImageBitmap | undefined;
-    try {
-      original = await createImageBitmap(file);
-      const dimensions = fitDimensions(original.width, original.height, scale);
-      const resized = await createImageBitmap(original, {
-        resizeWidth: dimensions.width,
-        resizeHeight: dimensions.height,
-        resizeQuality: "high",
-      });
-      original.close();
-      original = undefined;
-      return {
-        source: resized,
-        width: dimensions.width,
-        height: dimensions.height,
-        release: () => resized.close(),
-      };
-    } catch {
-      original?.close();
-    }
-  }
-  const image = await loadImage(file);
-  return {
-    source: image,
-    image,
-    width: image.naturalWidth || image.width,
-    height: image.naturalHeight || image.height,
-    release: () => image.removeAttribute("src"),
-  };
 }
 
 function drawText(
@@ -366,7 +298,15 @@ async function renderHtmlToBlob(html: string, width: number, height: number): Pr
     const context = canvas.getContext("2d");
     if (context === null) throw new Error("렌더링 공간을 만들지 못했습니다.");
     context.drawImage(image, 0, 0);
-    return await canvasBlob(canvas, "image/png", 100);
+    try {
+      const blob = await canvasBlob(canvas, "image/png", 100);
+      await validateExtraOutput(blob, { width, height }, "image/png");
+      return blob;
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+      image.removeAttribute("src");
+    }
   } finally {
     URL.revokeObjectURL(source);
   }
@@ -379,9 +319,11 @@ async function renderFile(
   regions: readonly BlurRegion[],
 ): Promise<{ blob: Blob; width: number; height: number }> {
   const scale = intent === "upscale" ? options.scale : 1;
-  const renderSource = await loadRenderSource(file, scale);
+  const renderSource = await loadRenderSource(file, scale, intent === "convert-to-jpg");
+  const canvas = document.createElement("canvas");
   try {
-    const canvas = document.createElement("canvas");
+    if (intent === "remove-background" && Math.max(renderSource.width, renderSource.height) > 4096)
+      throw new Error("배경 제거는 한 변 4096px 이하 이미지를 선택해 주세요.");
     canvas.width = renderSource.width;
     canvas.height = renderSource.height;
     const context = canvas.getContext("2d");
@@ -412,7 +354,8 @@ async function renderFile(
       context.putImageData(pixels, 0, 0);
     }
     if (intent === "blur-face") {
-      if (regions.length === 0) throw new Error("흐리게 할 영역을 하나 이상 드래그해 주세요.");
+      if (regions.length === 0)
+        throw new Error("흐리게 할 영역을 드래그하거나 영역 추가 버튼으로 지정해 주세요.");
       if (renderSource.image === undefined) throw new Error("이미지를 다시 읽지 못했습니다.");
       drawRegions(context, renderSource.image, regions, canvas.width, canvas.height);
     }
@@ -468,12 +411,12 @@ async function renderFile(
           : options.output === "gif"
             ? "png"
             : options.output;
-    return {
-      blob: await canvasBlob(canvas, outputMime(output), options.quality),
-      width: canvas.width,
-      height: canvas.height,
-    };
+    const blob = await canvasBlob(canvas, outputMime(output), options.quality);
+    await validateExtraOutput(blob, renderSource, outputMime(output));
+    return { blob, width: canvas.width, height: canvas.height };
   } finally {
+    canvas.width = 0;
+    canvas.height = 0;
     renderSource.release();
   }
 }
@@ -487,7 +430,7 @@ async function renderGif(
   try {
     const sourceWidth = first.naturalWidth || first.width;
     const sourceHeight = first.naturalHeight || first.height;
-    const baseDimensions = fitDimensions(sourceWidth, sourceHeight, 1);
+    const baseDimensions = planExtraDimensions(sourceWidth, sourceHeight, 1);
     const gifPixelRatio = Math.min(
       1,
       Math.sqrt(4_000_000 / Math.max(1, baseDimensions.width * baseDimensions.height)),
@@ -496,11 +439,15 @@ async function renderGif(
       width: Math.max(1, Math.floor(baseDimensions.width * gifPixelRatio)),
       height: Math.max(1, Math.floor(baseDimensions.height * gifPixelRatio)),
     };
+    if (dimensions.width * dimensions.height * files.length > 50_000_000)
+      throw new Error(
+        "GIF 전체 프레임은 최대 5천만 픽셀까지 만들 수 있어요. 사진 수나 크기를 줄여 주세요.",
+      );
     const frames = [];
     for (const [index, file] of files.entries()) {
       const image = index === 0 ? first : await loadImage(file);
+      const canvas = document.createElement("canvas");
       try {
-        const canvas = document.createElement("canvas");
         canvas.width = dimensions.width;
         canvas.height = dimensions.height;
         const context = canvas.getContext("2d");
@@ -514,15 +461,15 @@ async function renderGif(
           pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
         });
       } finally {
+        canvas.width = 0;
+        canvas.height = 0;
         image.removeAttribute("src");
       }
     }
     const bytes = encodeAnimatedGif(frames, { delayMs: options.delayMs, loop: options.loop });
-    return {
-      blob: new Blob([bytes], { type: "image/gif" }),
-      width: dimensions.width,
-      height: dimensions.height,
-    };
+    const blob = new Blob([bytes], { type: "image/gif" });
+    await validateExtraOutput(blob, dimensions, "image/gif");
+    return { blob, ...dimensions };
   } finally {
     first.removeAttribute("src");
   }
@@ -563,8 +510,12 @@ export function ImageExtraWorkbench({
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>();
   const inputRef = useRef<HTMLInputElement>(null);
   const ownedUrls = useRef(new Set<string>());
+  const busyRef = useRef(false);
+  const mountedRef = useRef(true);
+  const archiveUrlRef = useRef<string | undefined>(undefined);
 
   const createOwnedUrl = useCallback((blob: Blob): string => {
+    if (!mountedRef.current) throw new Error("작업 화면을 닫았어요.");
     const url = URL.createObjectURL(blob);
     ownedUrls.current.add(url);
     return url;
@@ -574,13 +525,14 @@ export function ImageExtraWorkbench({
     URL.revokeObjectURL(url);
   }, []);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       for (const url of ownedUrls.current) URL.revokeObjectURL(url);
       ownedUrls.current.clear();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const selected = items[0];
   const showFiles = intent !== "html-to-image";
@@ -595,49 +547,84 @@ export function ImageExtraWorkbench({
   const outputLabel =
     itemOutputFormat === "jpeg" ? "JPG" : itemOutputFormat === "gif" ? "GIF" : "PNG";
 
-  function chooseFiles(fileList: FileList | readonly File[]): void {
-    if (processing) return;
-    const files = Array.from(fileList)
-      .filter((file) => acceptedFile(file, intent))
-      .slice(0, limits.maxFiles);
-    if (files.length === 0) {
-      setMessage("이 도구에서 읽을 수 있는 이미지가 없어요.");
-      return;
+  async function chooseFiles(fileList: FileList | readonly File[]): Promise<void> {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setProcessing(true);
+    setMessage("이미지 크기를 확인하고 있어요.");
+    try {
+      const files = Array.from(fileList);
+      assertExtraFileSizes(files, limits);
+      if (files.some((file) => !acceptedFile(file, intent)))
+        throw new Error("지원 형식의 이미지를 선택해 주세요. SVG·TIFF는 지원하지 않아요.");
+      let totalPixels = 0;
+      const inspectedFiles: { file: File; animated: boolean }[] = [];
+      for (const file of files) {
+        const dimensions = await inspectExtraInput(file, intent === "convert-to-jpg");
+        inspectedFiles.push({ file, animated: dimensions.animated });
+        const supported =
+          intent === "convert-to-jpg" ||
+          (intent === "convert-from-jpg"
+            ? dimensions.format === "jpeg"
+            : intent === "upscale"
+              ? ["jpeg", "png"].includes(dimensions.format)
+              : ["jpeg", "png", "webp"].includes(dimensions.format));
+        if (!supported) throw new Error("이 도구에서 지원하지 않는 이미지 형식이에요.");
+        totalPixels += dimensions.decodedPixels;
+        if (totalPixels > 50_000_000)
+          throw new Error(
+            "선택한 이미지 합계는 최대 5천만 픽셀까지 준비할 수 있어요. 파일 수나 크기를 줄여 주세요.",
+          );
+      }
+      if (!mountedRef.current) return;
+      for (const item of items) {
+        revokeOwnedUrl(item.previewUrl);
+        revokeOwnedUrl(item.resultUrl);
+      }
+      revokeOwnedUrl(archiveUrlRef.current);
+      archiveUrlRef.current = undefined;
+      setItems(
+        inspectedFiles.map(({ file, animated }) => ({
+          id: makeId(),
+          file,
+          previewUrl: animated ? undefined : createOwnedUrl(file),
+          status: "ready",
+        })),
+      );
+      setRegions([]);
+      setMessage(`${files.length}개 이미지를 준비했어요.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "이미지를 확인하지 못했어요.");
+    } finally {
+      busyRef.current = false;
+      setProcessing(false);
     }
-    for (const item of items) revokeOwnedUrl(item.previewUrl);
-    setItems(
-      files.map((file) => ({
-        id: makeId(),
-        file,
-        previewUrl: createOwnedUrl(file),
-        status: "ready",
-      })),
-    );
-    setRegions([]);
-    setMessage(`${files.length}개 이미지를 준비했어요.`);
   }
 
   async function run(): Promise<void> {
-    if (processing) return;
+    if (busyRef.current) return;
     if (intent === "html-to-image") {
       if (html.trim() === "") {
         setMessage("HTML을 입력해 주세요.");
         return;
       }
+      busyRef.current = true;
       setProcessing(true);
+      if (htmlResult !== undefined) revokeOwnedUrl(htmlResult.url);
+      setHtmlResult(undefined);
       try {
         const blob = await renderHtmlToBlob(
           html,
-          clampControl(htmlWidth, 160, 2400),
-          clampControl(htmlHeight, 160, 2400),
+          Math.round(clampControl(htmlWidth, 160, 2400)),
+          Math.round(clampControl(htmlHeight, 160, 2400)),
         );
         const url = createOwnedUrl(blob);
-        if (htmlResult !== undefined) revokeOwnedUrl(htmlResult.url);
         setHtmlResult({ url, blob });
         setMessage("HTML을 PNG로 만들었어요.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "HTML을 이미지로 만들지 못했어요.");
       } finally {
+        busyRef.current = false;
         setProcessing(false);
       }
       return;
@@ -646,7 +633,10 @@ export function ImageExtraWorkbench({
       setMessage("먼저 이미지를 선택해 주세요.");
       return;
     }
+    busyRef.current = true;
     setProcessing(true);
+    revokeOwnedUrl(archiveUrlRef.current);
+    archiveUrlRef.current = undefined;
     for (const item of items) revokeOwnedUrl(item.resultUrl);
     setItems((current) =>
       current.map((item) => ({
@@ -679,6 +669,7 @@ export function ImageExtraWorkbench({
           setMessage(reason);
           return;
         }
+      if (!mountedRef.current) return;
       if (gifResult !== undefined) {
         const first = items[0];
         if (first !== undefined) {
@@ -703,7 +694,10 @@ export function ImageExtraWorkbench({
           }
         }
       } else {
+        let retainedBytes = 0;
+        let retainedPixels = 0;
         for (const item of items) {
+          if (!mountedRef.current) return;
           const baseItem = {
             id: item.id,
             file: item.file,
@@ -716,6 +710,12 @@ export function ImageExtraWorkbench({
               { ...options, output: itemOutputFormat },
               regions,
             );
+            assertExtraResultsFit(
+              retainedBytes + rendered.blob.size,
+              retainedPixels + rendered.width * rendered.height,
+            );
+            retainedBytes += rendered.blob.size;
+            retainedPixels += rendered.width * rendered.height;
             const resultUrl = createOwnedUrl(rendered.blob);
             next.push({
               ...baseItem,
@@ -740,11 +740,13 @@ export function ImageExtraWorkbench({
         completed > 0 ? `${completed}개 결과를 만들었어요.` : "처리할 수 있는 결과가 없어요.",
       );
     } finally {
+      busyRef.current = false;
       setProcessing(false);
     }
   }
 
   async function downloadAll(): Promise<void> {
+    if (busyRef.current) return;
     const completed = items.filter(
       (item): item is WorkItem & { result: Blob; resultUrl: string } =>
         item.result !== undefined && item.resultUrl !== undefined,
@@ -760,17 +762,31 @@ export function ImageExtraWorkbench({
       downloadUrl(first.resultUrl, outputName(first.file.name, itemOutputFormat));
       return;
     }
-    const archive = await createZipArchive(
-      await Promise.all(
-        completed.map(async (item) => ({
-          name: outputName(item.file.name, itemOutputFormat),
-          bytes: await item.result.arrayBuffer(),
-        })),
-      ),
-    );
-    const url = createOwnedUrl(archive);
-    downloadUrl(url, `hereisit-${intent}.zip`);
-    window.setTimeout(() => revokeOwnedUrl(url), 60_000);
+    busyRef.current = true;
+    setProcessing(true);
+    try {
+      assertExtraResultsFit(completed.reduce((sum, item) => sum + item.result.size + 1024, 0));
+      revokeOwnedUrl(archiveUrlRef.current);
+      archiveUrlRef.current = undefined;
+      const archive = await createZipArchive(
+        await Promise.all(
+          completed.map(async (item) => ({
+            name: outputName(item.file.name, itemOutputFormat),
+            bytes: await item.result.arrayBuffer(),
+          })),
+        ),
+      );
+      assertExtraResultsFit(archive.size);
+      const url = createOwnedUrl(archive);
+      archiveUrlRef.current = url;
+      downloadUrl(url, `hereisit-${intent}.zip`);
+      window.setTimeout(() => revokeOwnedUrl(url), 60_000);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "다운로드를 준비하지 못했어요.");
+    } finally {
+      busyRef.current = false;
+      setProcessing(false);
+    }
   }
 
   function updateOption<Key extends keyof ExtraOptions>(key: Key, value: ExtraOptions[Key]): void {
@@ -779,11 +795,11 @@ export function ImageExtraWorkbench({
 
   function handleDrop(event: DragEvent<HTMLButtonElement>): void {
     event.preventDefault();
-    chooseFiles(event.dataTransfer.files);
+    void chooseFiles(event.dataTransfer.files);
   }
 
   function beginBlur(event: PointerEvent<HTMLElement>): void {
-    if (intent !== "blur-face" || selected === undefined) return;
+    if (intent !== "blur-face" || selected === undefined || busyRef.current) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = clampControl((event.clientX - rect.left) / rect.width, 0, 1);
     const y = clampControl((event.clientY - rect.top) / rect.height, 0, 1);
@@ -792,7 +808,7 @@ export function ImageExtraWorkbench({
   }
 
   function endBlur(event: PointerEvent<HTMLElement>): void {
-    if (dragStart === undefined) return;
+    if (dragStart === undefined || busyRef.current) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = clampControl((event.clientX - rect.left) / rect.width, 0, 1);
     const y = clampControl((event.clientY - rect.top) / rect.height, 0, 1);
@@ -803,20 +819,25 @@ export function ImageExtraWorkbench({
       width: Math.abs(x - dragStart.x),
       height: Math.abs(y - dragStart.y),
     };
-    if (region.width > 0.02 && region.height > 0.02) setRegions((current) => [...current, region]);
+    if (region.width > 0.02 && region.height > 0.02)
+      setRegions((current) => [...current, region].slice(0, 20));
     setDragStart(undefined);
   }
 
   async function detectFaces(): Promise<void> {
-    if (intent !== "blur-face" || selected === undefined || processing) return;
+    if (intent !== "blur-face" || selected === undefined || busyRef.current) return;
     const detector = createFaceDetector();
     if (detector === undefined) {
-      setMessage("자동 얼굴 찾기는 이 브라우저에서 지원되지 않아요. 영역을 직접 드래그해 주세요.");
+      setMessage(
+        "자동 얼굴 찾기는 이 브라우저에서 지원되지 않아요. 드래그하거나 영역 추가 버튼으로 직접 지정해 주세요.",
+      );
       return;
     }
+    busyRef.current = true;
     setProcessing(true);
+    let image: HTMLImageElement | undefined;
     try {
-      const image = await loadImage(selected.file);
+      image = await loadImage(selected.file);
       const detections = await detector.detect(image);
       const imageWidth = image.naturalWidth || image.width;
       const imageHeight = image.naturalHeight || image.height;
@@ -832,14 +853,18 @@ export function ImageExtraWorkbench({
         imageHeight,
       );
       if (detected.length === 0) {
-        setMessage("얼굴을 찾지 못했어요. 영역을 직접 드래그해 주세요.");
+        setMessage("얼굴을 찾지 못했어요. 드래그하거나 영역 추가 버튼으로 직접 지정해 주세요.");
         return;
       }
       setRegions(detected);
       setMessage(`${detected.length}개 얼굴 영역을 찾았어요. 필요하면 직접 조절해 주세요.`);
     } catch {
-      setMessage("자동 얼굴 찾기에 실패했어요. 영역을 직접 드래그해 주세요.");
+      setMessage(
+        "자동 얼굴 찾기에 실패했어요. 드래그하거나 영역 추가 버튼으로 직접 지정해 주세요.",
+      );
     } finally {
+      image?.removeAttribute("src");
+      busyRef.current = false;
       setProcessing(false);
     }
   }
@@ -859,7 +884,7 @@ export function ImageExtraWorkbench({
             disabled={processing}
             multiple={limits.maxFiles > 1}
             onChange={(event) => {
-              if (event.currentTarget.files !== null) chooseFiles(event.currentTarget.files);
+              if (event.currentTarget.files !== null) void chooseFiles(event.currentTarget.files);
               event.currentTarget.value = "";
             }}
             ref={inputRef}
@@ -880,11 +905,15 @@ export function ImageExtraWorkbench({
             <ul aria-label="선택한 이미지" className={styles.fileList}>
               {items.map((item) => (
                 <li className={styles.fileRow} key={item.id}>
-                  {/* biome-ignore lint/performance/noImgElement: local object URL preview */}
-                  <img alt="" src={item.previewUrl} />
+                  {item.previewUrl === undefined ? (
+                    <small>GIF</small>
+                  ) : (
+                    // biome-ignore lint/performance/noImgElement: local object URL preview
+                    <img alt="" src={item.previewUrl} />
+                  )}
                   <span>{item.file.name}</span>
                   <small>
-                    {statusLabel(item.status)}
+                    {item.error ?? statusLabel(item.status)}
                     {item.result !== undefined ? ` · ${formatBytes(item.result.size)}` : ""}
                   </small>
                 </li>
@@ -1067,6 +1096,71 @@ export function ImageExtraWorkbench({
               </button>
               <button
                 className={styles.secondaryButton}
+                disabled={regions.length >= 20}
+                onClick={() =>
+                  setRegions((current) => [
+                    ...current,
+                    { id: makeId(), x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+                  ])
+                }
+                type="button"
+              >
+                영역 추가
+              </button>
+              {regions.map((region, index) => (
+                <fieldset key={region.id}>
+                  <legend>영역 {index + 1}</legend>
+                  {(
+                    [
+                      ["x", "가로 위치"],
+                      ["y", "세로 위치"],
+                      ["width", "너비"],
+                      ["height", "높이"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key}>
+                      {label} (%)
+                      <input
+                        type="number"
+                        min={key === "width" || key === "height" ? 1 : 0}
+                        max={100}
+                        step={1}
+                        value={Math.round(region[key] * 100)}
+                        onChange={(event) => {
+                          const value =
+                            clampControl(
+                              Number(event.currentTarget.value),
+                              key === "width" || key === "height" ? 1 : 0,
+                              100,
+                            ) / 100;
+                          setRegions((current) =>
+                            current.map((entry) => {
+                              if (entry.id !== region.id) return entry;
+                              const next = { ...entry, [key]: value };
+                              next.x = Math.min(next.x, 0.99);
+                              next.y = Math.min(next.y, 0.99);
+                              next.width = Math.min(next.width, 1 - next.x);
+                              next.height = Math.min(next.height, 1 - next.y);
+                              return next;
+                            }),
+                          );
+                        }}
+                      />
+                    </label>
+                  ))}
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    onClick={() =>
+                      setRegions((current) => current.filter((entry) => entry.id !== region.id))
+                    }
+                  >
+                    영역 {index + 1} 삭제
+                  </button>
+                </fieldset>
+              ))}
+              <button
+                className={styles.secondaryButton}
                 disabled={processing}
                 onClick={() => setRegions([])}
                 type="button"
@@ -1223,6 +1317,7 @@ export function ImageExtraWorkbench({
         {items.some((item) => item.result !== undefined) || htmlResult !== undefined ? (
           <button
             className={styles.secondaryButton}
+            disabled={processing}
             onClick={() => void downloadAll()}
             type="button"
           >

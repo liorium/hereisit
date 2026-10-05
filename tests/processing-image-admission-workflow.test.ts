@@ -51,7 +51,7 @@ describe("deployed image canary admission workflow", () => {
     expect(workflow).toContain(
       'hash(".artifacts/canary/authority/processing-release-report.json") !== canary.releaseReportSha256',
     );
-    expect(workflow.match(/--release-report-sha256 "\$REPORT_SHA256"/g)).toHaveLength(2);
+    expect(workflow.match(/--release-report-sha256 "\$REPORT_SHA256"/g)).toHaveLength(1);
     expect(workflow.match(/--expected-release-report-sha256 "\$REPORT_SHA256"/g)).toHaveLength(4);
   });
   it("binds an explicit immutable production artifact before any mutation", () => {
@@ -86,10 +86,10 @@ describe("deployed image canary admission workflow", () => {
       "scripts/.verify-worker-version-chain.mjs",
     );
     expect(workflow.slice(materialize, restore)).toContain(
-      'git show "${' + 'GITHUB_SHA}:scripts/rotate-staging-accounting-epoch.mjs"',
+      'git show "${' + 'GITHUB_SHA}:scripts/verify-processing-admission-state.mjs"',
     );
     expect(workflow.slice(materialize, restore)).toContain(
-      "scripts/.rotate-staging-accounting-epoch.mjs",
+      "scripts/.verify-processing-admission-state.mjs",
     );
     expect(workflow.slice(materialize, restore)).toContain(
       'git show "${' + 'GITHUB_SHA}:scripts/smoke-image-compress-server.mjs"',
@@ -133,12 +133,9 @@ describe("deployed image canary admission workflow", () => {
     );
     const mutation = workflow.indexOf("Arm fail-closed mutation recovery");
     const restore = workflow.indexOf("Restore and verify the exact local canary before admission");
-    const rearm = workflow.indexOf("Rearm stale unsealed cost accounting once");
     const pause = workflow.indexOf("Pause and verify both queues before mutation");
     expect(discover).toBeGreaterThan(0);
     expect(discover).toBeLessThan(mutation);
-    expect(mutation).toBeLessThan(rearm);
-    expect(rearm).toBeLessThan(restore);
     expect(mutation).toBeLessThan(restore);
     expect(restore).toBeLessThan(pause);
     const restoreStep = workflow.slice(restore, pause);
@@ -152,13 +149,10 @@ describe("deployed image canary admission workflow", () => {
     expect(restoreStep).toContain("verifyActiveWorkerDeployment");
     expect(restoreStep).toContain('body.execution === "local"');
     expect(restoreStep).toContain("body.disclosure?.upload === false");
-    expect(workflow.slice(discover, mutation)).not.toContain(
-      "verify-processing-admission-state.mjs",
-    );
-    expect(workflow.slice(rearm, restore)).toContain(
-      "node scripts/.rotate-staging-accounting-epoch.mjs",
-    );
-    expect(workflow.slice(rearm, restore)).toContain("--mode public-admission-rearm");
+    expect(workflow).not.toContain("--mode public-admission-rearm");
+    expect(workflow).toContain("--mode capture");
+    expect(workflow).toContain("...safety.state");
+    expect(workflow).not.toContain("state: { circuitOpen: 0");
   });
 
   it("fails closed on failure or cancellation before reporting success", () => {
@@ -181,4 +175,12 @@ describe("deployed image canary admission workflow", () => {
       recoveryStep.indexOf("--mode disable-current"),
     );
   });
+});
+
+it("reports service and accounting separately only after successful public smoke", () => {
+  const report = workflow.indexOf(
+    "serviceAvailable: true, accountingHealthy: state.accountingHealthy, alertPending: state.alertPending",
+  );
+  expect(report).toBeGreaterThan(workflow.indexOf("Run anonymous public production smoke"));
+  expect(workflow).toContain(".artifacts/admission/service-accounting-state.json");
 });

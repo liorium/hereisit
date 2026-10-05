@@ -457,7 +457,7 @@ export const toolCatalog = defineToolCatalog([
     id: "image.convert-to-jpg",
     name: "JPG로 변환",
     shortDescription:
-      "PNG, GIF, WebP, SVG 등 이미지를 JPG로 바꾸세요. 여러 파일도 내 기기에서 한 번에 처리합니다.",
+      "PNG, GIF, WebP 이미지를 JPG로 바꾸세요. GIF는 첫 프레임을 저장하며 파일은 내 기기에서 처리합니다.",
     domains: ["image", "data"],
     purposes: ["convert"],
     searchAliases: aliases["image.convert-to-jpg"],
@@ -466,16 +466,7 @@ export const toolCatalog = defineToolCatalog([
     route: "/image/convert-to-jpg",
     launcherInput: {
       role: "source",
-      kinds: [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/gif",
-        "image/tiff",
-        "image/svg+xml",
-        "image/heic",
-        "image/heif",
-      ],
+      kinds: ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"],
       minFiles: 1,
       maxFiles: 100,
       allowMixedKinds: true,
@@ -607,7 +598,7 @@ export const toolCatalog = defineToolCatalog([
     id: "image.blur-face",
     name: "얼굴·개인정보 흐리기",
     shortDescription:
-      "사진에서 얼굴·번호판처럼 가릴 영역을 자동으로 찾거나 직접 지정해 브라우저에서 흐리게 처리하세요.",
+      "지원 브라우저에서 얼굴을 자동으로 찾고, 번호판·이름은 직접 영역을 지정해 흐리게 처리하세요.",
     domains: ["image"],
     purposes: ["protect", "edit"],
     searchAliases: aliases["image.blur-face"],

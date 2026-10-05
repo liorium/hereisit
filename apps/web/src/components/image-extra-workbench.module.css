@@ -51,7 +51,7 @@
 .fileRow {
   min-height: 52px;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(0, 2fr);
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
@@ -74,7 +74,7 @@
 }
 
 .fileRow small {
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .controls,
@@ -90,6 +90,16 @@
   margin: 0;
   padding: 0;
   border: 0;
+}
+
+.controls fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-inline-size: 0;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
 }
 
 .controls label,
@@ -112,6 +122,10 @@
   border-radius: 9px;
   background: var(--panel);
   color: var(--ink);
+}
+
+.controls fieldset input {
+  width: 112px;
 }
 
 .controls input[type="range"] {

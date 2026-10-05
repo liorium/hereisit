@@ -1,16 +1,19 @@
 import type { ImageJobMessage } from "@hereisit/server-contracts";
 import { calculateSettledWeightedUnits, retentionDecision } from "@hereisit/server-job";
 import { z } from "zod";
+import { createAccountingEmailSender, sendAccountingAlert } from "./accounting-alerts";
+import { readAccountingHealth } from "./accounting-health";
 import { evaluateCircuitBreaker } from "./circuit-breaker";
 import {
   createCostAccountingRuntime,
   parseCostAccountingMode,
   parseCostAccountingRuntimeConfig,
+  runAccountingHealthCheck,
 } from "./cost-accounting-runtime";
-import { runCostAccountingSchedule } from "./cost-accounting-scheduler";
 import { cleanupCostHistory } from "./cost-history-cleanup";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
 import { type Env, parseOperationalConfig } from "./env";
+import { applyLiveCostGuard } from "./live-cost-guard";
 import { prepareOperationalCounter } from "./operational-counters";
 import { dispatchJobOutbox, dispatchPendingOutbox } from "./outbox";
 import { emitSafeProcessingEvent, sessionHashPrefix } from "./telemetry";
@@ -97,9 +100,9 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
   await dependencies.recoverStale(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepExpired(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepOrphans(env, now - ORPHAN_GRACE_MS, MAINTENANCE_LIMIT);
-  await dependencies.reconcileCostAccounting(env, now);
-  await dependencies.cleanupCostHistory(env, now, MAINTENANCE_LIMIT);
   await dependencies.evaluateCircuit(env, now);
+  await dependencies.cleanupCostHistory(env, now, MAINTENANCE_LIMIT);
+  await dependencies.reconcileCostAccounting(env, now);
 }
 
 const recoveryRowSchema = z
@@ -731,10 +734,32 @@ export async function runScheduledMaintenance(env: Env, now = Date.now()): Promi
       if (parseCostAccountingMode(environment) === "bootstrap") return;
       const operational = await parseOperationalConfig(environment);
       const config = parseCostAccountingRuntimeConfig(environment, operational);
-      await runCostAccountingSchedule(
+      await runAccountingHealthCheck(
+        environment.DB,
         reconciledAt,
         createCostAccountingRuntime(environment, config),
       );
+      await applyLiveCostGuard(environment.DB, operational, reconciledAt);
+      const health = await readAccountingHealth(environment.DB);
+      const send =
+        environment.ALERT_EMAIL && environment.ALERT_FROM_ADDRESS && environment.ALERT_TO_ADDRESS
+          ? createAccountingEmailSender({
+              binding: environment.ALERT_EMAIL,
+              from: environment.ALERT_FROM_ADDRESS,
+              to: environment.ALERT_TO_ADDRESS,
+            })
+          : null;
+      await sendAccountingAlert({
+        db: environment.DB,
+        health,
+        now: reconciledAt,
+        environment: operational.environment,
+        send:
+          send ??
+          (async () => {
+            throw new Error("Accounting email sender is not configured.");
+          }),
+      });
     },
     cleanupCostHistory: (environment, cleanupAt, limit) =>
       cleanupCostHistory(environment.DB, environment.USAGE_LOGS, { now: cleanupAt, limit }),

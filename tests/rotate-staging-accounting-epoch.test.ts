@@ -45,6 +45,7 @@ function migratedDatabase() {
     "apps/api-worker/migrations/0005_usage_log_ledger.sql",
     "apps/api-worker/migrations/0006_container_provider_egress.sql",
     "apps/api-worker/migrations/0007_operational_counters.sql",
+    "apps/api-worker/migrations/0011_accounting_health.sql",
   ]) {
     database.exec(readFileSync(path, "utf8"));
   }
@@ -66,10 +67,13 @@ function migratedDatabase() {
 }
 
 describe("staging cost-accounting epoch rotation", () => {
-  it("rotates once from a recovered operator-disabled release", async () => {
+  it("epoch_rotation_does_not_clear_safety", async () => {
     const database = migratedDatabase();
     database.exec(
       "UPDATE rollout_control SET circuit_open = 1, reason = 'OPERATOR_DISABLED', opened_at = 1",
+    );
+    database.exec(
+      "UPDATE rollout_control SET cost_breach_count=2; UPDATE accounting_health SET status='degraded', reason='PROVIDER_UNAVAILABLE', pending_hour_key=495000, unresolved_since_hour_key=495000",
     );
     const calls: unknown[] = [];
     const fetchImpl = async (_url: string, init: RequestInit) => {
@@ -120,11 +124,28 @@ describe("staging cost-accounting epoch rotation", () => {
            FROM rollout_control WHERE id = 1`,
         )
         .get(),
-    ).toEqual({ circuitOpen: 0, reason: null, accountingEpoch: rotated.accountingEpoch });
+    ).toEqual({
+      circuitOpen: 1,
+      reason: "OPERATOR_DISABLED",
+      accountingEpoch: rotated.accountingEpoch,
+    });
+    expect(
+      database.prepare("SELECT cost_breach_count, opened_at FROM rollout_control").get(),
+    ).toEqual({ cost_breach_count: 2, opened_at: 1 });
+    expect(
+      database
+        .prepare("SELECT epoch,status,reason,unresolved_since_hour_key FROM accounting_health")
+        .get(),
+    ).toEqual({
+      epoch: rotated.accountingEpoch,
+      status: "degraded",
+      reason: "HISTORICAL_GAP",
+      unresolved_since_hour_key: 495000,
+    });
     expect(calls).toHaveLength(2);
     expect(JSON.stringify(calls[0])).toContain("deletion_overdue_count = 0");
     expect(JSON.stringify(calls[0])).toContain("status NOT IN");
-    expect(JSON.stringify(calls[0])).toContain("COST_ACCOUNTING_INCOMPLETE");
+    expect(JSON.stringify(calls[0])).not.toContain("SET circuit_open");
     expect(JSON.stringify(calls)).not.toContain("d1-token");
   });
 
@@ -132,7 +153,7 @@ describe("staging cost-accounting epoch rotation", () => {
     const accountingEpoch = "b".repeat(32);
     const fetchImpl = async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
-      if ("batch" in body) return response([result([], 0), result([], 0)]);
+      if ("batch" in body) return response([result([], 0), result([], 0), result([], 0)]);
       return response([
         result([
           {
@@ -164,7 +185,7 @@ describe("staging cost-accounting epoch rotation", () => {
     ).resolves.toMatchObject({ rotated: false, accountingEpoch, circuitOpen: true });
   });
 
-  it("rearms one stale unsealed epoch before delayed public admission", async () => {
+  it("rotates a stale epoch without clearing the accounting circuit", async () => {
     const database = migratedDatabase();
     database
       .prepare(
@@ -217,7 +238,7 @@ describe("staging cost-accounting epoch rotation", () => {
     ).resolves.toMatchObject({
       rotated: true,
       accountingStartedAt: Date.parse("2026-07-30T06:00:00.000Z"),
-      circuitOpen: false,
+      circuitOpen: true,
     });
     expect(
       database
@@ -235,7 +256,7 @@ describe("staging cost-accounting epoch rotation", () => {
         mode: "public-admission-rearm",
         fetchImpl,
       }),
-    ).resolves.toMatchObject({ rotated: false, circuitOpen: false });
+    ).resolves.toMatchObject({ rotated: false, circuitOpen: true });
 
     database
       .prepare(
@@ -260,7 +281,7 @@ describe("staging cost-accounting epoch rotation", () => {
   it("rejects a new-release rotation when guarded state did not converge", async () => {
     const fetchImpl = async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body));
-      if ("batch" in body) return response([result([], 0), result([], 0)]);
+      if ("batch" in body) return response([result([], 0), result([], 0), result([], 0)]);
       return response([
         result([
           {
@@ -291,4 +312,43 @@ describe("staging cost-accounting epoch rotation", () => {
       }),
     ).rejects.toThrow(/guard|converge/i);
   });
+});
+
+it.each([
+  7, 1,
+])("keeps ended unsealed hours hidden by healthy status (%s hours behind)", async (hoursBehind) => {
+  const database = migratedDatabase();
+  const nextHour = Math.floor(now / 3_600_000) - hoursBehind;
+  database.prepare("UPDATE rollout_control SET last_sealed_hour_key=?").run(nextHour - 1);
+  database
+    .prepare("UPDATE accounting_health SET status='healthy',reason=NULL,evaluated_at=?")
+    .run(hoursBehind === 1 ? now : now - 6 * 3_600_000);
+  const fetchImpl = async (_url: string, init: RequestInit) => {
+    const body = JSON.parse(String(init.body));
+    if (!body.batch) return response([result(database.prepare(body.sql).all(...body.params))]);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const results = body.batch.map(
+        ({ sql, params }: { sql: string; params: (number | string | null)[] }) =>
+          result([], Number(database.prepare(sql).run(...params).changes)),
+      );
+      database.exec("COMMIT");
+      return response(results);
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+  };
+  await rotateStagingAccountingEpoch({
+    accountId,
+    databaseId,
+    apiToken: "token",
+    releaseReportSha256,
+    now,
+    fetchImpl,
+  });
+  expect(
+    database.prepare("SELECT status,reason,unresolved_since_hour_key FROM accounting_health").get(),
+  ).toEqual({ status: "degraded", reason: "HISTORICAL_GAP", unresolved_since_hour_key: nextHour });
+  database.close();
 });

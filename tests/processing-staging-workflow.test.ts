@@ -243,6 +243,7 @@ describe("processing staging workflow", () => {
       ".artifacts/deployment/worker-version.json",
       ".artifacts/deployment/gate-results.json",
       ".artifacts/deployment/smoke-result.json",
+      ".artifacts/deployment/admission-accounting-state.json",
     ]);
     expect(upload).toContain("if-no-files-found: error");
     expect(upload).toContain("retention-days: 7");

@@ -141,9 +141,10 @@ export async function recordParsedUsageLog(
     session
       .prepare(
         `UPDATE rollout_control
-         SET circuit_open = 1,
+         SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
              reason = CASE
-               WHEN circuit_open = 1 THEN reason
+               WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason
                ELSE 'USAGE_LOG_OBJECT_CHANGED'
              END,
              opened_at = COALESCE(opened_at, ?)
@@ -212,9 +213,10 @@ export async function recordParsedUsageLog(
            FROM json_each(?)
          )
          UPDATE rollout_control
-         SET circuit_open = 1,
+         SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
              reason = CASE
-               WHEN circuit_open = 1 THEN reason
+               WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason
                ELSE 'USAGE_LOG_OBJECT_CHANGED'
              END,
              opened_at = COALESCE(opened_at, ?)

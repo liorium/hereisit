@@ -72,8 +72,9 @@ async function openInvalidObservationCircuit(
     .withSession("first-primary")
     .prepare(
       `UPDATE rollout_control
-       SET circuit_open = 1,
-           reason = CASE WHEN circuit_open = 1 THEN reason ELSE 'USAGE_LOG_IMPORT_INVALID' END,
+       SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
+           reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'USAGE_LOG_IMPORT_INVALID' END,
            opened_at = COALESCE(opened_at, ?)
        WHERE id = 1`,
     )
@@ -142,8 +143,9 @@ export async function observeUsageLogHour(
     session
       .prepare(
         `UPDATE rollout_control
-         SET circuit_open = 1,
-             reason = CASE WHEN circuit_open = 1 THEN reason ELSE 'USAGE_LOG_DUPLICATE_PAYLOAD' END,
+         SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
+             reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'USAGE_LOG_DUPLICATE_PAYLOAD' END,
              opened_at = COALESCE(opened_at, ?)
          WHERE id = 1
            AND EXISTS (
@@ -231,8 +233,9 @@ export async function observeUsageLogHour(
     session
       .prepare(
         `UPDATE rollout_control
-         SET circuit_open = 1,
-             reason = CASE WHEN circuit_open = 1 THEN reason ELSE 'USAGE_LOG_OBJECT_SET_CHANGED' END,
+         SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
+             reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'USAGE_LOG_OBJECT_SET_CHANGED' END,
              opened_at = COALESCE(opened_at, ?)
          WHERE id = 1
            AND (

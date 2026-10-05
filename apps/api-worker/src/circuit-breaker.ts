@@ -79,12 +79,13 @@ export async function evaluateCircuitBreaker(
            WHERE control.id = 1
          )
          UPDATE rollout_control
-         SET circuit_open = CASE
+         SET safety_generation = safety_generation + CASE WHEN (circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE') AND (SELECT reason FROM hard_signal) IS NOT NULL THEN 1 ELSE 0 END,
+             circuit_open = CASE
                WHEN circuit_open = 1 OR (SELECT reason FROM hard_signal) IS NOT NULL THEN 1
                ELSE 0
              END,
              reason = CASE
-               WHEN circuit_open = 1 THEN reason
+               WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason
                ELSE COALESCE((SELECT reason FROM hard_signal), reason)
              END,
              opened_at = CASE

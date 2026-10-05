@@ -147,7 +147,7 @@ test("discloses local processing before selection and preserves PNG", async ({ p
   });
   await page.goto("/image/compress");
   await expect(page.locator('[data-policy="local"]')).toHaveText(
-    "파일은 업로드하지 않고 이 기기에서 처리해요.",
+    "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
   );
   await expect(page.getByText("내 기기에서만 처리")).toHaveCount(0);
   const picker = page.getByRole("button", { name: "이미지 선택" });
@@ -188,7 +188,7 @@ test("keeps the mobile workbench in one column without horizontal overflow", asy
     await page.setViewportSize({ width, height: 720 });
     await page.goto("/image/compress");
     await expect(page.locator('[data-policy="local"]')).toHaveText(
-      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+      "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
     );
     expect(
       await page.evaluate(
@@ -472,7 +472,7 @@ test.describe("configured processing server", () => {
     await page.goto("/image/compress");
     await page.getByRole("radio", { name: /내 기기에서 처리/ }).check();
     await expect(page.locator('[data-policy="local"]')).toHaveText(
-      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+      "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
     );
     await page.locator('input[type="file"]').setInputFiles({
       name: "local.png",
@@ -1184,8 +1184,43 @@ test.describe("configured processing server", () => {
     });
     await page.goto("/image/compress");
     await expect(page.getByText("서버에 연결하지 못해 로컬 처리로 전환했어요.")).toBeVisible();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeDisabled();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).not.toBeChecked();
+    await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).toBeChecked();
     await expect(page.getByRole("button", { name: "이미지 선택" })).toBeEnabled();
     expect(jobCalls).toEqual([]);
+  });
+
+  test("keeps policy fallback local after the server recovers until explicitly selected", async ({
+    page,
+  }) => {
+    let recovered = false;
+    const jobs: string[] = [];
+    await page.route("**/v1/policy", (route) =>
+      route.fulfill({
+        status: 200,
+        json: recovered ? serverPolicy() : localPolicy("SERVER_PROCESSING_DISABLED"),
+      }),
+    );
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/v1/jobs")) jobs.push(request.url());
+    });
+    await page.goto("/image/compress");
+    await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).toBeChecked();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeDisabled();
+    recovered = true;
+    await page.reload();
+    await expect(page.getByRole("radio", { name: /고성능 서버 압축/ })).toBeEnabled();
+    await expect(page.getByRole("radio", { name: /내 기기에서 처리/ })).toBeChecked();
+    await expect(page.locator('[data-policy="local"]')).toContainText("파일은 업로드하지 않고");
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles({ name: "local.png", mimeType: "image/png", buffer: onePixelPng });
+    await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
+    await expect(page.getByRole("button", { name: /원본 다운로드 ↓|결과 다운로드 ↓/ })).toBeVisible(
+      { timeout: 20_000 },
+    );
+    expect(jobs).toEqual([]);
   });
 
   test("keeps a server-required lossless item local when usage protection activates", async ({
@@ -1214,7 +1249,7 @@ test.describe("configured processing server", () => {
     await page.getByRole("radio", { name: /무손실/ }).check();
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
     await expect(page.locator('[data-policy="local"]')).toHaveText(
-      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+      "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
     );
     await expect(page.getByText(/무손실 서버 처리가 필요한 이미지/)).toBeVisible();
     await expect(page.getByRole("button", { name: "결과 다운로드 ↓" })).toHaveCount(0);
@@ -1243,7 +1278,7 @@ test.describe("configured processing server", () => {
     await page.getByRole("button", { name: "용량 줄이기", exact: true }).click();
 
     await expect(page.locator('[data-policy="local"]')).toHaveText(
-      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+      "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
     );
     await expect(
       page.getByText("이 브라우저는 로컬 이미지 처리를 지원하지 않습니다."),
@@ -1299,7 +1334,7 @@ test.describe("configured processing server", () => {
       page.getByText("이 브라우저는 로컬 이미지 처리를 지원하지 않습니다."),
     ).toBeVisible();
     await expect(page.locator('[data-policy="local"]')).toHaveText(
-      "파일은 업로드하지 않고 이 기기에서 처리해요.",
+      "파일은 업로드하지 않고 이 기기에서 처리해요. 압축 결과는 서버 처리와 다를 수 있어요.",
     );
     expect(
       await page.evaluate(

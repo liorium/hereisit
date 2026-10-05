@@ -69,26 +69,11 @@ export async function rotateStagingAccountingEpoch({
       ? "cost-accounting-public-admission"
       : "cost-accounting-release";
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
-  const statements = [
-    {
-      sql: `UPDATE rollout_control
-SET cost_accounting_epoch = ?,
-    cost_accounting_started_at = ?,
-    first_admitted_at = NULL,
-    last_sealed_hour_key = NULL,
-    last_cost_evaluated_hour_key = NULL,
-    last_cost_window_complete = 0,
-    cost_breach_count = 0,
-    cost_breach_window_started_at = NULL,
-    last_cost_per_1000_microusd = NULL,
-    last_projected_monthly_cost_microusd = NULL,
-    circuit_open = 0,
-    reason = NULL,
-    opened_at = NULL,
-    manual_reset_at = ?
-WHERE id = 1
+  const rotationGuard = `WHERE control.id = 1
   AND deletion_overdue_count = 0
-  ${mode === PUBLIC_ADMISSION_REARM_MODE ? "AND last_sealed_hour_key IS NULL\n  AND cost_accounting_started_at <= ?" : ""}
+  AND EXISTS (SELECT 1 FROM accounting_health WHERE id = 1 AND epoch = control.cost_accounting_epoch)
+  AND NOT EXISTS (SELECT 1 FROM job_outbox WHERE sent_at IS NULL)
+  ${mode === PUBLIC_ADMISSION_REARM_MODE ? "AND last_sealed_hour_key IS NULL\n  AND control.cost_accounting_started_at <= ?" : ""}
   AND (circuit_open = 0 OR reason IN (
     'COST_ACCOUNTING_INCOMPLETE',
     'COST_ACCOUNTING_HASH_MISMATCH',
@@ -106,10 +91,26 @@ WHERE id = 1
   AND NOT EXISTS (
     SELECT 1 FROM maintenance_cursors
     WHERE task = ? AND cursor = ?
-  )`,
+  )`;
+  const statements = [
+    {
+      sql: `WITH old_next AS (
+  SELECT COALESCE(last_sealed_hour_key + 1, CAST((cost_accounting_started_at + 3599999) / 3600000 AS INTEGER)) AS hour_key
+  FROM rollout_control WHERE id = 1
+), ended_gap AS (SELECT hour_key FROM old_next WHERE (hour_key + 1) * 3600000 <= ?)
+UPDATE accounting_health
+SET epoch = ?,
+    status = CASE WHEN status = 'healthy' AND NOT EXISTS (SELECT 1 FROM ended_gap) THEN 'unknown' ELSE 'degraded' END,
+    reason = CASE WHEN reason = 'SAFETY_CONFLICT' THEN reason WHEN status = 'healthy' AND NOT EXISTS (SELECT 1 FROM ended_gap) THEN NULL ELSE 'HISTORICAL_GAP' END,
+    unresolved_since_hour_key = CASE WHEN status = 'healthy' AND NOT EXISTS (SELECT 1 FROM ended_gap) THEN NULL ELSE COALESCE(
+      (SELECT MIN(hour_key) FROM (
+        SELECT unresolved_since_hour_key AS hour_key UNION ALL SELECT pending_hour_key UNION ALL SELECT hour_key FROM ended_gap
+      )), (SELECT hour_key FROM old_next)) END,
+    evaluated_at = MAX(evaluated_at, ?)
+WHERE id = 1 AND EXISTS (SELECT 1 FROM rollout_control AS control ${rotationGuard})`,
       params: [
+        now,
         accountingEpoch,
-        accountingStartedAt,
         now,
         ...(mode === PUBLIC_ADMISSION_REARM_MODE ? [staleCutoff] : []),
         releaseReportSha256,
@@ -118,12 +119,17 @@ WHERE id = 1
       ],
     },
     {
+      sql: `UPDATE rollout_control
+SET cost_accounting_epoch = ?, cost_accounting_started_at = ?,
+    first_admitted_at = NULL, last_sealed_hour_key = NULL,
+    last_cost_evaluated_hour_key = NULL, last_cost_window_complete = 0
+WHERE id = 1 AND changes() = 1`,
+      params: [accountingEpoch, accountingStartedAt],
+    },
+    {
       sql: `INSERT INTO maintenance_cursors (task, cursor, updated_at)
-SELECT ?, ?, ?
-WHERE changes() = 1
-ON CONFLICT(task) DO UPDATE SET
-  cursor = excluded.cursor,
-  updated_at = excluded.updated_at`,
+SELECT ?, ?, ? WHERE changes() = 1
+ON CONFLICT(task) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at`,
       params: [markerTask, releaseReportSha256, now],
     },
   ];
@@ -135,8 +141,8 @@ ON CONFLICT(task) DO UPDATE SET
     fetchImpl,
   });
   const rotated = readChanges(writes[0]) === 1;
-  const markerChanged = readChanges(writes[1]) === 1;
-  if (rotated !== markerChanged) {
+  const markerChanged = readChanges(writes[2]) === 1;
+  if (rotated !== markerChanged || rotated !== (readChanges(writes[1]) === 1)) {
     throw new Error("staging accounting epoch marker did not converge");
   }
 
@@ -187,12 +193,7 @@ WHERE control.id = 1`;
     row.deletionOverdueCount === 0;
   const rotationConverged =
     !rotated ||
-    (row.accountingEpoch === accountingEpoch &&
-      row.accountingStartedAt === accountingStartedAt &&
-      row.circuitOpen === 0 &&
-      row.reason === null &&
-      row.openedAt === null &&
-      row.manualResetAt === now);
+    (row.accountingEpoch === accountingEpoch && row.accountingStartedAt === accountingStartedAt);
   if (!commonConverged || !rotationConverged) {
     throw new Error("staging accounting epoch guard did not converge");
   }

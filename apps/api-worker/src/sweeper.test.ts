@@ -88,9 +88,9 @@ describe("scheduled maintenance policy", () => {
       "recovery",
       "expiry",
       "orphans",
-      "cost-accounting",
-      "cost-history",
       "circuit",
+      "cost-history",
+      "cost-accounting",
     ]);
     expect(dependencies.recordCounters).toHaveBeenCalledWith(expect.anything(), now);
     expect(dependencies.dispatchPendingOutbox).toHaveBeenCalledWith(expect.anything(), now, 100);

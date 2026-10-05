@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 export type Env = Cloudflare.Env & {
+  readonly ALERT_EMAIL?: SendEmail;
+  readonly ALERT_FROM_ADDRESS?: string;
+  readonly ALERT_TO_ADDRESS?: string;
   readonly ABUSE_HMAC_SECRET_CURRENT: string;
   readonly ABUSE_HMAC_SECRET_PREVIOUS: string;
   readonly ANALYTICS_READ_TOKEN: string;

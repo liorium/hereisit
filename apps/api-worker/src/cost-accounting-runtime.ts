@@ -1,11 +1,20 @@
 import { z } from "zod";
+import {
+  type AccountingHealthReason,
+  openSafetyCircuit,
+  readAccountingHealth,
+  recordAccountingHealth,
+} from "./accounting-health";
 import { queryContainerUsageHour } from "./container-provider-usage";
 import { reconcileContainerProviderHour } from "./container-provider-usage-reconciler";
-import type { CostAccountingScheduleDependencies } from "./cost-accounting-scheduler";
+import {
+  type CostAccountingScheduleDependencies,
+  runCostAccountingSchedule,
+} from "./cost-accounting-scheduler";
 import type { LiveCostModelV1 } from "./env";
 import { sealNextHourlyCost } from "./hourly-cost-sealer";
 import { prepareOperationalCounter } from "./operational-counters";
-import { checkLogpushHour } from "./provider-usage";
+import { checkLogpushHour, ProviderUnavailableError } from "./provider-usage";
 import { reconcileWorkerProviderHour } from "./provider-usage-reconciler";
 import { importUsageLogPage } from "./usage-log-importer";
 import { observeUsageLogHour } from "./usage-log-observer";
@@ -131,7 +140,8 @@ async function activeAttestation(
     .bind(versionId)
     .first();
   const parsed = attestationRowSchema.safeParse(row);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) throw new Error("Active Worker attestation is missing or invalid.");
+  return parsed.data;
 }
 
 export function createCostAccountingRuntime(
@@ -153,12 +163,11 @@ export function createCostAccountingRuntime(
     targetHour,
     importUsageLogs: async (now) => {
       const session = env.DB.withSession("first-primary");
-      const cursor = cursorRowSchema.safeParse(
-        await session
-          .prepare("SELECT cursor FROM maintenance_cursors WHERE task = 'usage-log-import'")
-          .first(),
-      );
-      let nextCursor = cursor.success ? cursor.data.cursor : null;
+      const cursorRaw = await session
+        .prepare("SELECT cursor FROM maintenance_cursors WHERE task = 'usage-log-import'")
+        .first();
+      const cursor = cursorRaw === null ? null : cursorRowSchema.parse(cursorRaw);
+      let nextCursor = cursor?.cursor ?? null;
       let bodyReads = 0;
       let listCalls = 0;
       let metadataRowsRead = 0;
@@ -217,51 +226,43 @@ export function createCostAccountingRuntime(
       return result.kind === "conflict" ? "conflict" : result.kind;
     },
     reconcileWorker: async (hourKey, now) => {
-      try {
-        const attestation = await activeAttestation(env.DB, env.WORKER_VERSION.id);
-        if (attestation === null) return "incomplete";
-        const logpush = await checkLogpushHour(fetch, {
-          accountId: config.accountId,
-          token: env.LOGPUSH_STATUS_TOKEN,
-          jobId: config.logpushJobId,
-          hourKey,
-        });
-        const result = await reconcileWorkerProviderHour(env.DB, {
-          hourKey,
-          observedAt: now,
-          logpush,
-          liveCostModelSha256: config.liveCostModelSha256,
-          providerUsageSchemaSha256: config.providerUsageSchemaSha256,
-          releaseReportSha256: config.releaseReportSha256,
-          expectedWorkerModuleSha256: attestation.worker_module_sha256,
-          expectedGeneratedConfigSha256: attestation.generated_config_sha256,
-        });
-        return result.kind === "verified" ? "verified" : result.kind;
-      } catch {
-        return "incomplete";
-      }
+      const attestation = await activeAttestation(env.DB, env.WORKER_VERSION.id);
+      if (attestation === null) throw new Error("Active Worker attestation is missing.");
+      const logpush = await checkLogpushHour(fetch, {
+        accountId: config.accountId,
+        token: env.LOGPUSH_STATUS_TOKEN,
+        jobId: config.logpushJobId,
+        hourKey,
+      });
+      const result = await reconcileWorkerProviderHour(env.DB, {
+        hourKey,
+        observedAt: now,
+        logpush,
+        liveCostModelSha256: config.liveCostModelSha256,
+        providerUsageSchemaSha256: config.providerUsageSchemaSha256,
+        releaseReportSha256: config.releaseReportSha256,
+        expectedWorkerModuleSha256: attestation.worker_module_sha256,
+        expectedGeneratedConfigSha256: attestation.generated_config_sha256,
+      });
+      return result.kind === "verified" ? "verified" : result.kind;
     },
     reconcileContainer: async (hourKey, now) => {
-      try {
-        const usage = await queryContainerUsageHour(fetch, {
-          accountId: config.accountId,
-          token: env.ANALYTICS_READ_TOKEN,
-          applicationId: config.containerApplicationId,
-          hourKey,
-          expectedSchemaSha256: config.providerUsageSchemaSha256,
-        });
-        const result = await reconcileContainerProviderHour(env.DB, {
-          hourKey,
-          observedAt: now,
-          usage,
-          liveCostModelSha256: config.liveCostModelSha256,
-          providerUsageSchemaSha256: config.providerUsageSchemaSha256,
-          releaseReportSha256: config.releaseReportSha256,
-        });
-        return result.kind === "verified" ? "verified" : result.kind;
-      } catch {
-        return "incomplete";
-      }
+      const usage = await queryContainerUsageHour(fetch, {
+        accountId: config.accountId,
+        token: env.ANALYTICS_READ_TOKEN,
+        applicationId: config.containerApplicationId,
+        hourKey,
+        expectedSchemaSha256: config.providerUsageSchemaSha256,
+      });
+      const result = await reconcileContainerProviderHour(env.DB, {
+        hourKey,
+        observedAt: now,
+        usage,
+        liveCostModelSha256: config.liveCostModelSha256,
+        providerUsageSchemaSha256: config.providerUsageSchemaSha256,
+        releaseReportSha256: config.releaseReportSha256,
+      });
+      return result.kind === "verified" ? "verified" : result.kind;
     },
     sealHour: async (now) => {
       const result = await sealNextHourlyCost(env.DB, {
@@ -274,4 +275,73 @@ export function createCostAccountingRuntime(
       return result.kind;
     },
   };
+}
+
+export async function runAccountingHealthCheck(
+  database: D1Database,
+  now: number,
+  dependencies: CostAccountingScheduleDependencies,
+): Promise<void> {
+  let providerReason: AccountingHealthReason | null = null;
+  let safetyConflict = false;
+  try {
+    try {
+      safetyConflict = (await runCostAccountingSchedule(now, dependencies)).kind === "conflict";
+    } catch (error) {
+      if (!(error instanceof ProviderUnavailableError)) throw error;
+      providerReason = error.code === "SAMPLED" ? "PROVIDER_SAMPLED" : "PROVIDER_UNAVAILABLE";
+    }
+    const control = z
+      .object({
+        cost_accounting_epoch: z.string().regex(/^[a-f0-9]{32}$/),
+        last_sealed_hour_key: nonnegativeInteger.nullable(),
+        cost_accounting_started_at: nonnegativeInteger,
+      })
+      .strict()
+      .parse(
+        await database
+          .withSession("first-primary")
+          .prepare(
+            "SELECT cost_accounting_epoch,last_sealed_hour_key,cost_accounting_started_at FROM rollout_control WHERE id=1",
+          )
+          .first(),
+      );
+    const previous = await readAccountingHealth(database);
+    const nextHour =
+      control.last_sealed_hour_key === null
+        ? Math.ceil(control.cost_accounting_started_at / 3600000)
+        : control.last_sealed_hour_key + 1;
+    const overdue = (nextHour + 2) * 3600000 <= now;
+    const historical =
+      previous.reason === "HISTORICAL_GAP" ||
+      (previous.epoch !== control.cost_accounting_epoch &&
+        previous.unresolvedSinceHourKey !== null);
+    const gap = historical
+      ? previous.unresolvedSinceHourKey
+      : overdue || safetyConflict
+        ? nextHour
+        : null;
+    await recordAccountingHealth(database, {
+      epoch: control.cost_accounting_epoch,
+      status:
+        historical || overdue || safetyConflict
+          ? "degraded"
+          : providerReason !== null || control.last_sealed_hour_key === null
+            ? "unknown"
+            : "healthy",
+      reason: historical
+        ? "HISTORICAL_GAP"
+        : safetyConflict
+          ? "SAFETY_CONFLICT"
+          : overdue
+            ? (providerReason ?? "ACCOUNTING_DELAY")
+            : null,
+      evaluatedAt: now,
+      pendingHourKey: historical || overdue || safetyConflict ? nextHour : null,
+      unresolvedSinceHourKey: gap,
+    });
+  } catch (error) {
+    await openSafetyCircuit(database, now, "ACCOUNTING_STATE_INVALID");
+    throw error;
+  }
 }

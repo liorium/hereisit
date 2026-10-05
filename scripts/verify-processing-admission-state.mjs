@@ -25,6 +25,18 @@ export const processingAdmissionStateSql = `WITH target AS (
   WHERE control.id = 1
 )
 SELECT
+  EXISTS (
+    SELECT 1 FROM operational_alert_state
+    WHERE kind IN ('accounting-degraded','accounting-recovered') AND active = 1
+      AND (last_sent_at IS NULL OR (kind = 'accounting-degraded' AND last_sent_at <= ? - 86400000))
+  ) AS alertPending,
+  control.safety_generation AS safetyGeneration,
+  health.epoch AS accountingHealthEpoch,
+  health.status AS accountingStatus,
+  health.reason AS accountingReason,
+  health.evaluated_at AS accountingEvaluatedAt,
+  health.pending_hour_key AS pendingHourKey,
+  health.unresolved_since_hour_key AS unresolvedSinceHourKey,
   control.circuit_open AS circuitOpen,
   control.reason AS circuitReason,
   control.deletion_overdue_count AS deletionOverdueCount,
@@ -47,6 +59,7 @@ SELECT
   COALESCE(observation.matching_observation_count, 0) AS targetUsageObservationMatches,
   active.release_report_sha256 AS releaseReportSha256
 FROM target AS control
+LEFT JOIN accounting_health AS health ON health.id = 1
 LEFT JOIN worker_version_attestations AS active ON active.kind = 'active'
 LEFT JOIN operational_cost_hourly AS cost
   ON cost.accounting_epoch = control.cost_accounting_epoch
@@ -57,8 +70,9 @@ LEFT JOIN usage_log_hour_observations AS observation
 
 const disableSql = `UPDATE rollout_control
 SET circuit_open = 1,
-    reason = CASE WHEN circuit_open = 1 THEN reason ELSE 'OPERATOR_DISABLED' END,
-    opened_at = CASE WHEN circuit_open = 1 THEN opened_at ELSE ? END,
+    reason = CASE WHEN circuit_open = 1 AND reason <> 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'OPERATOR_DISABLED' END,
+    opened_at = CASE WHEN circuit_open = 1 AND reason <> 'COST_ACCOUNTING_INCOMPLETE' THEN opened_at ELSE ? END,
+    safety_generation = safety_generation + 1,
     last_evaluated_at = ?
 WHERE id = 1
   AND EXISTS (
@@ -87,6 +101,14 @@ function validateStateRow(value) {
   assertExactKeys(
     row,
     [
+      "alertPending",
+      "safetyGeneration",
+      "accountingHealthEpoch",
+      "accountingStatus",
+      "accountingReason",
+      "accountingEvaluatedAt",
+      "pendingHourKey",
+      "unresolvedSinceHourKey",
       "circuitOpen",
       "circuitReason",
       "deletionOverdueCount",
@@ -112,6 +134,8 @@ function validateStateRow(value) {
     "processing admission state",
   );
   for (const name of [
+    "safetyGeneration",
+    "accountingEvaluatedAt",
     "circuitOpen",
     "deletionOverdueCount",
     "activeJobs",
@@ -130,6 +154,7 @@ function validateStateRow(value) {
     }
   }
   for (const name of [
+    "alertPending",
     "circuitOpen",
     "publicAdmissionAllowed",
     "targetCostRowPresent",
@@ -158,6 +183,34 @@ function validateStateRow(value) {
     (!Number.isSafeInteger(row.lastSealedHourKey) || row.lastSealedHourKey < 0)
   ) {
     throw new TypeError("processing admission lastSealedHourKey is invalid");
+  }
+  if (
+    !["unknown", "degraded", "healthy"].includes(row.accountingStatus) ||
+    typeof row.accountingHealthEpoch !== "string" ||
+    !epochPattern.test(row.accountingHealthEpoch) ||
+    (row.accountingReason !== null &&
+      ![
+        "PROVIDER_UNAVAILABLE",
+        "PROVIDER_SAMPLED",
+        "ACCOUNTING_DELAY",
+        "HISTORICAL_GAP",
+        "SAFETY_CONFLICT",
+      ].includes(row.accountingReason))
+  ) {
+    throw new TypeError("processing accounting health is invalid");
+  }
+  for (const name of ["pendingHourKey", "unresolvedSinceHourKey"]) {
+    if (row[name] !== null && (!Number.isSafeInteger(row[name]) || row[name] < 0)) {
+      throw new TypeError("processing accounting gap is invalid");
+    }
+  }
+  if (
+    row.accountingStatus === "healthy" &&
+    (row.accountingReason !== null ||
+      row.pendingHourKey !== null ||
+      row.unresolvedSinceHourKey !== null)
+  ) {
+    throw new TypeError("processing accounting health is inconsistent");
   }
   const firstHourKey = Math.ceil(row.costAccountingStartedAt / 3_600_000);
   if (
@@ -253,22 +306,44 @@ function parseCanonicalTimestamp(value) {
   return Date.parse(value);
 }
 
-async function readStateRows({ accountId, databaseId, apiToken, fetchImpl }) {
-  const [result] = await postD1Query({
-    url: d1Url(accountId, databaseId),
-    apiToken,
-    body: { sql: processingAdmissionStateSql, params: [] },
-    expectedCount: 1,
-    fetchImpl,
-  });
+async function readStateRows({ accountId, databaseId, apiToken, fetchImpl, now = Date.now() }) {
+  if (!Number.isSafeInteger(now) || now < 0)
+    throw new TypeError("processing admission inspection time is invalid");
+  let result;
+  try {
+    [result] = await postD1Query({
+      url: d1Url(accountId, databaseId),
+      apiToken,
+      body: { sql: processingAdmissionStateSql, params: [now] },
+      expectedCount: 1,
+      fetchImpl,
+    });
+  } catch {
+    throw new Error(
+      "processing admission inspection unavailable; verify migration 0011_accounting_health.sql and primary D1 access",
+    );
+  }
   return result.results;
 }
 
 export async function inspectCurrentProcessingAdmissionInD1(input) {
-  const values = { fetchImpl: fetch, ...input };
+  const values = { fetchImpl: fetch, now: Date.now(), ...input };
   validateCoordinates(values);
   const row = requireSingleStateRow(await readStateRows(values));
   return {
+    admissionAvailable: row.circuitOpen === 0 && row.publicAdmissionAllowed === 1,
+    accountingHealthy:
+      row.accountingStatus === "healthy" &&
+      row.accountingHealthEpoch === row.costAccountingEpoch &&
+      row.accountingEvaluatedAt >= values.now - 15 * 60_000 &&
+      row.accountingEvaluatedAt <= values.now,
+    alertPending: row.alertPending === 1,
+    safetyGeneration: row.safetyGeneration,
+    accountingStatus: row.accountingStatus,
+    accountingReason: row.accountingReason,
+    accountingEvaluatedAt: row.accountingEvaluatedAt,
+    pendingHourKey: row.pendingHourKey,
+    unresolvedSinceHourKey: row.unresolvedSinceHourKey,
     circuitOpen: row.circuitOpen === 1,
     circuitReason: row.circuitReason,
     deletionOverdueCount: row.deletionOverdueCount,
@@ -331,10 +406,127 @@ export async function disableProcessingAdmissionInD1(input) {
   });
   const row = requireSingleStateRow(await readStateRows(values));
   verifyExpectedRelease(row, values.expectedVersionId, values.expectedReleaseReportSha256);
-  if (update.meta.changes !== 1 || row.circuitOpen !== 1 || row.circuitReason === null) {
+  if (
+    ![1, 2].includes(update.meta.changes) ||
+    row.circuitOpen !== 1 ||
+    row.circuitReason === null
+  ) {
     throw new Error("processing admission circuit did not open over a valid active release");
   }
   return { disabled: true, circuitOpen: true };
+}
+
+// The caller must hold the protected deployment lock with public admission closed.
+// A pre-migration reason alone is not proof that no hard incident was hidden behind it.
+export async function rearmAccountingOnlyCircuitInD1(input) {
+  const values = { fetchImpl: fetch, ...input };
+  validateCoordinates(values);
+  validateExpectedRelease(values.expectedVersionId, values.expectedReleaseReportSha256);
+  if (!epochPattern.test(values.expectedEpoch ?? "") || values.expectedEpoch === "uninitialized") {
+    throw new TypeError("expected accounting epoch is invalid");
+  }
+  for (const name of ["expectedSafetyGeneration", "now"]) {
+    if (!Number.isSafeInteger(values[name]) || values[name] < 0) {
+      throw new TypeError(`processing admission ${name} is invalid`);
+    }
+  }
+  const statements = [
+    {
+      sql: `WITH expected(version, report, epoch, generation, now, fresh) AS (VALUES (?, ?, ?, ?, ?, ?))
+UPDATE rollout_control AS control
+SET circuit_open = 0, reason = NULL, opened_at = NULL, manual_reset_at = (SELECT now FROM expected)
+WHERE id = 1
+  AND circuit_open = 1 AND reason = 'COST_ACCOUNTING_INCOMPLETE'
+  AND cost_accounting_epoch = (SELECT epoch FROM expected)
+  AND safety_generation = (SELECT generation FROM expected)
+  AND opened_at IS NOT NULL AND opened_at <= (SELECT now FROM expected)
+  AND safety_history_started_at > 0 AND safety_history_started_at <= opened_at
+  AND (SELECT COUNT(*) FROM safety_incidents) = safety_generation
+  AND NOT EXISTS (SELECT 1 FROM safety_incidents WHERE recorded_at >= control.opened_at)
+  AND deletion_overdue_count = 0
+  AND deletion_sweep_started_at IS NOT NULL
+  AND deletion_sweep_completed_at >= deletion_sweep_started_at
+  AND deletion_sweep_completed_at BETWEEN (SELECT fresh FROM expected) AND (SELECT now FROM expected)
+  AND (SELECT COUNT(*) FROM worker_version_attestations WHERE kind = 'active') = 1
+  AND EXISTS (
+    SELECT 1 FROM worker_version_attestations
+    WHERE kind = 'active' AND public_admission_allowed = 1
+      AND version_id = (SELECT version FROM expected)
+      AND release_report_sha256 = (SELECT report FROM expected)
+  )
+  AND EXISTS (
+    SELECT 1 FROM accounting_health
+    WHERE id = 1 AND epoch = control.cost_accounting_epoch
+      AND (reason IS NULL OR reason IN ('PROVIDER_UNAVAILABLE','PROVIDER_SAMPLED','ACCOUNTING_DELAY','HISTORICAL_GAP'))
+  )
+  AND NOT EXISTS (SELECT 1 FROM jobs WHERE status NOT IN ('succeeded','failed','cancelled','expired'))
+  AND NOT EXISTS (SELECT 1 FROM job_outbox WHERE sent_at IS NULL OR sent_at < 0 OR sent_at > (SELECT now FROM expected))
+  AND NOT EXISTS (SELECT 1 FROM job_quarantine WHERE inspected_at IS NULL)
+  AND NOT EXISTS (SELECT 1 FROM artifact_cleanup_tombstones)
+  AND NOT EXISTS (SELECT 1 FROM jobs WHERE error_code = 'VERIFICATION_FAILED')
+  AND NOT EXISTS (
+    SELECT 1 FROM jobs
+    WHERE (queued_at IS NOT NULL AND (queued_at < created_at OR queued_at > finished_at OR queued_at > (SELECT now FROM expected)))
+      OR (started_at IS NOT NULL AND (queued_at IS NULL OR started_at < queued_at OR started_at > finished_at))
+      OR finished_at IS NULL OR finished_at < created_at OR finished_at > (SELECT now FROM expected)
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM jobs AS job LEFT JOIN usage_ledger AS ledger ON ledger.job_id = job.id
+    WHERE ledger.job_id IS NULL OR job.settlement_state <> 'settled'
+      OR ledger.settled_at IS NULL OR ledger.actual_units IS NULL OR job.actual_units IS NULL
+      OR ledger.actual_units <> job.actual_units OR ledger.actual_units < 0
+      OR ledger.reserved_units <> job.reserved_units OR ledger.session_hash <> job.session_hash
+      OR ledger.day_key <> job.day_key OR ledger.outcome IS NOT job.status
+      OR ledger.network_hash IS NOT job.network_hash
+  )
+  AND NOT EXISTS (SELECT 1 FROM account_usage WHERE pending_jobs <> 0 OR reserved_units <> 0)
+  AND NOT EXISTS (SELECT 1 FROM anonymous_usage WHERE active_jobs <> 0 OR reserved_units <> 0)
+  AND NOT EXISTS (SELECT 1 FROM network_usage WHERE pending_jobs <> 0 OR reserved_units <> 0)`,
+      params: [
+        values.expectedVersionId,
+        values.expectedReleaseReportSha256,
+        values.expectedEpoch,
+        values.expectedSafetyGeneration,
+        values.now,
+        Math.max(0, values.now - 15 * 60_000),
+      ],
+    },
+    {
+      sql: `INSERT INTO maintenance_cursors (task, cursor, updated_at)
+SELECT 'accounting-only-rearm', ?, ? WHERE changes() = 1
+ON CONFLICT(task) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at`,
+      params: [
+        canonicalJson({
+          versionId: values.expectedVersionId,
+          releaseReportSha256: values.expectedReleaseReportSha256,
+          epoch: values.expectedEpoch,
+          safetyGeneration: values.expectedSafetyGeneration,
+        }),
+        values.now,
+      ],
+    },
+  ];
+  const results = await postD1Query({
+    url: d1Url(values.accountId, values.databaseId),
+    apiToken: values.apiToken,
+    body: { batch: statements },
+    expectedCount: statements.length,
+    fetchImpl: values.fetchImpl,
+  });
+  if (results.some((result) => result.meta.changes !== 1)) {
+    throw new Error("accounting-only rearm prerequisite or historical safety proof is missing");
+  }
+  const row = requireSingleStateRow(await readStateRows(values));
+  verifyExpectedRelease(row, values.expectedVersionId, values.expectedReleaseReportSha256);
+  if (
+    row.circuitOpen !== 0 ||
+    row.circuitReason !== null ||
+    row.costAccountingEpoch !== values.expectedEpoch ||
+    row.safetyGeneration !== values.expectedSafetyGeneration
+  ) {
+    throw new Error("accounting-only rearm state changed after guarded transition");
+  }
+  return { rearmed: true };
 }
 
 export async function disableCurrentProcessingAdmissionInD1(input) {
