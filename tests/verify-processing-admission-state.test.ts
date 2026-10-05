@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   disableProcessingAdmissionInD1,
   inspectCurrentProcessingAdmissionInD1,
+  processingAdmissionStateSql,
   readProcessingAdmissionStateFromD1,
   runProcessingAdmissionStateCli,
   verifyProcessingAdmissionState,
@@ -14,6 +15,14 @@ const releaseReportSha256 = "a".repeat(64);
 
 function readyRow() {
   return {
+    alertPending: 0,
+    safetyGeneration: 0,
+    accountingHealthEpoch: "release-epoch",
+    accountingStatus: "degraded",
+    accountingReason: "PROVIDER_UNAVAILABLE",
+    accountingEvaluatedAt: 1,
+    pendingHourKey: 496200,
+    unresolvedSinceHourKey: 496200,
     circuitOpen: 0,
     circuitReason: null,
     deletionOverdueCount: 0,
@@ -142,7 +151,7 @@ describe("processing public admission state", () => {
       }),
     ).resolves.toMatchObject({ ready: true, activeVersionId });
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ params: [] });
+    expect(calls[0]).toMatchObject({ params: [expect.any(Number)] });
     expect(JSON.stringify(calls[0])).toContain("deletion_overdue_count");
     expect(JSON.stringify(calls[0])).not.toContain("d1-token");
   });
@@ -161,6 +170,15 @@ describe("processing public admission state", () => {
         fetchImpl: async () => response([open]),
       }),
     ).resolves.toEqual({
+      admissionAvailable: false,
+      accountingHealthy: false,
+      alertPending: false,
+      safetyGeneration: 0,
+      accountingStatus: "degraded",
+      accountingReason: "PROVIDER_UNAVAILABLE",
+      accountingEvaluatedAt: 1,
+      pendingHourKey: 496200,
+      unresolvedSinceHourKey: 496200,
       circuitOpen: true,
       circuitReason: "COST_ACCOUNTING_INCOMPLETE",
       deletionOverdueCount: 0,
@@ -224,9 +242,11 @@ describe("processing public admission state", () => {
       activeVersionId,
       releaseReportSha256,
     ]);
-    expect(bodies[1].sql).toContain("CASE WHEN circuit_open = 1 THEN reason");
+    expect(bodies[1].sql).toContain(
+      "CASE WHEN circuit_open = 1 AND reason <> 'COST_ACCOUNTING_INCOMPLETE' THEN reason",
+    );
     expect(bodies[1].sql).toContain("public_admission_allowed = 1");
-    expect(bodies[2].params).toEqual([]);
+    expect(bodies[2].params).toEqual([Date.parse("2026-08-10T00:10:00.000Z")]);
   });
 
   it("rejects a stale disable request before changing the circuit", async () => {
@@ -348,4 +368,79 @@ describe("processing public admission state", () => {
       ),
     ).resolves.toEqual({ disabled: true, circuitOpen: true });
   });
+});
+
+it.each([
+  [1, false],
+  [1_800_000_000_001, false],
+  [1_800_000_000_000 - 15 * 60_000 - 1, false],
+  [1_800_000_000_000 - 15 * 60_000, true],
+  [1_800_000_000_000, true],
+])("only reports fresh accounting health at %s", async (evaluatedAt, expected) => {
+  const state = await inspectCurrentProcessingAdmissionInD1({
+    accountId,
+    databaseId,
+    apiToken: "token",
+    now: 1_800_000_000_000,
+    fetchImpl: async () =>
+      response([
+        {
+          ...readyRow(),
+          accountingStatus: "healthy",
+          accountingReason: null,
+          pendingHourKey: null,
+          unresolvedSinceHourKey: null,
+          accountingEvaluatedAt: evaluatedAt,
+        },
+      ]),
+  });
+  expect(state.accountingHealthy).toBe(expected);
+});
+
+it("reads pending initial, recovery and reminder email deliveries", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const db = new DatabaseSync(":memory:");
+  for (const name of readdirSync("apps/api-worker/migrations")
+    .filter((name) => name.endsWith(".sql"))
+    .sort())
+    db.exec(readFileSync(`apps/api-worker/migrations/${name}`, "utf8"));
+  const now = 1_800_000_000_000;
+  const pending = () =>
+    (db.prepare(processingAdmissionStateSql).get(now) as { alertPending: number }).alertPending;
+  expect(pending()).toBe(0);
+  db.exec(
+    "INSERT INTO operational_alert_state(kind,active,event_key,lease_token,lease_expires_at,next_attempt_at) VALUES ('accounting-degraded',1,'episode','retry',1800000300000,1800000300000)",
+  );
+  expect(pending()).toBe(1);
+  db.prepare(
+    "UPDATE operational_alert_state SET last_sent_at=?,lease_token=NULL,lease_expires_at=NULL",
+  ).run(now);
+  expect(pending()).toBe(0);
+  db.prepare("UPDATE operational_alert_state SET last_sent_at=?").run(now - 86_400_000);
+  expect(pending()).toBe(1);
+  db.exec(
+    "UPDATE operational_alert_state SET active=0; INSERT INTO operational_alert_state(kind,active,event_key) VALUES ('accounting-recovered',1,'episode')",
+  );
+  expect(pending()).toBe(1);
+  db.prepare(
+    "UPDATE operational_alert_state SET active=0,last_sent_at=? WHERE kind='accounting-recovered'",
+  ).run(now);
+  expect(pending()).toBe(0);
+  db.close();
+});
+
+it("does not invent accounting health when the pre-0011 schema is unavailable", async () => {
+  await expect(
+    inspectCurrentProcessingAdmissionInD1({
+      accountId,
+      databaseId,
+      apiToken: "token",
+      fetchImpl: async () => {
+        throw new Error("no such table: accounting_health");
+      },
+    }),
+  ).rejects.toThrow(
+    /inspection unavailable; verify migration 0011_accounting_health.sql and primary D1 access/,
+  );
 });

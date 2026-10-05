@@ -156,7 +156,7 @@ describe("Worker control-plane bindings and routes", () => {
     const migration = await env.DB.prepare(
       "SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1",
     ).first<{ name: string }>();
-    expect(migration?.name).toBe("0010_usage_log_versions.sql");
+    expect(migration?.name).toBe("0011_accounting_health.sql");
 
     for (const [table, column] of primaryKeyColumns) {
       const schema = await env.DB.prepare(`PRAGMA table_info("${table}")`).all<D1TableColumn>();
@@ -528,5 +528,89 @@ describe("Worker control-plane bindings and routes", () => {
     );
     expect(replay.status).toBe(204);
     expect(repeatedBodyRead).toBe(false);
+  });
+  it("classifies the first owned ETag conflict with the real D1 incident trigger", async () => {
+    const created = await rememberCreatedJob(
+      await createJobRequest({
+        anonymousSessionId: crypto.randomUUID(),
+        clientRequestId: crypto.randomUUID(),
+        ip: "203.0.119.77",
+      }),
+    );
+    const repository = createD1JobRepository(env.DB);
+    const generation = await env.DB.prepare(
+      "SELECT safety_generation FROM rollout_control WHERE id=1",
+    ).first<number>("safety_generation");
+    const response = await routeUploadRequest(
+      new Request(`https://api.example/v1/jobs/${created.jobId}/input`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${jobToken}`,
+          "cf-connecting-ip": "203.0.119.77",
+          "content-length": "3",
+          "content-type": "image/png",
+          origin: "http://localhost:4173",
+        },
+        body: Uint8Array.of(1, 2, 3),
+      }),
+      created.jobId,
+      {
+        config: { appOrigins: [new URL("http://localhost:4173")] },
+        currentSecret,
+        previousSecret,
+        networkRateLimiter: env.JOB_API_NETWORK_RATE_LIMITER,
+        repository,
+        storeInput: async (input) => {
+          const stored = await storeExactInputArtifact({ bucket: env.JOB_OBJECTS, ...input });
+          // Another owner commits while this upload is storing its input.
+          await repository.commitStoredInput({
+            jobId: created.jobId,
+            uploadVersion: input.uploadVersion,
+            inputEtag: "owned-etag",
+            now: Date.now(),
+          });
+          return stored;
+        },
+        deleteInput: (authorization) => deleteAuthorizedArtifact(env.JOB_OBJECTS, authorization),
+        dispatchOutbox: async () => false,
+        now: Date.now,
+      },
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "SERVER_PROCESSING_DISABLED" } });
+    await expect(
+      repository.commitStoredInput({
+        jobId: created.jobId,
+        uploadVersion: 1,
+        inputEtag: "different-etag",
+        now: Date.now(),
+      }),
+    ).resolves.toEqual({ kind: "conflicting-owned-etag" });
+    expect(
+      await env.DB.prepare(
+        "SELECT circuit_open,reason,safety_generation FROM rollout_control WHERE id=1",
+      ).first(),
+    ).toEqual({
+      circuit_open: 1,
+      reason: "INPUT_ETAG_CONFLICT",
+      safety_generation: (generation ?? 0) + 1,
+    });
+    expect(
+      await env.DB.prepare("SELECT reason FROM safety_incidents WHERE generation=?")
+        .bind((generation ?? 0) + 1)
+        .first(),
+    ).toEqual({ reason: "INPUT_ETAG_CONFLICT" });
+    expect(
+      await env.DB.prepare("SELECT input_etag,status FROM jobs WHERE id=?")
+        .bind(created.jobId)
+        .first(),
+    ).toEqual({ input_etag: "owned-etag", status: "queued" });
+    const denied = await createJobRequest({
+      anonymousSessionId: crypto.randomUUID(),
+      clientRequestId: crypto.randomUUID(),
+      ip: "203.0.120.77",
+    });
+    expect(denied.status).toBe(503);
+    expect(await denied.json()).toMatchObject({ error: { code: "SERVER_PROCESSING_DISABLED" } });
   });
 });

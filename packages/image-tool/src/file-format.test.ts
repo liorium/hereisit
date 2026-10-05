@@ -352,6 +352,17 @@ describe("inspectImageHeader", () => {
     });
   });
 
+  it("rejects GIF frame rectangles outside the logical canvas before decoding", () => {
+    const bytes = new Uint8Array(gifWithFrames(2, 1, 1));
+    const descriptor = bytes.indexOf(0x2c);
+    const oversized = bytes.slice();
+    oversized[descriptor + 5] = 0xff;
+    oversized[descriptor + 6] = 0xff;
+    expect(() => inspectImageHeader(oversized.buffer)).toThrow();
+    bytes[descriptor + 1] = 1;
+    expect(() => inspectImageHeader(bytes.buffer)).toThrow();
+  });
+
   it("rejects a truncated GIF block", () => {
     const bytes = new Uint8Array(gifWithFrames(2, 1, 1));
     expect(() => inspectImageHeader(bytes.slice(0, -2).buffer)).toThrow(

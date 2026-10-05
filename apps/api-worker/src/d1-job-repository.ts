@@ -1636,8 +1636,9 @@ class D1JobRepository implements JobRepository {
       session
         .prepare(
           `UPDATE rollout_control
-           SET circuit_open = 1,
-               reason = 'INPUT_ETAG_CONFLICT',
+           SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+               circuit_open = 1,
+               reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'INPUT_ETAG_CONFLICT' END,
                opened_at = COALESCE(opened_at, ?)
            WHERE id = 1
              AND EXISTS (
@@ -1680,7 +1681,8 @@ class D1JobRepository implements JobRepository {
     if (queued > 1) {
       throw new RepositoryIntegrityError("Stored-input transition changed more than one job.");
     }
-    if (circuitChanged > 1) {
+    // D1 counts the singleton update and its optional safety-incident trigger insert.
+    if (circuitChanged > 2) {
       throw new RepositoryIntegrityError("Stored-input conflict changed multiple circuit rows.");
     }
     const row = parseCommitSnapshot(results[3]);
@@ -1688,7 +1690,7 @@ class D1JobRepository implements JobRepository {
       return { kind: "delete-unowned-object", reason: "no-owner" };
     }
     if (row.input_etag !== null && row.input_etag !== input.inputEtag) {
-      if (circuitChanged !== 1) {
+      if (circuitChanged === 0) {
         throw new RepositoryIntegrityError("Conflicting owned ETag did not open the circuit.");
       }
       return { kind: "conflicting-owned-etag" };
@@ -2008,8 +2010,9 @@ class D1JobRepository implements JobRepository {
       session
         .prepare(
           `UPDATE rollout_control
-           SET circuit_open = 1,
-               reason = 'INPUT_ETAG_CONFLICT',
+           SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+               circuit_open = 1,
+               reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE 'INPUT_ETAG_CONFLICT' END,
                opened_at = COALESCE(opened_at, ?)
            WHERE id = 1`,
         )
@@ -2020,7 +2023,7 @@ class D1JobRepository implements JobRepository {
            WHERE id = 1`,
       ),
     ]);
-    if (batchChanged(results[0], "Invariant circuit update") > 1) {
+    if (batchChanged(results[0], "Invariant circuit update") > 2) {
       throw new RepositoryIntegrityError("Invariant circuit update changed multiple rows.");
     }
     const row = parseBatchRow(results[1], circuitRowSchema, "Invariant circuit snapshot");

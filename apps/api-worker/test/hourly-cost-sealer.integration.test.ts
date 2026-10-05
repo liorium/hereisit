@@ -175,7 +175,7 @@ describe("hourly cost sealing", () => {
     ).resolves.toEqual({ last_sealed_hour_key: firstHourKey });
   });
 
-  it("waits for a due source, then opens the circuit at the one-hour deadline", async () => {
+  it("keeps missing external usage incomplete after the one-hour deadline", async () => {
     const hourEnd = firstHourStart + 3_600_000;
     await expect(sealNextHourlyCost(env.DB, input(hourEnd + 59 * 60_000))).resolves.toEqual({
       kind: "incomplete",
@@ -183,10 +183,9 @@ describe("hourly cost sealing", () => {
       circuitOpen: false,
     });
     await expect(sealNextHourlyCost(env.DB, input(hourEnd + 60 * 60_000))).resolves.toEqual({
-      kind: "conflict",
+      kind: "incomplete",
       hourKey: firstHourKey,
-      reason: "COST_ACCOUNTING_INCOMPLETE",
-      circuitOpen: true,
+      circuitOpen: false,
     });
   });
 

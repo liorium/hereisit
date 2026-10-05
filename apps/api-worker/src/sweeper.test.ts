@@ -74,6 +74,9 @@ describe("scheduled maintenance policy", () => {
       cleanupCostHistory: vi.fn(async () => {
         calls.push("cost-history");
       }),
+      auditEmptyState: vi.fn(async () => {
+        calls.push("empty-audit");
+      }),
       evaluateCircuit: vi.fn(async (_env: unknown, evaluatedAt: number) => {
         expect(evaluatedAt).toBe(now);
         calls.push("circuit");
@@ -88,9 +91,10 @@ describe("scheduled maintenance policy", () => {
       "recovery",
       "expiry",
       "orphans",
-      "cost-accounting",
-      "cost-history",
       "circuit",
+      "empty-audit",
+      "cost-history",
+      "cost-accounting",
     ]);
     expect(dependencies.recordCounters).toHaveBeenCalledWith(expect.anything(), now);
     expect(dependencies.dispatchPendingOutbox).toHaveBeenCalledWith(expect.anything(), now, 100);

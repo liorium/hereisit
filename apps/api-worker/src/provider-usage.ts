@@ -100,42 +100,97 @@ function validateCommon(accountId: string, token: string, hourKey: number): void
   }
 }
 
-async function readProviderJson(response: Response): Promise<unknown> {
-  if (!response.ok) throw new Error("Provider usage request failed.");
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
-    throw new TypeError("Provider usage response must be JSON.");
+export class ProviderUnavailableError extends Error {
+  readonly code: "HTTP" | "TRANSPORT" | "TIMEOUT" | "SAMPLED";
+  readonly httpStatus: number | undefined;
+
+  constructor(code: "HTTP" | "TRANSPORT" | "TIMEOUT" | "SAMPLED", httpStatus?: number) {
+    super(
+      code === "SAMPLED"
+        ? "Sampled Analytics results cannot seal provider usage."
+        : "Provider usage request failed.",
+    );
+    this.name = "ProviderUnavailableError";
+    this.code = code;
+    this.httpStatus = httpStatus;
   }
-  if (response.body === null) throw new TypeError("Provider usage response body is missing.");
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+}
+
+export async function requestProviderText(
+  fetcher: ProviderFetch,
+  url: string,
+  init: RequestInit,
+  maximumBytes = MAXIMUM_RESPONSE_BYTES,
+): Promise<string> {
+  const controller = new AbortController();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const timeout = Promise.withResolvers<never>();
+  const timer = setTimeout(() => {
+    controller.abort();
+    void reader?.cancel().catch(() => undefined);
+    timeout.reject(new ProviderUnavailableError("TIMEOUT"));
+  }, 8000);
+  const transport = async <T>(operation: Promise<T>): Promise<T> => {
+    try {
+      return await Promise.race([operation, timeout.promise]);
+    } catch (error) {
+      if (error instanceof ProviderUnavailableError) throw error;
+      throw new ProviderUnavailableError(controller.signal.aborted ? "TIMEOUT" : "TRANSPORT");
+    }
+  };
   try {
+    const response = await transport(
+      Promise.resolve().then(() => fetcher(url, { ...init, signal: controller.signal })),
+    );
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new ProviderUnavailableError("HTTP", response.status);
+    }
+    const contentType = response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    if (contentType !== "application/json") {
+      void response.body?.cancel().catch(() => undefined);
+      throw new TypeError("Provider usage response must be JSON.");
+    }
+    if (response.body === null) throw new TypeError("Provider usage response body is missing.");
+    reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
     for (;;) {
-      const next = await reader.read();
+      const next = await transport(reader.read());
+      if (controller.signal.aborted) throw new ProviderUnavailableError("TIMEOUT");
       if (next.done) break;
       total += next.value.byteLength;
-      if (!Number.isSafeInteger(total) || total > MAXIMUM_RESPONSE_BYTES) {
-        await reader.cancel("Provider usage response exceeded its bound.");
+      if (!Number.isSafeInteger(total) || total > maximumBytes)
         throw new RangeError("Provider usage response exceeded its bound.");
-      }
       chunks.push(next.value);
     }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } finally {
+      bytes.fill(0);
+    }
   } finally {
-    reader.releaseLock();
+    clearTimeout(timer);
+    void reader?.cancel().catch(() => undefined);
+    reader?.releaseLock();
   }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+}
+
+function parseProviderJson(text: string): unknown {
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return JSON.parse(text);
   } catch {
     throw new TypeError("Provider usage response contains invalid JSON.");
-  } finally {
-    bytes.fill(0);
   }
 }
 
@@ -155,7 +210,8 @@ export async function checkLogpushHour(
   if (!Number.isSafeInteger(input.jobId) || input.jobId < 1) {
     throw new RangeError("Logpush job ID is invalid.");
   }
-  const response = await fetcher(
+  const response = await requestProviderText(
+    fetcher,
     `https://api.cloudflare.com/client/v4/accounts/${input.accountId}/logpush/jobs/${input.jobId}`,
     {
       method: "GET",
@@ -163,7 +219,7 @@ export async function checkLogpushHour(
       headers: { accept: "application/json", authorization: `Bearer ${input.token}` },
     },
   );
-  const envelope = logpushEnvelopeSchema.parse(await readProviderJson(response));
+  const envelope = logpushEnvelopeSchema.parse(parseProviderJson(response));
   if (!envelope.success || envelope.result.id !== input.jobId) {
     throw new Error("Logpush status response is not authoritative.");
   }
@@ -202,7 +258,8 @@ WHERE double1 = ${input.hourKey}
 GROUP BY event_type, entrypoint, version_id, release_report_sha256
 ORDER BY event_type, entrypoint, version_id, release_report_sha256
 FORMAT JSON`;
-  const response = await fetcher(
+  const response = await requestProviderText(
+    fetcher,
     `https://api.cloudflare.com/client/v4/accounts/${input.accountId}/analytics_engine/sql`,
     {
       method: "POST",
@@ -215,14 +272,14 @@ FORMAT JSON`;
       body: query,
     },
   );
-  const envelope = analyticsEnvelopeSchema.parse(await readProviderJson(response));
+  const envelope = analyticsEnvelopeSchema.parse(parseProviderJson(response));
   if (envelope.rows !== envelope.data.length) {
     throw new TypeError("Analytics response row count is inconsistent.");
   }
   let handlerInvocationCount = 0;
   for (const row of envelope.data) {
     if (row.minimum_sample_interval !== 1 || row.maximum_sample_interval !== 1) {
-      throw new TypeError("Sampled Analytics results cannot seal provider usage.");
+      throw new ProviderUnavailableError("SAMPLED");
     }
     handlerInvocationCount += row.point_count;
     if (!Number.isSafeInteger(handlerInvocationCount)) {

@@ -193,3 +193,33 @@ describe("Cloudflare provider usage checks", () => {
     ).rejects.toThrow(/entrypoint/i);
   });
 });
+
+it("classifies provider HTTP failure without exposing response", async () => {
+  await expect(
+    checkLogpushHour(async () => new Response("private", { status: 403 }), {
+      accountId,
+      token,
+      jobId: 41,
+      hourKey,
+    }),
+  ).rejects.toMatchObject({ code: "HTTP", httpStatus: 403 });
+});
+it("bounds a stalled provider body at eight seconds", async () => {
+  vi.useFakeTimers();
+  try {
+    const cancelled = vi.fn();
+    const pending = checkLogpushHour(
+      async () =>
+        new Response(new ReadableStream({ cancel: cancelled }), {
+          headers: { "content-type": "application/json" },
+        }),
+      { accountId, token, jobId: 41, hourKey },
+    );
+    const assertion = expect(pending).rejects.toMatchObject({ code: "TIMEOUT" });
+    await vi.advanceTimersByTimeAsync(8000);
+    await assertion;
+    expect(cancelled).toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});

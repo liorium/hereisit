@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const isCI = Boolean(process.env.CI);
 const includeWebKit = isCI;
+const imageExtraSpec = /image-extra\.spec\.ts/;
 const imageWatermarkSpec = /image-watermark\.spec\.ts/;
 const imageCompressionServerSpec = /image-compression-server\.spec\.ts/;
 
@@ -39,7 +40,12 @@ export default defineConfig({
         hasTouch: true,
         isMobile: true,
       },
-      testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
+      testMatch: [
+        /mobile\.spec\.ts/,
+        imageWatermarkSpec,
+        imageCompressionServerSpec,
+        imageExtraSpec,
+      ],
     },
     {
       name: "mobile-firefox",
@@ -61,7 +67,12 @@ export default defineConfig({
           {
             name: "mobile-webkit",
             use: { ...devices["iPhone 15"] },
-            testMatch: [/mobile\.spec\.ts/, imageWatermarkSpec, imageCompressionServerSpec],
+            testMatch: [
+              /mobile\.spec\.ts/,
+              imageWatermarkSpec,
+              imageCompressionServerSpec,
+              imageExtraSpec,
+            ],
           },
         ]
       : []),

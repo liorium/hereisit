@@ -127,7 +127,7 @@ export type SealNextHourlyCostResult =
       readonly kind: "conflict";
       readonly hourKey: number;
       readonly reason:
-        | "COST_ACCOUNTING_INCOMPLETE"
+        | "ACCOUNTING_STATE_INVALID"
         | "COST_ACCOUNTING_HASH_MISMATCH"
         | "COST_ACCOUNTING_EGRESS_MISMATCH"
         | "COST_ACTIVITY_INVALID"
@@ -146,8 +146,9 @@ async function openCostCircuit(
     .withSession("first-primary")
     .prepare(
       `UPDATE rollout_control
-       SET circuit_open = 1,
-           reason = CASE WHEN circuit_open = 1 THEN reason ELSE ? END,
+       SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
+           reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE ? END,
            opened_at = COALESCE(opened_at, ?)
        WHERE id = 1`,
     )
@@ -273,10 +274,9 @@ export async function sealNextHourlyCost(
     .bind(control.cost_accounting_epoch, hourKey)
     .first();
   const row = rawCostRowSchema.safeParse(rawRow);
+  if (!row.success && rawRow !== null)
+    return openCostCircuit(database, input.now, hourKey, "ACCOUNTING_STATE_INVALID");
   if (!row.success || row.data.provider_usage_complete !== 1) {
-    if (input.now >= completenessDeadline) {
-      return openCostCircuit(database, input.now, hourKey, "COST_ACCOUNTING_INCOMPLETE");
-    }
     return { kind: "incomplete", hourKey, circuitOpen: control.circuit_open === 1 };
   }
   if (
@@ -318,7 +318,7 @@ export async function sealNextHourlyCost(
   );
   if (!counterRow.success) {
     if (input.now >= completenessDeadline) {
-      return openCostCircuit(database, input.now, hourKey, "COST_ACCOUNTING_INCOMPLETE");
+      return openCostCircuit(database, input.now, hourKey, "ACCOUNTING_STATE_INVALID");
     }
     return { kind: "incomplete", hourKey, circuitOpen: control.circuit_open === 1 };
   }

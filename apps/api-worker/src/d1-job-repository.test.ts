@@ -29,7 +29,7 @@ const pdfMigration = readFileSync(
   new URL("../migrations/0008_pdf_processing_jobs.sql", import.meta.url),
   "utf8",
 );
-const migration = `${baseMigration}\n${pdfMigration}`;
+const migration = `${baseMigration}\n${pdfMigration}\n${["0009_container_activity_identity.sql", "0010_usage_log_versions.sql", "0011_accounting_health.sql"].map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8")).join("\n")}`;
 const now = Date.parse("2026-07-16T00:10:00.000Z");
 const dayKey = "2026-07-16";
 const priorDayKey = "2026-07-15";
@@ -183,8 +183,15 @@ class SqliteD1Database implements D1Database {
   batchCalls = 0;
   afterBatch: (() => void) | null = null;
 
-  constructor() {
+  constructor(accountingStatus: "unknown" | "degraded" = "unknown") {
     this.sqlite.exec(migration);
+    if (accountingStatus === "degraded") {
+      this.sqlite
+        .prepare(
+          `UPDATE accounting_health SET status='degraded',reason='PROVIDER_UNAVAILABLE',evaluated_at=?,pending_hour_key=?,unresolved_since_hour_key=? WHERE id=1`,
+        )
+        .run(now, Math.floor(now / 3_600_000) - 2, Math.floor(now / 3_600_000) - 2);
+    }
   }
 
   prepare(query: string): D1PreparedStatement {
@@ -646,8 +653,11 @@ describe("atomic job reservation", () => {
     expect(persisted).not.toContain("private.png");
   });
 
-  it("replays the persisted descriptor without reserving counters twice", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("replays the persisted descriptor without reserving counters twice with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     const repository = createD1JobRepository(database);
     const first = await reservationInput();
     const replay = await reservationInput({
@@ -839,11 +849,14 @@ describe("atomic job reservation", () => {
     expect(count(database, "network_usage")).toBe(0);
   });
 
-  it("allows only one concurrent reservation for one replay tuple", async () => {
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("allows only one concurrent reservation for one replay tuple with %s accounting", async (accountingStatus) => {
     // TODO(Task 5 routes integration): repeat this proof in Workerd with two independent D1
     // requests. DatabaseSync serializes these Promise callbacks and proves replay/idempotency,
     // not remote primary contention.
-    const database = new SqliteD1Database();
+    const database = new SqliteD1Database(accountingStatus);
     const repository = createD1JobRepository(database);
     const [first, second] = await Promise.all([
       repository.reserveAndCreate(await reservationInput()),
@@ -865,6 +878,39 @@ describe("atomic job reservation", () => {
 });
 
 describe("authoritative admission predicates", () => {
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("allows only one competing reservation at the account quota with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
+    const repository = createD1JobRepository(database);
+    const first = await reservationInput();
+    const second = await reservationInput({
+      request: request({
+        anonymousSessionId: alternateSessionId,
+        clientRequestId: alternateClientRequestId,
+        jobToken: alternateJobToken,
+      }),
+      jobId: alternateJobId,
+      inputKey: "inputs/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      outputKey: "outputs/cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      queueEpoch: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    });
+    const limit = first.estimate.reservedWeightedUnits;
+    const results = await Promise.all([
+      repository.reserveAndCreate({ ...first, accountDailyLimit: limit }),
+      repository.reserveAndCreate({ ...second, accountDailyLimit: limit }),
+    ]);
+    expect(results.map((result) => result.kind).sort()).toEqual(["created", "quota-exceeded"]);
+    expect(results.find((result) => result.kind === "quota-exceeded")).toEqual({
+      kind: "quota-exceeded",
+      scope: "account",
+    });
+    expect(count(database, "jobs")).toBe(1);
+    expect(usageRows(database).account).toEqual([
+      expect.objectContaining({ reserved_units: limit, pending_jobs: 1 }),
+    ]);
+  });
   it.each([
     { accountDailyLimit: 0 },
     { anonymousDailyLimit: 0 },
@@ -895,8 +941,11 @@ describe("authoritative admission predicates", () => {
     expect(count(database, "jobs")).toBe(0);
   });
 
-  it("denies one active anonymous job across a UTC midnight row boundary", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("denies one active anonymous job across a UTC midnight row boundary with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     const input = await reservationInput();
     database.sqlite
       .prepare(
@@ -911,8 +960,11 @@ describe("authoritative admission predicates", () => {
     });
   });
 
-  it("denies account pending jobs across retained UTC-day rows", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("denies account pending jobs across retained UTC-day rows with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     database.sqlite
       .prepare(
         `INSERT INTO account_usage
@@ -1280,8 +1332,11 @@ describe("authenticated upload reservation", () => {
     });
   });
 
-  it("settles concurrent expired uploading retries exactly once", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("settles concurrent expired uploading retries exactly once with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     const repository = createD1JobRepository(database);
     const reservation = await reservationInput();
     await repository.reserveAndCreate(reservation);
@@ -1345,8 +1400,11 @@ describe("authenticated upload reservation", () => {
     });
   });
 
-  it("settles concurrent cancelled never-started retries at upload version zero", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("settles concurrent cancelled never-started retries at upload version zero with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     const repository = createD1JobRepository(database);
     const reservation = await reservationInput();
     await repository.reserveAndCreate(reservation);
@@ -1850,8 +1908,11 @@ describe("exactly-once pre-engine settlement", () => {
     });
   });
 
-  it("settles the fixed floor once and explicitly authorizes only the unowned input key", async () => {
-    const database = new SqliteD1Database();
+  it.each([
+    "unknown",
+    "degraded",
+  ] as const)("settles the fixed floor once and explicitly authorizes only the unowned input key with %s accounting", async (accountingStatus) => {
+    const database = new SqliteD1Database(accountingStatus);
     const repository = createD1JobRepository(database);
     const reservation = await reservationInput();
     await repository.reserveAndCreate(reservation);

@@ -499,7 +499,12 @@ function inspectGif(bytes: Uint8Array): InspectedImageFile {
 
     const frameWidth = readUint16LE(bytes, offset + 4);
     const frameHeight = readUint16LE(bytes, offset + 6);
-    if (!validDimensions(frameWidth, frameHeight)) invalidImage();
+    if (
+      !validDimensions(frameWidth, frameHeight) ||
+      readUint16LE(bytes, offset) + frameWidth > width ||
+      readUint16LE(bytes, offset + 2) + frameHeight > height
+    )
+      invalidImage();
     const framePacked = bytes[offset + 8] ?? 0;
     offset += 9;
     if ((framePacked & 0x80) !== 0) {

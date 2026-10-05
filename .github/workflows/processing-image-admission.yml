@@ -179,10 +179,10 @@ jobs:
           test ! -e scripts/.smoke-image-compress-server.mjs
           git show "${GITHUB_SHA}:scripts/smoke-image-compress-server.mjs" \
             > scripts/.smoke-image-compress-server.mjs
-          test ! -e scripts/.rotate-staging-accounting-epoch.mjs
-          git show "${GITHUB_SHA}:scripts/rotate-staging-accounting-epoch.mjs" \
-            > scripts/.rotate-staging-accounting-epoch.mjs
-          chmod 0700 scripts/.processing-admission-rollback-state.mjs scripts/.verify-worker-version-chain.mjs scripts/.smoke-image-compress-server.mjs scripts/.rotate-staging-accounting-epoch.mjs
+          test ! -e scripts/.verify-processing-admission-state.mjs
+          git show "${GITHUB_SHA}:scripts/verify-processing-admission-state.mjs" \
+            > scripts/.verify-processing-admission-state.mjs
+          chmod 0700 scripts/.processing-admission-rollback-state.mjs scripts/.verify-worker-version-chain.mjs scripts/.smoke-image-compress-server.mjs scripts/.verify-processing-admission-state.mjs
       - name: Discover production resources and reconstruct the exact rollout pair
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -265,6 +265,9 @@ jobs:
           cp "$WRANGLER_CONFIG" .artifacts/runtime/current-wrangler.jsonc
           pnpm exec wrangler deploy "$WORKER_MODULE" --config "$WRANGLER_CONFIG" \
             --no-bundle --containers-rollout none --dry-run
+          node scripts/.processing-admission-rollback-state.mjs \
+            --mode capture --account-id "$CLOUDFLARE_ACCOUNT_ID" \
+            --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/safety-before.json
           node --input-type=module - <<'NODE'
           import { createHash } from "node:crypto";
           import { readFile, writeFile } from "node:fs/promises";
@@ -273,7 +276,8 @@ jobs:
           if (await hash(process.env.WORKER_MODULE) !== canary.workerModuleSha256 || await hash(".artifacts/runtime/current-wrangler.jsonc") !== canary.generatedConfigSha256 || await hash(".artifacts/canary/authority/processing-release-report.json") !== canary.releaseReportSha256) throw new Error("rebuilt canary artifacts do not match");
           const observedAt = Date.parse(canary.verifiedAt);
           if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new Error("canary verification time is invalid");
-          await writeFile(".artifacts/runtime/canary-rollback.json", `${JSON.stringify({ schema: "hereisit-processing-admission-rollback@1", state: { circuitOpen: 0, circuitReason: null, openedAt: null, versionId: canary.activeVersionId, workerModuleSha256: canary.workerModuleSha256, generatedConfigSha256: canary.generatedConfigSha256, releaseReportSha256: canary.releaseReportSha256, publicAdmissionAllowed: 1, observedAt } })}\n`, { flag: "wx", mode: 0o600 });
+          const safety = JSON.parse(await readFile(".artifacts/runtime/safety-before.json", "utf8"));
+          await writeFile(".artifacts/runtime/canary-rollback.json", `${JSON.stringify({ schema: "hereisit-processing-admission-rollback@2", state: { ...safety.state, versionId: canary.activeVersionId, workerModuleSha256: canary.workerModuleSha256, generatedConfigSha256: canary.generatedConfigSha256, releaseReportSha256: canary.releaseReportSha256, publicAdmissionAllowed: 1, observedAt } })}\n`, { flag: "wx", mode: 0o600 });
           NODE
           pnpm exec wrangler versions list --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/versions-before.json
           pnpm exec wrangler deployments status --config "$WRANGLER_CONFIG" --json > .artifacts/runtime/deployment-before.json
@@ -296,16 +300,6 @@ jobs:
       - name: Arm fail-closed mutation recovery
         id: mutation
         run: echo "attempted=true" >> "$GITHUB_OUTPUT"
-      - name: Rearm stale unsealed cost accounting once
-        env:
-          CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          node scripts/.rotate-staging-accounting-epoch.mjs \
-            --mode public-admission-rearm \
-            --account-id "$CLOUDFLARE_ACCOUNT_ID" \
-            --database-id "$PRODUCTION_D1_DATABASE_ID" \
-            --release-report-sha256 "$REPORT_SHA256"
       - name: Restore and verify the exact local canary before admission
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -324,7 +318,7 @@ jobs:
           node scripts/.processing-admission-rollback-state.mjs \
             --mode restore --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json
-          node scripts/verify-processing-admission-state.mjs \
+          node scripts/.verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$CANARY_VERSION_ID" \
             --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/preflight.json
@@ -380,7 +374,7 @@ jobs:
             --attestation .artifacts/runtime/transition-attestation.json \
             --account-id "$CLOUDFLARE_ACCOUNT_ID" --database-id "$PRODUCTION_D1_DATABASE_ID"
           PUBLIC_VERSION_ID="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; const value=JSON.parse(readFileSync(".artifacts/runtime/transition-attestation.json","utf8")); process.stdout.write(value.activeVersionId)')"
-          node scripts/verify-processing-admission-state.mjs \
+          node scripts/.verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
             --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/post-attestation.json
@@ -436,7 +430,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
-          node scripts/verify-processing-admission-state.mjs \
+          node scripts/.verify-processing-admission-state.mjs \
             --mode verify --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" --expected-version-id "$PUBLIC_VERSION_ID" \
             --expected-release-report-sha256 "$REPORT_SHA256" > .artifacts/runtime/final-state.json
@@ -445,6 +439,13 @@ jobs:
           printf '%s\n' '{"schema":"hereisit-processing-image-admission-gate@1","verified":true,"projectedMonthlyCostCeilingMicrousd":5000000,"liveCostPer1000CeilingMicrousd":500000}' > .artifacts/admission/gate-result.json
           printf '%s\n' '{"schema":"hereisit-processing-image-admission-recovery@1","attempted":false,"queuePaused":false,"circuitOpened":false,"versionRestored":false,"localPolicy":false}' > .artifacts/admission/recovery-result.json
           chmod 0600 .artifacts/admission/gate-result.json .artifacts/admission/recovery-result.json
+          node --input-type=module - <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          import { inspectCurrentProcessingAdmissionInD1 } from "./scripts/.verify-processing-admission-state.mjs";
+          const state = await inspectCurrentProcessingAdmissionInD1({ accountId: process.env.CLOUDFLARE_ACCOUNT_ID, databaseId: process.env.PRODUCTION_D1_DATABASE_ID, apiToken: process.env.CLOUDFLARE_D1_API_TOKEN });
+          if (!state.admissionAvailable || state.activeVersionId !== process.env.PUBLIC_VERSION_ID || state.releaseReportSha256 !== process.env.REPORT_SHA256) throw new Error("post-smoke admission state changed");
+          await writeFile(".artifacts/admission/service-accounting-state.json", JSON.stringify({ serviceAvailable: true, accountingHealthy: state.accountingHealthy, alertPending: state.alertPending, accountingStatus: state.accountingStatus, accountingReason: state.accountingReason, unresolvedSinceHourKey: state.unresolvedSinceHourKey }), { flag: "wx", mode: 0o600 });
+          NODE
       - name: Attempt every fail-closed recovery layer
         if: always() && steps.mutation.outputs.attempted == 'true' && (failure() || cancelled())
         env:
@@ -466,7 +467,7 @@ jobs:
               --database-id "$PRODUCTION_D1_DATABASE_ID" --file .artifacts/runtime/canary-rollback.json || VERSION_RECOVERY=$?
           fi
           CIRCUIT_RECOVERY=0
-          node scripts/verify-processing-admission-state.mjs \
+          node scripts/.verify-processing-admission-state.mjs \
             --mode disable-current --account-id "$CLOUDFLARE_ACCOUNT_ID" \
             --database-id "$PRODUCTION_D1_DATABASE_ID" \
             --now "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > .artifacts/runtime/disable-result.json || CIRCUIT_RECOVERY=$?
@@ -504,6 +505,7 @@ jobs:
             .artifacts/admission/policy-result.json
             .artifacts/admission/public-smoke-result.json
             .artifacts/admission/recovery-result.json
+            .artifacts/admission/service-accounting-state.json
           compression-level: 0
           if-no-files-found: warn
           include-hidden-files: true

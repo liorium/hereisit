@@ -127,12 +127,15 @@ jobs:
           docker load --input .artifacts/release-source/image-engine-linux-amd64.docker.tar
           cc -std=c11 -Wall -Wextra -Werror -O2 tests/fixtures/native/libvips-source-bounds.c \
             -ldl -o .artifacts/runtime/libvips-source-bounds
-          timeout 15s docker run --rm --network none --read-only --memory 128m --memory-swap 128m \
-            --pids-limit 32 --cap-drop ALL --security-opt no-new-privileges \
-            -v "$PWD/.artifacts/runtime/libvips-source-bounds:/probe:ro" --entrypoint /probe \
-            "hereisit-image-engine:$GITHUB_SHA" \
-            > .artifacts/runtime/security-libvips-source-bounds.json
           IMAGE_ENGINE_SHA256="$(docker image inspect "hereisit-image-engine:$GITHUB_SHA" --format '{{.Id}}' | sed 's/^sha256://')"
+          timeout 15s docker run --rm --network none --read-only --memory 128m --memory-swap 128m \
+            --pids-limit 32 --cap-drop ALL --security-opt no-new-privileges --ulimit core=0 \
+            -v "$PWD/.artifacts/runtime/libvips-source-bounds:/probe:ro" \
+            -v "$PWD/tests/fixtures/native/libvips-source-bounds.c:/probe-source.c:ro" \
+            -v "$PWD/scripts/collect-libvips-bounds-evidence.mjs:/collect.mjs:ro" \
+            --entrypoint /nodejs/bin/node "sha256:$IMAGE_ENGINE_SHA256" /collect.mjs \
+            "$IMAGE_ENGINE_SHA256" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > .artifacts/runtime/security-libvips-source-bounds.json
           WEB_STAGING_SHA256="$(sha256sum .artifacts/release-source/web-staging.tar | cut -d' ' -f1)"
           WEB_PRODUCTION_SHA256="$(sha256sum .artifacts/release-source/web-production.tar | cut -d' ' -f1)"
           WORKER_SHA256="$(sha256sum .artifacts/release-source/api-worker.mjs | cut -d' ' -f1)"

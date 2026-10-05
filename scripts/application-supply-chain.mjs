@@ -48,8 +48,8 @@ const EXPECTED_FALLBACKS = {
     sha256: "9bb3b077cc8628334bab25961223dd8207252c8a56aa054195be38f1c042aaf4",
   },
   "@img/sharp-libvips-linux-x64@1.3.3": { kind: "root-readme", path: "README.md" },
-  "@next/env@16.3.5": { kind: "package", package: "next@16.3.5" },
-  "@next/swc-linux-x64-gnu@16.3.5": { kind: "package", package: "next@16.3.5" },
+  "@next/env@16.3.6": { kind: "package", package: "next@16.3.6" },
+  "@next/swc-linux-x64-gnu@16.3.6": { kind: "package", package: "next@16.3.6" },
   "client-only@0.0.1": { kind: "package", package: "react@19.2.7" },
 };
 const PNPM_REQUEST = Object.freeze({

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { providerUsageContractSha256 } from "../apps/api-worker/src/container-provider-usage";
 import { CANONICAL_PROVIDER_USAGE_SCHEMA_SHA256 } from "../scripts/generate-processing-wrangler.mjs";
@@ -397,4 +398,18 @@ describe("processing cost provider inspection", () => {
       container: { reachable: false, httpStatus: 200, failure: "provider-error" },
     });
   });
+});
+
+it("loads the production diagnostic with native Node type stripping", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      'await import("./scripts/inspect-processing-cost-providers.mjs")',
+    ],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
 });

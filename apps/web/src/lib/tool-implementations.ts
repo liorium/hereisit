@@ -143,7 +143,8 @@ export const toolImplementationConfig = defineToolImplementationConfig({
     intent: "convert-to-jpg",
     sourceFileLimits: imageSourceFileLimits,
     eyebrow: "JPG CONVERTER",
-    defaultSummary: "PNG·GIF·WebP·SVG 이미지를 JPG로 바꾸고 여러 결과를 ZIP으로 받을 수 있어요.",
+    defaultSummary:
+      "PNG·GIF·WebP 이미지를 JPG로 바꿔요. GIF는 첫 프레임을 저장하며 SVG·TIFF는 지원하지 않아요.",
     notices: [{ tone: "support", text: "브라우저가 직접 읽을 수 있는 형식만 변환할 수 있어요." }],
   },
   "image.convert-from-jpg": {
@@ -232,7 +233,8 @@ export const toolImplementationConfig = defineToolImplementationConfig({
       maxTotalBytes: 30 * MEBIBYTE,
     },
     eyebrow: "PRIVACY BLUR",
-    defaultSummary: "얼굴·번호판·이름을 자동으로 찾거나 가릴 영역을 드래그해 흐리게 처리해요.",
+    defaultSummary:
+      "지원 브라우저에서 얼굴을 자동으로 찾아요. 번호판·이름은 드래그하거나 영역 추가 버튼으로 직접 지정해 주세요.",
     notices: [
       {
         tone: "support",

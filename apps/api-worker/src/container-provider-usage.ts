@@ -2,6 +2,7 @@ import { z } from "zod";
 import providerUsageContract from "../../../docs/deployment/provider-usage-schema.v1.json" with {
   type: "json",
 };
+import { ProviderUnavailableError, requestProviderText } from "./provider-usage.ts";
 
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -91,55 +92,25 @@ export function providerUsageContractSha256(): Promise<string> {
   return Promise.resolve("b7fe0c24941179f85e6c7d0b9cdcd82cb5a60597a606748352bc81f1e63d35af");
 }
 
-async function readBoundedProviderText(response: Response): Promise<string> {
-  if (!response.ok) throw new Error("Container provider usage request failed.");
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== "application/json") {
-    throw new TypeError("Container provider usage response must be JSON.");
-  }
-  if (response.body === null) throw new TypeError("Container provider usage response is missing.");
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (!Number.isSafeInteger(total) || total > providerUsageContract.maximumResponseBytes) {
-        await reader.cancel("Container provider response exceeded its bound.");
-        throw new RangeError("Container provider response exceeded its bound.");
-      }
-      chunks.push(next.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } finally {
-    bytes.fill(0);
-  }
-}
-
 function parseProviderJson(text: string): unknown {
   const parseWithSource = JSON.parse as (
     input: string,
     reviver: (this: unknown, key: string, value: unknown, context: JsonParseContext) => unknown,
   ) => unknown;
-  return parseWithSource(text, (_key, value, context) => {
-    if (!PROVIDER_NUMBER_KEYS.has(_key)) return value;
-    if (typeof value !== "number" || typeof context.source !== "string") {
-      throw new TypeError("Container provider numeric source is unavailable.");
+  try {
+    return parseWithSource(text, (_key, value, context) => {
+      if (!PROVIDER_NUMBER_KEYS.has(_key)) return value;
+      if (typeof value !== "number" || typeof context.source !== "string") {
+        throw new TypeError("Container provider numeric source is unavailable.");
+      }
+      return { source: context.source } satisfies SourceNumber;
+    });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new TypeError("Container provider response contains invalid JSON.");
     }
-    return { source: context.source } satisfies SourceNumber;
-  });
+    throw error;
+  }
 }
 
 function fixedInteger(source: string, scale: number, label: string): string {
@@ -215,17 +186,40 @@ export async function queryContainerUsageHour(
     datetimeEnd: new Date(hourEnd).toISOString(),
     applicationId: input.applicationId,
   };
-  const response = await fetcher(providerUsageContract.endpoint, {
-    method: providerUsageContract.method,
-    redirect: "error",
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${input.token}`,
-      "content-type": "application/json",
+  const response = await requestProviderText(
+    fetcher,
+    providerUsageContract.endpoint,
+    {
+      method: providerUsageContract.method,
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${input.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ query: providerUsageContract.query, variables }),
     },
-    body: JSON.stringify({ query: providerUsageContract.query, variables }),
-  });
-  const parsedJson = parseProviderJson(await readBoundedProviderText(response));
+    providerUsageContract.maximumResponseBytes,
+  );
+  const parsedJson = parseProviderJson(response);
+  const unavailable = z
+    .object({
+      data: z.null().optional(),
+      errors: z
+        .array(
+          z
+            .object({
+              message: z.string().min(1),
+              path: z.array(z.union([z.string(), z.number()])).optional(),
+              extensions: z.record(z.string(), z.unknown()).optional(),
+            })
+            .strict(),
+        )
+        .min(1),
+    })
+    .strict()
+    .safeParse(parsedJson);
+  if (unavailable.success) throw new ProviderUnavailableError("HTTP");
   const errorEnvelope = z.object({ errors: z.unknown() }).passthrough().safeParse(parsedJson);
   if (!errorEnvelope.success || errorEnvelope.data.errors !== null) {
     throw new Error("Container provider GraphQL response contains errors.");

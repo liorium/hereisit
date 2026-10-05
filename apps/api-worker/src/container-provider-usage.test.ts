@@ -45,6 +45,12 @@ async function validInput() {
 }
 
 describe("Cloudflare Container provider usage", () => {
+  it("does not expose malformed provider response text in errors", async () => {
+    const fetcher = vi.fn(async () => response("private-provider-response"));
+    await expect(queryContainerUsageHour(fetcher, await validInput())).rejects.toThrow(
+      "Container provider response contains invalid JSON.",
+    );
+  });
   it("queries the exact hour and converts provider decimals without floating-point arithmetic", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       response(usageBody()),
@@ -162,9 +168,9 @@ describe("Cloudflare Container provider usage", () => {
     const graphqlError = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       response('{"data":null,"errors":[{"message":"unavailable"}]}'),
     );
-    await expect(queryContainerUsageHour(graphqlError, await validInput())).rejects.toThrow(
-      /GraphQL/i,
-    );
+    await expect(queryContainerUsageHour(graphqlError, await validInput())).rejects.toMatchObject({
+      code: "HTTP",
+    });
 
     const wrongApplication = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       response(usageBody().replace(applicationId, "123e4567-e89b-42d3-a456-426614174002")),

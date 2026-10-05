@@ -120,8 +120,9 @@ export async function openUsageLogCircuit(
     .withSession("first-primary")
     .prepare(
       `UPDATE rollout_control
-       SET circuit_open = 1,
-           reason = CASE WHEN circuit_open = 1 THEN reason ELSE ? END,
+       SET safety_generation = safety_generation + CASE WHEN circuit_open = 0 OR reason = 'COST_ACCOUNTING_INCOMPLETE' THEN 1 ELSE 0 END,
+           circuit_open = 1,
+           reason = CASE WHEN circuit_open = 1 AND reason IS NOT 'COST_ACCOUNTING_INCOMPLETE' THEN reason ELSE ? END,
            opened_at = COALESCE(opened_at, ?)
        WHERE id = 1`,
     )
