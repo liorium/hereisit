@@ -34,9 +34,9 @@ describe("processing staging workflow", () => {
     expect(workflow).toContain('workflows: ["CI"]');
     expect(workflow).toContain("types: [completed]");
     expect(workflow).toContain("branches: [main]");
-    expect(workflow).not.toContain("workflow_dispatch:");
+    expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("group: processing-staging");
-    expect(workflow).toContain("cancel-in-progress: true");
+    expect(workflow).toContain("cancel-in-progress: false");
     expect(deploy).toContain("github.repository == 'liorium/hereisit'");
     expect(deploy).not.toContain("PROCESSING_HOSTED_REVIEWS_READY");
     expect(deploy).toContain("github.event.workflow_run.conclusion == 'success'");
@@ -56,9 +56,13 @@ describe("processing staging workflow", () => {
     const validateEnvironment = deploy.indexOf("verify-processing-deployment-environment.mjs");
     const firstCloudflareMutation = deploy.indexOf("wrangler containers push");
 
-    expect(checkout).toContain(`ref: \${{ github.event.workflow_run.head_sha }}`);
+    expect(checkout).toContain(
+      `ref: \${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
+    );
     expect(checkout).toContain("persist-credentials: false");
-    expect(deploy).toContain(`EXPECTED_HEAD_SHA: \${{ github.event.workflow_run.head_sha }}`);
+    expect(deploy).toContain(
+      `EXPECTED_HEAD_SHA: \${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
+    );
     expect(verifySource).toBeGreaterThanOrEqual(0);
     expect(install).toBeLessThan(verifySource);
     expect(validateEnvironment).toBeGreaterThan(install);
@@ -67,7 +71,7 @@ describe("processing staging workflow", () => {
 
   it("downloads the automatic exact-SHA CI release authority without a manual release", () => {
     expect(workflow).toContain(
-      `processing-release-authority-\${{ github.event.workflow_run.head_sha }}`,
+      `processing-release-authority-\${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
     );
     expect(workflow).toContain("verify-processing-deployment-authority.mjs");
     expect(workflow).not.toContain("gh release");
@@ -268,4 +272,33 @@ describe("processing staging workflow", () => {
       expect(actionReferences.some((reference) => reference.startsWith(action))).toBe(true);
     }
   });
+});
+
+it("requires explicit protected legacy recovery without relaxing automatic authority", () => {
+  expect(workflow).toContain("ACCEPT UNKNOWN LEGACY SAFETY COST AND STORAGE WRITES");
+  expect(workflow).toContain(
+    "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+  );
+  expect(workflow).toContain("Verify explicit recovery upstream authority");
+  expect(workflow).toContain('run.conclusion !== "success"');
+  expect(workflow).toContain("recoverLegacyAccountingCircuitInD1");
+  expect(workflow).toContain("rearmAccountingOnlyCircuitInD1");
+  expect(workflow).toContain("legacy_recovery_expires_at");
+  expect(workflow).toContain("e.EXPECTED_HEAD_SHA !== e.GITHUB_SHA");
+  expect(workflow).toContain("fresh empty-state recovery audit unavailable");
+  const attempts = Number(workflow.match(/attempt < (\d+); attempt \+= 1/)?.[1]);
+  const delay = Number(workflow.match(/await delay\((\d[\d_]*)\);/)?.[1]?.replaceAll("_", ""));
+  expect(attempts * delay).toBeGreaterThanOrEqual(20 * 60_000);
+});
+
+it("closes committed manual recovery on canary or pre-resume failure", () => {
+  const failureStep = workflow.slice(
+    workflow.indexOf("      - name: Close any committed manual recovery after failure"),
+  );
+  const end = failureStep.indexOf("      - name:", 1);
+  const body = end < 0 ? failureStep : failureStep.slice(0, end);
+  expect(body).toContain("github.event_name == 'workflow_dispatch' && (failure() || cancelled())");
+  expect(body).toContain("closeFailedLegacyRecoveryInD1");
+  expect(body).not.toContain("resume-attempt");
+  expect(body).not.toContain("legacy-recovery.json");
 });

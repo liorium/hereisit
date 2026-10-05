@@ -2,6 +2,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  closeFailedLegacyRecoveryInD1,
+  legacyRecoveryAcknowledgement,
+  recoverLegacyAccountingCircuitInD1,
+} from "../scripts/processing-legacy-recovery.mjs";
+import {
   disableProcessingAdmissionInD1,
   rearmAccountingOnlyCircuitInD1,
 } from "../scripts/verify-processing-admission-state.mjs";
@@ -13,6 +18,7 @@ const report = "b".repeat(64);
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
+  db.function("unixepoch", () => Math.floor(now / 1000));
   for (const file of readdirSync("apps/api-worker/migrations")
     .filter((name) => name.endsWith(".sql"))
     .sort()) {
@@ -180,5 +186,203 @@ it("operator disable supersedes legacy accounting and records a hard generation"
     (db.prepare("SELECT recorded_at FROM safety_incidents").get() as { recorded_at: number })
       .recorded_at,
   ).toBeGreaterThanOrEqual(now);
+  db.close();
+});
+
+function legacyFixture() {
+  const { db, input } = fixture();
+  db.exec("UPDATE rollout_control SET safety_history_started_at=0,deletion_sweep_generation=1");
+  db.prepare(
+    "INSERT INTO maintenance_cursors(task,cursor,updated_at) VALUES ('empty-state-audit',?,?)",
+  ).run(
+    JSON.stringify({
+      versionId: version,
+      releaseReportSha256: report,
+      epoch,
+      safetyGeneration: 0,
+      auditGeneration: 1,
+      startedAt: now - 500,
+      completedAt: now - 100,
+      historicalSafetyUnknown: true,
+    }),
+    now - 100,
+  );
+  return {
+    db,
+    input: {
+      ...input,
+      maximumLiveCostPer1000Microusd: 100,
+      maximumProjectedMonthlyCostMicrousd: 1000,
+      authorization: {
+        acknowledgement: legacyRecoveryAcknowledgement,
+        eventName: "workflow_dispatch",
+        repository: "liorium/hereisit",
+        environment: "processing-production",
+        sourceSha: "c".repeat(40),
+        runId: "123",
+        runAttempt: "1",
+        actor: "operator",
+        expiresAt: new Date(now + 3600000).toISOString(),
+      },
+    },
+  };
+}
+describe("explicit one-time legacy recovery policy", () => {
+  it("requires explicit unknown safety AND cost acceptance, records it once, and preserves gaps and quotas", async () => {
+    const { db, input } = legacyFixture();
+    db.exec("INSERT INTO account_usage VALUES ('day',0,123,0,0,0)");
+    const health = db.prepare("SELECT * FROM accounting_health").get();
+    await expect(recoverLegacyAccountingCircuitInD1(input)).resolves.toEqual({
+      recovered: true,
+      historicalSafetyUnknown: true,
+      historicalCostUnknown: true,
+      legacyStorageWritesUnknown: true,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT safety_history_started_at,cost_accounting_epoch,cost_breach_count FROM rollout_control",
+        )
+        .get(),
+    ).toEqual({ safety_history_started_at: 0, cost_accounting_epoch: epoch, cost_breach_count: 0 });
+    expect(db.prepare("SELECT settled_units FROM account_usage").get()).toEqual({
+      settled_units: 123,
+    });
+    expect(
+      db.prepare("SELECT unresolved_since_hour_key,reason FROM accounting_health").get(),
+    ).toMatchObject({
+      unresolved_since_hour_key: health?.unresolved_since_hour_key,
+      reason: "HISTORICAL_GAP",
+    });
+    const record = db
+      .prepare("SELECT cursor FROM maintenance_cursors WHERE task='legacy-accounting-recovery'")
+      .get();
+    expect(JSON.parse(String(record?.cursor))).toMatchObject({
+      historicalSafetyUnknown: true,
+      historicalCostUnknown: true,
+      legacyStorageWritesUnknown: true,
+      authorization: input.authorization,
+    });
+    db.exec(
+      "UPDATE rollout_control SET circuit_open=1,reason='COST_ACCOUNTING_INCOMPLETE',opened_at=1",
+    );
+    await expect(recoverLegacyAccountingCircuitInD1(input)).rejects.toThrow(/blocked/);
+    db.close();
+  });
+  it.each([
+    ["missing audit", "DELETE FROM maintenance_cursors WHERE task='empty-state-audit'"],
+    ["stale audit", `UPDATE rollout_control SET deletion_sweep_started_at=${now - 3600000}`],
+    ["wrong epoch", `UPDATE rollout_control SET cost_accounting_epoch='${"e".repeat(32)}'`],
+    ["known cost breach", "UPDATE rollout_control SET cost_breach_count=1"],
+    [
+      "stale known expensive cost",
+      "UPDATE rollout_control SET last_projected_monthly_cost_microusd=1001",
+    ],
+    [
+      "stale known expensive per-job cost",
+      "UPDATE rollout_control SET last_cost_per_1000_microusd=101",
+    ],
+    [
+      "hard incident",
+      "UPDATE rollout_control SET safety_generation=1,reason='VERIFICATION_FAILED'",
+    ],
+    ["operator stop", "UPDATE rollout_control SET reason='OPERATOR_DISABLED'"],
+    ["unsettled quota", "INSERT INTO account_usage VALUES ('day',1,0,0,0,0)"],
+    ["fractional quota", "INSERT INTO account_usage VALUES ('day',0,1.5,0,0,0)"],
+    ["text quota", "INSERT INTO account_usage VALUES ('day',0,'broken',0,0,0)"],
+    ["unsafe quota", "INSERT INTO account_usage VALUES ('day',0,9007199254740992,0,0,0)"],
+    ["safety conflict", "UPDATE accounting_health SET reason='SAFETY_CONFLICT'"],
+  ])("refuses %s without consuming authority", async (_label, sql) => {
+    const { db, input } = legacyFixture();
+    db.exec(sql);
+    await expect(recoverLegacyAccountingCircuitInD1(input)).rejects.toThrow();
+    expect(db.prepare("SELECT circuit_open FROM rollout_control").get()).toEqual({
+      circuit_open: 1,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM maintenance_cursors WHERE task='legacy-accounting-recovery'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    db.close();
+  });
+  it.each([
+    "missing acknowledgement",
+    "automatic workflow",
+    "expired approval",
+  ])("rejects %s", async (condition) => {
+    const { db, input } = legacyFixture();
+    if (condition === "missing acknowledgement") input.authorization.acknowledgement = "";
+    if (condition === "automatic workflow") input.authorization.eventName = "workflow_run";
+    if (condition === "expired approval")
+      input.authorization.expiresAt = new Date(now).toISOString();
+    await expect(recoverLegacyAccountingCircuitInD1(input)).rejects.toThrow(/authorization/);
+    db.close();
+  });
+  it("lets a newly observed hard incident win between inspection and the transaction", async () => {
+    const { db, input } = legacyFixture();
+    const original = input.fetchImpl;
+    input.fetchImpl = async (url, init) => {
+      if (JSON.parse(String(init.body)).batch)
+        db.exec("UPDATE rollout_control SET safety_generation=1,reason='DELETION_OVERDUE'");
+      return original(url, init);
+    };
+    await expect(recoverLegacyAccountingCircuitInD1(input)).rejects.toThrow(/blocked/);
+    expect(db.prepare("SELECT circuit_open,reason FROM rollout_control").get()).toEqual({
+      circuit_open: 1,
+      reason: "DELETION_OVERDUE",
+    });
+    db.close();
+  });
+});
+
+it("refuses an approval expiring during the D1 inspection", async () => {
+  const { db, input } = legacyFixture();
+  const original = input.fetchImpl;
+  input.fetchImpl = async (url, init) => {
+    if (JSON.parse(String(init.body)).batch)
+      db.function("unixepoch", () => Math.floor(Date.parse(input.authorization.expiresAt) / 1000));
+    return original(url, init);
+  };
+  await expect(recoverLegacyAccountingCircuitInD1(input)).rejects.toThrow(/blocked/);
+  expect(db.prepare("SELECT circuit_open FROM rollout_control").get()).toEqual({ circuit_open: 1 });
+  db.close();
+});
+
+it.each([
+  1, 2,
+])("closes a committed recovery and preserves newer hard incidents with D1 change count %i", async (changeCount) => {
+  const { db, input } = legacyFixture();
+  const cleanup = {
+    ...input,
+    runId: input.authorization.runId,
+    runAttempt: input.authorization.runAttempt,
+    fetchImpl: async (url: string, init: RequestInit) => {
+      const response = await input.fetchImpl(url, init);
+      const body = await response.json();
+      // D1 includes the safety-incident trigger insert in its change count.
+      if (body.result[0].meta.changes === 1) body.result[0].meta.changes = changeCount;
+      return Response.json(body);
+    },
+  };
+  await expect(closeFailedLegacyRecoveryInD1(cleanup)).resolves.toEqual({ closed: false });
+  await recoverLegacyAccountingCircuitInD1(input);
+  await expect(closeFailedLegacyRecoveryInD1({ ...cleanup, runId: "other" })).rejects.toThrow();
+  await expect(closeFailedLegacyRecoveryInD1({ ...cleanup, runId: "456" })).resolves.toEqual({
+    closed: false,
+  });
+  await expect(closeFailedLegacyRecoveryInD1(cleanup)).resolves.toEqual({ closed: true });
+  expect(db.prepare("SELECT reason,safety_generation FROM rollout_control").get()).toEqual({
+    reason: "OPERATOR_DISABLED",
+    safety_generation: 1,
+  });
+  db.exec("UPDATE rollout_control SET reason='DELETION_OVERDUE'");
+  await expect(closeFailedLegacyRecoveryInD1(cleanup)).resolves.toEqual({ closed: false });
+  expect(db.prepare("SELECT reason,safety_generation FROM rollout_control").get()).toEqual({
+    reason: "DELETION_OVERDUE",
+    safety_generation: 1,
+  });
   db.close();
 });

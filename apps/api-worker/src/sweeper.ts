@@ -12,6 +12,7 @@ import {
 } from "./cost-accounting-runtime";
 import { cleanupCostHistory } from "./cost-history-cleanup";
 import { createD1JobRepository, createD1LifecycleRepository } from "./d1-job-repository";
+import { auditEmptyProcessingState } from "./empty-state-audit";
 import { type Env, parseOperationalConfig } from "./env";
 import { applyLiveCostGuard } from "./live-cost-guard";
 import { prepareOperationalCounter } from "./operational-counters";
@@ -87,6 +88,7 @@ export interface ScheduledMaintenanceDependencies<Environment> {
   readonly reconcileCostAccounting: (env: Environment, now: number) => Promise<unknown>;
   readonly cleanupCostHistory: (env: Environment, now: number, limit: number) => Promise<unknown>;
   readonly evaluateCircuit: (env: Environment, now: number) => Promise<unknown>;
+  readonly auditEmptyState: (env: Environment, now: number) => Promise<unknown>;
 }
 
 export async function runScheduledMaintenanceWithDependencies<Environment>(
@@ -101,6 +103,7 @@ export async function runScheduledMaintenanceWithDependencies<Environment>(
   await dependencies.sweepExpired(env, now, MAINTENANCE_LIMIT);
   await dependencies.sweepOrphans(env, now - ORPHAN_GRACE_MS, MAINTENANCE_LIMIT);
   await dependencies.evaluateCircuit(env, now);
+  await dependencies.auditEmptyState(env, now);
   await dependencies.cleanupCostHistory(env, now, MAINTENANCE_LIMIT);
   await dependencies.reconcileCostAccounting(env, now);
 }
@@ -730,6 +733,7 @@ export async function runScheduledMaintenance(env: Env, now = Date.now()): Promi
     recoverStale: recoverStaleLeasesAndLostQueueMessages,
     sweepExpired: sweepExpiredJobs,
     sweepOrphans: sweepOrphanArtifactsFromSavedCursor,
+    auditEmptyState: auditEmptyProcessingState,
     reconcileCostAccounting: async (environment, reconciledAt) => {
       if (parseCostAccountingMode(environment) === "bootstrap") return;
       const operational = await parseOperationalConfig(environment);

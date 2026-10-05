@@ -74,6 +74,9 @@ describe("scheduled maintenance policy", () => {
       cleanupCostHistory: vi.fn(async () => {
         calls.push("cost-history");
       }),
+      auditEmptyState: vi.fn(async () => {
+        calls.push("empty-audit");
+      }),
       evaluateCircuit: vi.fn(async (_env: unknown, evaluatedAt: number) => {
         expect(evaluatedAt).toBe(now);
         calls.push("circuit");
@@ -89,6 +92,7 @@ describe("scheduled maintenance policy", () => {
       "expiry",
       "orphans",
       "circuit",
+      "empty-audit",
       "cost-history",
       "cost-accounting",
     ]);

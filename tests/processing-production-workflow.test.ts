@@ -19,8 +19,12 @@ describe("processing production workflow", () => {
       "github.event.workflow_run.head_repository.full_name == github.repository",
     );
     expect(workflow).toContain("environment: processing-production");
-    expect(workflow).toContain(`run-id: \${{ github.event.workflow_run.id }}`);
-    expect(workflow).toContain(`ref: \${{ github.event.workflow_run.head_sha }}`);
+    expect(workflow).toContain(
+      `run-id: \${{ inputs.upstream_run_id || github.event.workflow_run.id }}`,
+    );
+    expect(workflow).toContain(
+      `ref: \${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
+    );
     expect(workflow).toContain(
       'test "$(cat .artifacts/staging/source-sha.txt)" = "$EXPECTED_HEAD_SHA"',
     );
@@ -34,7 +38,7 @@ describe("processing production workflow", () => {
     expect(workflow).toContain("needs: deploy");
     expect(workflow).toContain("runs-on: ubuntu-24.04");
     expect(workflow).toContain(
-      `processing-production-canary-preflight-\${{ github.event.workflow_run.head_sha }}`,
+      `processing-production-canary-preflight-\${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
     );
     expect(workflow).toContain("pnpm exec playwright install chromium");
     expect(workflow).not.toContain("playwright install --with-deps");
@@ -129,7 +133,7 @@ describe("processing production workflow", () => {
     expect(workflow).toContain('CANARY_DAILY_WEIGHTED_UNIT_LIMIT: "5000000000"');
     expect(workflow).toContain("local daily_limit=0");
     expect(workflow).toContain("Verify public production policy remains local");
-    expect(workflow).not.toContain("workflow_dispatch:");
+    expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("local maintainer_hashes='[]'");
     expect(workflow).toContain('if [[ "$1" == active ]]');
     expect(workflow).toContain('daily_limit="$CANARY_DAILY_WEIGHTED_UNIT_LIMIT"');
@@ -213,7 +217,7 @@ describe("processing production workflow", () => {
     expect(resume).toBeGreaterThan(preflightUpload);
     expect(upload).toBeGreaterThan(canarySmoke);
     expect(workflow).toContain(
-      `processing-production-canary-\${{ github.event.workflow_run.head_sha }}`,
+      `processing-production-canary-\${{ inputs.source_sha || github.event.workflow_run.head_sha }}`,
     );
     const uploadedPaths = [...workflow.slice(upload).matchAll(/^\s+(.artifacts\/[^\s]+)$/gm)].map(
       ([, path]) => path,
@@ -242,4 +246,33 @@ describe("processing production workflow", () => {
     expect(references.length).toBeGreaterThan(0);
     for (const reference of references) expect(reference).toMatch(/^[^@\s]+@[a-f0-9]{40}$/);
   });
+});
+
+it("requires explicit protected legacy recovery without relaxing automatic authority", () => {
+  expect(workflow).toContain("ACCEPT UNKNOWN LEGACY SAFETY COST AND STORAGE WRITES");
+  expect(workflow).toContain(
+    "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
+  );
+  expect(workflow).toContain("Verify explicit recovery upstream authority");
+  expect(workflow).toContain('run.conclusion !== "success"');
+  expect(workflow).toContain("recoverLegacyAccountingCircuitInD1");
+  expect(workflow).toContain("rearmAccountingOnlyCircuitInD1");
+  expect(workflow).toContain("legacy_recovery_expires_at");
+  expect(workflow).toContain("e.EXPECTED_HEAD_SHA !== e.GITHUB_SHA");
+  expect(workflow).toContain("fresh empty-state recovery audit unavailable");
+  const attempts = Number(workflow.match(/attempt < (\d+); attempt \+= 1/)?.[1]);
+  const delay = Number(workflow.match(/await delay\((\d[\d_]*)\);/)?.[1]?.replaceAll("_", ""));
+  expect(attempts * delay).toBeGreaterThanOrEqual(20 * 60_000);
+});
+
+it("closes committed manual recovery on canary or pre-resume failure", () => {
+  const failureStep = workflow.slice(
+    workflow.indexOf("      - name: Close any committed manual recovery after failure"),
+  );
+  const end = failureStep.indexOf("      - name:", 1);
+  const body = end < 0 ? failureStep : failureStep.slice(0, end);
+  expect(body).toContain("github.event_name == 'workflow_dispatch' && (failure() || cancelled())");
+  expect(body).toContain("closeFailedLegacyRecoveryInD1");
+  expect(body).not.toContain("resume-attempt");
+  expect(body).not.toContain("legacy-recovery.json");
 });
