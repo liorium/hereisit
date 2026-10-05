@@ -51,9 +51,9 @@
     },
     {
       "name": "expat",
-      "version": "2.8.4",
+      "version": "2.9.0",
       "repository": "https://github.com/libexpat/libexpat.git",
-      "revision": "12cf0b1f25f026a022fe728ad8f7e3d017285b80",
+      "revision": "a76b1174c1ea52abb639a4c69d52b630a8a106a2",
       "licenses": ["MIT"],
       "noticePaths": ["expat/COPYING"],
       "buildRole": "runtime-dynamic-library",
