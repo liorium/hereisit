@@ -15,14 +15,20 @@ embedding the day of the build into its binaries. Archive timestamp normalizatio
 normalize dates compiled into native code. Security exceptions remain bound to an exact image digest;
 a changed digest still requires fresh evidence and approval, never an automatic exception rebind.
 
-For `Stale Trivy DB pin`, compare the official `ghcr.io/aquasecurity/trivy-db:2` manifest digest
-with `gh variable get TRIVY_DB_DIGEST --env processing-release-authority`. The protected environment
-variable [takes precedence](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#configuration-variable-precedence)
-over the repository variable: updating only the repository value does not
-update the release job. After verifying the official manifest, update the protected environment pin
-and keep any repository pin consistent, then start a new workflow run. Do not remove the digest check
-or reuse an old security report to resolve this failure. A matching DB pin only permits the scans to
-run; it does not prove that the resulting image passes the vulnerability gate.
+Each release resolves the current database from the official `ghcr.io/aquasecurity/trivy-db:2`
+registry once, validates its immutable digest, and downloads by that digest. Every scan and the signed
+candidate use the same run-bound digest, even if the registry publishes another database mid-run.
+The old `TRIVY_DB_DIGEST` repository/environment variables are no longer release inputs. Scanner
+images remain pinned, fresh scans remain mandatory, and HIGH/CRITICAL findings still fail the gate
+unless covered by a valid exact-artifact exception.
+
+The hourly production readiness workflow checks public anonymous server admission without uploading
+files. Its separate exception check fails 72 hours before an approved exception expires (or if an
+exception is invalid). These checks report failures in GitHub Actions; they do not change admission,
+extend approvals, or claim an upload/compression/download succeeded. Replace the affected component
+with a verified fix or obtain fresh bounded approval before the deadline; never automatically rebind
+an exception to a changed image. Exception expiry blocks future release validation, not an automatic
+shutdown of an already running Worker.
 
 ## Runtime cost accounting
 
@@ -44,8 +50,12 @@ strictly before the target hour need only an unchanged ETag/size check; target/f
 objects still require full body validation. Partial scans never count as complete observations. This
 avoids repeatedly replaying the historical backlog, but is not an unbounded stale-epoch catch-up path.
 
-Configured cost ceilings constrain release estimates and admission configuration. They are not a
-Cloudflare invoice cap: a live budget-overrun evaluator is not currently wired into the runtime.
+Provider collection delays and missing historical receipts degrade accounting health without opening
+the global safety circuit. Unknown usage remains unknown and pending alerts remain visible. The
+runtime live cost guard requires 24 contiguous, complete hours for the current epoch, report and cost
+model, with the latest hour no more than two hours old. A verified ceiling breach opens the safety
+circuit; missing coverage cannot prove a breach or a zero cost. Integrity, quota and deletion safeguards
+remain enforced. These controls are not a Cloudflare invoice cap.
 
 ## Existing deployment retirement
 

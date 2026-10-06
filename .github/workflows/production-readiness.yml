@@ -33,3 +33,6 @@ jobs:
         run: pnpm install --filter @hereisit/tool-contracts --prod --frozen-lockfile --ignore-scripts
       - name: Check public pages, API readiness, and anonymous image admission
         run: node scripts/check-production-health.mjs
+      - name: Detect security exception expiry within 72 hours
+        if: always()
+        run: node scripts/check-security-exception-expiry.mjs
