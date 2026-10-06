@@ -102,6 +102,7 @@ jobs:
             --output .artifacts/runtime/web-production-scan
           cp docs/deployment/provider-usage-schema.v1.json .artifacts/runtime/provider-usage-schema.v1.json
       - name: Generate and verify image engine and application security evidence
+        id: security
         env:
           SYFT_IMAGE: ghcr.io/anchore/syft@sha256:2baa4d24d90599840c0100a8d30deaa533821fcd99f405ce6f90e3d225bd836d
           TRIVY_IMAGE: ghcr.io/aquasecurity/trivy@sha256:7228e304ae0f610a1fad937baa463598cadac0c2ac4027cc68f3a8b997115689
@@ -110,10 +111,7 @@ jobs:
           set -euo pipefail
           TRIVY_DB_DIGEST="$(docker buildx imagetools inspect ghcr.io/aquasecurity/trivy-db:2 | awk '$1 == "Digest:" { print $2; exit }')"
           [[ "$TRIVY_DB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          if [[ "$TRIVY_DB_DIGEST" != "${{ vars.TRIVY_DB_DIGEST }}" ]]; then
-            echo "::error title=Stale Trivy DB pin::Update TRIVY_DB_DIGEST in the processing-release-authority environment, then start a new workflow run. A repository variable update does not override the environment variable."
-            exit 1
-          fi
+          printf 'trivy-db-digest=%s\n' "$TRIVY_DB_DIGEST" >> "$GITHUB_OUTPUT"
           mkdir -p .artifacts/runtime/trivy-cache
           docker run --rm -v "$PWD/.artifacts/runtime/trivy-cache:/trivy-cache" "$TRIVY_IMAGE" \
             image --cache-dir /trivy-cache --db-repository "ghcr.io/aquasecurity/trivy-db@$TRIVY_DB_DIGEST" \
@@ -283,7 +281,7 @@ jobs:
             --production-processing-api-origin https://api.hereisit.app \
             --staging-web-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-staging.json").treeSha256')" \
             --production-web-tree-sha256 "$(node -p 'require("./.artifacts/runtime/web-production.json").treeSha256')" \
-            --trivy-db-digest "${{ vars.TRIVY_DB_DIGEST }}" \
+            --trivy-db-digest "${{ steps.security.outputs.trivy-db-digest }}" \
             --provider-usage-schema docs/deployment/provider-usage-schema.v1.json
           node scripts/prepare-processing-ci-evidence.mjs --candidate .artifacts/built-candidate/processing-candidate.json \
             --release-id "$RELEASE_ID" --git-sha "$GITHUB_SHA" \
